@@ -8,7 +8,7 @@
  */
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import * as echarts from 'echarts'
-import axios from 'axios'
+import dockerRequest from '@/api/docker'
 
 const props = defineProps({
   node:           Object,           // 包含 wellName 字段
@@ -252,8 +252,8 @@ async function fetchData() {
   wellData.value       = null
 
   try {
-    const res = await axios.get(
-        `/docker-api/projectanalysis/waterinvasionanalysis/${props.projectId}/${props.gasReservoirId}/well/${encodeURIComponent(wellName)}`
+    const res = await dockerRequest.get(
+        `/projectanalysis/waterinvasionanalysis/${props.projectId}/${props.gasReservoirId}/well/${encodeURIComponent(wellName)}`
     )
     wellData.value = res.data
     await nextTick()

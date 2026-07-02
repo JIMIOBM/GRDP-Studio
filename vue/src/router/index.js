@@ -1,7 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
 const routes = [
-  { path: '/', redirect: '/ipr' },
+  { path: '/', redirect: '/login' },
 
   // 登录 / 注册
   { path: '/login', name: 'Login', component: () => import('@/views/Login.vue') },

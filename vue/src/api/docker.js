@@ -14,6 +14,20 @@ const dockerRequest = axios.create({
     withCredentials: true
 })
 
+dockerRequest.interceptors.request.use(
+  (config) => {
+    const accountStr = localStorage.getItem('account')
+    if (accountStr) {
+      const account = JSON.parse(accountStr)
+      if (account.token) {
+        config.headers.token = account.token
+      }
+    }
+    return config
+  },
+  (error) => Promise.reject(error)
+)
+
 // 响应拦截：统一报错
 dockerRequest.interceptors.response.use(
   (res) => res,
