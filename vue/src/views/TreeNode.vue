@@ -4,12 +4,13 @@ import { ArrowDown, ArrowRight, Folder, Document } from '@element-plus/icons-vue
 
 const props = defineProps({
   node: { type: Object, required: true },
-  activeId: { type: [String, Number], default: '' }
+  activeId: { type: [String, Number], default: '' },
+  defaultExpanded: { type: Boolean, default: true }
 })
 
 const emit = defineEmits(['select'])
 
-const expanded = ref(true)
+const expanded = ref(props.node.defaultExpanded ?? props.defaultExpanded)
 const hasChildren = () => props.node.children && props.node.children.length > 0
 
 const toggle = () => {
@@ -17,10 +18,9 @@ const toggle = () => {
 }
 
 const handleClick = () => {
+  emit('select', props.node)
   if (hasChildren()) {
     toggle()
-  } else {
-    emit('select', props.node)
   }
 }
 
@@ -31,7 +31,7 @@ const onChildSelect = (n) => emit('select', n)
   <div class="tree-node">
     <div
       class="node-label"
-      :class="{ active: !hasChildren() && node.id === activeId }"
+      :class="{ active: node.id === activeId }"
       @click="handleClick"
     >
       <el-icon v-if="hasChildren()" class="caret">
@@ -54,6 +54,7 @@ const onChildSelect = (n) => emit('select', n)
         :key="child.id"
         :node="child"
         :active-id="activeId"
+        :default-expanded="defaultExpanded"
         @select="onChildSelect"
       />
     </div>

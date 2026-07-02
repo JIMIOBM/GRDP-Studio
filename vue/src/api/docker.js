@@ -38,6 +38,18 @@ dockerRequest.interceptors.response.use(
   }
 )
 
+/* ===== 项目详情 ===== */
+export const projectApi = {
+    /**
+     * GET /projects/{id}?projectId={id}
+     * 返回项目、气藏、井以及已有分析节点等工程数据。
+     */
+    getProject: (projectId = 1) =>
+        dockerRequest.get(`/projects/${projectId}`, {
+            params: { projectId }
+        })
+}
+
 /* ===== 水侵动态分析 ===== */
 export const waterInvasionApi = {
   /**
