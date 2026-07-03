@@ -315,10 +315,10 @@ onBeforeUnmount(() => {
           <label>CO₂摩尔百分含量(%)</label>
           <el-input size="small" readonly :model-value="input.carbonDioxide ?? ''"/>
         </div>
-<!--        <div class="field">-->
-<!--          <label>N₂摩尔百分含量(%)</label>-->
-<!--          <el-input size="small" readonly :model-value="input.nitrogen ?? ''"/>-->
-<!--        </div>-->
+        <div class="field">
+          <label>N₂摩尔百分含量(%)</label>
+          <el-input size="small" readonly :model-value="input.nitrogen ?? ''"/>
+        </div>
 
         <div class="sec-label">计算方法</div>
         <div class="field">
