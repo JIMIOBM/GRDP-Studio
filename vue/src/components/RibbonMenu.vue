@@ -149,6 +149,18 @@ const defaultTabs = [
 const tabList = computed(() => props.tabs || defaultTabs)
 const activeTab = ref(0)
 const activeTabGroups = computed(() => tabList.value[activeTab.value]?.groups || [])
+const iconModules = import.meta.glob('../assets/ribbon-icons/*.svg', {
+  eager: true,
+  query: '?url',
+  import: 'default'
+})
+const normalizeIconKey = (value) => String(value || '').replace(/\s+/g, '').toLowerCase()
+const iconMap = Object.fromEntries(
+  Object.entries(iconModules).map(([path, url]) => [
+    normalizeIconKey(decodeURIComponent(path.split('/').pop().replace(/\.svg$/, ''))),
+    url
+  ])
+)
 
 const switchTab = (idx) => {
   activeTab.value = idx
@@ -158,6 +170,8 @@ const onItemClick = (groupTitle, label) => {
   if (!label) return
   emit('command', {group: groupTitle, name: label})
 }
+
+const getIcon = (label) => iconMap[normalizeIconKey(label)] || ''
 </script>
 
 <template>
@@ -189,7 +203,13 @@ const onItemClick = (groupTitle, label) => {
                   :key="item"
                   @click="onItemClick(group.title, item)"
               >
-                <span class="checkbox"></span>
+                <img
+                    v-if="getIcon(item)"
+                    class="small-icon"
+                    :src="getIcon(item)"
+                    :alt="item"
+                >
+                <span v-else class="checkbox"></span>
                 <span class="check-label">{{ item }}</span>
               </label>
               <div v-if="col.squares" class="square-row">
@@ -207,7 +227,13 @@ const onItemClick = (groupTitle, label) => {
             >
               <template #reference>
                 <div class="col-large">
-                  <span class="big-icon"></span>
+                  <img
+                      v-if="getIcon(col.label)"
+                      class="big-icon"
+                      :src="getIcon(col.label)"
+                      :alt="col.label"
+                  >
+                  <span v-else class="big-icon icon-placeholder"></span>
                   <span class="big-label">{{ col.label }}</span>
                   <span class="dropdown-arrow">▾</span>
                 </div>
@@ -221,7 +247,13 @@ const onItemClick = (groupTitle, label) => {
                     :key="item"
                     @click="onItemClick(group.title, item)"
                 >
-                  <span class="d-checkbox"></span>
+                  <img
+                      v-if="getIcon(item)"
+                      class="dropdown-icon"
+                      :src="getIcon(item)"
+                      :alt="item"
+                  >
+                  <span v-else class="d-checkbox"></span>
                   <span class="d-label">{{ item }}</span>
                 </div>
               </div>
@@ -233,7 +265,13 @@ const onItemClick = (groupTitle, label) => {
                 class="col-large"
                 @click="onItemClick(group.title, col.label)"
             >
-              <span class="big-icon"></span>
+              <img
+                  v-if="getIcon(col.label)"
+                  class="big-icon"
+                  :src="getIcon(col.label)"
+                  :alt="col.label"
+              >
+              <span v-else class="big-icon icon-placeholder"></span>
               <span class="big-label">{{ col.label }}</span>
             </div>
 
@@ -355,6 +393,13 @@ $square-border: #c2c2c2;
       flex-shrink: 0;
     }
 
+    .small-icon {
+      width: 18px;
+      height: 18px;
+      object-fit: contain;
+      flex-shrink: 0;
+    }
+
     .check-label {
       font-size: 13px;
       color: #333;
@@ -395,6 +440,11 @@ $square-border: #c2c2c2;
   .big-icon {
     width: 36px;
     height: 36px;
+    object-fit: contain;
+    flex-shrink: 0;
+  }
+
+  .icon-placeholder {
     background-color: $square-bg;
     border: 1px solid $square-border;
     border-radius: 2px;
@@ -467,6 +517,13 @@ $square-border: #c2c2c2;
       background-color: #d7d7d7;
       border: 1px solid #c2c2c2;
       border-radius: 1px;
+      flex-shrink: 0;
+    }
+
+    .dropdown-icon {
+      width: 16px;
+      height: 16px;
+      object-fit: contain;
       flex-shrink: 0;
     }
 
