@@ -24,10 +24,10 @@ const MODIFICATION_METHODS = ['Wichert-Aziz修正方法', 'Pitzer修正方法']
 const DEVIATION_METHODS    = ['Dranchuk-Abu-Kassem方法', 'Hall-Yarborough方法', 'BK方法']
 
 // ─── 状态 ───
-const loading        = ref(false)
-const wellData       = ref(null)
-const activeChartIdx = ref(0)
-const activeParamTab = ref('input')
+// const loading        = ref(false)
+// const wellData       = ref(null)
+// const activeChartIdx = ref(0)
+// const activeParamTab = ref('input')
 
 // ─── 从接口数据派生 ───
 const input = computed(() => wellData.value?.input || {})
