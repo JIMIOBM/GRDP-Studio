@@ -10,11 +10,11 @@ import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import * as echarts from 'echarts'
 import dockerRequest from '@/api/docker'
 
-const props = defineProps({
-  node:           Object,           // 包含 wellName 字段
-  projectId:      [Number, String],
-  gasReservoirId: [Number, String]
-})
+// const props = defineProps({
+//   node:           Object,           // 包含 wellName 字段
+//   projectId:      [Number, String],
+//   gasReservoirId: [Number, String]
+// })
 
 // 通知父组件（IprInterface）刷新左侧树
 const emit = defineEmits(['refresh-tree'])
