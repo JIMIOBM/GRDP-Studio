@@ -27,6 +27,7 @@ const DEVIATION_METHODS    = ['Dranchuk-Abu-Kassem方法', 'Hall-Yarborough方�
 const loading        = ref(false)
 const wellData       = ref(null)
 const activeChartIdx = ref(0)
+const activeParamTab = ref('input')
 
 // ─── 从接口数据派生 ───
 const input = computed(() => wellData.value?.input || {})
@@ -249,6 +250,7 @@ async function fetchData() {
 
   loading.value        = true
   activeChartIdx.value = 0
+  activeParamTab.value = 'input'
   wellData.value       = null
 
   try {
@@ -294,7 +296,7 @@ onBeforeUnmount(() => {
         </svg>
       </div>
 
-      <div class="panel-body">
+      <div v-if="activeParamTab === 'input'" class="panel-body">
         <div class="sec-label">气体性质</div>
         <div class="field">
           <label>天然气类型</label>
@@ -373,6 +375,35 @@ onBeforeUnmount(() => {
           <el-button size="small">导入</el-button>
         </div>
       </div>
+
+      <div v-else class="panel-body">
+        <div class="sec-label">输出结果</div>
+        <div class="field">
+          <label>水侵识别结果</label>
+          <el-input size="small" readonly model-value="强水侵" />
+        </div>
+        <div class="field">
+          <label>动态地质储量(10⁸m³)</label>
+          <el-input size="small" readonly model-value="13.5839" />
+        </div>
+      </div>
+
+      <div class="param-tabs">
+        <div
+          class="param-tab"
+          :class="{ active: activeParamTab === 'input' }"
+          @click="activeParamTab = 'input'"
+        >
+          输入
+        </div>
+        <div
+          class="param-tab"
+          :class="{ active: activeParamTab === 'output' }"
+          @click="activeParamTab = 'output'"
+        >
+          输出
+        </div>
+      </div>
     </div>
 
     <!-- 右侧图表区域 -->
@@ -424,6 +455,34 @@ onBeforeUnmount(() => {
   flex: 1;
   overflow-y: auto;
   padding: 4px 12px 14px;
+}
+
+.param-tabs {
+  display: flex;
+  height: 30px;
+  border-top: 1px solid #e0e0e0;
+  flex-shrink: 0;
+}
+
+.param-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: #555;
+  cursor: pointer;
+  border-right: 1px solid #e0e0e0;
+
+  &:last-child {
+    border-right: none;
+  }
+
+  &.active {
+    background-color: #f4d000;
+    color: #1a1a1a;
+    font-weight: 600;
+  }
 }
 
 .sec-label {

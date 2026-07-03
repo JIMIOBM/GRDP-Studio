@@ -51,7 +51,6 @@ const treeData = ref([
 
 const activeNodeId = ref('')
 const activeNode = ref(null)
-const activeSide = ref('input')
 const currentView = ref(null)
 const currentViewNode = ref(null)
 const wellKeyword = ref('')
@@ -385,23 +384,6 @@ onMounted(initTree)
             @select="handleSelect"
           />
         </div>
-
-        <div class="side-tabs">
-          <div
-            class="side-tab"
-            :class="{ active: activeSide === 'input' }"
-            @click="activeSide = 'input'"
-          >
-            输入
-          </div>
-          <div
-            class="side-tab"
-            :class="{ active: activeSide === 'output' }"
-            @click="activeSide = 'output'"
-          >
-            输出
-          </div>
-        </div>
       </aside>
 
       <main class="content-area">
@@ -452,33 +434,6 @@ $border: #e0e0e0;
     flex: 1;
     overflow-y: auto;
     padding: 6px 4px;
-  }
-
-  .side-tabs {
-    display: flex;
-    height: 30px;
-    border-top: 1px solid $border;
-
-    .side-tab {
-      flex: 1;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 13px;
-      color: #555;
-      cursor: pointer;
-      border-right: 1px solid $border;
-
-      &:last-child {
-        border-right: none;
-      }
-
-      &.active {
-        background-color: $accent-yellow;
-        color: #1a1a1a;
-        font-weight: 600;
-      }
-    }
   }
 }
 
