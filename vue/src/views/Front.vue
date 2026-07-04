@@ -10,9 +10,8 @@ const router = useRouter()
 const route = useRoute()
 
 // 用户信息
-//const account = ref(
-  //  localStorage.getItem('account') ? JSON.parse(localStorage.getItem('account')) : {}
-//)
+const account = ref(localStorage.getItem('account') ? JSON.parse(localStorage.getItem('account')) : {}
+)
 
 // 当前激活的菜单项
 const activeMenu = computed(() => route.path)
