@@ -65,6 +65,52 @@ export const waterInvasionApi = {
     dockerRequest.post('/projectanalysis/waterinvasionanalysis', data)
 }
 
+/* ===== 动态储量-物质平衡 ===== */
+export const materialBalanceApi = {
+  /**
+   * POST /projectanalysis/dynamicoriginalgasInplace/mb/calc
+   */
+  calculate: (data) =>
+    dockerRequest.post('/projectanalysis/dynamicoriginalgasInplace/mb/calc', data),
+
+  /**
+   * GET /projectanalysis/dynamicoriginalgasInplace/result/{projectId}/{gasReservoirId}/{resultId}
+   */
+  getResult: (projectId, gasReservoirId, resultId) =>
+    dockerRequest.get(
+      `/projectanalysis/dynamicoriginalgasInplace/result/${projectId}/${gasReservoirId}/${resultId}`
+    ),
+
+  /**
+   * GET /projectanalysis/dynamicoriginalgasInplace/result/summary/{projectId}/{gasReservoirId}
+   */
+  getSummary: (projectId, gasReservoirId) =>
+    dockerRequest.get(
+      `/projectanalysis/dynamicoriginalgasInplace/result/summary/${projectId}/${gasReservoirId}`
+    )
+}
+
+/* ===== 典型曲线-Wattenbarger ===== */
+export const typicalCurveApi = {
+  /**
+   * POST /projectanalysis/typicalcurve/fitting
+   */
+  fitting: (data) =>
+    dockerRequest.post('/projectanalysis/typicalcurve/fitting', data),
+
+  /**
+   * GET /projectanalysis/typicalcurve/{projectId}/{gasReservoirId}/{resultId}
+   */
+  getResult: (projectId, gasReservoirId, resultId) =>
+    dockerRequest.get(`/projectanalysis/typicalcurve/${projectId}/${gasReservoirId}/${resultId}`),
+
+  /**
+   * GET /projectanalysis/typicalcurve/summary/chart/{projectId}/{gasReservoirId}
+   */
+  getSummaryChart: (projectId, gasReservoirId) =>
+    dockerRequest.get(`/projectanalysis/typicalcurve/summary/chart/${projectId}/${gasReservoirId}`)
+}
+
 /* ===== 井列表 ===== */
 export const wellApi = {
     /**

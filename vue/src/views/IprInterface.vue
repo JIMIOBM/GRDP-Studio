@@ -4,8 +4,10 @@ import { ElMessage } from 'element-plus'
 import RibbonMenu from '@/components/RibbonMenu.vue'
 import TreeNode from '@/views/TreeNode.vue'
 import WaterInvasionContent from '@/views/WellControlInventory/WaterInvasionContent.vue'
+import MaterialBalanceContent from '@/views/WellControlInventory/MaterialBalanceContent.vue'
+import WattenbargerContent from '@/views/WellControlInventory/WattenbargerContent.vue'
 import { NODETYPE } from '@/constants/nodeType'
-import { nodeApi, projectApi, waterInvasionApi } from '@/api/docker'
+import { materialBalanceApi, nodeApi, parametersApi, projectApi, typicalCurveApi, waterInvasionApi } from '@/api/docker'
 
 const PROJECT_ID = 1
 const GAS_RESERVOIR_ID = 1
@@ -21,6 +23,14 @@ const WELL_GROUPS = [
 
 const NODE_GROUP_BY_TYPE = {
   [NODETYPE.NodeType_WaterInvasionAnalysis]: 'well-control-inventory',
+  [NODETYPE.NodeType_ConfinedGasReservoirMaterialBalanceMethodForActualStaticPressure]: 'well-control-inventory',
+  [NODETYPE.NodeType_ConfinedGasReservoirMaterialBalanceMethodForCalculatedStaticPressure]: 'well-control-inventory',
+  [NODETYPE.NodeType_ConstantVolumeGasReservoirMaterialBalanceMethodForActualStaticPressure]: 'well-control-inventory',
+  [NODETYPE.NodeType_ConstantVolumeReservoirMaterialBalanceMethodForCalculatedStaticPressure]: 'well-control-inventory',
+  [NODETYPE.NodeType_MaterialBalanceMethod]: 'well-control-inventory',
+  [NODETYPE.NodeType_MaterialBalanceMethodForActualStaticPressure]: 'well-control-inventory',
+  [NODETYPE.NodeType_MaterialBalanceMethodForCalculatedStaticPressure]: 'well-control-inventory',
+  [NODETYPE.NodeType_VerticalWellTypicalCurveWb]: 'well-control-inventory',
   [NODETYPE.NodeType_ProductionDeclineAnalysis]: 'data-management',
   [NODETYPE.NodeType_ProductivityInstabilityAnalysis]: 'data-management',
   [NODETYPE.NodeType_ProductionAnalysis]: 'data-management',
@@ -35,6 +45,14 @@ const NODE_GROUP_BY_TYPE = {
 
 const NODE_LABEL_BY_TYPE = {
   [NODETYPE.NodeType_WaterInvasionAnalysis]: '水侵分析',
+  [NODETYPE.NodeType_ConfinedGasReservoirMaterialBalanceMethodForActualStaticPressure]: '物质平衡',
+  [NODETYPE.NodeType_ConfinedGasReservoirMaterialBalanceMethodForCalculatedStaticPressure]: '物质平衡',
+  [NODETYPE.NodeType_ConstantVolumeGasReservoirMaterialBalanceMethodForActualStaticPressure]: '物质平衡',
+  [NODETYPE.NodeType_ConstantVolumeReservoirMaterialBalanceMethodForCalculatedStaticPressure]: '物质平衡',
+  [NODETYPE.NodeType_MaterialBalanceMethod]: '物质平衡',
+  [NODETYPE.NodeType_MaterialBalanceMethodForActualStaticPressure]: '物质平衡',
+  [NODETYPE.NodeType_MaterialBalanceMethodForCalculatedStaticPressure]: '物质平衡',
+  [NODETYPE.NodeType_VerticalWellTypicalCurveWb]: 'Wattenbarger',
   [NODETYPE.NodeType_ProductionDeclineAnalysis]: '产量递减分析',
   [NODETYPE.NodeType_ProductivityInstabilityAnalysis]: '产量不稳定分析',
   [NODETYPE.NodeType_ProductionAnalysis]: '生产分析',
@@ -55,7 +73,23 @@ const currentView = ref(null)
 const currentViewNode = ref(null)
 const wellKeyword = ref('')
 const waterInvasionRunning = ref(false)
+const materialBalanceRunning = ref(false)
+const wattenbargerRunning = ref(false)
 const selectedWellName = ref('')
+
+const MATERIAL_BALANCE_NODE_TYPES = [
+  NODETYPE.NodeType_MaterialBalanceMethod,
+  NODETYPE.NodeType_MaterialBalanceMethodForActualStaticPressure,
+  NODETYPE.NodeType_MaterialBalanceMethodForCalculatedStaticPressure,
+  NODETYPE.NodeType_ConfinedGasReservoirMaterialBalanceMethodForActualStaticPressure,
+  NODETYPE.NodeType_ConfinedGasReservoirMaterialBalanceMethodForCalculatedStaticPressure,
+  NODETYPE.NodeType_ConstantVolumeGasReservoirMaterialBalanceMethodForActualStaticPressure,
+  NODETYPE.NodeType_ConstantVolumeReservoirMaterialBalanceMethodForCalculatedStaticPressure
+]
+
+const WATTENBARGER_NODE_TYPES = [
+  NODETYPE.NodeType_VerticalWellTypicalCurveWb
+]
 
 const filteredTreeData = computed(() => {
   const keyword = wellKeyword.value.trim().toLowerCase()
@@ -240,6 +274,22 @@ const applyWaterInvasionNodes = (node) => {
   })
 }
 
+const applyWellAnalysisNodes = (node, nodeType, label) => {
+  if (!node?.subNodes?.length) return
+
+  node.subNodes.forEach(wellNode => {
+    const wellName = wellNode.nodeTitle || wellNode.wellName
+    if (!wellName) return
+
+    ensureWell(wellName, wellNode.nodeId || `well-${wellName}`)
+    addAnalysisNode(wellName, {
+      ...wellNode,
+      nodeType,
+      nodeTitle: label
+    })
+  })
+}
+
 const refreshProjectTree = async () => {
   try {
     const res = await projectApi.getProject(PROJECT_ID)
@@ -258,6 +308,23 @@ const refreshWaterInvasionNodes = async () => {
   }
 }
 
+const refreshNodeType = async (nodeType, label) => {
+  try {
+    const res = await nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, nodeType)
+    applyWellAnalysisNodes(res?.data?.node, nodeType, label)
+  } catch {
+    // 没有已有分析结果时，保持项目树不变。
+  }
+}
+
+const refreshMaterialBalanceNodes = async () => {
+  await Promise.all(MATERIAL_BALANCE_NODE_TYPES.map(type => refreshNodeType(type, '物质平衡')))
+}
+
+const refreshWattenbargerNodes = async () => {
+  await Promise.all(WATTENBARGER_NODE_TYPES.map(type => refreshNodeType(type, 'Wattenbarger')))
+}
+
 const pollWaterInvasionNode = async (wellName, maxRetries = 20, intervalMs = 1500) => {
   for (let i = 0; i < maxRetries; i++) {
     await new Promise(resolve => setTimeout(resolve, intervalMs))
@@ -272,6 +339,30 @@ const pollWaterInvasionNode = async (wellName, maxRetries = 20, intervalMs = 150
 
   throw new Error('分析超时，请稍后刷新查看结果')
 }
+
+const pollAnalysisNode = async (wellName, nodeTypes, maxRetries = 20, intervalMs = 1500) => {
+  for (let i = 0; i < maxRetries; i++) {
+    await new Promise(resolve => setTimeout(resolve, intervalMs))
+
+    for (const nodeType of nodeTypes) {
+      try {
+        const res = await nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, nodeType)
+        const node = res?.data?.node
+        const subNodes = node?.subNodes ?? []
+        if (subNodes.some(sub => sub.nodeTitle === wellName || sub.wellName === wellName)) {
+          return { node, nodeType }
+        }
+      } catch {
+        // 部分节点类型不存在时继续查其他类型。
+      }
+    }
+  }
+
+  throw new Error('分析超时，请稍后刷新查看结果')
+}
+
+const findResultSubNode = (node, wellName) =>
+  node?.subNodes?.find(sub => sub.nodeTitle === wellName || sub.wellName === wellName)
 
 const runWaterInvasionForSelectedWell = async () => {
   const targetWellName = selectedWellName.value
@@ -319,9 +410,121 @@ const runWaterInvasionForSelectedWell = async () => {
   }
 }
 
+const runMaterialBalanceForSelectedWell = async () => {
+  const targetWellName = selectedWellName.value
+
+  if (!targetWellName) {
+    ElMessage.warning('请先在左侧选择一口井')
+    return
+  }
+
+  if (materialBalanceRunning.value) return
+
+  materialBalanceRunning.value = true
+  try {
+    let waterGasRatioLimit = -1
+    try {
+      const res = await parametersApi.getMinWaterGasRatio(PROJECT_ID, GAS_RESERVOIR_ID)
+      waterGasRatioLimit = res?.data?.vaule ?? -1
+    } catch {
+      waterGasRatioLimit = -1
+    }
+
+    await materialBalanceApi.calculate({
+      gasReservoirId: Number(GAS_RESERVOIR_ID),
+      projectId: Number(PROJECT_ID),
+      wellNames: [targetWellName],
+      gasReservoirType: 1,
+      waterGasRatioLimit
+    })
+
+    ElMessage.info(`${targetWellName} 物质平衡计算中，请稍候...`)
+    const { node, nodeType } = await pollAnalysisNode(targetWellName, MATERIAL_BALANCE_NODE_TYPES)
+    applyWellAnalysisNodes(node, nodeType, '物质平衡')
+
+    const resultNode = findResultSubNode(node, targetWellName)
+    const viewNode = {
+      id: resultNode?.nodeId || `mb-${targetWellName}`,
+      label: '物质平衡',
+      type: nodeType,
+      wellName: targetWellName,
+      raw: resultNode
+    }
+
+    activeNodeId.value = viewNode.id
+    currentView.value = 'material-balance'
+    currentViewNode.value = viewNode
+    ElMessage.success(`${targetWellName} 物质平衡完成`)
+  } catch (error) {
+    ElMessage.error(error.message || '物质平衡失败')
+    console.error('物质平衡失败', error)
+  } finally {
+    materialBalanceRunning.value = false
+  }
+}
+
+const runWattenbargerForSelectedWell = async () => {
+  const targetWellName = selectedWellName.value
+
+  if (!targetWellName) {
+    ElMessage.warning('请先在左侧选择一口井')
+    return
+  }
+
+  if (wattenbargerRunning.value) return
+
+  wattenbargerRunning.value = true
+  try {
+    let minimumWaterGasRatio = -1
+    try {
+      const res = await parametersApi.getMinWaterGasRatio(PROJECT_ID, GAS_RESERVOIR_ID)
+      minimumWaterGasRatio = res?.data?.vaule ?? -1
+    } catch {
+      minimumWaterGasRatio = -1
+    }
+
+    await typicalCurveApi.fitting({
+      gasReservoirId: Number(GAS_RESERVOIR_ID),
+      projectId: Number(PROJECT_ID),
+      wellNames: [targetWellName],
+      fittingType: 5,
+      isSkipFitting: false,
+      dataSize: 300,
+      initScanDataSize: 10,
+      fineScanDataSize: 30,
+      minimumWaterGasRatio
+    })
+
+    ElMessage.info(`${targetWellName} Wattenbarger 计算中，请稍候...`)
+    const { node, nodeType } = await pollAnalysisNode(targetWellName, WATTENBARGER_NODE_TYPES)
+    applyWellAnalysisNodes(node, nodeType, 'Wattenbarger')
+
+    const resultNode = findResultSubNode(node, targetWellName)
+    const viewNode = {
+      id: resultNode?.nodeId || `wb-${targetWellName}`,
+      label: 'Wattenbarger',
+      type: nodeType,
+      wellName: targetWellName,
+      raw: resultNode
+    }
+
+    activeNodeId.value = viewNode.id
+    currentView.value = 'wattenbarger'
+    currentViewNode.value = viewNode
+    ElMessage.success(`${targetWellName} Wattenbarger 完成`)
+  } catch (error) {
+    ElMessage.error(error.message || 'Wattenbarger 失败')
+    console.error('Wattenbarger 失败', error)
+  } finally {
+    wattenbargerRunning.value = false
+  }
+}
+
 const initTree = async () => {
   await refreshProjectTree()
   await refreshWaterInvasionNodes()
+  await refreshMaterialBalanceNodes()
+  await refreshWattenbargerNodes()
 }
 
 const handleSelect = (node) => {
@@ -340,6 +543,18 @@ const handleSelect = (node) => {
     return
   }
 
+  if (MATERIAL_BALANCE_NODE_TYPES.includes(node.type)) {
+    currentView.value = 'material-balance'
+    currentViewNode.value = node
+    return
+  }
+
+  if (WATTENBARGER_NODE_TYPES.includes(node.type)) {
+    currentView.value = 'wattenbarger'
+    currentViewNode.value = node
+    return
+  }
+
   if (node.type === NODETYPE.NodeType_Well) return
 }
 
@@ -348,6 +563,12 @@ const handleCommand = ({ group, name }) => {
     case '水侵分析':
       runWaterInvasionForSelectedWell()
       break
+    case '物质平衡':
+      runMaterialBalanceForSelectedWell()
+      break
+    case 'Wattenbarger':
+      runWattenbargerForSelectedWell()
+      break
     default:
       ElMessage.success(`[${group}] ${name}`)
   }
@@ -355,6 +576,8 @@ const handleCommand = ({ group, name }) => {
 
 const handleRefreshTree = () => {
   refreshWaterInvasionNodes()
+  refreshMaterialBalanceNodes()
+  refreshWattenbargerNodes()
 }
 
 onMounted(initTree)
@@ -389,6 +612,20 @@ onMounted(initTree)
       <main class="content-area">
         <WaterInvasionContent
           v-if="currentView === 'water-invasion'"
+          :node="currentViewNode"
+          :project-id="PROJECT_ID"
+          :gas-reservoir-id="GAS_RESERVOIR_ID"
+          @refresh-tree="handleRefreshTree"
+        />
+        <MaterialBalanceContent
+          v-else-if="currentView === 'material-balance'"
+          :node="currentViewNode"
+          :project-id="PROJECT_ID"
+          :gas-reservoir-id="GAS_RESERVOIR_ID"
+          @refresh-tree="handleRefreshTree"
+        />
+        <WattenbargerContent
+          v-else-if="currentView === 'wattenbarger'"
           :node="currentViewNode"
           :project-id="PROJECT_ID"
           :gas-reservoir-id="GAS_RESERVOIR_ID"
