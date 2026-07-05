@@ -6,14 +6,14 @@ import { ref, computed } from 'vue'
  * 完全数据驱动：tabs -> groups -> columns -> items
  * dropdown: true 的列需同时提供 dropdownItems 数组，点击后弹出复选下拉列表。
  */
-const props = defineProps({
+const props = defineProps({ //允许外部传菜单配置
   tabs: {
     type: Array,
     default: () => null
   }
 })
 
-const emit = defineEmits(['command'])
+const emit = defineEmits(['command']) //向父组件发送命令
 
 const defaultTabs = [
   {
@@ -146,15 +146,22 @@ const defaultTabs = [
   }
 ]
 
+//控制当先显示哪一个页签
 const tabList = computed(() => props.tabs || defaultTabs)
 const activeTab = ref(0)
 const activeTabGroups = computed(() => tabList.value[activeTab.value]?.groups || [])
+
+
+//把 ../assets/ribbon-icons/ 下面所有 svg 图标都加载进来。
 const iconModules = import.meta.glob('../assets/ribbon-icons/*.svg', {
   eager: true,
   query: '?url',
   import: 'default'
 })
+//把图表名标准化
 const normalizeIconKey = (value) => String(value || '').replace(/\s+/g, '').toLowerCase()
+
+//把所有图表文件变成一个映射表
 const iconMap = Object.fromEntries(
   Object.entries(iconModules).map(([path, url]) => [
     normalizeIconKey(decodeURIComponent(path.split('/').pop().replace(/\.svg$/, ''))),
@@ -162,15 +169,17 @@ const iconMap = Object.fromEntries(
   ])
 )
 
-const switchTab = (idx) => {
+const switchTab = (idx) => { //切换页签
   activeTab.value = idx
 }
 
-const onItemClick = (groupTitle, label) => {
+const onItemClick = (groupTitle, label) => { //点击菜单项
   if (!label) return
   emit('command', {group: groupTitle, name: label})
 }
 
+
+//渲染图表
 const getIcon = (label) => iconMap[normalizeIconKey(label)] || ''
 </script>
 

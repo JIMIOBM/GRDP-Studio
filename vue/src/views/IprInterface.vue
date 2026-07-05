@@ -20,7 +20,7 @@ const WELL_GROUPS = [
 ]
 
 const NODE_GROUP_BY_TYPE = {
-  [NODETYPE.NodeType_WaterInvasionAnalysis]: 'well-control-inventory',
+  [NODETYPE.NodeType_WaterInvasionAnalysis]: 'well-control-inventory',  //水侵分析节点，要放到井控库存下面
   [NODETYPE.NodeType_ProductionDeclineAnalysis]: 'data-management',
   [NODETYPE.NodeType_ProductivityInstabilityAnalysis]: 'data-management',
   [NODETYPE.NodeType_ProductionAnalysis]: 'data-management',
@@ -49,20 +49,20 @@ const treeData = ref([
   { id: 'g-group', label: '库群', children: [{ id: 'grp-1', label: '项目 1', type: 'group' }] }
 ])
 
-const activeNodeId = ref('')
-const activeNode = ref(null)
-const currentView = ref(null)
-const currentViewNode = ref(null)
-const wellKeyword = ref('')
-const waterInvasionRunning = ref(false)
-const selectedWellName = ref('')
+const activeNodeId = ref('')  // 当前左侧树选中的节点 ID. 用于高亮显示
+const activeNode = ref(null)  // 当前选中的完整节点对象
+const currentView = ref(null)  // currentView.value = 'water-invasion'，即确定右侧部分区域所显示的界面
+const currentViewNode = ref(null)  // 传给右侧内容组件的节点对象
+const wellKeyword = ref('')  // 左侧搜索框输入的井名关键字
+const waterInvasionRunning = ref(false)  //用于判断水侵分析是否正在运行
+const selectedWellName = ref('')  //当前选中的井名
 
-const filteredTreeData = computed(() => {
+const filteredTreeData = computed(() => {   //搜索井名，控制左侧树搜索
   const keyword = wellKeyword.value.trim().toLowerCase()
   if (!keyword) return treeData.value
 
   return treeData.value.map(node => {
-    if (node.id !== 'g-well') return node
+    if (node.id !== 'g-well') return node  // 只有“井”这个分组会被搜索过滤。
 
     return {
       ...node,
@@ -75,7 +75,7 @@ const filteredTreeData = computed(() => {
 
 const normalizePayload = (res) => res?.data?.data ?? res?.data ?? res
 
-const toArray = (value) => {
+const toArray = (value) => { // 把数据统一变成数组
   if (!value) return []
   return Array.isArray(value) ? value : [value]
 }
@@ -91,7 +91,7 @@ const getChildren = (item) => [
   ...toArray(item?.analyses)
 ]
 
-const createEmptyWell = (wellName, wellId) => ({
+const createEmptyWell = (wellName, wellId) => ({ //创建一口空井
   id: wellId || `well-${wellName}`,
   label: wellName,
   type: NODETYPE.NodeType_Well,
@@ -101,7 +101,6 @@ const createEmptyWell = (wellName, wellId) => ({
     ...group,
     id: `${wellId || wellName}-${group.id}`,
     type: group.id,
-    wellName,
     defaultExpanded: false,
     children: []
   }))
@@ -109,7 +108,7 @@ const createEmptyWell = (wellName, wellId) => ({
 
 const getWellGroup = () => treeData.value.find(node => node.id === 'g-well')
 
-const ensureWell = (wellName, wellId) => {
+const ensureWell = (wellName, wellId) => { //确保井存在
   const wellGroup = getWellGroup()
   if (!wellGroup || !wellName) return null
 
@@ -135,7 +134,7 @@ const ensureWell = (wellName, wellId) => {
   return wellItem
 }
 
-const addAnalysisNode = (wellName, rawNode) => {
+const addAnalysisNode = (wellName, rawNode) => {  // 添加分析节点
   const nodeType = rawNode?.nodeType ?? rawNode?.type
   const groupId = NODE_GROUP_BY_TYPE[nodeType] || rawNode?.menuType || rawNode?.groupType
   const groupConfig = WELL_GROUPS.find(group => group.id === groupId || group.label === groupId)
@@ -240,7 +239,7 @@ const applyWaterInvasionNodes = (node) => {
   })
 }
 
-const refreshProjectTree = async () => {
+const refreshProjectTree = async () => { //加在项目树
   try {
     const res = await projectApi.getProject(PROJECT_ID)
     rebuildProjectTree(normalizePayload(res))
@@ -249,7 +248,7 @@ const refreshProjectTree = async () => {
   }
 }
 
-const refreshWaterInvasionNodes = async () => {
+const refreshWaterInvasionNodes = async () => {  //加载已有水侵分析节点
   try {
     const res = await nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, NODETYPE.NodeType_WaterInvasionAnalysis)
     applyWaterInvasionNodes(res?.data?.node)
@@ -258,7 +257,7 @@ const refreshWaterInvasionNodes = async () => {
   }
 }
 
-const pollWaterInvasionNode = async (wellName, maxRetries = 20, intervalMs = 1500) => {
+const pollWaterInvasionNode = async (wellName, maxRetries = 20, intervalMs = 1500) => { //轮询结果
   for (let i = 0; i < maxRetries; i++) {
     await new Promise(resolve => setTimeout(resolve, intervalMs))
 
@@ -273,7 +272,7 @@ const pollWaterInvasionNode = async (wellName, maxRetries = 20, intervalMs = 150
   throw new Error('分析超时，请稍后刷新查看结果')
 }
 
-const runWaterInvasionForSelectedWell = async () => {
+const runWaterInvasionForSelectedWell = async () => { //点击水侵分析的操作
   const targetWellName = selectedWellName.value
 
   if (!targetWellName) {
@@ -324,7 +323,7 @@ const initTree = async () => {
   await refreshWaterInvasionNodes()
 }
 
-const handleSelect = (node) => {
+const handleSelect = (node) => { // 点击左侧树节点
   const isWellMenuGroup = WELL_GROUPS.some(group => group.id === node.type)
   const nodeWellName = node.wellName || (node.type === NODETYPE.NodeType_Well ? node.label : '')
 
@@ -343,7 +342,7 @@ const handleSelect = (node) => {
   if (node.type === NODETYPE.NodeType_Well) return
 }
 
-const handleCommand = ({ group, name }) => {
+const handleCommand = ({ group, name }) => { // 接收顶部菜单栏的点击事件
   switch (name) {
     case '水侵分析':
       runWaterInvasionForSelectedWell()
@@ -362,9 +361,12 @@ onMounted(initTree)
 
 <template>
   <div class="ipr-container">
+<!--    顶部菜单栏目-->
     <RibbonMenu @command="handleCommand" />
 
+
     <div class="ipr-main">
+<!--      左侧菜单栏-->
       <aside class="side-panel">
         <div class="side-search">
           <el-input
@@ -386,6 +388,7 @@ onMounted(initTree)
         </div>
       </aside>
 
+<!--     右侧的主要内容区域-->
       <main class="content-area">
         <WaterInvasionContent
           v-if="currentView === 'water-invasion'"

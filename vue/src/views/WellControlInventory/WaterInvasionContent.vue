@@ -10,7 +10,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import * as echarts from 'echarts'
 import dockerRequest from '@/api/docker'
 
-const props = defineProps({
+const props = defineProps({ // 父组件传进来的数据
   node:           Object,           // 包含 wellName 字段
   projectId:      [Number, String],
   gasReservoirId: [Number, String]
@@ -37,13 +37,13 @@ const OUTPUT_FIELD_CONFIGS = [
 ]
 
 // ─── 状态 ───
-const loading        = ref(false)
-const wellData       = ref(null)
-const activeChartIdx = ref(0)
-const activeParamTab = ref('input')
-const paramsPanelWidth = ref(238)
-const paramsCollapsed = ref(false)
-const resizingParamsPanel = ref(false)
+const loading        = ref(false)   // 接口加载状态
+const wellData       = ref(null)  //接口返回的谁侵分析详细数据
+const activeChartIdx = ref(0)  // 选中的图表页签下标
+const activeParamTab = ref('input')  //左侧参数面板输入\输出显示
+const paramsPanelWidth = ref(238)  //参数面板宽度
+const paramsCollapsed = ref(false)  //参数面板是否收起
+const resizingParamsPanel = ref(false)  // 用户是否正在拖拽调整参数面板宽度
 
 // ─── 从接口数据派生 ───
 const input = computed(() => wellData.value?.input || {})
@@ -52,9 +52,12 @@ const outputFields = computed(() => OUTPUT_FIELD_CONFIGS[activeChartIdx.value] |
 const hasOutputResults = computed(() => outputFields.value.length > 0)
 const isWaterActivityTab = computed(() => activeChartIdx.value === 4)
 const waterActivityOutput = computed(() => wellData.value?.outputs?.[4]?.output || {})
+
+//用于控制右侧浮动图例的位置
 const legendPosition = ref({ x: null, y: null })
 const draggingLegend = ref(false)
 const legendDragOffset = ref({ x: 0, y: 0 })
+
 const legendItems = computed(() => {
   if (isWaterActivityTab.value) return []
   if (activeChartIdx.value === 0) return [{ name: '无因次视压力PFD(dless)', color: '#5470c6' }]
@@ -81,6 +84,7 @@ const legendStyle = computed(() => {
 
 const wgrEnabled = computed(() => (input.value.waterGasRatioLimit ?? -1) > 0)
 
+//获取输入值
 const getInputValue = (keys, fallback = '') => {
   for (const key of keys) {
     const value = input.value?.[key]
@@ -89,6 +93,8 @@ const getInputValue = (keys, fallback = '') => {
   return fallback
 }
 
+
+//获取输出值
 const getOutputValue = (keys, fallback = '') => {
   for (const key of keys) {
     const value = output.value?.[key]
@@ -97,6 +103,8 @@ const getOutputValue = (keys, fallback = '') => {
   return fallback
 }
 
+
+//方法编号转换
 const getMethodValue = (methods, key) => {
   const value = input.value?.[key]
   if (value === undefined || value === null || value === '') return ''
@@ -119,6 +127,7 @@ const chartTabs = computed(() => {
 
 const activeTab = computed(() => chartTabs.value[activeChartIdx.value] || null)
 
+
 // ─── ECharts ───
 const chartEl = ref(null)
 const chartAreaEl = ref(null)
@@ -127,7 +136,7 @@ let chart = null
 let chartRenderTimer = null
 const onResize = () => chart?.resize()
 
-const renderChartSoon = (delay = 0) => {
+const renderChartSoon = (delay = 0) => {  //延迟渲染图表
   if (chartRenderTimer) clearTimeout(chartRenderTimer)
   chartRenderTimer = setTimeout(() => {
     nextTick(() => {
@@ -139,11 +148,15 @@ const renderChartSoon = (delay = 0) => {
   }, delay)
 }
 
+
+//参数面板收起和拖拽
 function toggleParamsPanel() {
   paramsCollapsed.value = !paramsCollapsed.value
   renderChartSoon(180)
 }
 
+
+//拖拽改变宽度
 function onParamsPanelResize(event) {
   if (!resizingParamsPanel.value) return
   const leftBoundary = paramsPanelEl.value?.getBoundingClientRect().left || 0
@@ -238,6 +251,7 @@ function fmtSci(v) {
   return `${sign}${coeff}E${exp >= 0 ? '+' : ''}${String(exp).padStart(1, '0')}`
 }
 
+//图表数据处理
 function getChartData(item) {
   return (item?.data || [])
       .filter(d => !d.isDeleted)
@@ -265,6 +279,8 @@ function baseGrid() {
   }
 }
 
+
+//渲染水侵识别/水体大小图
 function renderPressureRecoveryChart(tab, index) {
   const primary = tab.chartItems[0]
   const scatter = getNumericPoints(primary)
@@ -335,6 +351,8 @@ function renderPressureRecoveryChart(tab, index) {
   }, true)
 }
 
+
+//渲染水侵量曲线
 function renderWaterAmountChart(tab) {
   const primary = tab.chartItems[0]
   const data = getDatePoints(primary)
@@ -388,6 +406,8 @@ function renderWaterAmountChart(tab) {
   }, true)
 }
 
+
+//喧嚷驱动机制图
 function renderDriveMechanismChart(tab) {
   const names = ['天然气驱动指数(dless)', '气藏容积驱动指数(dless)', '水侵能量驱动指数(dless)']
   const colors = ['#ffff33', '#b84a4a', '#2f80ed']
@@ -443,6 +463,7 @@ function renderDriveMechanismChart(tab) {
   }, true)
 }
 
+//总渲染入口，决定当前改该画哪种图
 function renderChart() {
   if (!chart || !activeTab.value) return
   if (isWaterActivityTab.value) {
@@ -472,7 +493,7 @@ function renderChart() {
 }
 
 // ─── API 调用 ───
-async function fetchData() {
+async function fetchData() { //请求水侵分析详情
   const wellName = props.node?.wellName
   if (!wellName || !props.projectId || !props.gasReservoirId) return
 
@@ -497,7 +518,11 @@ async function fetchData() {
   }
 }
 
+
+//监听井名变化
 watch(() => props.node?.wellName, fetchData, { immediate: true })
+
+//监听图表页切换
 watch(activeChartIdx, () => {
   if (!hasOutputResults.value && activeParamTab.value === 'output') {
     activeParamTab.value = 'input'
