@@ -20,29 +20,99 @@ const props = defineProps({
 const emit = defineEmits(['refresh-tree'])
 
 // ─── 常量：方法枚举 ───
-const MODIFICATION_METHODS = ['Wichert-Aziz修正方法', 'Pitzer修正方法']
-const DEVIATION_METHODS    = ['Dranchuk-Abu-Kassem方法', 'Hall-Yarborough方法', 'BK方法']
+const MODIFICATION_METHODS = ['Wichert-Aziz 修正方法', 'Carr-Kobayashi-Burrous 修正方法']
+const DEVIATION_METHODS    = ['Dranchuk-Abu-Kassem 方法', 'Dranchuk-Purvis-Robinson 方法', 'Hall-Yarborough 方法']
+const VISCOSITY_METHODS    = ['Lee-Gonzalez-Eakin 方法', 'Carr-Kobayashi-Burrous 方法', 'Sutton 方法']
+const CHART_TAB_LABELS = ['水侵识别', '水体大小', '水侵量', '驱动机制', '水体活跃性']
+const OUTPUT_FIELD_CONFIGS = [
+  [
+    { label: '水侵识别结果', keys: ['waterInvasionStateDesc'] },
+    { label: '动态地质储量(10⁸m³)', keys: ['originalGasVolume'] }
+  ],
+  [
+    { label: '水体大小(10⁴m³)', keys: ['waterBodySize'] },
+    { label: '天然气地下体积(10⁸m³)', keys: ['undergroundGasVolume'] },
+    { label: '水体倍数(dless)', keys: ['waterBodySizeMultiple'] }
+  ]
+]
 
 // ─── 状态 ───
 const loading        = ref(false)
 const wellData       = ref(null)
 const activeChartIdx = ref(0)
 const activeParamTab = ref('input')
+const paramsPanelWidth = ref(238)
+const paramsCollapsed = ref(false)
+const resizingParamsPanel = ref(false)
 
 // ─── 从接口数据派生 ───
 const input = computed(() => wellData.value?.input || {})
+const output = computed(() => wellData.value?.outputs?.[activeChartIdx.value]?.output || {})
+const outputFields = computed(() => OUTPUT_FIELD_CONFIGS[activeChartIdx.value] || [])
+const hasOutputResults = computed(() => outputFields.value.length > 0)
+const isWaterActivityTab = computed(() => activeChartIdx.value === 4)
+const waterActivityOutput = computed(() => wellData.value?.outputs?.[4]?.output || {})
+const legendPosition = ref({ x: null, y: null })
+const draggingLegend = ref(false)
+const legendDragOffset = ref({ x: 0, y: 0 })
+const legendItems = computed(() => {
+  if (isWaterActivityTab.value) return []
+  if (activeChartIdx.value === 0) return [{ name: '无因次视压力PFD(dless)', color: '#5470c6' }]
+  if (activeChartIdx.value === 1) return [{ name: '无因次视压力PHD(dless)', color: '#5470c6' }]
+  if (activeChartIdx.value === 2) return [{ name: '累计水侵量(10⁴m³)', color: '#1677ff' }]
+  if (activeChartIdx.value === 3) {
+    return [
+      { name: '天然气驱动指数(dless)', color: '#ffff33' },
+      { name: '气藏容积驱动指数(dless)', color: '#b84a4a' },
+      { name: '水侵能量驱动指数(dless)', color: '#2f80ed' }
+    ]
+  }
+  return []
+})
+const legendStyle = computed(() => {
+  if (legendPosition.value.x === null || legendPosition.value.y === null) {
+    return { top: '36px', right: '18px' }
+  }
+  return {
+    left: `${legendPosition.value.x}px`,
+    top: `${legendPosition.value.y}px`
+  }
+})
 
 const wgrEnabled = computed(() => (input.value.waterGasRatioLimit ?? -1) > 0)
+
+const getInputValue = (keys, fallback = '') => {
+  for (const key of keys) {
+    const value = input.value?.[key]
+    if (value !== undefined && value !== null && value !== '') return value
+  }
+  return fallback
+}
+
+const getOutputValue = (keys, fallback = '') => {
+  for (const key of keys) {
+    const value = output.value?.[key]
+    if (value !== undefined && value !== null && value !== '') return value
+  }
+  return fallback
+}
+
+const getMethodValue = (methods, key) => {
+  const value = input.value?.[key]
+  if (value === undefined || value === null || value === '') return ''
+  if (typeof value === 'number') return methods[value] || String(value)
+  return value
+}
 
 // 只保留有 chartItems 的 outputs，作为图表标签页
 const chartTabs = computed(() => {
   if (!wellData.value?.outputs) return []
   return wellData.value.outputs
-      .filter(o => o.chartItems?.length > 0)
-      .map(o => ({
+      .slice(0, CHART_TAB_LABELS.length)
+      .map((o, index) => ({
         analysisId:  o.analysisId,
-        label:       o.chartItems[0].name,
-        chartItems:  o.chartItems,
+        label:       CHART_TAB_LABELS[index],
+        chartItems:  o.chartItems || [],
         outputItems: o.outputItems || []
       }))
 })
@@ -51,8 +121,92 @@ const activeTab = computed(() => chartTabs.value[activeChartIdx.value] || null)
 
 // ─── ECharts ───
 const chartEl = ref(null)
+const chartAreaEl = ref(null)
+const paramsPanelEl = ref(null)
 let chart = null
+let chartRenderTimer = null
 const onResize = () => chart?.resize()
+
+const renderChartSoon = (delay = 0) => {
+  if (chartRenderTimer) clearTimeout(chartRenderTimer)
+  chartRenderTimer = setTimeout(() => {
+    nextTick(() => {
+      requestAnimationFrame(() => {
+        chart?.resize()
+        renderChart()
+      })
+    })
+  }, delay)
+}
+
+function toggleParamsPanel() {
+  paramsCollapsed.value = !paramsCollapsed.value
+  renderChartSoon(180)
+}
+
+function onParamsPanelResize(event) {
+  if (!resizingParamsPanel.value) return
+  const leftBoundary = paramsPanelEl.value?.getBoundingClientRect().left || 0
+  const width = Math.max(180, Math.min(520, event.clientX - leftBoundary))
+  paramsPanelWidth.value = width
+  chart?.resize()
+}
+
+function stopParamsPanelResize() {
+  if (!resizingParamsPanel.value) return
+  resizingParamsPanel.value = false
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+  window.removeEventListener('mousemove', onParamsPanelResize)
+  window.removeEventListener('mouseup', stopParamsPanelResize)
+  renderChartSoon(180)
+}
+
+function startParamsPanelResize(event) {
+  if (paramsCollapsed.value) return
+  event.preventDefault()
+  resizingParamsPanel.value = true
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+  window.addEventListener('mousemove', onParamsPanelResize)
+  window.addEventListener('mouseup', stopParamsPanelResize)
+}
+
+function onLegendDrag(event) {
+  if (!draggingLegend.value || !chartAreaEl.value) return
+  const rect = chartAreaEl.value.getBoundingClientRect()
+  const x = Math.max(0, Math.min(rect.width - 80, event.clientX - rect.left - legendDragOffset.value.x))
+  const y = Math.max(0, Math.min(rect.height - 30, event.clientY - rect.top - legendDragOffset.value.y))
+  legendPosition.value = { x, y }
+}
+
+function stopLegendDrag() {
+  if (!draggingLegend.value) return
+  draggingLegend.value = false
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+  window.removeEventListener('mousemove', onLegendDrag)
+  window.removeEventListener('mouseup', stopLegendDrag)
+}
+
+function startLegendDrag(event) {
+  if (!chartAreaEl.value) return
+  event.preventDefault()
+  const legendRect = event.currentTarget.getBoundingClientRect()
+  const areaRect = chartAreaEl.value.getBoundingClientRect()
+  const currentX = legendPosition.value.x ?? legendRect.left - areaRect.left
+  const currentY = legendPosition.value.y ?? legendRect.top - areaRect.top
+  legendPosition.value = { x: currentX, y: currentY }
+  legendDragOffset.value = {
+    x: event.clientX - legendRect.left,
+    y: event.clientY - legendRect.top
+  }
+  draggingLegend.value = true
+  document.body.style.cursor = 'move'
+  document.body.style.userSelect = 'none'
+  window.addEventListener('mousemove', onLegendDrag)
+  window.addEventListener('mouseup', stopLegendDrag)
+}
 
 /** 简单最小二乘线性回归 */
 function linearRegression(pts) {
@@ -84,162 +238,236 @@ function fmtSci(v) {
   return `${sign}${coeff}E${exp >= 0 ? '+' : ''}${String(exp).padStart(1, '0')}`
 }
 
-function renderChart() {
-  if (!chart || !activeTab.value) return
+function getChartData(item) {
+  return (item?.data || [])
+      .filter(d => !d.isDeleted)
+      .map(d => ({
+        x: d.xValue,
+        y: Number(d.yValue),
+        raw: d
+      }))
+}
 
-  const tab    = activeTab.value
-  const isTime = tab.chartItems[0].xAxisField === 'date'
-  const COLORS = ['#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de']
-  const series = []
+function getNumericPoints(item) {
+  return getChartData(item).map(d => [Number(d.x), d.y])
+}
 
-  if (isTime) {
-    // ────── 时间序列折线图 ──────
-    tab.chartItems.forEach((item, i) => {
-      const data = item.data
-          .filter(d => !d.isDeleted)
-          .map(d => [d.xValue.slice(0, 10), +d.yValue])
-      series.push({
-        name: item.name,
-        type: 'line',
-        data,
-        smooth: true,
-        symbol: 'circle', symbolSize: 5,
-        lineStyle: { color: COLORS[i], width: 2 },
-        itemStyle: { color: COLORS[i] }
-      })
-    })
+function getDatePoints(item) {
+  return getChartData(item).map(d => [String(d.x).slice(0, 10), d.y])
+}
 
-    chart.setOption({
-      animation: false,
-      tooltip: {
-        trigger: 'axis',
-        axisPointer: {
-          type: 'cross',
-          crossStyle: { color: '#aaa', type: 'dashed', width: 1 },
-          label: { backgroundColor: '#555' }
-        },
-        formatter: params => params
-            .map(p => `${p.marker}${p.seriesName}：<b>${(+p.data[1]).toFixed(4)}</b>`)
-            .join('<br/>')
-      },
-      legend: { bottom: 4, textStyle: { fontSize: 11 }, itemGap: 12 },
-      grid: { left: 62, right: 18, top: 28, bottom: 72 },
-      xAxis: {
-        type: 'category',
-        data: tab.chartItems[0].data.map(d => d.xValue.slice(0, 10)),
-        axisLabel: { rotate: 30, fontSize: 10, color: '#999' },
-        axisLine: { lineStyle: { color: '#ccc' } },
-        splitLine: { lineStyle: { color: '#ebebeb' } }
-      },
-      yAxis: {
-        type: 'value',
-        axisLabel: { fontSize: 11, color: '#999' },
-        splitLine: { lineStyle: { color: '#ebebeb' } }
-      },
-      series
-    }, true)
+function baseGrid() {
+  return {
+    left: 62,
+    right: 92,
+    top: 44,
+    bottom: 56
+  }
+}
 
-  } else {
-    // ────── X-Y 散点图（PFD / PHD）──────
-    const primary = tab.chartItems[0]
-    const scatter = primary.data
-        .filter(d => !d.isDeleted)
-        .map(d => [+d.xValue, +d.yValue])
-
-    // 蓝色散点
-    series.push({
-      name: primary.name,
+function renderPressureRecoveryChart(tab, index) {
+  const primary = tab.chartItems[0]
+  const scatter = getNumericPoints(primary)
+  const isPHD = index === 1
+  const yName = isPHD ? 'PHD(dless)' : 'PFD(dless)'
+  const title = isPHD ? 'PHD-Rg关系图' : 'PFD-Rg关系图'
+  const legendName = isPHD ? '无因次视压力PHD(dless)' : '无因次视压力PFD(dless)'
+  const series = [
+    {
+      name: legendName,
       type: 'scatter',
       data: scatter,
-      symbolSize: 7,
+      symbolSize: 8,
       itemStyle: { color: '#5470c6', opacity: 0.85 }
-    })
-
-    // 线性拟合线（黑色）
-    const reg = linearRegression(scatter)
-    let eqText = ''
-    if (reg) {
-      const xs   = scatter.map(d => d[0])
-      const xMin = Math.min(...xs), xMax = Math.max(...xs)
-      const pad  = (xMax - xMin) * 0.02
-      series.push({
-        name: '拟合线',
-        type: 'line',
-        data: [
-          [xMin - pad, reg.slope * (xMin - pad) + reg.intercept],
-          [xMax + pad, reg.slope * (xMax + pad) + reg.intercept]
-        ],
-        symbol: 'none',
-        lineStyle: { color: '#2a2a2a', width: 1.8 },
-        itemStyle: { color: '#2a2a2a' }
-      })
-      eqText = `y = ${fmtSci(reg.slope)}×X + ${fmtSci(reg.intercept)}    R² = ${reg.r2.toFixed(4)}`
+    },
+    {
+      name: '理论线',
+      type: 'line',
+      data: [[0, 1], [100, 0]],
+      symbol: 'none',
+      lineStyle: { color: '#111', width: 1.8 },
+      tooltip: { show: false }
     }
+  ]
 
-    // 理论线（金色）—— 从 outputItems 中取
-    const theoryPts = tab.outputItems
-        .filter(o => o.theoreticalRecoveryDegree > 0 && o.theoreticalApparentPressure > 0)
-        .map(o => [+o.theoreticalRecoveryDegree, +o.theoreticalApparentPressure])
-        .sort((a, b) => a[0] - b[0])
+  chart.setOption({
+    animation: false,
+    title: {
+      text: title,
+      left: 'center',
+      top: 8,
+      textStyle: { fontSize: 14, fontWeight: 600, color: '#333' }
+    },
+    tooltip: {
+      trigger: 'item',
+      axisPointer: {
+        type: 'cross',
+        crossStyle: { color: '#d936d0', type: 'dashed', width: 1 },
+        label: { backgroundColor: '#d936d0' }
+      },
+      formatter: p => `${p.marker}${p.seriesName}：${Number(p.value?.[1] ?? p.value).toFixed(4)}`
+    },
+    legend: { show: false },
+    grid: baseGrid(),
+    xAxis: {
+      type: 'value',
+      name: 'Rg(%)',
+      min: 0,
+      max: 100,
+      nameLocation: 'middle',
+      nameGap: 30,
+      minorTick: { show: true },
+      minorSplitLine: { show: true, lineStyle: { color: '#f1f5fb' } },
+      splitLine: { lineStyle: { color: '#dce5f2' } }
+    },
+    yAxis: {
+      type: 'value',
+      name: yName,
+      min: 0,
+      max: 1,
+      nameLocation: 'middle',
+      nameGap: 44,
+      minorTick: { show: true },
+      minorSplitLine: { show: true, lineStyle: { color: '#f1f5fb' } },
+      splitLine: { lineStyle: { color: '#dce5f2' } }
+    },
+    series
+  }, true)
+}
 
-    if (theoryPts.length > 1) {
-      series.push({
-        name: '理论线',
-        type: 'line',
-        data: theoryPts,
-        symbol: 'none',
-        lineStyle: { color: '#e8a500', width: 1.8 },
-        itemStyle: { color: '#e8a500' }
-      })
-    }
+function renderWaterAmountChart(tab) {
+  const primary = tab.chartItems[0]
+  const data = getDatePoints(primary)
+  const name = '累计水侵量(10⁴m³)'
 
-    const xName = primary.xAxisField === 'recoveryDegree' ? 'Rg(%)'
-        : primary.xAxisField === 'cumulativeGasProduction' ? 'Gp(10⁸m³)'
-            : primary.xAxisField
-    const yName = primary.yAxisField === 'apparentPressure' ? 'PFD'
-        : primary.yAxisField === 'pressure' ? 'P(MPa)'
-            : primary.yAxisField
+  chart.setOption({
+    animation: false,
+    title: {
+      text: '水侵量随时间变化曲线',
+      left: 'center',
+      top: 8,
+      textStyle: { fontSize: 14, fontWeight: 600, color: '#333' }
+    },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'line', lineStyle: { color: '#d936d0', type: 'solid', width: 1 } }
+    },
+    legend: { show: false },
+    grid: baseGrid(),
+    xAxis: {
+      type: 'category',
+      name: '日期',
+      nameLocation: 'middle',
+      nameGap: 34,
+      boundaryGap: false,
+      data: data.map(item => item[0]),
+      axisLabel: { formatter: v => String(v).slice(0, 4) },
+      minorTick: { show: true },
+      minorSplitLine: { show: true, lineStyle: { color: '#f1f5fb' } },
+      splitLine: { show: true, lineStyle: { color: '#dce5f2' } }
+    },
+    yAxis: {
+      type: 'value',
+      name: '水侵量(10⁴m³)',
+      nameLocation: 'middle',
+      nameGap: 44,
+      minorTick: { show: true },
+      minorSplitLine: { show: true, lineStyle: { color: '#f1f5fb' } },
+      splitLine: { lineStyle: { color: '#dce5f2' } }
+    },
+    series: [{
+      name,
+      type: 'line',
+      data,
+      showSymbol: false,
+      smooth: true,
+      lineStyle: { color: '#1677ff', width: 1.5 },
+      itemStyle: { color: '#1677ff' },
+      areaStyle: { color: 'rgba(22,119,255,0.78)' }
+    }]
+  }, true)
+}
 
-    chart.setOption({
-      animation: false,
-      tooltip: {
-        trigger: 'axis',
-        axisPointer: {
-          type: 'cross',
-          crossStyle: { color: '#aaa', type: 'dashed', width: 1 },
-          label: { backgroundColor: '#555', formatter: p => (+p.value).toFixed(4) }
-        },
-        formatter: params => {
-          if (!params?.length) return ''
-          const [x, y] = params[0].data
-          return `X: <b>${(+x).toFixed(4)}</b><br/>Y: <b>${(+y).toFixed(4)}</b>`
-        }
-      },
-      legend: {
-        orient: 'vertical', right: 8, top: 'middle',
-        itemGap: 10, textStyle: { fontSize: 11 }
-      },
-      grid: { left: 58, right: 142, top: 28, bottom: 46 },
-      xAxis: {
-        type: 'value', name: xName, nameLocation: 'middle', nameGap: 28,
-        nameTextStyle: { fontSize: 11, color: '#666' },
-        axisLine: { lineStyle: { color: '#ccc' } },
-        axisLabel: { fontSize: 11, color: '#999' },
-        splitLine: { lineStyle: { color: '#ebebeb' } }
-      },
-      yAxis: {
-        type: 'value', name: yName, nameLocation: 'middle', nameGap: 42,
-        nameTextStyle: { fontSize: 11, color: '#666' },
-        axisLine: { lineStyle: { color: '#ccc' } },
-        axisLabel: { fontSize: 11, color: '#999' },
-        splitLine: { lineStyle: { color: '#ebebeb' } }
-      },
-      graphic: eqText ? [{
-        type: 'text', right: 148, bottom: 54,
-        style: { text: eqText, font: 'italic 11px "Microsoft YaHei", sans-serif', fill: '#555' }
-      }] : [],
-      series
-    }, true)
+function renderDriveMechanismChart(tab) {
+  const names = ['天然气驱动指数(dless)', '气藏容积驱动指数(dless)', '水侵能量驱动指数(dless)']
+  const colors = ['#ffff33', '#b84a4a', '#2f80ed']
+  const baseData = getDatePoints(tab.chartItems[0])
+  const categories = baseData.map(item => item[0])
+  const series = tab.chartItems.slice(0, 3).map((item, index) => ({
+    name: names[index] || item.name,
+    type: 'line',
+    stack: 'drive',
+    data: getDatePoints(item).map(point => point[1]),
+    showSymbol: false,
+    smooth: true,
+    lineStyle: { width: 1, color: colors[index] },
+    itemStyle: { color: colors[index] },
+    areaStyle: { color: colors[index], opacity: 0.9 }
+  }))
+
+  chart.setOption({
+    animation: false,
+    title: {
+      text: '驱动指数随时间变化曲线',
+      left: 'center',
+      top: 8,
+      textStyle: { fontSize: 14, fontWeight: 600, color: '#333' }
+    },
+    tooltip: { trigger: 'axis' },
+    legend: { show: false },
+    grid: baseGrid(),
+    xAxis: {
+      type: 'category',
+      name: '日期',
+      nameLocation: 'middle',
+      nameGap: 34,
+      boundaryGap: false,
+      data: categories,
+      axisLabel: { formatter: v => String(v).slice(0, 4) },
+      minorTick: { show: true },
+      minorSplitLine: { show: true, lineStyle: { color: '#f1f5fb' } },
+      splitLine: { show: true, lineStyle: { color: '#dce5f2' } }
+    },
+    yAxis: {
+      type: 'value',
+      name: '驱动指数(dless)',
+      min: 0,
+      max: 1,
+      nameLocation: 'middle',
+      nameGap: 44,
+      minorTick: { show: true },
+      minorSplitLine: { show: true, lineStyle: { color: '#f1f5fb' } },
+      splitLine: { lineStyle: { color: '#dce5f2' } }
+    },
+    series
+  }, true)
+}
+
+function renderChart() {
+  if (!chart || !activeTab.value) return
+  if (isWaterActivityTab.value) {
+    chart.clear()
+    return
+  }
+
+  const tab = activeTab.value
+  if (!tab.chartItems?.length) {
+    chart.clear()
+    return
+  }
+
+  if (activeChartIdx.value === 0 || activeChartIdx.value === 1) {
+    renderPressureRecoveryChart(tab, activeChartIdx.value)
+    return
+  }
+
+  if (activeChartIdx.value === 2) {
+    renderWaterAmountChart(tab)
+    return
+  }
+
+  if (activeChartIdx.value === 3) {
+    renderDriveMechanismChart(tab)
   }
 }
 
@@ -259,7 +487,7 @@ async function fetchData() {
     )
     wellData.value = res.data
     await nextTick()
-    renderChart()
+    renderChartSoon()
     // 数据加载成功后通知父组件刷新左侧树
     emit('refresh-tree')
   } catch (e) {
@@ -270,16 +498,25 @@ async function fetchData() {
 }
 
 watch(() => props.node?.wellName, fetchData, { immediate: true })
-watch(activeChartIdx, () => nextTick().then(renderChart))
+watch(activeChartIdx, () => {
+  if (!hasOutputResults.value && activeParamTab.value === 'output') {
+    activeParamTab.value = 'input'
+  }
+  renderChartSoon()
+  renderChartSoon(180)
+})
 
 onMounted(() => {
   chart = echarts.init(chartEl.value)
   window.addEventListener('resize', onResize)
-  if (wellData.value) renderChart()
+  if (wellData.value) renderChartSoon()
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onResize)
+  stopParamsPanelResize()
+  stopLegendDrag()
+  if (chartRenderTimer) clearTimeout(chartRenderTimer)
   chart?.dispose()
 })
 </script>
@@ -288,85 +525,130 @@ onBeforeUnmount(() => {
   <div v-loading="loading" class="wia-wrap">
 
     <!-- 左侧参数面板 -->
-    <div class="params-panel">
-      <div class="panel-head">
-        <span>参数设置</span>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="#999">
-          <path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z"/>
-        </svg>
+    <div
+        ref="paramsPanelEl"
+        class="params-panel"
+        :class="{ collapsed: paramsCollapsed }"
+        :style="{ width: paramsCollapsed ? '22px' : `${paramsPanelWidth}px`, minWidth: paramsCollapsed ? '22px' : `${paramsPanelWidth}px` }"
+    >
+      <div v-if="paramsCollapsed" class="panel-collapsed-tab" @click="toggleParamsPanel">
+        参数设置
       </div>
 
-      <div v-if="activeParamTab === 'input'" class="panel-body">
+      <div v-show="!paramsCollapsed" class="panel-head">
+        <span>参数设置</span>
+        <button class="panel-toggle" type="button" title="收起参数设置" @click="toggleParamsPanel">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="#777">
+            <path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z"/>
+          </svg>
+        </button>
+      </div>
+
+      <div v-if="!paramsCollapsed && activeParamTab === 'input'" class="panel-body">
         <div class="sec-label">气体性质</div>
-        <div class="field">
-          <label>天然气类型</label>
-          <el-select size="small" :model-value="input.gasType || '干气'" style="width:100%">
-            <el-option label="干气" value="干气"/>
-            <el-option label="湿气" value="湿气"/>
-          </el-select>
+        <div class="field-grid">
+          <div class="field">
+            <label>天然气类型</label>
+            <el-select size="small" :model-value="getInputValue(['gasType'])" style="width:100%">
+              <el-option label="干气" value="干气" />
+              <el-option label="湿气" value="湿气" />
+            </el-select>
+          </div>
+          <div class="field">
+            <label>天然气比重(dless)</label>
+            <el-input size="small" readonly :model-value="getInputValue(['specificGravity'])" />
+          </div>
+          <div class="field">
+            <label>H₂S摩尔百分含量(%)</label>
+            <el-input size="small" readonly :model-value="getInputValue(['hydrogenSulfide'])" />
+          </div>
+          <div class="field">
+            <label>CO₂摩尔百分含量(%)</label>
+            <el-input size="small" readonly :model-value="getInputValue(['carbonDioxide'])" />
+          </div>
+          <div class="field">
+            <label>N₂摩尔百分含量(%)</label>
+            <el-input size="small" readonly :model-value="getInputValue(['nitrogen'])" />
+          </div>
         </div>
-        <div class="field">
-          <label>天然气比重</label>
-          <el-input size="small" readonly :model-value="input.specificGravity ?? ''"/>
-        </div>
-        <div class="field">
-          <label>H₂S摩尔百分含量(%)</label>
-          <el-input size="small" readonly :model-value="input.hydrogenSulfide ?? ''"/>
-        </div>
-        <div class="field">
-          <label>CO₂摩尔百分含量(%)</label>
-          <el-input size="small" readonly :model-value="input.carbonDioxide ?? ''"/>
-        </div>
-<!--        <div class="field">-->
-<!--          <label>N₂摩尔百分含量(%)</label>-->
-<!--          <el-input size="small" readonly :model-value="input.nitrogen ?? ''"/>-->
-<!--        </div>-->
 
         <div class="sec-label">计算方法</div>
-        <div class="field">
-          <label>非烃气体修正方法</label>
-          <el-select size="small"
-                     :model-value="MODIFICATION_METHODS[input.modificationMethod ?? 0]"
-                     style="width:100%">
-            <el-option v-for="m in MODIFICATION_METHODS" :key="m" :label="m" :value="m"/>
-          </el-select>
-        </div>
-        <div class="field">
-          <label>天然气偏差系数计算方法</label>
-          <el-select size="small"
-                     :model-value="DEVIATION_METHODS[input.deviationFactorMethod ?? 0]"
-                     style="width:100%">
-            <el-option v-for="m in DEVIATION_METHODS" :key="m" :label="m" :value="m"/>
-          </el-select>
+        <div class="field-grid">
+          <div class="field">
+            <label>非烃气体修正方法</label>
+            <el-select size="small" :model-value="getMethodValue(MODIFICATION_METHODS, 'modificationMethod')" style="width:100%">
+              <el-option v-for="m in MODIFICATION_METHODS" :key="m" :label="m" :value="m" />
+            </el-select>
+          </div>
+          <div class="field">
+            <label>天然气偏差系数计算方法</label>
+            <el-select size="small" :model-value="getMethodValue(DEVIATION_METHODS, 'deviationFactorMethod')" style="width:100%">
+              <el-option v-for="m in DEVIATION_METHODS" :key="m" :label="m" :value="m" />
+            </el-select>
+          </div>
+          <div class="field">
+            <label>天然气粘度计算方法</label>
+            <el-select size="small" :model-value="getMethodValue(VISCOSITY_METHODS, 'viscosityMethod')" style="width:100%">
+              <el-option v-for="m in VISCOSITY_METHODS" :key="m" :label="m" :value="m" />
+            </el-select>
+          </div>
         </div>
 
-        <div class="sec-label">其他数据</div>
-        <div class="field">
-          <label>原始地层压力  (MPa)</label>
-          <el-input size="small" readonly :model-value="input.originalFormationPressure ?? ''"/>
-        </div>
-        <div class="field">
-          <label>底层温度  (°C)</label>
-          <el-input size="small" readonly :model-value="input.formationTemperature ?? ''"/>
-        </div>
-        <div class="field">
-          <label>束缚水饱和度  (%)</label>
-          <el-input size="small" readonly :model-value="input.waterSaturation ?? ''"/>
-        </div>
-        <div class="field">
-          <div class="wgr-label-row">
-            <span>生产水气比上限(m³/10⁴m³)</span>
-            <el-switch
-                :model-value="wgrEnabled"
-                disabled
-                style="--el-switch-on-color:#e8a000;--el-switch-off-color:#ccc"
+        <div class="sec-label">其它数据</div>
+        <div class="field-grid">
+          <div class="field">
+            <label>原始地层压力(MPa)</label>
+            <el-input size="small" readonly :model-value="getInputValue(['originalFormationPressure'])" />
+          </div>
+          <div class="field">
+            <label>气井地层温度(°C)</label>
+            <el-input size="small" readonly :model-value="getInputValue(['formationTemperature'])" />
+          </div>
+          <div class="field">
+            <label>气藏地质储量(10⁸m³)</label>
+            <el-input size="small" readonly :model-value="getInputValue(['reservoirOriginalGasVolume'])" />
+          </div>
+          <div class="field">
+            <label>束缚水饱和度(%)</label>
+            <el-input size="small" readonly :model-value="getInputValue(['waterSaturation'])" />
+          </div>
+          <div class="field">
+            <label>储层岩石压缩系数(MPa⁻¹)</label>
+            <el-input size="small" readonly :model-value="getInputValue(['rockCompressionCoefficient'])" />
+          </div>
+          <div class="field">
+            <label>地层水压缩系数(MPa⁻¹)</label>
+            <el-input size="small" readonly :model-value="getInputValue(['waterCompressionCoefficient'])" />
+          </div>
+          <div class="field">
+            <label>地层水体积系数(dless)</label>
+            <el-input size="small" readonly :model-value="getInputValue(['waterVolumeCoefficient'])" />
+          </div>
+          <div class="field">
+            <label>当前累产气量(10⁸m³)</label>
+            <el-input size="small" readonly :model-value="getInputValue(['currCumulativeGasProduction'])" />
+          </div>
+          <div class="field">
+            <label>气藏废弃压力(MPa)</label>
+            <el-input size="small" readonly :model-value="getInputValue(['reservoirAbandonmentPressure'])" />
+          </div>
+          <div class="field field-with-switch">
+            <div class="wgr-label-row">
+              <span>生产水气比上限(m³/10⁴m³)</span>
+              <el-switch
+                  :model-value="wgrEnabled"
+                  disabled
+                  style="--el-switch-on-color:#e8a000;--el-switch-off-color:#ccc"
+                  size="small"
+              />
+            </div>
+            <el-input
                 size="small"
+                readonly
+                :disabled="!wgrEnabled"
+                :model-value="getInputValue(['waterGasRatioLimit'])"
             />
           </div>
-          <el-input
-              size="small" readonly :disabled="!wgrEnabled"
-              :model-value="wgrEnabled ? input.waterGasRatioLimit : ''"
-          />
         </div>
 
         <div class="sec-label">生产数据</div>
@@ -375,20 +657,15 @@ onBeforeUnmount(() => {
           <el-button size="small">导入</el-button>
         </div>
       </div>
-
-      <div v-else class="panel-body">
+      <div v-else-if="!paramsCollapsed && hasOutputResults" class="panel-body">
         <div class="sec-label">输出结果</div>
-        <div class="field">
-          <label>水侵识别结果</label>
-          <el-input size="small" readonly model-value="强水侵" />
-        </div>
-        <div class="field">
-          <label>动态地质储量(10⁸m³)</label>
-          <el-input size="small" readonly model-value="13.5839" />
+        <div v-for="field in outputFields" :key="field.label" class="field">
+          <label>{{ field.label }}</label>
+          <el-input size="small" readonly :model-value="getOutputValue(field.keys)" />
         </div>
       </div>
 
-      <div class="param-tabs">
+      <div v-show="!paramsCollapsed" class="param-tabs">
         <div
           class="param-tab"
           :class="{ active: activeParamTab === 'input' }"
@@ -397,6 +674,7 @@ onBeforeUnmount(() => {
           输入
         </div>
         <div
+          v-if="hasOutputResults"
           class="param-tab"
           :class="{ active: activeParamTab === 'output' }"
           @click="activeParamTab = 'output'"
@@ -404,10 +682,11 @@ onBeforeUnmount(() => {
           输出
         </div>
       </div>
+      <div v-if="!paramsCollapsed" class="params-resizer" @mousedown="startParamsPanelResize"></div>
     </div>
 
     <!-- 右侧图表区域 -->
-    <div class="chart-area">
+    <div ref="chartAreaEl" class="chart-area">
       <div v-if="chartTabs.length" class="chart-tabs">
         <div
             v-for="(tab, i) in chartTabs"
@@ -417,7 +696,62 @@ onBeforeUnmount(() => {
             @click="activeChartIdx = i"
         >{{ tab.label }}</div>
       </div>
-      <div ref="chartEl" class="chart-instance"/>
+      <div v-show="!isWaterActivityTab" ref="chartEl" class="chart-instance"/>
+
+      <div
+          v-if="legendItems.length"
+          class="floating-chart-legend"
+          :class="{ dragging: draggingLegend }"
+          :style="legendStyle"
+          @mousedown="startLegendDrag"
+      >
+        <div v-for="item in legendItems" :key="item.name" class="floating-legend-item">
+          <span class="legend-dot" :style="{ backgroundColor: item.color }"></span>
+          <span>{{ item.name }}</span>
+        </div>
+      </div>
+
+      <div v-if="isWaterActivityTab" class="water-activity-panel">
+        <div class="activity-form">
+          <div class="activity-field">
+            <label>气藏废弃时的水侵量(10⁴m³):</label>
+            <el-input size="small" readonly :model-value="waterActivityOutput.abandonWaterInflux ?? ''" />
+          </div>
+          <div class="activity-field">
+            <label>原始条件下气藏容积(10⁸m³):</label>
+            <el-input size="small" readonly :model-value="waterActivityOutput.reservoirOriginalVolume ?? ''" />
+          </div>
+          <div class="activity-field">
+            <label>气藏废弃时的水侵替换系数(dless):</label>
+            <el-input size="small" readonly :model-value="waterActivityOutput.waterInvasionReplacementCoefficient ?? ''" />
+          </div>
+          <div class="activity-field">
+            <label>边底水活跃程度:</label>
+            <el-input size="small" readonly :model-value="waterActivityOutput.waterActivenessDesc ?? ''" />
+          </div>
+        </div>
+
+        <div class="activity-table-title">边底水活跃程度划分标准(水侵替换系数法)</div>
+        <table class="activity-table">
+          <tbody>
+            <tr>
+              <th rowspan="2">评价指标</th>
+              <th colspan="3">边底水活跃程度</th>
+            </tr>
+            <tr>
+              <th>活跃</th>
+              <th>较活跃</th>
+              <th>不活跃</th>
+            </tr>
+            <tr>
+              <td>水侵替换系数</td>
+              <td>&gt; 0.4</td>
+              <td>0.15 ~ 0.4</td>
+              <td>&lt; 0.15</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
   </div>
@@ -437,7 +771,14 @@ onBeforeUnmount(() => {
   border-right: 1px solid #e0e0e0;
   display: flex;
   flex-direction: column;
+  position: relative;
   overflow: hidden;
+  transition: width 0.16s ease, min-width 0.16s ease;
+
+  &.collapsed {
+    background: transparent;
+    border-right: 0;
+  }
 }
 
 .panel-head {
@@ -449,6 +790,59 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
   font-size: 13px;
   color: #333;
+}
+
+.panel-toggle {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: 2px;
+
+  &:hover {
+    background: #eef4ff;
+  }
+}
+
+.panel-collapsed-tab {
+  width: 22px;
+  height: 76px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  font-size: 13px;
+  color: #333;
+  cursor: pointer;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-left: 0;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+
+  &:hover {
+    background: #eef4ff;
+    color: #1f6fd6;
+  }
+}
+
+.params-resizer {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 4;
+
+  &:hover {
+    background: rgba(64, 132, 217, 0.18);
+  }
 }
 
 .panel-body {
@@ -503,6 +897,18 @@ onBeforeUnmount(() => {
   }
 }
 
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  column-gap: 24px;
+}
+
+.field-with-switch {
+  .el-input {
+    margin-top: 3px;
+  }
+}
+
 .wgr-label-row {
   display: flex;
   align-items: center;
@@ -519,6 +925,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  position: relative;
 }
 
 .chart-tabs {
@@ -550,5 +957,89 @@ onBeforeUnmount(() => {
   flex: 1;
   min-height: 0;
   width: 100%;
+}
+
+.floating-chart-legend {
+  position: absolute;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-width: 280px;
+  padding: 7px 10px;
+  border: 1px solid #eeeeee;
+  background: rgba(255, 255, 255, 0.9);
+  color: #333;
+  font-size: 12px;
+  line-height: 1.2;
+  cursor: move;
+  user-select: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+
+  &.dragging {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.14);
+  }
+}
+
+.floating-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.water-activity-panel {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px 18px;
+  background: #fff;
+}
+
+.activity-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(260px, 1fr));
+  column-gap: 22px;
+  row-gap: 8px;
+  margin-bottom: 24px;
+}
+
+.activity-field {
+  label {
+    display: block;
+    font-size: 13px;
+    color: #333;
+    margin-bottom: 4px;
+  }
+}
+
+.activity-table-title {
+  text-align: center;
+  font-size: 14px;
+  color: #333;
+  margin-bottom: 8px;
+}
+
+.activity-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 13px;
+  color: #333;
+
+  th,
+  td {
+    border: 1px solid #333;
+    height: 44px;
+    text-align: center;
+    font-weight: 400;
+  }
 }
 </style>
