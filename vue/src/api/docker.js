@@ -65,6 +65,21 @@ export const waterInvasionApi = {
     dockerRequest.post('/projectanalysis/waterinvasionanalysis', data)
 }
 
+/* ===== 产量不稳定分析 - 解析法 ===== */
+export const analyticMethodApi = {
+  historyFitting: (data) =>
+    dockerRequest.post('/projectanalysis/analysismethods/historyfitting', data),
+
+  historyRefitting: (data) =>
+    dockerRequest.post('/projectanalysis/analysismethods/historyrefitting', data),
+
+  getResult: (projectId, gasReservoirId, resultId) =>
+    dockerRequest.get(`/projectanalysis/analysismethods/${projectId}/${gasReservoirId}/${resultId}`),
+
+  getSummaryChart: (projectId, gasReservoirId) =>
+    dockerRequest.get(`/projectanalysis/analysismethods/summary/chart/${projectId}/${gasReservoirId}`)
+}
+
 /* ===== 井列表 ===== */
 export const wellApi = {
     /**
