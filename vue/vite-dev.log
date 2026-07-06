@@ -1,0 +1,16 @@
+
+> fusion-platform-frontend@1.0.0 dev
+> vite --host 127.0.0.1
+
+
+  [32m[1mVITE[22m v5.4.21[39m  [2mready in [0m[1m344[22m[2m[0m ms[22m
+
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://127.0.0.1:[1m5173[22m/[39m
+[2m17:29:51[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/TreeNode.vue[22m
+[2m17:30:12[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue[22m
+[2m17:30:33[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue?vue&type=style&index=0&scoped=8eaaef3a&lang.scss[22m
+[2m17:38:37[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/TreeNode.vue[22m
+[2m17:39:10[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue[22m
+[2m17:48:11[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue[22m
+[2m17:51:49[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue[22m
+[2m17:56:23[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue[22m
