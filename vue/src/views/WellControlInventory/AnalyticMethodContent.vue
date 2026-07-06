@@ -106,39 +106,13 @@ const renderChart = () => {
   }, true)
 }
 
-const resolveResultIdByWellName = async () => {
-  const targetWell = wellName.value
-  if (!targetWell) return null
-
-  const batches = []
-  for (let start = 1; start <= 160; start += 10) {
-    batches.push(Array.from({ length: 10 }, (_, index) => start + index))
-  }
-
-  for (const batch of batches) {
-    const results = await Promise.all(batch.map(async (id) => {
-      try {
-        const res = await analyticMethodApi.getResult(props.projectId, props.gasReservoirId, id, { silent: true })
-        const data = normalizePayload(res)
-        return data?.analysis?.wellName === targetWell ? id : null
-      } catch {
-        return null
-      }
-    }))
-    const matched = results.find(Boolean)
-    if (matched) return matched
-  }
-
-  return null
-}
-
 const fetchData = async () => {
   if (!props.projectId || !props.gasReservoirId || !wellName.value) return
   loading.value = true
   resultData.value = null
 
   try {
-    const resultId = getResultIdFromNode() || await resolveResultIdByWellName()
+    const resultId = getResultIdFromNode()
     if (!resultId) throw new Error('没有找到该井的解析法结果 ID')
 
     const res = await analyticMethodApi.getResult(props.projectId, props.gasReservoirId, resultId)

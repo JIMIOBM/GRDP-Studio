@@ -108,6 +108,13 @@ const createEmptyWell = (wellName, wellId, raw = null) => ({
 })
 
 const getWellGroup = () => treeData.value.find(node => node.id === 'g-well')
+const getAllWellNames = () =>
+  getWellGroup()?.children.map(item => item.wellName || item.label).filter(Boolean) || []
+
+const getSelectedAnalyticWellNames = () => {
+  if (activeNode.value?.id === 'g-well' || !selectedWellName.value) return getAllWellNames()
+  return [selectedWellName.value]
+}
 
 const ensureWell = (wellName, wellId, raw = null) => {
   const wellGroup = getWellGroup()
@@ -248,16 +255,20 @@ const applyMaterialBalanceNodes = (node) => {
   })
 }
 
-const applyAnalyticSummaryNodes = (payload) => {
-  const items = normalizePayload(payload)?.analysisMethodsHistoryFittingSummaryChartData || []
-  items.forEach(item => {
-    const wellName = item.wellName
-    if (!wellName) return
-    ensureWell(wellName, `well-${wellName}`, item)
+const applyAnalyticMethodNodes = (node) => {
+  const analyticRoot = (node?.subNodes || []).find(sub => sub.nodeType === NODETYPE.NodeType_AnalysisMethods)
+  if (!analyticRoot?.subNodes?.length) return
+
+  analyticRoot.subNodes.forEach(wellNode => {
+    const wellName = wellNode.nodeTitle || wellNode.wellName
+    if (!wellName || !wellNode.nodeId) return
+    ensureWell(wellName, `well-${wellName}`, wellNode)
     addAnalysisNode(wellName, {
-      ...item,
+      ...wellNode,
       nodeType: NODETYPE.NodeType_AnalysisMethods,
-      nodeTitle: '解析法'
+      nodeTitle: '解析法',
+      resultId: wellNode.nodeId,
+      analysisId: wellNode.nodeId
     })
   })
 }
@@ -287,11 +298,28 @@ const refreshMaterialBalanceNodes = async () => {
 
 const refreshAnalyticMethodNodes = async () => {
   try {
-    const res = await analyticMethodApi.getSummaryChart(PROJECT_ID, GAS_RESERVOIR_ID, { silent: true })
-    applyAnalyticSummaryNodes(res)
+    const res = await nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, NODETYPE.NodeType_ProductivityInstabilityAnalysis)
+    applyAnalyticMethodNodes(res?.data?.node)
   } catch (error) {
     console.warn('解析法汇总加载失败', error)
   }
+}
+
+const findAnalyticMethodNode = (wellName) => {
+  const well = getWellGroup()?.children.find(item => item.wellName === wellName || item.label === wellName)
+  const group = well?.children.find(item => item.type === 'well-control-inventory')
+  return group?.children.find(item => item.type === NODETYPE.NodeType_AnalysisMethods)
+}
+
+const pollAnalyticMethodNodes = async (wellNames, maxRetries = 20, intervalMs = 1500) => {
+  const targets = wellNames.filter(Boolean)
+  for (let i = 0; i < maxRetries; i++) {
+    await new Promise(resolve => setTimeout(resolve, intervalMs))
+    await refreshAnalyticMethodNodes()
+    const matched = targets.map(wellName => findAnalyticMethodNode(wellName)).filter(Boolean)
+    if (matched.length === targets.length) return matched
+  }
+  throw new Error('解析法计算超时，请稍后刷新查看结果')
 }
 
 const pollWaterInvasionNode = async (wellName, maxRetries = 20, intervalMs = 1500) => {
@@ -415,42 +443,33 @@ const runMaterialBalanceForSelectedWell = async () => {
 }
 
 const runAnalyticMethodForSelectedWell = async () => {
-  const targetWellName = selectedWellName.value
-  if (!targetWellName) {
-    ElMessage.warning('请先在左侧选择一口井')
+  const wellNames = getSelectedAnalyticWellNames()
+  if (!wellNames.length) {
+    ElMessage.warning('没有可执行解析法的井')
     return
   }
   if (analyticMethodRunning.value) return
 
   analyticMethodRunning.value = true
-  const wellRaw = selectedWellRaw.value || {}
   try {
-    const res = await analyticMethodApi.createByWellName({
-      wellName: targetWellName,
-      gasReservoirId: 0,
+    await analyticMethodApi.fitHistory({
+      gasReservoirId: Number(GAS_RESERVOIR_ID),
       projectId: Number(PROJECT_ID),
-      wellType: wellRaw.wellType || '直井',
-      isFractured: wellRaw.isFractured === 2 ? '是' : (wellRaw.isFractured || '否')
+      wellNames,
+      dataSize: 30,
+      minimumWaterGasRatio: -1
     })
 
-    const data = normalizePayload(res)
-    const resultId = data.analysisId || data.resultId || data.id
-    openAnalyticMethodResult(targetWellName, {
-      ...data,
-      resultId,
-      analysisId: resultId
-    })
-    ElMessage.success(`${targetWellName} 解析法已创建`)
+    ElMessage.info(`解析法计算中，请稍候...`)
+    const resultNodes = await pollAnalyticMethodNodes(wellNames)
+    if (wellNames.length === 1 && resultNodes[0]?.raw) {
+      openAnalyticMethodResult(wellNames[0], resultNodes[0].raw)
+    }
+    ElMessage.success(`解析法结果已更新`)
   } catch (error) {
     const msg = error.response?.data?.msg || error.response?.data?.message || ''
-    if (error.response?.status === 400 && msg.includes('单井分析已存在')) {
-      await refreshAnalyticMethodNodes()
-      openAnalyticMethodResult(targetWellName)
-      ElMessage.info(`${targetWellName} 已有解析法结果，已打开`)
-    } else {
-      ElMessage.error(msg || error.message || '解析法创建失败')
-      console.error('解析法创建失败', error)
-    }
+    ElMessage.error(msg || error.message || '解析法执行失败')
+    console.error('解析法执行失败', error)
   } finally {
     analyticMethodRunning.value = false
   }
