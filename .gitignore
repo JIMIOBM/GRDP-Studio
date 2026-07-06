@@ -1,5 +1,6 @@
 node_modules/
 vue/node_modules/
+vue/dist/
 .env.local
 .env.*.local
 vue/.env.local
