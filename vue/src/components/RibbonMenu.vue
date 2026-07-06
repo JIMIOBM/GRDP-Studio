@@ -30,7 +30,7 @@ const defaultTabs = [
         columns: [
           { type: 'large', label: '诊断曲线', dropdown: true, dropdownItems: ['Blasingame', 'Transient', 'AG', 'Wattenbarger', 'NPI'] },
           { type: 'checks', items: ['物质平衡', '流动平衡', '动态平衡'] },
-          { type: 'checks', items: ['水侵分析', '解析法'], squares: 4 }
+          { type: 'checks', items: ['水侵分析', '解析法'], squares: 5 }
         ]
       },
       {
@@ -159,7 +159,7 @@ const iconModules = import.meta.glob('../assets/ribbon-icons/*.svg', {
   import: 'default'
 })
 //把图表名标准化
-const normalizeIconKey = (value) => String(value || '').replace(/\s+/g, '').toLowerCase()
+const normalizeIconKey = (value) => String(value || '').replace(/[\s/\\-]+/g, '').toLowerCase()
 
 //把所有图表文件变成一个映射表
 const iconMap = Object.fromEntries(
