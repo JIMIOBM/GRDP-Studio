@@ -1,14 +1,15 @@
 <script setup>
-import { computed, ref, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import RibbonMenu from '@/components/RibbonMenu.vue'
 import TreeNode from '@/views/TreeNode.vue'
 import WaterInvasionContent from '@/views/WellControlInventory/WaterInvasionContent.vue'
 import MaterialBalanceContent from '@/views/WellControlInventory/MaterialBalanceContent.vue'
+import AnalyticMethodContent from '@/views/WellControlInventory/AnalyticMethodContent.vue'
 import { NODETYPE } from '@/constants/nodeType'
-import { materialBalanceApi, nodeApi, projectApi, waterInvasionApi } from '@/api/docker'
+import { analyticMethodApi, materialBalanceApi, nodeApi, projectApi, waterInvasionApi } from '@/api/docker'
 
-const PROJECT_ID = 1
+const PROJECT_ID = 2
 const GAS_RESERVOIR_ID = 1
 
 const WELL_GROUPS = [
@@ -21,7 +22,8 @@ const WELL_GROUPS = [
 ]
 
 const NODE_GROUP_BY_TYPE = {
-  [NODETYPE.NodeType_WaterInvasionAnalysis]: 'well-control-inventory',  //水侵分析节点，要放到井控库存下面
+  [NODETYPE.NodeType_WaterInvasionAnalysis]: 'well-control-inventory',
+  [NODETYPE.NodeType_AnalysisMethods]: 'well-control-inventory',
   [NODETYPE.NodeType_DynamicOriginalGasInplace]: 'well-control-inventory',
   [NODETYPE.NodeType_ProductionDeclineAnalysis]: 'data-management',
   [NODETYPE.NodeType_ProductivityInstabilityAnalysis]: 'data-management',
@@ -36,6 +38,7 @@ const NODE_GROUP_BY_TYPE = {
 
 const NODE_LABEL_BY_TYPE = {
   [NODETYPE.NodeType_WaterInvasionAnalysis]: '水侵分析',
+  [NODETYPE.NodeType_AnalysisMethods]: '解析法',
   [NODETYPE.NodeType_DynamicOriginalGasInplace]: '物质平衡',
   [NODETYPE.NodeType_ProductionDeclineAnalysis]: '产量递减分析',
   [NODETYPE.NodeType_ProductivityInstabilityAnalysis]: '产量不稳定分析',
@@ -50,22 +53,23 @@ const treeData = ref([
   { id: 'g-group', label: '库群', children: [{ id: 'grp-1', label: '项目 1', type: 'group' }] }
 ])
 
-const activeNodeId = ref('')  // 当前左侧树选中的节点 ID. 用于高亮显示
-const activeNode = ref(null)  // 当前选中的完整节点对象
-const currentView = ref(null)  // currentView.value = 'water-invasion'，即确定右侧部分区域所显示的界面
-const currentViewNode = ref(null)  // 传给右侧内容组件的节点对象
-const wellKeyword = ref('')  // 左侧搜索框输入的井名关键字
-const waterInvasionRunning = ref(false)  //用于判断水侵分析是否正在运行
+const activeNodeId = ref('')
+const activeNode = ref(null)
+const currentView = ref(null)
+const currentViewNode = ref(null)
+const wellKeyword = ref('')
+const selectedWellName = ref('')
+const selectedWellRaw = ref(null)
+const waterInvasionRunning = ref(false)
 const materialBalanceRunning = ref(false)
-const selectedWellName = ref('')  //当前选中的井名
+const analyticMethodRunning = ref(false)
 
-const filteredTreeData = computed(() => {   //搜索井名，控制左侧树搜索
+const filteredTreeData = computed(() => {
   const keyword = wellKeyword.value.trim().toLowerCase()
   if (!keyword) return treeData.value
 
   return treeData.value.map(node => {
-    if (node.id !== 'g-well') return node  // 只有“井”这个分组会被搜索过滤。
-
+    if (node.id !== 'g-well') return node
     return {
       ...node,
       children: node.children.filter(well =>
@@ -76,15 +80,8 @@ const filteredTreeData = computed(() => {   //搜索井名，控制左侧树搜�
 })
 
 const normalizePayload = (res) => res?.data?.data ?? res?.data ?? res
-
-const toArray = (value) => { // 把数据统一变成数组
-  if (!value) return []
-  return Array.isArray(value) ? value : [value]
-}
-
-const getNodeName = (item) =>
-  item?.wellName || item?.nodeTitle || item?.name || item?.title || item?.label || item?.well_name || ''
-
+const toArray = (value) => !value ? [] : Array.isArray(value) ? value : [value]
+const getNodeName = (item) => item?.wellName || item?.nodeTitle || item?.name || item?.title || item?.label || item?.well_name || ''
 const getChildren = (item) => [
   ...toArray(item?.children),
   ...toArray(item?.subNodes),
@@ -93,16 +90,18 @@ const getChildren = (item) => [
   ...toArray(item?.analyses)
 ]
 
-const createEmptyWell = (wellName, wellId) => ({ //创建一口空井
+const createEmptyWell = (wellName, wellId, raw = null) => ({
   id: wellId || `well-${wellName}`,
   label: wellName,
   type: NODETYPE.NodeType_Well,
   wellName,
+  raw,
   defaultExpanded: false,
   children: WELL_GROUPS.map(group => ({
     ...group,
     id: `${wellId || wellName}-${group.id}`,
     type: group.id,
+    wellName,
     defaultExpanded: false,
     children: []
   }))
@@ -110,18 +109,20 @@ const createEmptyWell = (wellName, wellId) => ({ //创建一口空井
 
 const getWellGroup = () => treeData.value.find(node => node.id === 'g-well')
 
-const ensureWell = (wellName, wellId) => { //确保井存在
+const ensureWell = (wellName, wellId, raw = null) => {
   const wellGroup = getWellGroup()
   if (!wellGroup || !wellName) return null
 
   let wellItem = wellGroup.children.find(item => item.label === wellName || item.id === wellId)
   if (!wellItem) {
-    wellItem = createEmptyWell(wellName, wellId)
+    wellItem = createEmptyWell(wellName, wellId, raw)
     wellGroup.children.push(wellItem)
+  } else if (raw) {
+    wellItem.raw = { ...(wellItem.raw || {}), ...raw }
   }
 
   WELL_GROUPS.forEach(group => {
-    if (!wellItem.children.some(item => item.type === group.id || item.label === group.label)) {
+    if (!wellItem.children.some(item => item.type === group.id)) {
       wellItem.children.push({
         ...group,
         id: `${wellItem.id}-${group.id}`,
@@ -136,20 +137,21 @@ const ensureWell = (wellName, wellId) => { //确保井存在
   return wellItem
 }
 
-const addAnalysisNode = (wellName, rawNode) => {  // 添加分析节点
+const addAnalysisNode = (wellName, rawNode) => {
   const nodeType = rawNode?.nodeType ?? rawNode?.type
   const groupId = NODE_GROUP_BY_TYPE[nodeType] || rawNode?.menuType || rawNode?.groupType
   const groupConfig = WELL_GROUPS.find(group => group.id === groupId || group.label === groupId)
-  if (!groupConfig) return
+  if (!groupConfig) return null
 
   const wellItem = ensureWell(wellName, rawNode?.wellId || rawNode?.parentId)
   const targetGroup = wellItem?.children.find(item => item.type === groupConfig.id)
-  if (!targetGroup) return
+  if (!targetGroup) return null
 
   const label = NODE_LABEL_BY_TYPE[nodeType] || getNodeName(rawNode)
-  if (!label) return
+  if (!label) return null
 
-  const id = rawNode?.nodeId || rawNode?.id || `${wellItem.id}-${groupConfig.id}-${nodeType || label}`
+  const id = rawNode?.nodeId || rawNode?.resultId || rawNode?.analysisId ||
+    rawNode?.id || `${wellItem.id}-${groupConfig.id}-${nodeType || label}`
   const analysisNode = {
     id,
     label,
@@ -164,6 +166,8 @@ const addAnalysisNode = (wellName, rawNode) => {  // 添加分析节点
   } else {
     targetGroup.children.push(analysisNode)
   }
+
+  return analysisNode
 }
 
 const collectWellsFromProject = (payload) => {
@@ -171,25 +175,17 @@ const collectWellsFromProject = (payload) => {
 
   const addWell = (name, raw = null, id = '') => {
     if (!name || wellMap.has(name)) return
-    wellMap.set(name, {
-      id: id || `well-${name}`,
-      name,
-      raw
-    })
+    wellMap.set(name, { id: id || `well-${name}`, name, raw })
   }
 
   const visit = (value, parentKey = '') => {
     if (!value) return
-
     const keyLooksLikeWells = /wells?|wellList|well_list/i.test(parentKey)
 
     if (Array.isArray(value)) {
       value.forEach(item => {
-        if (keyLooksLikeWells && typeof item !== 'object') {
-          addWell(String(item))
-          return
-        }
-        visit(item, parentKey)
+        if (keyLooksLikeWells && typeof item !== 'object') addWell(String(item))
+        else visit(item, parentKey)
       })
       return
     }
@@ -198,7 +194,6 @@ const collectWellsFromProject = (payload) => {
 
     const name = getNodeName(value)
     const isWell = value.nodeType === NODETYPE.NodeType_Well || Boolean(value.wellName) || keyLooksLikeWells
-
     if (isWell && name) {
       const id = value.nodeId || value.id || value.wellId || `well-${name}`
       addWell(name, value, id)
@@ -221,17 +216,15 @@ const rebuildProjectTree = (payload) => {
   if (!wellGroup) return
 
   wellGroup.children = []
-  wells.forEach(well => ensureWell(well.name, well.id))
+  wells.forEach(well => ensureWell(well.name, well.id, well.raw))
   wells.forEach(well => getChildren(well.raw).forEach(child => addAnalysisNode(well.name, child)))
 }
 
 const applyWaterInvasionNodes = (node) => {
   if (!node?.subNodes?.length) return
-
   node.subNodes.forEach(wellNode => {
     const wellName = wellNode.nodeTitle || wellNode.wellName
     if (!wellName) return
-
     ensureWell(wellName, wellNode.nodeId || `well-${wellName}`)
     addAnalysisNode(wellName, {
       ...wellNode,
@@ -243,11 +236,9 @@ const applyWaterInvasionNodes = (node) => {
 
 const applyMaterialBalanceNodes = (node) => {
   if (!node?.subNodes?.length) return
-
   node.subNodes.forEach(wellNode => {
     const wellName = wellNode.nodeTitle || wellNode.wellName
     if (!wellName) return
-
     ensureWell(wellName, wellNode.nodeId || `well-${wellName}`)
     addAnalysisNode(wellName, {
       ...wellNode,
@@ -257,7 +248,21 @@ const applyMaterialBalanceNodes = (node) => {
   })
 }
 
-const refreshProjectTree = async () => { //加在项目树
+const applyAnalyticSummaryNodes = (payload) => {
+  const items = normalizePayload(payload)?.analysisMethodsHistoryFittingSummaryChartData || []
+  items.forEach(item => {
+    const wellName = item.wellName
+    if (!wellName) return
+    ensureWell(wellName, `well-${wellName}`, item)
+    addAnalysisNode(wellName, {
+      ...item,
+      nodeType: NODETYPE.NodeType_AnalysisMethods,
+      nodeTitle: '解析法'
+    })
+  })
+}
+
+const refreshProjectTree = async () => {
   try {
     const res = await projectApi.getProject(PROJECT_ID)
     rebuildProjectTree(normalizePayload(res))
@@ -266,62 +271,77 @@ const refreshProjectTree = async () => { //加在项目树
   }
 }
 
-const refreshWaterInvasionNodes = async () => {  //加载已有水侵分析节点
+const refreshWaterInvasionNodes = async () => {
   try {
     const res = await nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, NODETYPE.NodeType_WaterInvasionAnalysis)
     applyWaterInvasionNodes(res?.data?.node)
-  } catch {
-    // 没有已有水侵分析结果时，保持项目树不变。
-  }
+  } catch {}
 }
 
 const refreshMaterialBalanceNodes = async () => {
   try {
     const res = await nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, NODETYPE.NodeType_DynamicOriginalGasInplace)
     applyMaterialBalanceNodes(res?.data?.node)
-  } catch {
-    // 没有已有物质平衡结果时保持项目树不变。
+  } catch {}
+}
+
+const refreshAnalyticMethodNodes = async () => {
+  try {
+    const res = await analyticMethodApi.getSummaryChart(PROJECT_ID, GAS_RESERVOIR_ID, { silent: true })
+    applyAnalyticSummaryNodes(res)
+  } catch (error) {
+    console.warn('解析法汇总加载失败', error)
   }
 }
 
-const pollWaterInvasionNode = async (wellName, maxRetries = 20, intervalMs = 1500) => { //轮询结果
+const pollWaterInvasionNode = async (wellName, maxRetries = 20, intervalMs = 1500) => {
   for (let i = 0; i < maxRetries; i++) {
     await new Promise(resolve => setTimeout(resolve, intervalMs))
-
     const res = await nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, NODETYPE.NodeType_WaterInvasionAnalysis)
     const node = res?.data?.node
     const subNodes = node?.subNodes ?? []
-    if (subNodes.some(sub => sub.nodeTitle === wellName || sub.wellName === wellName)) {
-      return node
-    }
+    if (subNodes.some(sub => sub.nodeTitle === wellName || sub.wellName === wellName)) return node
   }
-
   throw new Error('分析超时，请稍后刷新查看结果')
 }
 
 const pollMaterialBalanceNode = async (wellName, maxRetries = 20, intervalMs = 1500) => {
   for (let i = 0; i < maxRetries; i++) {
     await new Promise(resolve => setTimeout(resolve, intervalMs))
-
     const res = await nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, NODETYPE.NodeType_DynamicOriginalGasInplace)
     const node = res?.data?.node
     const subNodes = node?.subNodes ?? []
-    if (!wellName || subNodes.some(sub => sub.nodeTitle === wellName || sub.wellName === wellName)) {
-      return node
-    }
+    if (!wellName || subNodes.some(sub => sub.nodeTitle === wellName || sub.wellName === wellName)) return node
   }
-
   throw new Error('物质平衡计算超时，请稍后刷新查看结果')
 }
 
-const runWaterInvasionForSelectedWell = async () => { //点击水侵分析的操作
-  const targetWellName = selectedWellName.value
+const openAnalyticMethodResult = (wellName, raw = {}) => {
+  const viewNode = {
+    id: raw.resultId || raw.analysisId || raw.id || `analytic-${wellName}`,
+    label: '解析法',
+    type: NODETYPE.NodeType_AnalysisMethods,
+    wellName,
+    raw: {
+      ...raw,
+      nodeType: NODETYPE.NodeType_AnalysisMethods,
+      nodeTitle: '解析法',
+      wellName
+    }
+  }
 
+  addAnalysisNode(wellName, viewNode.raw)
+  activeNodeId.value = viewNode.id
+  currentView.value = 'analytic-method'
+  currentViewNode.value = viewNode
+}
+
+const runWaterInvasionForSelectedWell = async () => {
+  const targetWellName = selectedWellName.value
   if (!targetWellName) {
     ElMessage.warning('请先在左侧选择一口井')
     return
   }
-
   if (waterInvasionRunning.value) return
 
   waterInvasionRunning.value = true
@@ -338,20 +358,15 @@ const runWaterInvasionForSelectedWell = async () => { //点击水侵分析的操
     ElMessage.info(`${targetWellName} 水侵分析计算中，请稍候...`)
     const node = await pollWaterInvasionNode(targetWellName)
     applyWaterInvasionNodes(node)
-
     const resultNode = node.subNodes?.find(sub => sub.nodeTitle === targetWellName || sub.wellName === targetWellName)
-    const viewNode = {
+    currentView.value = 'water-invasion'
+    currentViewNode.value = {
       id: resultNode?.nodeId || `wia-${targetWellName}`,
       label: '水侵分析',
       type: NODETYPE.NodeType_WaterInvasionAnalysis,
       wellName: targetWellName,
       raw: resultNode
     }
-
-    activeNodeId.value = viewNode.id
-    currentView.value = 'water-invasion'
-    currentViewNode.value = viewNode
-    ElMessage.success(`${targetWellName} 水侵分析完成`)
   } catch (error) {
     ElMessage.error(error.message || '水侵分析失败')
     console.error('水侵分析失败', error)
@@ -362,12 +377,10 @@ const runWaterInvasionForSelectedWell = async () => { //点击水侵分析的操
 
 const runMaterialBalanceForSelectedWell = async () => {
   const targetWellName = selectedWellName.value
-
   if (!targetWellName) {
     ElMessage.warning('请先在左侧选择一口井')
     return
   }
-
   if (materialBalanceRunning.value) return
 
   materialBalanceRunning.value = true
@@ -383,21 +396,16 @@ const runMaterialBalanceForSelectedWell = async () => {
     ElMessage.info(`${targetWellName} 物质平衡计算中，请稍候...`)
     const node = await pollMaterialBalanceNode(targetWellName)
     applyMaterialBalanceNodes(node)
-
     const subNodes = node?.subNodes ?? []
     const resultNode = subNodes.find(sub => sub.nodeTitle === targetWellName || sub.wellName === targetWellName) || subNodes[0] || node
-    const viewNode = {
+    currentView.value = 'material-balance'
+    currentViewNode.value = {
       id: resultNode?.nodeId || resultNode?.resultId || `mb-${targetWellName}`,
       label: '物质平衡',
       type: NODETYPE.NodeType_DynamicOriginalGasInplace,
       wellName: targetWellName,
       raw: resultNode
     }
-
-    activeNodeId.value = viewNode.id
-    currentView.value = 'material-balance'
-    currentViewNode.value = viewNode
-    ElMessage.success(`${targetWellName} 物质平衡计算完成`)
   } catch (error) {
     ElMessage.error(error.message || '物质平衡计算失败')
     console.error('物质平衡计算失败', error)
@@ -406,17 +414,65 @@ const runMaterialBalanceForSelectedWell = async () => {
   }
 }
 
-const initTree = async () => {
-  await refreshProjectTree()
-  await refreshWaterInvasionNodes()
-  await refreshMaterialBalanceNodes()
+const runAnalyticMethodForSelectedWell = async () => {
+  const targetWellName = selectedWellName.value
+  if (!targetWellName) {
+    ElMessage.warning('请先在左侧选择一口井')
+    return
+  }
+  if (analyticMethodRunning.value) return
+
+  analyticMethodRunning.value = true
+  const wellRaw = selectedWellRaw.value || {}
+  try {
+    const res = await analyticMethodApi.createByWellName({
+      wellName: targetWellName,
+      gasReservoirId: 0,
+      projectId: Number(PROJECT_ID),
+      wellType: wellRaw.wellType || '直井',
+      isFractured: wellRaw.isFractured === 2 ? '是' : (wellRaw.isFractured || '否')
+    })
+
+    const data = normalizePayload(res)
+    const resultId = data.analysisId || data.resultId || data.id
+    openAnalyticMethodResult(targetWellName, {
+      ...data,
+      resultId,
+      analysisId: resultId
+    })
+    ElMessage.success(`${targetWellName} 解析法已创建`)
+  } catch (error) {
+    const msg = error.response?.data?.msg || error.response?.data?.message || ''
+    if (error.response?.status === 400 && msg.includes('单井分析已存在')) {
+      await refreshAnalyticMethodNodes()
+      openAnalyticMethodResult(targetWellName)
+      ElMessage.info(`${targetWellName} 已有解析法结果，已打开`)
+    } else {
+      ElMessage.error(msg || error.message || '解析法创建失败')
+      console.error('解析法创建失败', error)
+    }
+  } finally {
+    analyticMethodRunning.value = false
+  }
 }
 
-const handleSelect = (node) => { // 点击左侧树节点
+const initTree = async () => {
+  await refreshProjectTree()
+  await Promise.all([
+    refreshWaterInvasionNodes(),
+    refreshMaterialBalanceNodes(),
+    refreshAnalyticMethodNodes()
+  ])
+}
+
+const handleSelect = (node) => {
   const isWellMenuGroup = WELL_GROUPS.some(group => group.id === node.type)
   const nodeWellName = node.wellName || (node.type === NODETYPE.NodeType_Well ? node.label : '')
 
-  if (nodeWellName) selectedWellName.value = nodeWellName
+  if (nodeWellName) {
+    selectedWellName.value = nodeWellName
+    selectedWellRaw.value = node.raw || null
+  }
   if (isWellMenuGroup) return
 
   activeNodeId.value = node.id
@@ -428,31 +484,40 @@ const handleSelect = (node) => { // 点击左侧树节点
     return
   }
 
-  if (node.type === NODETYPE.NodeType_DynamicOriginalGasInplace) {
-    currentView.value = 'material-balance'
+  if (node.type === NODETYPE.NodeType_AnalysisMethods) {
+    currentView.value = 'analytic-method'
     currentViewNode.value = node
     return
   }
 
-  if (node.type === NODETYPE.NodeType_Well) return
+  if (node.type === NODETYPE.NodeType_DynamicOriginalGasInplace) {
+    currentView.value = 'material-balance'
+    currentViewNode.value = node
+  }
 }
 
-const handleCommand = ({ group, name }) => { // 接收顶部菜单栏的点击事件
-  switch (name) {
-    case '水侵分析':
-      runWaterInvasionForSelectedWell()
-      break
-    case '物质平衡':
-      runMaterialBalanceForSelectedWell()
-      break
-    default:
-      ElMessage.success(`[${group}] ${name}`)
+const isCommand = (name, target) => String(name || '').includes(target)
+
+const handleCommand = ({ group, name }) => {
+  if (isCommand(name, '水侵分析')) {
+    runWaterInvasionForSelectedWell()
+    return
   }
+  if (isCommand(name, '解析法')) {
+    runAnalyticMethodForSelectedWell()
+    return
+  }
+  if (isCommand(name, '物质平衡')) {
+    runMaterialBalanceForSelectedWell()
+    return
+  }
+  ElMessage.success(`[${group}] ${name}`)
 }
 
 const handleRefreshTree = () => {
   refreshWaterInvasionNodes()
   refreshMaterialBalanceNodes()
+  refreshAnalyticMethodNodes()
 }
 
 onMounted(initTree)
@@ -460,12 +525,9 @@ onMounted(initTree)
 
 <template>
   <div class="ipr-container">
-<!--    顶部菜单栏目-->
     <RibbonMenu @command="handleCommand" />
 
-
     <div class="ipr-main">
-<!--      左侧菜单栏-->
       <aside class="side-panel">
         <div class="side-search">
           <el-input
@@ -487,7 +549,6 @@ onMounted(initTree)
         </div>
       </aside>
 
-<!--     右侧的主要内容区域-->
       <main class="content-area">
         <WaterInvasionContent
           v-if="currentView === 'water-invasion'"
@@ -502,13 +563,18 @@ onMounted(initTree)
           :project-id="PROJECT_ID"
           :gas-reservoir-id="GAS_RESERVOIR_ID"
         />
+        <AnalyticMethodContent
+          v-if="currentView === 'analytic-method'"
+          :node="currentViewNode"
+          :project-id="PROJECT_ID"
+          :gas-reservoir-id="GAS_RESERVOIR_ID"
+        />
       </main>
     </div>
   </div>
 </template>
 
 <style lang="scss" scoped>
-$accent-yellow: #f4d000;
 $border: #e0e0e0;
 
 .ipr-container {
