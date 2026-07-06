@@ -33,7 +33,7 @@ const router = createRouter({
 })
 
 // 简单登录守卫
-const whiteList = ['/login', '/register']
+const whiteList = ['/login', '/register', '/ipr']
 router.beforeEach((to, from, next) => {
   const account = localStorage.getItem('account')
   if (account || whiteList.includes(to.path)) {

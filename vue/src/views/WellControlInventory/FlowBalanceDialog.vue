@@ -1,6 +1,6 @@
 <script setup>
 import { ref } from "vue";
-import { waterInvasionApi } from "@/api/docker";
+import { flowBalanceApi } from "@/api/docker";
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
@@ -57,7 +57,7 @@ const submit = async () => {
       waterGasRatioLimit: Number(form.value.waterGasRatioLimit),
     };
 
-    const r = await waterInvasionApi.analyze(payload);
+    const r = await flowBalanceApi.analyze(payload);
     if (r && r.ok) {
       resultText.value = JSON.stringify(r.data, null, 2);
     } else {
@@ -77,7 +77,7 @@ const reset = () => {
 <template>
   <el-dialog
     :model-value="visible"
-    title="水侵动态分析"
+    title="流动平衡分析"
     width="720px"
     draggable
     destroy-on-close

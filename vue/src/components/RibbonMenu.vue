@@ -1,186 +1,240 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed } from "vue";
 
 /**
  * 顶部功能区菜单（Ribbon）组件
  * 完全数据驱动：tabs -> groups -> columns -> items
  * dropdown: true 的列需同时提供 dropdownItems 数组，点击后弹出复选下拉列表。
  */
-const props = defineProps({ //允许外部传菜单配置
+const props = defineProps({
   tabs: {
     type: Array,
-    default: () => null
-  }
-})
+    default: () => null,
+  },
+});
 
-const emit = defineEmits(['command']) //向父组件发送命令
+const emit = defineEmits(["command"]);
 
 const defaultTabs = [
   {
-    name: '解析融合',
+    name: "解析融合",
     groups: [
       {
-        title: '数据管理',
+        title: "数据管理",
         columns: [
-          { type: 'checks', items: ['动态数据', '岩石及流体性质', '相渗数据'] }
-        ]
+          { type: "checks", items: ["动态数据", "岩石及流体性质", "相渗数据"] },
+        ],
       },
       {
-        title: '井控库存',
-        columns: [
-          { type: 'large', label: '诊断曲线', dropdown: true, dropdownItems: ['Blasingame', 'Transient', 'AG', 'Wattenbarger', 'NPI'] },
-          { type: 'checks', items: ['物质平衡', '流动平衡', '动态平衡'] },
-          { type: 'checks', items: ['水侵分析', '解析法'], squares: 5 }
-        ]
-      },
-      {
-        title: '单井产能',
-        columns: [
-          { type: 'large', label: '产能试井', dropdown: true, dropdownItems: ['二项式', '指数式'] },
-          { type: 'large', label: '产能系数', dropdown: true, dropdownItems: ['二项式', '指数式'] },
-          { type: 'large', label: '理论计算', dropdown: true, dropdownItems: ['稳定流', '不稳定流'] },
-          { type: 'large', label: '动态产能', dropdown: true, dropdownItems: ['稳定流', '不稳定流'] },
-          { type: 'large', label: '产能对比', dropdown: true, dropdownItems: ['多周期'] }
-        ]
-      },
-      {
-        title: '井筒能力',
-        columns: [
-          { type: 'checks', items: ['井身结构', 'PVT模型', '温度模型'] },
-          { type: 'checks', items: ['边界条件', '井筒积液', '水合物'] },
-          { type: 'checks', items: ['冲蚀', '出砂'] },
-          { type: 'large', label: '压力折算', dropdown: true, dropdownItems: ['折算方法', '结果对比'] }
-        ]
-      },
-      {
-        title: '管束能力',
-        columns: [
-          { type: 'large', label: '管流计算', dropdown: true, dropdownItems: ['折算方法', '结果对比'] },
-          { type: 'large', label: '约束条件', dropdown: true, dropdownItems: ['关键设备', '水合物', '冲蚀', '冻堵'] },
-          { type: 'squares', count: 3 },
-          { type: 'squares', count: 1 }
-        ]
-      },
-      {
-        title: '配产配注',
-        columns: [
-          { type: 'checks', items: ['节点分析', '注采拟合', '图版法'] },
-          { type: 'large', label: '一体化耦合优化', dropdown: true, dropdownItems: ['单目标', '多目标'] },
-          { type: 'large', label: '多周期预测', dropdown: true, dropdownItems: ['目标函数', '约束条件', '方案生成', '方案必选'] }
-        ]
-      }
-    ]
-  },
-  {
-    name: '软件集成',
-    groups: [
-      {
-        title: '外部软件',
-        columns: [
-          { type: 'large', label: 'Eclipse' },
-          { type: 'large', label: 'CMG' },
-          { type: 'large', label: 'PIPESIM' }
-        ]
-      },
-      {
-        title: '数据接口',
-        columns: [
-          { type: 'checks', items: ['数据映射', '单位转换', '接口配置'] }
-        ]
-      }
-    ]
-  },
-  {
-    name: '多周期优化',
-    groups: [
-      {
-        title: '周期设置',
-        columns: [{type: 'checks', items: ['周期划分', '约束设置', '初始方案']}]
-      },
-      {
-        title: '优化算法',
+        title: "井控库存",
         columns: [
           {
-            type: 'large',
-            label: '遗传算法',
+            type: "large",
+            label: "诊断曲线",
             dropdown: true,
-            dropdownItems: ['标准遗传算法', '自适应遗传算法', '差分进化']
+            dropdownItems: [
+              "Blasingame",
+              "Transient",
+              "AG",
+              "Wattenbarger",
+              "NPI",
+            ],
           },
-          {type: 'large', label: '梯度法', dropdown: true, dropdownItems: ['最速下降法', '共轭梯度法', 'Newton法']}
-        ]
-      }
-    ]
-  },
-  {
-    name: '多目标决策',
-    groups: [
-      {
-        title: '目标定义',
-        columns: [{type: 'checks', items: ['产量目标', '成本目标', '采收率目标']}]
+          { type: "checks", items: ["物质平衡", "流动平衡", "动态平衡"] },
+          { type: "checks", items: ["水侵分析", "解析法"], squares: 4 },
+        ],
       },
       {
-        title: '决策方法',
+        title: "单井产能",
         columns: [
-          {type: 'large', label: 'Pareto', dropdown: true, dropdownItems: ['NSGA-II', 'MOEA/D', 'SPEA2']},
-          {type: 'large', label: '权衡分析'}
-        ]
-      }
-    ]
-  },
-  {
-    name: '可视化',
-    groups: [
-      {
-        title: '图表',
-        columns: [
-          {type: 'large', label: '曲线图'},
-          {type: 'large', label: '散点图'},
-          {type: 'large', label: '云图'}
-        ]
+          {
+            type: "large",
+            label: "产能试井",
+            dropdown: true,
+            dropdownItems: ["二项式", "指数式"],
+          },
+          {
+            type: "large",
+            label: "产能系数",
+            dropdown: true,
+            dropdownItems: ["二项式", "指数式"],
+          },
+          {
+            type: "large",
+            label: "理论计算",
+            dropdown: true,
+            dropdownItems: ["稳定流", "不稳定流"],
+          },
+          {
+            type: "large",
+            label: "动态产能",
+            dropdown: true,
+            dropdownItems: ["稳定流", "不稳定流"],
+          },
+          {
+            type: "large",
+            label: "产能对比",
+            dropdown: true,
+            dropdownItems: ["多周期"],
+          },
+        ],
       },
       {
-        title: '报告',
-        columns: [{type: 'checks', items: ['生成报告', '导出 PDF', '打印']}]
-      }
-    ]
-  }
-]
+        title: "井筒能力",
+        columns: [
+          { type: "checks", items: ["井身结构", "PVT模型", "温度模型"] },
+          { type: "checks", items: ["边界条件", "井筒积液", "水合物"] },
+          { type: "checks", items: ["冲蚀", "出砂"] },
+          {
+            type: "large",
+            label: "压力折算",
+            dropdown: true,
+            dropdownItems: ["折算方法", "结果对比"],
+          },
+        ],
+      },
+      {
+        title: "管束能力",
+        columns: [
+          {
+            type: "large",
+            label: "管流计算",
+            dropdown: true,
+            dropdownItems: ["折算方法", "结果对比"],
+          },
+          {
+            type: "large",
+            label: "约束条件",
+            dropdown: true,
+            dropdownItems: ["关键设备", "水合物", "冲蚀", "冻堵"],
+          },
+          { type: "squares", count: 3 },
+          { type: "squares", count: 1 },
+        ],
+      },
+      {
+        title: "配产配注",
+        columns: [
+          { type: "checks", items: ["节点分析", "注采拟合", "图版法"] },
+          {
+            type: "large",
+            label: "一体化耦合优化",
+            dropdown: true,
+            dropdownItems: ["单目标", "多目标"],
+          },
+          {
+            type: "large",
+            label: "多周期预测",
+            dropdown: true,
+            dropdownItems: ["目标函数", "约束条件", "方案生成", "方案必选"],
+          },
+        ],
+      },
+    ],
+  },
+  {
+    name: "软件集成",
+    groups: [
+      {
+        title: "外部软件",
+        columns: [
+          { type: "large", label: "Eclipse" },
+          { type: "large", label: "CMG" },
+          { type: "large", label: "PIPESIM" },
+        ],
+      },
+      {
+        title: "数据接口",
+        columns: [
+          { type: "checks", items: ["数据映射", "单位转换", "接口配置"] },
+        ],
+      },
+    ],
+  },
+  {
+    name: "多周期优化",
+    groups: [
+      {
+        title: "周期设置",
+        columns: [
+          { type: "checks", items: ["周期划分", "约束设置", "初始方案"] },
+        ],
+      },
+      {
+        title: "优化算法",
+        columns: [
+          {
+            type: "large",
+            label: "遗传算法",
+            dropdown: true,
+            dropdownItems: ["标准遗传算法", "自适应遗传算法", "差分进化"],
+          },
+          {
+            type: "large",
+            label: "梯度法",
+            dropdown: true,
+            dropdownItems: ["最速下降法", "共轭梯度法", "Newton法"],
+          },
+        ],
+      },
+    ],
+  },
+  {
+    name: "多目标决策",
+    groups: [
+      {
+        title: "目标定义",
+        columns: [
+          { type: "checks", items: ["产量目标", "成本目标", "采收率目标"] },
+        ],
+      },
+      {
+        title: "决策方法",
+        columns: [
+          {
+            type: "large",
+            label: "Pareto",
+            dropdown: true,
+            dropdownItems: ["NSGA-II", "MOEA/D", "SPEA2"],
+          },
+          { type: "large", label: "权衡分析" },
+        ],
+      },
+    ],
+  },
+  {
+    name: "可视化",
+    groups: [
+      {
+        title: "图表",
+        columns: [
+          { type: "large", label: "曲线图" },
+          { type: "large", label: "散点图" },
+          { type: "large", label: "云图" },
+        ],
+      },
+      {
+        title: "报告",
+        columns: [{ type: "checks", items: ["生成报告", "导出 PDF", "打印"] }],
+      },
+    ],
+  },
+];
 
-//控制当先显示哪一个页签
-const tabList = computed(() => props.tabs || defaultTabs)
-const activeTab = ref(0)
-const activeTabGroups = computed(() => tabList.value[activeTab.value]?.groups || [])
+const tabList = computed(() => props.tabs || defaultTabs);
+const activeTab = ref(0);
+const activeTabGroups = computed(
+  () => tabList.value[activeTab.value]?.groups || [],
+);
 
+const switchTab = (idx) => {
+  activeTab.value = idx;
+};
 
-//把 ../assets/ribbon-icons/ 下面所有 svg 图标都加载进来。
-const iconModules = import.meta.glob('../assets/ribbon-icons/*.svg', {
-  eager: true,
-  query: '?url',
-  import: 'default'
-})
-//把图表名标准化
-const normalizeIconKey = (value) => String(value || '').replace(/[\s/\\-]+/g, '').toLowerCase()
-
-//把所有图表文件变成一个映射表
-const iconMap = Object.fromEntries(
-  Object.entries(iconModules).map(([path, url]) => [
-    normalizeIconKey(decodeURIComponent(path.split('/').pop().replace(/\.svg$/, ''))),
-    url
-  ])
-)
-
-const switchTab = (idx) => { //切换页签
-  activeTab.value = idx
-}
-
-const onItemClick = (groupTitle, label) => { //点击菜单项
-  if (!label) return
-  emit('command', {group: groupTitle, name: label})
-}
-
-
-//渲染图表
-const getIcon = (label) => iconMap[normalizeIconKey(label)] || ''
+const onItemClick = (groupTitle, label) => {
+  if (!label) return;
+  emit("command", { group: groupTitle, name: label });
+};
 </script>
 
 <template>
@@ -188,11 +242,11 @@ const getIcon = (label) => iconMap[normalizeIconKey(label)] || ''
     <!-- 顶部页签条 -->
     <div class="ribbon-tabs">
       <div
-          v-for="(tab, idx) in tabList"
-          :key="tab.name"
-          class="ribbon-tab"
-          :class="{ active: idx === activeTab }"
-          @click="switchTab(idx)"
+        v-for="(tab, idx) in tabList"
+        :key="tab.name"
+        class="ribbon-tab"
+        :class="{ active: idx === activeTab }"
+        @click="switchTab(idx)"
       >
         {{ tab.name }}
       </div>
@@ -200,49 +254,48 @@ const getIcon = (label) => iconMap[normalizeIconKey(label)] || ''
 
     <!-- 功能区主体 -->
     <div class="ribbon-body">
-      <div class="ribbon-group" v-for="group in activeTabGroups" :key="group.title">
+      <div
+        class="ribbon-group"
+        v-for="group in activeTabGroups"
+        :key="group.title"
+      >
         <div class="group-content">
           <template v-for="(col, ci) in group.columns" :key="ci">
-
             <!-- 复选项列 -->
             <div v-if="col.type === 'checks'" class="col-checks">
               <label
-                  class="check-item"
-                  v-for="item in col.items"
-                  :key="item"
-                  @click="onItemClick(group.title, item)"
+                class="check-item"
+                v-for="item in col.items"
+                :key="item"
+                @click="onItemClick(group.title, item)"
               >
-                <img
-                    v-if="getIcon(item)"
-                    class="small-icon"
-                    :src="getIcon(item)"
-                    :alt="item"
-                >
-                <span v-else class="checkbox"></span>
+                <span class="checkbox"></span>
                 <span class="check-label">{{ item }}</span>
               </label>
               <div v-if="col.squares" class="square-row">
-                <span class="mini-square" v-for="n in col.squares" :key="n"></span>
+                <span
+                  class="mini-square"
+                  v-for="n in col.squares"
+                  :key="n"
+                ></span>
               </div>
             </div>
 
             <!-- 大图标按钮列 - 有下拉菜单（dropdown: true + dropdownItems 存在） -->
             <el-popover
-                v-else-if="col.type === 'large' && col.dropdown && col.dropdownItems?.length"
-                placement="bottom-start"
-                trigger="click"
-                popper-class="ribbon-popover"
-                :show-arrow="false"
+              v-else-if="
+                col.type === 'large' &&
+                col.dropdown &&
+                col.dropdownItems?.length
+              "
+              placement="bottom-start"
+              trigger="click"
+              popper-class="ribbon-popover"
+              :show-arrow="false"
             >
               <template #reference>
                 <div class="col-large">
-                  <img
-                      v-if="getIcon(col.label)"
-                      class="big-icon"
-                      :src="getIcon(col.label)"
-                      :alt="col.label"
-                  >
-                  <span v-else class="big-icon icon-placeholder"></span>
+                  <span class="big-icon"></span>
                   <span class="big-label">{{ col.label }}</span>
                   <span class="dropdown-arrow">▾</span>
                 </div>
@@ -251,18 +304,12 @@ const getIcon = (label) => iconMap[normalizeIconKey(label)] || ''
               <!-- 下拉列表内容 -->
               <div class="ribbon-dropdown-list">
                 <div
-                    class="ribbon-dropdown-item"
-                    v-for="item in col.dropdownItems"
-                    :key="item"
-                    @click="onItemClick(group.title, item)"
+                  class="ribbon-dropdown-item"
+                  v-for="item in col.dropdownItems"
+                  :key="item"
+                  @click="onItemClick(group.title, item)"
                 >
-                  <img
-                      v-if="getIcon(item)"
-                      class="dropdown-icon"
-                      :src="getIcon(item)"
-                      :alt="item"
-                  >
-                  <span v-else class="d-checkbox"></span>
+                  <span class="d-checkbox"></span>
                   <span class="d-label">{{ item }}</span>
                 </div>
               </div>
@@ -270,17 +317,11 @@ const getIcon = (label) => iconMap[normalizeIconKey(label)] || ''
 
             <!-- 大图标按钮列 - 无下拉 -->
             <div
-                v-else-if="col.type === 'large'"
-                class="col-large"
-                @click="onItemClick(group.title, col.label)"
+              v-else-if="col.type === 'large'"
+              class="col-large"
+              @click="onItemClick(group.title, col.label)"
             >
-              <img
-                  v-if="getIcon(col.label)"
-                  class="big-icon"
-                  :src="getIcon(col.label)"
-                  :alt="col.label"
-              >
-              <span v-else class="big-icon icon-placeholder"></span>
+              <span class="big-icon"></span>
               <span class="big-label">{{ col.label }}</span>
             </div>
 
@@ -288,7 +329,6 @@ const getIcon = (label) => iconMap[normalizeIconKey(label)] || ''
             <div v-else-if="col.type === 'squares'" class="col-squares">
               <span class="pad-square" v-for="n in col.count" :key="n"></span>
             </div>
-
           </template>
         </div>
         <div class="group-title">{{ group.title }}</div>
@@ -315,7 +355,7 @@ $square-border: #c2c2c2;
 /* ===== 页签条 ===== */
 .ribbon-tabs {
   display: flex;
-  height: 32px;
+  height: 24px;
   background-color: $tab-bg;
   padding-left: 4px;
 
@@ -323,8 +363,8 @@ $square-border: #c2c2c2;
     height: 100%;
     display: flex;
     align-items: center;
-    padding: 0 16px;
-    font-size: 13px;
+    padding: 0 12px;
+    font-size: 12px;
     font-weight: 600;
     color: #e6e6e6;
     cursor: pointer;
@@ -346,7 +386,7 @@ $square-border: #c2c2c2;
   display: flex;
   align-items: stretch;
   background-color: $ribbon-bg;
-  min-height: 112px;
+  min-height: 72px;
 }
 
 .ribbon-group {
@@ -357,16 +397,16 @@ $square-border: #c2c2c2;
   .group-content {
     flex: 1;
     display: flex;
-    align-items: center;
-    gap: 14px;
-    padding: 8px 12px;
+    align-items: stretch;
+    gap: 5px;
+    padding: 3px 6px;
   }
 
   .group-title {
-    height: 20px;
-    line-height: 20px;
+    height: 16px;
+    line-height: 16px;
     text-align: center;
-    font-size: 12px;
+    font-size: 10px;
     color: #666;
     background-color: $group-label-bg;
     border-top: 1px solid $divider;
@@ -377,40 +417,34 @@ $square-border: #c2c2c2;
 .col-checks {
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  gap: 6px;
-  align-self: flex-start;
-  padding-top: 8px;
+  justify-content: flex-start;
+  align-items: flex-start;
+  gap: 4px;
+  align-self: stretch;
+  padding: 4px 0;
 
   .check-item {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
     cursor: pointer;
-    line-height: 16px;
+    line-height: 14px;
 
     &:hover .check-label {
       color: #4084d9;
     }
 
     .checkbox {
-      width: 16px;
-      height: 16px;
+      width: 11px;
+      height: 11px;
       background-color: $square-bg;
       border: 1px solid $square-border;
       border-radius: 1px;
       flex-shrink: 0;
     }
 
-    .small-icon {
-      width: 18px;
-      height: 18px;
-      object-fit: contain;
-      flex-shrink: 0;
-    }
-
     .check-label {
-      font-size: 13px;
+      font-size: 11px;
       color: #333;
       white-space: nowrap;
     }
@@ -418,12 +452,12 @@ $square-border: #c2c2c2;
 
   .square-row {
     display: flex;
-    gap: 3px;
-    margin-top: 2px;
+    flex-direction: row;
+    gap: 2px;
 
     .mini-square {
-      width: 16px;
-      height: 16px;
+      width: 11px;
+      height: 11px;
       background-color: $square-bg;
       border: 1px solid $square-border;
     }
@@ -436,10 +470,12 @@ $square-border: #c2c2c2;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-width: 52px;
-  padding: 4px 6px;
+  min-width: 36px;
+  padding: 4px 3px;
   border-radius: 3px;
   cursor: pointer;
+  align-self: center;
+  gap: 4px;
 
   &:hover {
     background-color: #f0f6ff;
@@ -447,29 +483,24 @@ $square-border: #c2c2c2;
   }
 
   .big-icon {
-    width: 36px;
-    height: 36px;
-    object-fit: contain;
-    flex-shrink: 0;
-  }
-
-  .icon-placeholder {
+    width: 22px;
+    height: 22px;
     background-color: $square-bg;
     border: 1px solid $square-border;
     border-radius: 2px;
   }
 
   .big-label {
-    margin-top: 5px;
-    font-size: 13px;
+    font-size: 11px;
     color: #333;
     white-space: nowrap;
   }
 
   .dropdown-arrow {
-    font-size: 10px;
-    line-height: 8px;
+    font-size: 9px;
+    line-height: 1;
     color: #666;
+    margin-top: -2px;
   }
 }
 
@@ -477,14 +508,14 @@ $square-border: #c2c2c2;
 .col-squares {
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  gap: 6px;
+  justify-content: flex-start;
+  gap: 4px;
   align-self: flex-start;
-  padding-top: 8px;
+  padding: 4px 0;
 
   .pad-square {
-    width: 16px;
-    height: 16px;
+    width: 11px;
+    height: 11px;
     background-color: $square-bg;
     border: 1px solid $square-border;
   }
@@ -529,17 +560,9 @@ $square-border: #c2c2c2;
       flex-shrink: 0;
     }
 
-    .dropdown-icon {
-      width: 16px;
-      height: 16px;
-      object-fit: contain;
-      flex-shrink: 0;
-    }
-
     .d-label {
       line-height: 1;
     }
   }
 }
 </style>
-
