@@ -1,37 +1,46 @@
-import { defineConfig } from "vite";
-import vue from "@vitejs/plugin-vue";
-import { fileURLToPath, URL } from "node:url";
-import flowBalancePlugin from "./flowBalancePlugin.js";
+import { defineConfig, loadEnv } from 'vite'
+import vue from '@vitejs/plugin-vue'
+import { fileURLToPath, URL } from 'node:url'
 
-const useLocalFlowPlugin = process.env.VITE_USE_LOCAL_FLOW_PLUGIN === "true";
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), '')
+  const dockerCookie = env.VITE_DOCKER_COOKIE
 
-export default defineConfig({
-  plugins: [vue(), ...(useLocalFlowPlugin ? [flowBalancePlugin()] : [])],
-  resolve: {
-    alias: {
-      "@": fileURLToPath(new URL("./src", import.meta.url)),
+  return {
+    plugins: [vue()],
+    resolve: {
+      alias: {
+        '@': fileURLToPath(new URL('./src', import.meta.url))
+      }
     },
-  },
-  server: {
-    port: 5173,
-    open: true,
-    proxy: {
-      "/api": {
-        target: "http://127.0.0.1:9920",
-        changeOrigin: true,
-      },
-      "/docker-api/common/notify": {
-        target: "ws://127.0.0.1:9920",
-        changeOrigin: true,
-        ws: true,
-        rewrite: (path) => path.replace(/^\/docker-api/, "/api"),
-      },
-      "/docker-api": {
-        target: "http://127.0.0.1:9920",
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/docker-api/, "/api"),
-      },
-    },
-  },
-  clearScreen: false,
-});
+    server: {
+      port: 5173,
+      open: true,
+      proxy: {
+        // SpringBoot backend
+        '/api': {
+          target: 'http://localhost:8080',
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/api/, '')
+        },
+
+        // Docker service WebSocket endpoint.
+        '/docker-api/common/notify': {
+          target: 'ws://127.0.0.1:9920',
+          changeOrigin: true,
+          ws: true,
+          headers: dockerCookie ? { Cookie: dockerCookie } : undefined,
+          rewrite: (path) => path.replace(/^\/docker-api/, '/api')
+        },
+
+        // Docker service HTTP endpoints.
+        '/docker-api': {
+          target: 'http://127.0.0.1:9920',
+          changeOrigin: true,
+          headers: dockerCookie ? { Cookie: dockerCookie } : undefined,
+          rewrite: (path) => path.replace(/^\/docker-api/, '/api')
+        }
+      }
+    }
+  }
+})

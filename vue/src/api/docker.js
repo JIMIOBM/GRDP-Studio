@@ -1,85 +1,84 @@
-import axios from "axios";
+/**
+ * docker.js
+ * 专门用于调用 Docker 服务（http://127.0.0.1:9919）的 axios 实例。
+ * 开发时通过 vite.config.js 中的 /docker-api 代理转发，避免跨域。
+ *
+ * 路径：src/api/docker.js
+ */
+import axios from 'axios'
+import { ElMessage } from 'element-plus'
 
 const dockerRequest = axios.create({
-  baseURL: "/docker-api",
-  timeout: 30000,
-  withCredentials: true,
-});
+    baseURL: '/docker-api',     // 不用改，前缀替换交给 vite 的 rewrite
+    timeout: 30000,
+    withCredentials: true
+})
 
-const backendRequest = axios.create({
-  baseURL: "/api",
-  timeout: 30000,
-  withCredentials: true,
-});
-
-function offlineError(context) {
-  return {
-    ok: false,
-    offline: true,
-    message: `未连接后端服务 — ${context}`,
-    data: null,
-  };
-}
-
-function unauthenticatedError(context) {
-  return {
-    ok: false,
-    offline: false,
-    message: `未登录 — ${context}，请先在控制台登录`,
-    data: null,
-  };
-}
-
-async function callApi(requestFn, context) {
-  try {
-    const res = await requestFn();
-    if (res?.status >= 200 && res.status < 300 && res.data) {
-      return { ok: true, data: res.data };
+dockerRequest.interceptors.request.use(
+  (config) => {
+    const accountStr = localStorage.getItem('account')
+    if (accountStr) {
+      const account = JSON.parse(accountStr)
+      if (account.token) {
+        config.headers.token = account.token
+      }
     }
-    if (res?.status === 401) {
-      return unauthenticatedError(context);
-    }
-    return offlineError(context);
-  } catch (e) {
-    const status = e?.response?.status;
-    if (status === 401) {
-      return unauthenticatedError(context);
-    }
-    return offlineError(context);
+    return config
+  },
+  (error) => Promise.reject(error)
+)
+
+// 响应拦截：统一报错
+dockerRequest.interceptors.response.use(
+  (res) => res,
+  (err) => {
+    const msg = err.response?.data?.message || err.message || '请求失败'
+    ElMessage.error(`Docker 服务错误：${msg}`)
+    return Promise.reject(err)
   }
+)
+
+/* ===== 项目详情 ===== */
+export const projectApi = {
+    /**
+     * GET /projects/{id}?projectId={id}
+     * 返回项目、气藏、井以及已有分析节点等工程数据。
+     */
+    getProject: (projectId = 1) =>
+        dockerRequest.get(`/projects/${projectId}`, {
+            params: { projectId }
+        })
 }
 
 /* ===== 水侵动态分析 ===== */
 export const waterInvasionApi = {
+  /**
+   * POST /projectanalysis/waterinvasionanalysis
+   * @param {Object} data
+   * @param {number} data.gasReservoirId   - 气藏 ID
+   * @param {number} data.projectId        - 项目 ID
+   * @param {number} data.analysisType     - 分析类型（1=…）
+   * @param {string[]} data.wellNames      - 井名列表
+   * @param {number} data.waterGasRatioLimit - 气水比限值（-1 表示不限）
+   */
   analyze: (data) =>
-    callApi(
-      () => dockerRequest.post("/projectanalysis/waterinvasionanalysis", data),
-      "水侵分析",
-    ),
-};
+    dockerRequest.post('/projectanalysis/waterinvasionanalysis', data)
+}
 
-/* ===== 流动平衡分析 ===== */
-export const flowBalanceApi = {
-  analyze: (data) =>
-    callApi(
-      () => dockerRequest.post("/projectanalysis/flowbalanceanalysis", data),
-      "流动平衡分析",
-    ),
-};
+/* ===== 产量不稳定分析 - 解析法 ===== */
+export const analyticMethodApi = {
+  historyFitting: (data) =>
+    dockerRequest.post('/projectanalysis/analysismethods/historyfitting', data),
 
-/* ===== 气藏列表 ===== */
-export const gasReservoirsApi = {
-  list: async (queryType) => {
-    const params = new URLSearchParams({ _t: String(Date.now()) });
-    if (queryType) params.set("gasReservoirType", queryType);
-    const url = `/common/coredb/gasreservoirs?${params.toString()}`;
-    return callApi(() => backendRequest.get(url), "气藏列表");
-  },
-  detail: async (gasReservoirId) => {
-    const url = `/common/coredb/gasreservoirs/${gasReservoirId}?_t=${Date.now()}`;
-    return callApi(() => backendRequest.get(url), "气藏详情");
-  },
-};
+  historyRefitting: (data) =>
+    dockerRequest.post('/projectanalysis/analysismethods/historyrefitting', data),
+
+  getResult: (projectId, gasReservoirId, resultId) =>
+    dockerRequest.get(`/projectanalysis/analysismethods/${projectId}/${gasReservoirId}/${resultId}`),
+
+  getSummaryChart: (projectId, gasReservoirId) =>
+    dockerRequest.get(`/projectanalysis/analysismethods/summary/chart/${projectId}/${gasReservoirId}`)
+}
 
 /* ===== 动态储量 - 物质平衡 ===== */
 export const materialBalanceApi = {
@@ -95,38 +94,39 @@ export const materialBalanceApi = {
 
 /* ===== 井列表 ===== */
 export const wellApi = {
-  getWells: (projectId, gasReservoirId) =>
-    callApi(
-      () =>
-        dockerRequest.get(
-          `/projectanalysis/${projectId}/${gasReservoirId}/wells`,
-        ),
-      "井列表",
-    ),
-};
+    /**
+     * GET /projectanalysis/{projectId}/{gasReservoirId}/wells
+     * 返回 { wells: [...], fields: [...] }
+     */
+    getWells: (projectId, gasReservoirId) =>
+        dockerRequest.get(`/projectanalysis/${projectId}/${gasReservoirId}/wells`)
+}
 
 /* ===== 分析参数 ===== */
 export const parametersApi = {
-  getMinWaterGasRatio: (projectId, gasReservoirId) =>
-    callApi(
-      () =>
+    /**
+     * GET /projectanalysis/{projectId}/{gasReservoirId}/parameters/minmumWaterGasRatio
+     * 返回 { vaule: number, unitLabel: string }
+     * 注意：后端字段名拼写为 vaule（原样保留，非笔误）
+     *
+     * @param {number|string} projectId
+     * @param {number|string} gasReservoirId
+     */
+    getMinWaterGasRatio: (projectId, gasReservoirId) =>
         dockerRequest.get(
-          `/projectanalysis/${projectId}/${gasReservoirId}/parameters/minmumWaterGasRatio`,
-        ),
-      "最小水气比参数",
-    ),
-};
+            `/projectanalysis/${projectId}/${gasReservoirId}/parameters/minmumWaterGasRatio`
+        )
+}
 
 /* ===== 节点树 ===== */
 export const nodeApi = {
-  getNode: (projectId, gasReservoirId, nodeType) =>
-    callApi(
-      () =>
-        dockerRequest.get(
-          `/projectanalysis/node/${projectId}/${gasReservoirId}/${nodeType}`,
-        ),
-      "节点树",
-    ),
-};
+    /**
+     * GET /projectanalysis/node/{projectId}/{gasReservoirId}/{nodeType}
+     */
+    getNode: (projectId, gasReservoirId, nodeType) =>
+        dockerRequest.get(`/projectanalysis/node/${projectId}/${gasReservoirId}/${nodeType}`)
+}
 
-export default dockerRequest;
+
+
+export default dockerRequest
