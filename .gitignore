@@ -4,3 +4,4 @@ vue/node_modules/
 .env.*.local
 vue/.env.local
 vue/.env.*.local
+.idea/
