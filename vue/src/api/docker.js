@@ -80,6 +80,18 @@ export const analyticMethodApi = {
     dockerRequest.get(`/projectanalysis/analysismethods/summary/chart/${projectId}/${gasReservoirId}`)
 }
 
+/* ===== 动态储量 - 物质平衡 ===== */
+export const materialBalanceApi = {
+  calc: (data) =>
+    dockerRequest.post('/projectanalysis/dynamicoriginalgasInplace/mb/calc', data),
+
+  getResult: (projectId, gasReservoirId, resultId) =>
+    dockerRequest.get(`/projectanalysis/dynamicoriginalgasInplace/result/${projectId}/${gasReservoirId}/${resultId}`),
+
+  getChartTemplate: () =>
+    dockerRequest.get('/common/charttemplates/MaterialBalance')
+}
+
 /* ===== 井列表 ===== */
 export const wellApi = {
     /**
