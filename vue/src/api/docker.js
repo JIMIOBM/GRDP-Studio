@@ -85,17 +85,17 @@ export const materialBalanceApi = {
   calc: (data) =>
     dockerRequest.post('/projectanalysis/dynamicoriginalgasInplace/mb/calc', data),
 
-  getAverageFormationPressure: (projectId, gasReservoirId, wellName, page = 1, size = -1) =>
-    dockerRequest.get(
-      `/projectanalysis/dynamicoriginalgasInplace/averageFormationPressure/${projectId}/${gasReservoirId}/${encodeURIComponent(wellName)}`,
-      { params: { page, size } }
-    ),
-
-  getResult: (projectId, gasReservoirId, resultId) =>
-    dockerRequest.get(`/projectanalysis/dynamicoriginalgasInplace/result/${projectId}/${gasReservoirId}/${resultId}`),
-
-  getChartTemplate: () =>
-    dockerRequest.get('/common/charttemplates/MaterialBalance')
+    getResult: (projectId, gasReservoirId, wellName, page = null, size = null) => {
+        const params = {}
+        if (page !== null && page !== undefined) params.page = page
+        if (size !== null && size !== undefined) params.size = size
+        wellName=wellName.replace("X-", "");
+        console.log(wellName)
+        return dockerRequest.get(
+            `/projectanalysis/dynamicoriginalgasInplace/result/${projectId}/${gasReservoirId}/${wellName}`,
+            Object.keys(params).length ? { params } : undefined
+        )
+    },
 }
 
 /* ===== 井列表 ===== */
