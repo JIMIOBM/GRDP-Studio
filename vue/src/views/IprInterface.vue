@@ -4,9 +4,10 @@ import { ElMessage } from 'element-plus'
 import RibbonMenu from '@/components/RibbonMenu.vue'
 import TreeNode from '@/views/TreeNode.vue'
 import WaterInvasionContent from '@/views/WellControlInventory/WaterInvasionContent.vue'
-import AnalyticMethodContent from '@/views/WellControlInventory/AnalyticMethodContent.vue'
+// import AnalyticMethodContent from '@/views/WellControlInventory/AnalyticMethodContent.vue'
 import MaterialBalanceContent from '@/views/WellControlInventory/MaterialBalanceContent.vue'
 import AnalyticMethodContent from '@/views/WellControlInventory/AnalyticMethodContent.vue'
+import WattenbargerContent from '@/views/WellControlInventory/WattenbargerContent.vue'
 import { NODETYPE } from '@/constants/nodeType'
 import { analyticMethodApi, materialBalanceApi, nodeApi, projectApi, waterInvasionApi } from '@/api/docker'
 
@@ -26,6 +27,7 @@ const NODE_GROUP_BY_TYPE = {
   [NODETYPE.NodeType_WaterInvasionAnalysis]: 'well-control-inventory',  //水侵分析节点，要放到井控库存下面
   [NODETYPE.NodeType_AnalysisMethods]: 'well-control-inventory',
   [NODETYPE.NodeType_DynamicOriginalGasInplace]: 'well-control-inventory',
+  [NODETYPE.NodeType_VerticalWellTypicalCurveWb]: 'well-control-inventory',
   [NODETYPE.NodeType_ProductionDeclineAnalysis]: 'data-management',
   [NODETYPE.NodeType_ProductivityInstabilityAnalysis]: 'data-management',
   [NODETYPE.NodeType_ProductionAnalysis]: 'data-management',
@@ -41,6 +43,7 @@ const NODE_LABEL_BY_TYPE = {
   [NODETYPE.NodeType_WaterInvasionAnalysis]: '水侵分析',
   [NODETYPE.NodeType_AnalysisMethods]: '解析法',
   [NODETYPE.NodeType_DynamicOriginalGasInplace]: '物质平衡',
+  [NODETYPE.NodeType_VerticalWellTypicalCurveWb]: 'Wattenbarger',
   [NODETYPE.NodeType_ProductionDeclineAnalysis]: '产量递减分析',
   [NODETYPE.NodeType_ProductivityInstabilityAnalysis]: '产量不稳定分析',
   [NODETYPE.NodeType_ProductionAnalysis]: '生产分析',
@@ -531,6 +534,12 @@ const handleSelect = (node) => { // 点击左侧树节点
     return
   }
 
+  if (node.type === NODETYPE.NodeType_VerticalWellTypicalCurveWb) {
+    currentView.value = 'wattenbarger'
+    currentViewNode.value = node
+    return
+  }
+
   if (node.type === NODETYPE.NodeType_Well) return
 }
 
@@ -544,6 +553,21 @@ const handleCommand = ({ group, name }) => { // 接收顶部菜单栏的点击�
       break
     case '物质平衡':
       runMaterialBalanceForSelectedWell()
+      break
+    case 'Wattenbarger':
+      if (!selectedWellName.value) {
+        ElMessage.warning('请先在左侧选择一口井')
+        return
+      }
+      currentView.value = 'wattenbarger'
+      currentViewNode.value = {
+        id: `wb-${selectedWellName.value}`,
+        label: 'Wattenbarger',
+        type: NODETYPE.NodeType_VerticalWellTypicalCurveWb,
+        wellName: selectedWellName.value,
+        raw: {}
+      }
+      activeNodeId.value = currentViewNode.value.id
       break
     default:
       ElMessage.success(`[${group}] ${name}`)
@@ -605,6 +629,13 @@ onMounted(initTree)
         />
         <MaterialBalanceContent
           v-if="currentView === 'material-balance'"
+          :node="currentViewNode"
+          :project-id="PROJECT_ID"
+          :gas-reservoir-id="GAS_RESERVOIR_ID"
+          @refresh-tree="handleRefreshTree"
+        />
+        <WattenbargerContent
+          v-if="currentView === 'wattenbarger'"
           :node="currentViewNode"
           :project-id="PROJECT_ID"
           :gas-reservoir-id="GAS_RESERVOIR_ID"
