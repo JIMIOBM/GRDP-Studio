@@ -3,14 +3,133 @@
 > vite --host 127.0.0.1
 
 
-  [32m[1mVITE[22m v5.4.21[39m  [2mready in [0m[1m344[22m[2m[0m ms[22m
+  [32m[1mVITE[22m v5.4.21[39m  [2mready in [0m[1m657[22m[2m[0m ms[22m
 
   [32m➜[39m  [1mLocal[22m:   [36mhttp://127.0.0.1:[1m5173[22m/[39m
-[2m17:29:51[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/TreeNode.vue[22m
-[2m17:30:12[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue[22m
-[2m17:30:33[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue?vue&type=style&index=0&scoped=8eaaef3a&lang.scss[22m
-[2m17:38:37[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/TreeNode.vue[22m
-[2m17:39:10[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue[22m
-[2m17:48:11[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue[22m
-[2m17:51:49[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue[22m
-[2m17:56:23[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue[22m
+[2m14:15:35[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue[22m
+[2m14:16:36[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue, /src/views/WellControlInventory/AnalyticMethodContent.vue, /src/views/WellControlInventory/MaterialBalanceContent.vue, /src/views/WellControlInventory/WaterInvasionContent.vue[22m
+[2m14:16:56[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue, /src/views/WellControlInventory/MaterialBalanceContent.vue?vue&type=style&index=0&scoped=f83ccc09&lang.scss[22m
+[2m14:17:18[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue[22m
+[2m14:27:11[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue, /src/views/WellControlInventory/MaterialBalanceContent.vue?vue&type=style&index=0&scoped=f83ccc09&lang.scss[22m
+[2m14:27:13[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue, /src/views/WellControlInventory/MaterialBalanceContent.vue?vue&type=style&index=0&scoped=f83ccc09&lang.scss[22m
+[2m14:29:44[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue[22m
+[2m14:30:11[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue[22m
+[2m14:30:28[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue[22m
+[2m14:30:42[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue[22m
+[2m14:30:53[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue[22m
+[2m14:33:29[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2m__mb_render_smoke.html[22m
+[2m14:34:20[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2m__mb_render_smoke.html[22m
+[2m14:41:32[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue, /src/views/WellControlInventory/MaterialBalanceContent.vue?vue&type=style&index=0&scoped=f83ccc09&lang.scss[22m
+[2m14:41:38[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m14:43:17[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m14:43:37[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m14:44:55[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m14:45:37[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m14:46:08[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m14:47:02[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m14:47:12[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m14:48:55[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m14:49:37[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m15:03:29[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue, /src/views/WellControlInventory/AnalyticMethodContent.vue, /src/views/WellControlInventory/WaterInvasionContent.vue[22m
+[2m15:04:06[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue, /src/views/WellControlInventory/AnalyticMethodContent.vue, /src/views/WellControlInventory/WaterInvasionContent.vue[22m
+[2m15:04:38[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue, /src/views/WellControlInventory/AnalyticMethodContent.vue, /src/views/WellControlInventory/WaterInvasionContent.vue[22m
+[2m15:05:08[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue, /src/views/WellControlInventory/AnalyticMethodContent.vue, /src/views/WellControlInventory/WaterInvasionContent.vue[22m
+[2m15:06:03[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m15:16:22[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m15:16:56[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m15:18:28[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m15:39:12[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m16:00:31[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue, /src/views/WellControlInventory/AnalyticMethodContent.vue, /src/views/WellControlInventory/WaterInvasionContent.vue[22m
+[2m16:01:20[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m16:01:37[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m16:05:51[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m16:06:07[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue[22m
+[2m16:06:19[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue, /src/views/WellControlInventory/AnalyticMethodContent.vue, /src/views/WellControlInventory/WaterInvasionContent.vue[22m
+[2m16:10:50[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue, /src/views/WellControlInventory/AnalyticMethodContent.vue, /src/views/WellControlInventory/WaterInvasionContent.vue[22m
+[2m16:12:01[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m16:12:19[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m16:13:00[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m16:13:12[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m16:20:00[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m16:20:23[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m16:20:58[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m16:21:12[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m16:21:24[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m16:37:11[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue, /src/views/WellControlInventory/AnalyticMethodContent.vue, /src/views/WellControlInventory/WaterInvasionContent.vue[22m
+[2m16:39:02[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue, /src/views/WellControlInventory/AnalyticMethodContent.vue, /src/views/WellControlInventory/WaterInvasionContent.vue[22m
+[2m16:40:07[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue, /src/views/WellControlInventory/AnalyticMethodContent.vue, /src/views/WellControlInventory/WaterInvasionContent.vue[22m
+[2m16:42:06[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue, /src/views/WellControlInventory/AnalyticMethodContent.vue, /src/views/WellControlInventory/WaterInvasionContent.vue[22m
+[2m16:42:43[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue, /src/views/WellControlInventory/AnalyticMethodContent.vue, /src/views/WellControlInventory/WaterInvasionContent.vue[22m
+[2m16:43:06[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue, /src/views/WellControlInventory/AnalyticMethodContent.vue, /src/views/WellControlInventory/WaterInvasionContent.vue[22m
+[2m16:43:21[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue, /src/views/WellControlInventory/AnalyticMethodContent.vue, /src/views/WellControlInventory/WaterInvasionContent.vue[22m
+[2m16:46:39[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue, /src/views/WellControlInventory/AnalyticMethodContent.vue, /src/views/WellControlInventory/WaterInvasionContent.vue[22m
+[2m16:46:48[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue, /src/views/WellControlInventory/AnalyticMethodContent.vue, /src/views/WellControlInventory/WaterInvasionContent.vue[22m
+[2m16:49:46[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue, /src/views/WellControlInventory/AnalyticMethodContent.vue, /src/views/WellControlInventory/WaterInvasionContent.vue[22m
+[2m16:49:57[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m16:50:18[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m16:50:33[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m16:51:38[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue, /src/views/WellControlInventory/MaterialBalanceContent.vue?vue&type=style&index=0&scoped=f83ccc09&lang.scss[22m
+[2m16:51:38[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m16:51:39[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m16:52:32[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue, /src/views/WellControlInventory/AnalyticMethodContent.vue, /src/views/WellControlInventory/WaterInvasionContent.vue[22m
+[2m16:53:18[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue, /src/views/WellControlInventory/AnalyticMethodContent.vue, /src/views/WellControlInventory/WaterInvasionContent.vue[22m
+[2m16:53:38[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m16:58:31[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m16:59:16[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m16:59:27[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m17:11:50[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m17:12:03[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m17:12:13[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m17:12:39[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m17:13:05[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m17:13:18[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m17:14:09[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m17:14:46[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m17:15:23[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m17:15:39[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m17:16:00[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m17:16:52[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m17:21:48[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m17:31:45[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m17:31:53[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m17:32:07[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m17:32:18[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m17:33:25[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m17:33:36[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m17:33:54[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m17:34:09[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m17:34:57[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m17:35:20[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m17:38:05[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue, /src/views/WellControlInventory/MaterialBalanceContent.vue?vue&type=style&index=0&scoped=f83ccc09&lang.scss[22m
+[2m17:38:06[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue, /src/views/WellControlInventory/MaterialBalanceContent.vue?vue&type=style&index=0&scoped=f83ccc09&lang.scss[22m
+[2m17:51:04[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue, /src/views/WellControlInventory/MaterialBalanceContent.vue?vue&type=style&index=0&scoped=f83ccc09&lang.scss[22m
+[2m17:51:26[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m17:51:41[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m17:51:50[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m17:52:02[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m17:55:37[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m17:58:13[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m17:59:44[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m18:00:08[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m18:02:14[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m18:02:43[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m18:03:55[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m18:04:31[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m18:06:22[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m18:09:11[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m18:09:22[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m18:09:34[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m18:11:12[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m18:13:02[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue[22m
+[2m18:15:46[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue, /src/views/WellControlInventory/AnalyticMethodContent.vue, /src/views/WellControlInventory/WaterInvasionContent.vue[22m
+[2m18:15:46[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue, /src/views/WellControlInventory/MaterialBalanceContent.vue?vue&type=style&index=0&scoped=f83ccc09&lang.scss[22m
+[2m18:17:39[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue, /src/views/WellControlInventory/AnalyticMethodContent.vue, /src/views/WellControlInventory/WaterInvasionContent.vue[22m
+[2m18:17:39[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue[22m
+[2m18:17:39[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue, /src/views/WellControlInventory/MaterialBalanceContent.vue?vue&type=style&index=0&scoped=f83ccc09&lang.scss[22m
+[2m18:17:39[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue, /src/views/WellControlInventory/AnalyticMethodContent.vue, /src/views/WellControlInventory/WaterInvasionContent.vue[22m
+[2m18:17:39[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue, /src/views/WellControlInventory/MaterialBalanceContent.vue?vue&type=style&index=0&scoped=f83ccc09&lang.scss[22m
+[2m18:18:47[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue, /src/views/WellControlInventory/AnalyticMethodContent.vue, /src/views/WellControlInventory/WaterInvasionContent.vue[22m
+[2m18:18:47[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue[22m
+[2m18:18:47[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue, /src/views/WellControlInventory/MaterialBalanceContent.vue?vue&type=style&index=0&scoped=f83ccc09&lang.scss[22m
+[2m18:21:04[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/IprInterface.vue, /src/views/WellControlInventory/AnalyticMethodContent.vue, /src/views/WellControlInventory/WaterInvasionContent.vue[22m
+[2m18:21:04[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/views/WellControlInventory/MaterialBalanceContent.vue, /src/views/WellControlInventory/MaterialBalanceContent.vue?vue&type=style&index=0&scoped=f83ccc09&lang.scss[22m
