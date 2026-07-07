@@ -6,3 +6,4 @@ vue/dist/
 vue/.env.local
 vue/.env.*.local
 .idea/
+vue/*.log
