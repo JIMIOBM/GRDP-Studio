@@ -31,6 +31,26 @@ const currentWellName = computed(() =>
   ''
 )
 
+const findDynamicOriginalGasInPlaceId = (value) => {
+  if (!value || typeof value !== 'object') return null
+
+  if (value.DynamicOriginalGasInPlaceId !== undefined && value.DynamicOriginalGasInPlaceId !== null) {
+    return value.DynamicOriginalGasInPlaceId
+  }
+
+  if (value.dynamicOriginalGasInPlaceId !== undefined && value.dynamicOriginalGasInPlaceId !== null) {
+    return value.dynamicOriginalGasInPlaceId
+  }
+
+  const children = Array.isArray(value) ? value : Object.values(value)
+  for (const child of children) {
+    const id = findDynamicOriginalGasInPlaceId(child)
+    if (id !== null && id !== undefined && id !== '') return id
+  }
+
+  return null
+}
+
 const input = computed(() => resultData.value?.input || {})
 const output = computed(() => resultData.value?.result || {})
 
@@ -476,7 +496,22 @@ async function fetchData() {
 
   loading.value = true
   try {
-    const res = await materialBalanceApi.getResult(props.projectId, props.gasReservoirId, wellName)
+    const pressureRes = await materialBalanceApi.getAverageFormationPressure(
+      props.projectId,
+      props.gasReservoirId,
+      wellName
+    )
+    const dynamicOriginalGasInPlaceId = findDynamicOriginalGasInPlaceId(pressureRes.data)
+
+    if (dynamicOriginalGasInPlaceId === null || dynamicOriginalGasInPlaceId === undefined || dynamicOriginalGasInPlaceId === '') {
+      throw new Error('averageFormationPressure 接口未返回 DynamicOriginalGasInPlaceId')
+    }
+
+    const res = await materialBalanceApi.getResult(
+      props.projectId,
+      props.gasReservoirId,
+      dynamicOriginalGasInPlaceId
+    )
     console.log("物质平衡测试输出：",res.data)
     if (requestId !== requestSeq) return
 

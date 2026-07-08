@@ -85,14 +85,20 @@ export const materialBalanceApi = {
   calc: (data) =>
     dockerRequest.post('/projectanalysis/dynamicoriginalgasInplace/mb/calc', data),
 
-    getResult: (projectId, gasReservoirId, wellName, page = null, size = null) => {
+// /projectanalysis/dynamicoriginalgasInplace/averageFormationPressure/2/1/X-1
+    getAverageFormationPressure: (projectId, gasReservoirId, wellName) => {
+        const params = {}
+        return dockerRequest.get(
+            `/projectanalysis/dynamicoriginalgasInplace/averageFormationPressure/${projectId}/${gasReservoirId}/${encodeURIComponent(wellName)}`,
+            Object.keys(params).length ? { params } : undefined
+        )
+    },
+    getResult: (projectId, gasReservoirId, dynamicOriginalGasInPlaceId, page = null, size = null) => {
         const params = {}
         if (page !== null && page !== undefined) params.page = page
         if (size !== null && size !== undefined) params.size = size
-        wellName=wellName.replace("X-", "");
-        console.log(wellName)
         return dockerRequest.get(
-            `/projectanalysis/dynamicoriginalgasInplace/result/${projectId}/${gasReservoirId}/${wellName}`,
+            `/projectanalysis/dynamicoriginalgasInplace/result/${projectId}/${gasReservoirId}/${encodeURIComponent(dynamicOriginalGasInPlaceId)}`,
             Object.keys(params).length ? { params } : undefined
         )
     },
