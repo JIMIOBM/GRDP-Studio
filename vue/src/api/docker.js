@@ -98,6 +98,15 @@ export const materialBalanceApi = {
     },
 }
 
+/* ===== 产量不稳定分析 - 典型曲线 ===== */
+export const typicalCurveApi = {
+  fitting: (data) =>
+    dockerRequest.post('/projectanalysis/typicalcurve/fitting', data),
+
+  getResult: (projectId, gasReservoirId, nodeId) =>
+    dockerRequest.get(`/projectanalysis/typicalcurve/${projectId}/${gasReservoirId}/${nodeId}`)
+}
+
 /* ===== 井列表 ===== */
 export const wellApi = {
     /**
