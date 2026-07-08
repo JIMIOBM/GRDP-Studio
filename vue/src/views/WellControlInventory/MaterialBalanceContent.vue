@@ -11,24 +11,6 @@ const props = defineProps({
 
 const emit = defineEmits(['refresh-tree'])
 
-const DEFAULT_INPUT = {
-  gasType: '干气',
-  specificGravity: 0.58,
-  hydrogenSulfide: 4.62,
-  carbonDioxide: 3.96,
-  nitrogen: 0,
-  modificationMethod: 0,
-  deviationFactorMethod: 0,
-  viscosityMethod: 0,
-  temperature: 80,
-  formationTemperature: 80,
-  waterGasRatioLimit: 0.0602,
-  gasReservoirType: 1
-}
-
-const MODIFICATION_METHODS = ['Wichert-Aziz 修正方法', 'Carr-Kobayashi-Burrous 修正方法']
-const DEVIATION_METHODS = ['Dranchuk-Abu-Kassem 方法', 'Dranchuk-Purvis-Robinson 方法', 'Hall-Yarborough 方法']
-
 const loading = ref(false)
 const resultData = ref(null)
 const activePanelTab = ref('input')
@@ -49,12 +31,8 @@ const currentWellName = computed(() =>
   ''
 )
 
-const input = computed(() => ({
-  ...DEFAULT_INPUT,
-  ...(resultData.value?.input || {})
-}))
+const input = computed(() => resultData.value?.input || {})
 const output = computed(() => resultData.value?.result || {})
-console.log("物质平衡测试输出output：",output)
 
 const getChartItems = (value) => {
   const items =
@@ -66,6 +44,7 @@ const getChartItems = (value) => {
     []
   return Array.isArray(items) ? items : []
 }
+
 
 const chartTabs = computed(() => {
   const outputs = resultData.value?.outputs
@@ -127,6 +106,86 @@ const displayedOutputFields = computed(() => {
     .filter(([, fieldValue]) => fieldValue !== undefined && fieldValue !== null && fieldValue !== '')
     .map(([key, fieldValue]) => ({ key, label: key, value: fieldValue }))
 })
+
+const MODIFICATION_METHODS = {
+  0: 'Wichert-Aziz 修正方法',
+  1: 'Carr-Kobayashi-Burrous 修正方法'
+}
+
+const DEVIATION_METHODS = {
+  0: 'Dranchuk-Abu-Kassem 方法',
+  1: 'Dranchuk-Purvis-Robinson 方法',
+  2: 'Hall-Yarborough 方法'
+}
+
+const GAS_TYPES = {
+  0: '干气',
+  1: '湿气'
+}
+
+const toSelectOptions = (map) => Object.values(map).map(value => ({ label: value, value }))
+
+const getInputValue = (keys, fallback = '') => {
+  for (const key of keys) {
+    const value = input.value?.[key]
+    if (value !== undefined && value !== null && value !== '') return value
+  }
+  return fallback
+}
+
+const getMappedInputValue = (keys, map) => {
+  const value = getInputValue(keys)
+  if (value === '') return ''
+  return map?.[value] ?? map?.[Number(value)] ?? value
+}
+
+const groupedInputSections = computed(() => [
+  {
+    title: '气体性质',
+    fields: [
+      {
+        key: 'gasType',
+        label: '天然气类型',
+        value: getMappedInputValue(['gasType'], GAS_TYPES),
+        options: toSelectOptions(GAS_TYPES)
+      },
+      { key: 'specificGravity', label: '天然气比重(dless)', value: getInputValue(['specificGravity']) },
+      { key: 'hydrogenSulfide', label: 'H₂S摩尔百分含量(%)', value: getInputValue(['hydrogenSulfide', 'h2s', 'H2S']) },
+      { key: 'carbonDioxide', label: 'CO₂摩尔百分含量(%)', value: getInputValue(['carbonDioxide', 'co2', 'CO2']) },
+      { key: 'nitrogen', label: 'N₂摩尔百分含量(%)', value: getInputValue(['nitrogen', 'n2', 'N2']) }
+    ]
+  },
+  {
+    title: '计算方法',
+    fields: [
+      {
+        key: 'modificationMethod',
+        label: '非烃气体修正方法',
+        value: getMappedInputValue(['modificationMethod'], MODIFICATION_METHODS),
+        options: toSelectOptions(MODIFICATION_METHODS)
+      },
+      {
+        key: 'deviationFactorMethod',
+        label: '天然气偏差系数计算方法',
+        value: getMappedInputValue(['deviationFactorMethod'], DEVIATION_METHODS),
+        options: toSelectOptions(DEVIATION_METHODS)
+      }
+    ]
+  },
+  {
+    title: '其他方法',
+    fields: [
+      { key: 'formationTemperature', label: '地层温度(℃)', value: getInputValue(['formationTemperature', 'temperature']) },
+      { key: 'waterGasRatioLimit', label: '生产水气比上限(m³/10⁴m³)', value: getInputValue(['waterGasRatioLimit']) }
+    ]
+  }
+])
+
+const hasDisplayedInputFields = computed(() =>
+  groupedInputSections.value.some(section =>
+    section.fields.some(field => field.value !== undefined && field.value !== null && field.value !== '')
+  )
+)
 
 const getPointFromRow = (row) => {
   if (Array.isArray(row) && row.length >= 2) {
@@ -468,34 +527,32 @@ onBeforeUnmount(() => {
       <div class="panel-head">参数设置</div>
 
       <div v-show="activePanelTab === 'input'" class="panel-body">
-        <div class="section-title">气体性质</div>
-        <div class="field">
-          <label>天然气类型</label>
-          <el-select size="small" :model-value="input.gasType" style="width: 100%">
-            <el-option label="干气" value="干气" />
-            <el-option label="湿气" value="湿气" />
-          </el-select>
-        </div>
-        <div class="field"><label>天然气比重(dless)</label><el-input size="small" readonly :model-value="input.specificGravity" /></div>
-        <div class="field"><label>H2S摩尔百分含量(%)</label><el-input size="small" readonly :model-value="input.hydrogenSulfide" /></div>
-        <div class="field"><label>CO2摩尔百分含量(%)</label><el-input size="small" readonly :model-value="input.carbonDioxide" /></div>
-        <div class="field"><label>N2摩尔百分含量(%)</label><el-input size="small" readonly :model-value="input.nitrogen" /></div>
-
-        <div class="section-title">计算方法</div>
-        <div class="field"><label>非烃气体修正方法</label>
-          <el-select size="small" :model-value="getMethodValue(MODIFICATION_METHODS, 'modificationMethod')" style="width:100%">
-            <el-option v-for="m in MODIFICATION_METHODS" :key="m" :label="m" :value="m" />
-          </el-select>
-        </div>
-        <div class="field"><label>天然气偏差系数计算方法</label>
-          <el-select size="small" :model-value="getMethodValue(DEVIATION_METHODS, 'deviationFactorMethod')" style="width:100%">
-            <el-option v-for="m in DEVIATION_METHODS" :key="m" :label="m" :value="m" />
-          </el-select>
-        </div>
-
-        <div class="section-title">其它数据</div>
-        <div class="field"><label>地层温度(°C)</label><el-input size="small" readonly :model-value="input.temperature ?? input.formationTemperature" /></div>
-        <div class="field"><label>生产水气比上限(m3/10^4m3)</label><el-input size="small" readonly :model-value="input.waterGasRatioLimit" /></div>
+        <div v-if="!hasDisplayedInputFields" class="empty">暂无接口输入结果</div>
+        <template v-for="section in groupedInputSections" :key="section.title">
+          <div class="section-title">{{ section.title }}</div>
+          <div
+            v-for="item in section.fields"
+            v-show="item.value !== undefined && item.value !== null && item.value !== ''"
+            :key="item.key"
+            class="field"
+          >
+            <label>{{ item.label }}</label>
+            <el-select
+              v-if="item.options"
+              size="small"
+              :model-value="item.value"
+              style="width: 100%"
+            >
+              <el-option
+                v-for="option in item.options"
+                :key="option.value"
+                :label="option.label"
+                :value="option.value"
+              />
+            </el-select>
+            <el-input v-else size="small" readonly :model-value="item.value" />
+          </div>
+        </template>
       </div>
 
       <div v-show="activePanelTab === 'output'" class="panel-body">
