@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="10" fill="#f6fbff"/>
+  <path d="M14 48h38M18 50V14" stroke="#345" stroke-width="3" stroke-linecap="round"/>
+  <path d="M20 42c9-18 19-18 30-2" fill="none" stroke="#1677ff" stroke-width="4" stroke-linecap="round"/>
+  <path d="M24 40l22-18" stroke="#faad14" stroke-width="3" stroke-linecap="round"/>
+  <text x="21" y="24" font-size="14" font-family="Arial" fill="#13c2c2">N</text>
+</svg>

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none" role="img" aria-label="CMG">
+  <title>CMG</title>
+  <g stroke="#2f3a45" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="14" y="16" width="36" height="28" rx="3"/><path d="M22 50h20M32 44v6"/><path d="M22 30h20" stroke="#f4d000"/>
+  </g>
+</svg>

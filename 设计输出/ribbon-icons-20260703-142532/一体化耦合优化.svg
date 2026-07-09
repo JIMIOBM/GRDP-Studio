@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none" role="img" aria-label="一体化耦合优化">
+  <title>一体化耦合优化</title>
+  <g stroke="#2f3a45" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="24" cy="32" r="8"/><circle cx="40" cy="32" r="8"/><path d="M32 24v16" stroke="#2d7ff9"/><path d="M18 18l8 8M46 18l-8 8M18 46l8-8M46 46l-8-8"/>
+  </g>
+</svg>

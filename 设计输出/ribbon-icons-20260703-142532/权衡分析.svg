@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none" role="img" aria-label="权衡分析">
+  <title>权衡分析</title>
+  <g stroke="#2f3a45" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M32 14v36"/><path d="M18 22h28"/><path d="M18 22l-6 14h12z"/><path d="M46 22l-6 14h12z"/><path d="M25 50h14" stroke="#f4d000"/>
+  </g>
+</svg>

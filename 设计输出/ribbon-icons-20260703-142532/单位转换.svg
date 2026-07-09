@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none" role="img" aria-label="单位转换">
+  <title>单位转换</title>
+  <g stroke="#2f3a45" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M18 24h28"/><path d="M38 16l8 8-8 8"/><path d="M46 40H18"/><path d="M26 32l-8 8 8 8" stroke="#f4d000"/>
+  </g>
+</svg>

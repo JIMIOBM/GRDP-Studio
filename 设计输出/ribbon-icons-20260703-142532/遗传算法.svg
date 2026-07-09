@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none" role="img" aria-label="遗传算法">
+  <title>遗传算法</title>
+  <g stroke="#2f3a45" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M20 14c24 12 0 24 24 36"/><path d="M44 14c-24 12 0 24-24 36"/><path d="M24 22h16M24 32h16M24 42h16" stroke="#2d7ff9"/>
+  </g>
+</svg>

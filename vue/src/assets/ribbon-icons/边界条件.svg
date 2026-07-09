@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none" role="img" aria-label="边界条件">
+  <title>边界条件</title>
+  <g stroke="#2f3a45" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="14" y="14" width="36" height="36" rx="2" stroke-dasharray="4 4"/><path d="M24 32h16M32 24v16" stroke="#f4d000"/>
+  </g>
+</svg>

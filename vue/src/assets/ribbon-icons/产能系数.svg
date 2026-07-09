@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none" role="img" aria-label="产能系数">
+  <title>产能系数</title>
+  <g stroke="#2f3a45" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M18 46L46 18"/><circle cx="22" cy="22" r="5"/><circle cx="42" cy="42" r="5"/><path d="M12 52h40" stroke="#7a8794"/>
+  </g>
+</svg>

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none" role="img" aria-label="多周期预测">
+  <title>多周期预测</title>
+  <g stroke="#2f3a45" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M16 16h32v34H16z"/><path d="M22 12v8M42 12v8M16 24h32"/><path d="M22 42l7-7 5 4 8-10" stroke="#f4d000"/>
+  </g>
+</svg>

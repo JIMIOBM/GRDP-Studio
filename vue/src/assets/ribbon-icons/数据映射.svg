@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none" role="img" aria-label="数据映射">
+  <title>数据映射</title>
+  <g stroke="#2f3a45" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M16 18h12v28H16zM36 18h12v28H36z"/><path d="M28 26h8M28 38h8" stroke="#2d7ff9"/>
+  </g>
+</svg>

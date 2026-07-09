@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none" role="img" aria-label="相渗数据">
+  <title>相渗数据</title>
+  <g stroke="#2f3a45" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 48h40"/><path d="M16 42c8-26 16-26 24 0"/><path d="M18 34c8 13 18 13 28-8" stroke="#2d7ff9"/>
+  </g>
+</svg>

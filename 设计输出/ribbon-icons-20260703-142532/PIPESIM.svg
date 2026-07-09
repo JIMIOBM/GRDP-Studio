@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none" role="img" aria-label="PIPESIM">
+  <title>PIPESIM</title>
+  <g stroke="#2f3a45" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 28h18v-8h22v16H34v8H12z"/><path d="M30 20v16M34 28h18"/><circle cx="18" cy="36" r="3" fill="#2d7ff9" stroke="none"/>
+  </g>
+</svg>

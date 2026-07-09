@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none" role="img" aria-label="动态数据">
+  <title>动态数据</title>
+  <g stroke="#2f3a45" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <ellipse cx="32" cy="16" rx="16" ry="7"/><path d="M16 16v24c0 4 7 7 16 7s16-3 16-7V16"/><path d="M16 28c0 4 7 7 16 7s16-3 16-7"/><path d="M16 40c0 4 7 7 16 7s16-3 16-7"/>
+  </g>
+</svg>

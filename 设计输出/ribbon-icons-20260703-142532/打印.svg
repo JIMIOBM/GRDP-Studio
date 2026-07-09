@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none" role="img" aria-label="打印">
+  <title>打印</title>
+  <g stroke="#2f3a45" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M22 18h20v10H22z"/><path d="M18 30h28a6 6 0 0 1 6 6v10H12V36a6 6 0 0 1 6-6z"/><path d="M22 42h20v12H22z"/><circle cx="44" cy="36" r="2" fill="#f4d000" stroke="none"/>
+  </g>
+</svg>

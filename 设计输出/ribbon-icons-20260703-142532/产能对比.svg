@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none" role="img" aria-label="产能对比">
+  <title>产能对比</title>
+  <g stroke="#2f3a45" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 46h40"/><path d="M16 40l10-10 9 5 13-17"/><path d="M16 28l10 7 9-14 13 7" stroke="#f4d000"/>
+  </g>
+</svg>

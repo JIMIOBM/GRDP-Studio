@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none" role="img" aria-label="节点分析">
+  <title>节点分析</title>
+  <g stroke="#2f3a45" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="18" cy="24" r="5"/><circle cx="46" cy="24" r="5"/><circle cx="32" cy="44" r="5"/><path d="M23 25h18M21 29l8 11M43 29l-8 11"/>
+  </g>
+</svg>

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none" role="img" aria-label="曲线图">
+  <title>曲线图</title>
+  <g stroke="#2f3a45" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 50h40M14 50V14"/><path d="M18 42l8-10 8 4 12-18" stroke="#2d7ff9"/>
+  </g>
+</svg>

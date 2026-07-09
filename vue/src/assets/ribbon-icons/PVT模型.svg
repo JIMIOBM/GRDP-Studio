@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none" role="img" aria-label="PVT模型">
+  <title>PVT模型</title>
+  <g stroke="#2f3a45" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M20 24l12-8 12 8v16l-12 8-12-8z"/><path d="M20 24l12 8 12-8M32 32v16"/><circle cx="18" cy="42" r="3" fill="#2d7ff9" stroke="none"/><circle cx="46" cy="42" r="3" fill="#2d7ff9" stroke="none"/>
+  </g>
+</svg>

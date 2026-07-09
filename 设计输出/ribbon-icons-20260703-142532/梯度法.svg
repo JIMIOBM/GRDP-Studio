@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none" role="img" aria-label="梯度法">
+  <title>梯度法</title>
+  <g stroke="#2f3a45" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M14 46l14-14 8 8 14-22"/><path d="M40 18h10v10"/><path d="M14 52h40" stroke="#7a8794"/>
+  </g>
+</svg>

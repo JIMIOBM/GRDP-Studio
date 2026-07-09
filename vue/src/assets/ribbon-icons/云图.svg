@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none" role="img" aria-label="云图">
+  <title>云图</title>
+  <g stroke="#2f3a45" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M22 44h22a10 10 0 0 0 0-20 14 14 0 0 0-27-2A11 11 0 0 0 22 44z"/><path d="M24 32h16" stroke="#2d7ff9"/>
+  </g>
+</svg>

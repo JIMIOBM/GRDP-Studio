@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none" role="img" aria-label="生成报告">
+  <title>生成报告</title>
+  <g stroke="#2f3a45" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M20 12h18l8 8v32H20z"/><path d="M38 12v8h8"/><path d="M26 30h14M26 38h14M26 46h10" stroke="#f4d000"/>
+  </g>
+</svg>

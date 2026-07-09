@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none" role="img" aria-label="动态平衡">
+  <title>动态平衡</title>
+  <g stroke="#2f3a45" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M46 22a18 18 0 0 0-30 6"/><path d="M16 18v10h10"/><path d="M18 42a18 18 0 0 0 30-6"/><path d="M48 46V36H38"/><circle cx="32" cy="32" r="4" fill="#f4d000" stroke="none"/>
+  </g>
+</svg>

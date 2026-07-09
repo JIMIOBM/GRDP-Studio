@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none" role="img" aria-label="约束设置">
+  <title>约束设置</title>
+  <g stroke="#2f3a45" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="16" y="24" width="32" height="24" rx="3"/><path d="M24 24v-4a8 8 0 0 1 16 0v4"/><path d="M32 34v6" stroke="#f4d000"/>
+  </g>
+</svg>
