@@ -85,6 +85,8 @@ const toNumber = (value) => {
   return Number.isFinite(number) ? number : null
 }
 
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms))
+
 const formatSci = (value) => {
   if (!Number.isFinite(value)) return ''
   if (value === 0) return '0'
@@ -496,22 +498,41 @@ async function fetchData() {
 
   loading.value = true
   try {
-    const pressureRes = await materialBalanceApi.getAverageFormationPressure(
-      props.projectId,
-      props.gasReservoirId,
-      wellName
-    )
-    const dynamicOriginalGasInPlaceId = findDynamicOriginalGasInPlaceId(pressureRes.data)
+    let res = null
+    let lastError = null
+    for (let attempt = 0; attempt < 10; attempt++) {
+      if (requestId !== requestSeq) return
 
-    if (dynamicOriginalGasInPlaceId === null || dynamicOriginalGasInPlaceId === undefined || dynamicOriginalGasInPlaceId === '') {
-      throw new Error('averageFormationPressure 接口未返回 DynamicOriginalGasInPlaceId')
+      try {
+        const pressureRes = await materialBalanceApi.getAverageFormationPressure(
+          props.projectId,
+          props.gasReservoirId,
+          wellName,
+          { silentError: true }
+        )
+        const dynamicOriginalGasInPlaceId = findDynamicOriginalGasInPlaceId(pressureRes.data)
+
+        if (dynamicOriginalGasInPlaceId === null || dynamicOriginalGasInPlaceId === undefined || dynamicOriginalGasInPlaceId === '') {
+          throw new Error('averageFormationPressure 接口未返回 DynamicOriginalGasInPlaceId')
+        }
+
+        res = await materialBalanceApi.getResult(
+          props.projectId,
+          props.gasReservoirId,
+          dynamicOriginalGasInPlaceId,
+          null,
+          null,
+          { silentError: true }
+        )
+        break
+      } catch (error) {
+        lastError = error
+        if (attempt === 9) break
+        await sleep(1000)
+      }
     }
 
-    const res = await materialBalanceApi.getResult(
-      props.projectId,
-      props.gasReservoirId,
-      dynamicOriginalGasInPlaceId
-    )
+    if (!res) throw lastError || new Error('物质平衡结果加载失败')
     console.log("物质平衡测试输出：",res.data)
     if (requestId !== requestSeq) return
 
