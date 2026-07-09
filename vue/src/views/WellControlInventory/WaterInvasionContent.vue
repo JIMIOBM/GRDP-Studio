@@ -57,6 +57,7 @@ const waterActivityOutput = computed(() => wellData.value?.outputs?.[4]?.output 
 const legendPosition = ref({ x: null, y: null })
 const draggingLegend = ref(false)
 const legendDragOffset = ref({ x: 0, y: 0 })
+const hiddenLegendNames = ref(new Set())
 
 const legendItems = computed(() => {
   if (isWaterActivityTab.value) return []
@@ -81,6 +82,30 @@ const legendStyle = computed(() => {
     top: `${legendPosition.value.y}px`
   }
 })
+
+function isLegendItemHidden(name) {
+  return hiddenLegendNames.value.has(name)
+}
+
+function isLegendSeriesVisible(name) {
+  if (!legendItems.value.some(item => item.name === name)) return true
+  return !hiddenLegendNames.value.has(name)
+}
+
+function toggleLegendItem(name) {
+  const next = new Set(hiddenLegendNames.value)
+  if (next.has(name)) {
+    next.delete(name)
+  } else {
+    next.add(name)
+  }
+  hiddenLegendNames.value = next
+  renderChartSoon()
+}
+
+function applyLegendVisibility(series) {
+  return series.filter(item => isLegendSeriesVisible(item.name))
+}
 
 const wgrEnabled = computed(() => (input.value.waterGasRatioLimit ?? -1) > 0)
 
@@ -347,7 +372,7 @@ function renderPressureRecoveryChart(tab, index) {
       minorSplitLine: { show: true, lineStyle: { color: '#f1f5fb' } },
       splitLine: { lineStyle: { color: '#dce5f2' } }
     },
-    series
+    series: applyLegendVisibility(series)
   }, true)
 }
 
@@ -393,7 +418,7 @@ function renderWaterAmountChart(tab) {
       minorSplitLine: { show: true, lineStyle: { color: '#f1f5fb' } },
       splitLine: { lineStyle: { color: '#dce5f2' } }
     },
-    series: [{
+    series: applyLegendVisibility([{
       name,
       type: 'line',
       data,
@@ -402,7 +427,7 @@ function renderWaterAmountChart(tab) {
       lineStyle: { color: '#1677ff', width: 1.5 },
       itemStyle: { color: '#1677ff' },
       areaStyle: { color: 'rgba(22,119,255,0.78)' }
-    }]
+    }])
   }, true)
 }
 
@@ -459,7 +484,7 @@ function renderDriveMechanismChart(tab) {
       minorSplitLine: { show: true, lineStyle: { color: '#f1f5fb' } },
       splitLine: { lineStyle: { color: '#dce5f2' } }
     },
-    series
+    series: applyLegendVisibility(series)
   }, true)
 }
 
@@ -730,8 +755,16 @@ onBeforeUnmount(() => {
           :style="legendStyle"
           @mousedown="startLegendDrag"
       >
-        <div v-for="item in legendItems" :key="item.name" class="floating-legend-item">
-          <span class="legend-dot" :style="{ backgroundColor: item.color }"></span>
+        <div
+            v-for="item in legendItems"
+            :key="item.name"
+            class="floating-legend-item"
+            :class="{ hidden: isLegendItemHidden(item.name) }"
+            title="点击显示/隐藏"
+            @mousedown.stop
+            @click.stop="toggleLegendItem(item.name)"
+        >
+          <span class="legend-dot" :style="{ backgroundColor: isLegendItemHidden(item.name) ? 'transparent' : item.color, borderColor: item.color }"></span>
           <span>{{ item.name }}</span>
         </div>
       </div>
@@ -1011,6 +1044,12 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 5px;
   white-space: nowrap;
+  cursor: pointer;
+
+  &.hidden {
+    color: #999;
+    opacity: 0.55;
+  }
 }
 
 .legend-dot {
@@ -1018,6 +1057,7 @@ onBeforeUnmount(() => {
   height: 10px;
   border-radius: 50%;
   flex-shrink: 0;
+  border: 1px solid transparent;
 }
 
 .water-activity-panel {
