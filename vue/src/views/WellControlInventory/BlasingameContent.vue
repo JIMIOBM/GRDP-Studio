@@ -296,20 +296,6 @@ const parsedTypeCurves = computed(() =>
     .filter(item => item?.data?.length)
 )
 
-const fittingX = computed(() => {
-  const value = getValue(result.value, [
-    'minimumWaterGasRatio',
-    'waterGasRatioLimit',
-    'matchedWaterGasRatio',
-    'matchWaterGasRatio',
-    'matchingWaterGasRatio',
-    'fittingX',
-    'xValue'
-  ], inputValue(['minimumWaterGasRatio', 'waterGasRatioLimit'], null))
-  const numberValue = Number(value)
-  return Number.isFinite(numberValue) && numberValue > 0 ? numberValue : null
-})
-
 function renderChart() {
   if (!chart) return
 
@@ -346,7 +332,7 @@ function renderChart() {
     {
       name: '拟合位置',
       type: 'line',
-      data: fittingX.value ? [[fittingX.value, 0.01], [fittingX.value, 10]] : [],
+      data: [],
       showSymbol: false,
       lineStyle: { color: '#ff40d8', type: 'dashed', width: 1 },
       tooltip: { show: false }
@@ -361,7 +347,16 @@ function renderChart() {
       top: 8,
       textStyle: { color: '#333', fontSize: 14, fontWeight: 600 }
     },
-    tooltip: { trigger: 'item' },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: {
+        type: 'line',
+        axis: 'x',
+        snap: false,
+        lineStyle: { color: '#ff40d8', type: 'dashed', width: 1 },
+        label: { backgroundColor: '#d936d0' }
+      }
+    },
     legend: {
       show: false,
       right: 18,
@@ -378,6 +373,13 @@ function renderChart() {
       name: 'tcaDd',
       nameLocation: 'middle',
       nameGap: 34,
+      axisPointer: {
+        show: true,
+        type: 'line',
+        snap: false,
+        lineStyle: { color: '#ff40d8', type: 'dashed', width: 1 },
+        label: { show: true, backgroundColor: '#d936d0' }
+      },
       splitLine: { show: true, lineStyle: { color: '#dfe7f2' } },
       minorSplitLine: { show: true, lineStyle: { color: '#f0f4fa' } }
     },

@@ -147,7 +147,43 @@ const defaultTabs = [
 ]
 
 //控制当先显示哪一个页签
-const tabList = computed(() => props.tabs || defaultTabs)
+const diagnosticCurveItems = ['Blasingame', 'Transient', 'AG', 'Wattenbarger', 'NPI']
+
+const isDiagnosticDropdown = (col) =>
+  Array.isArray(col?.dropdownItems) &&
+  diagnosticCurveItems.every(item => col.dropdownItems.includes(item))
+
+const normalizeRibbonTabs = (tabs) => tabs.map(tab => ({
+  ...tab,
+  groups: (tab.groups || []).map(group => {
+    let shouldMoveDiagnosticItems = false
+    return {
+      ...group,
+      columns: (group.columns || []).map(col => {
+        if (isDiagnosticDropdown(col)) {
+          shouldMoveDiagnosticItems = true
+          return {
+            ...col,
+            dropdown: false,
+            dropdownItems: []
+          }
+        }
+
+        if (shouldMoveDiagnosticItems && col?.squares === 5) {
+          shouldMoveDiagnosticItems = false
+          return {
+            ...col,
+            squares: diagnosticCurveItems
+          }
+        }
+
+        return col
+      })
+    }
+  })
+}))
+
+const tabList = computed(() => normalizeRibbonTabs(props.tabs || defaultTabs))
 const activeTab = ref(0)
 const activeTabGroups = computed(() => tabList.value[activeTab.value]?.groups || [])
 
@@ -222,7 +258,36 @@ const getIcon = (label) => iconMap[normalizeIconKey(label)] || ''
                 <span class="check-label">{{ item }}</span>
               </label>
               <div v-if="col.squares" class="square-row">
-                <span class="mini-square" v-for="n in col.squares" :key="n"></span>
+                <template v-if="Array.isArray(col.squares)">
+                  <el-tooltip
+                      v-for="item in col.squares"
+                      :key="item"
+                      :content="item"
+                      placement="bottom"
+                  >
+                    <span
+                        class="mini-square command-square"
+                        tabindex="0"
+                        role="button"
+                        :aria-label="item"
+                        @click="onItemClick(group.title, item)"
+                        @keydown.enter.prevent="onItemClick(group.title, item)"
+                    >
+                      <img
+                          v-if="getIcon(item)"
+                          class="square-icon"
+                          :src="getIcon(item)"
+                          :alt="item"
+                      >
+                    </span>
+                  </el-tooltip>
+                </template>
+                <span
+                    v-else
+                    class="mini-square"
+                    v-for="n in col.squares"
+                    :key="n"
+                ></span>
               </div>
             </div>
 
@@ -424,8 +489,29 @@ $square-border: #c2c2c2;
     .mini-square {
       width: 16px;
       height: 16px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
       background-color: $square-bg;
       border: 1px solid $square-border;
+    }
+
+    .command-square {
+      cursor: pointer;
+
+      &:hover,
+      &:focus-visible {
+        border-color: #4084d9;
+        background-color: #eaf3ff;
+        outline: none;
+      }
+    }
+
+    .square-icon {
+      width: 13px;
+      height: 13px;
+      object-fit: contain;
+      pointer-events: none;
     }
   }
 }
