@@ -232,7 +232,7 @@ const wellDataMap = {
       rockCompressibility: 0.00011,
       waterCompressibility: 3.6E-4,
       productionData: []
-    },//111
+    },
     data: [],
     result: {
       dynamicReserves: 22.4560,
