@@ -34,6 +34,21 @@ const currentWellName = computed(() =>
 const findDynamicOriginalGasInPlaceId = (value) => {
   if (!value || typeof value !== 'object') return null
 
+  const idKeys = [
+    'DynamicOriginalGasInPlaceId',
+    'dynamicOriginalGasInPlaceId',
+    'dynamicOriginalGasInplaceId',
+    'dynamicOriginalGasInplaceID',
+    'resultId',
+    'ResultId'
+  ]
+
+  for (const key of idKeys) {
+    if (value[key] !== undefined && value[key] !== null && value[key] !== '') {
+      return value[key]
+    }
+  }
+
   if (value.DynamicOriginalGasInPlaceId !== undefined && value.DynamicOriginalGasInPlaceId !== null) {
     return value.DynamicOriginalGasInPlaceId
   }
@@ -51,8 +66,63 @@ const findDynamicOriginalGasInPlaceId = (value) => {
   return null
 }
 
+const getDynamicOriginalGasInPlaceIdFromNode = () =>
+  findDynamicOriginalGasInPlaceId({
+    node: props.node,
+    raw: rawNode.value,
+    parentNode: rawNode.value?.parentNode,
+    rootNode: rawNode.value?.rootNode
+  })
+
+const getAverageFormationPressureRows = (payload) => {
+  const rows =
+    payload?.data?.data ??
+    payload?.data ??
+    payload?.items ??
+    payload?.rows ??
+    payload
+
+  if (Array.isArray(rows)) return rows
+  return rows ? [rows] : []
+}
+
+const getMaterialBalanceResultId = (row) => {
+  if (!row || typeof row !== 'object') return null
+  return (
+    row.DynamicOriginalGasInPlaceId ??
+    row.dynamicOriginalGasInPlaceId ??
+    row.dynamicOriginalGasInplaceId ??
+    row.dynamicOriginalGasInplaceID ??
+    row.id ??
+    null
+  )
+}
+
+const getMaterialBalanceTabLabel = (row, index) => {
+  const description = row?.dynamicOriginalGasInplaceMethodDescription || row?.dynamicOriginalGasInPlaceMethodDescription || ''
+  if (/实测静压/.test(description)) return '根据实测静压'
+  if (/计算静压/.test(description)) return '根据计算静压'
+  return description || `图表 ${index + 1}`
+}
+
+const mergeResultWithAverageRow = (result, averageRow, index) => {
+  const output = {
+    ...(result?.output || result?.result || {}),
+    ...averageRow
+  }
+  const label = getMaterialBalanceTabLabel(output, index)
+
+  return {
+    ...result,
+    name: label,
+    label,
+    title: label,
+    chartItems: getChartItems(result),
+    output
+  }
+}
+
 const input = computed(() => resultData.value?.input || {})
-const output = computed(() => resultData.value?.result || {})
 
 const getChartItems = (value) => {
   const items =
@@ -71,19 +141,27 @@ const chartTabs = computed(() => {
   if (Array.isArray(outputs) && outputs.length) {
     return outputs.map((item, index) => ({
       label: item.name || item.title || item.label || `图表 ${index + 1}`,
-      chartItems: getChartItems(item)
+      chartItems: getChartItems(item),
+      output: item.output || item.result || {}
     }))
   }
 
-  return [{ label: '根据计算静压', chartItems: getChartItems(resultData.value) }]
+  return [{
+    label: resultData.value?.name || resultData.value?.title || '根据计算静压',
+    chartItems: getChartItems(resultData.value),
+    output: resultData.value?.output || resultData.value?.result || {}
+  }]
 })
 
+const output = computed(() => chartTabs.value[activeChartTab.value]?.output || {})
 const activeChartItems = computed(() => chartTabs.value[activeChartTab.value]?.chartItems || [])
 
 const toNumber = (value) => {
   const number = Number(value)
   return Number.isFinite(number) ? number : null
 }
+
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms))
 
 const formatSci = (value) => {
   if (!Number.isFinite(value)) return ''
@@ -251,6 +329,10 @@ const pointChartItem = computed(() =>
   null
 )
 
+const regressionChartItems = computed(() =>
+  activeChartItems.value.filter((item, index) => Array.isArray(item?.data) && item.data.length && isRegressionItem(item, index))
+)
+
 const primaryPointRows = computed(() => Array.isArray(pointChartItem.value?.data) ? pointChartItem.value.data : [])
 
 const chartPoints = computed(() =>
@@ -282,7 +364,7 @@ const chartXRange = computed(() => {
   }
 })
 
-const regressionLinePoints = computed(() => {
+const calculatedRegressionLinePoints = computed(() => {
   const reg = regression.value
   if (!reg || !chartPoints.value.length) return []
 
@@ -294,8 +376,21 @@ const regressionLinePoints = computed(() => {
   ]
 })
 
+const regressionLinePoints = computed(() => {
+  const item = regressionChartItems.value[0]
+  if (item?.data?.length) {
+    return item.data
+      .map(row => getPointFromRow(row))
+      .filter(Boolean)
+  }
+
+  return calculatedRegressionLinePoints.value
+})
+
 const chartTitle = computed(() =>
-  output.value?.dynamicOriginalGasInplaceMethodDescription || '定容气藏物质平衡方程-根据计算静压'
+  output.value?.dynamicOriginalGasInplaceMethodDescription ||
+  chartTabs.value[activeChartTab.value]?.label ||
+  '定容气藏物质平衡方程-根据计算静压'
 )
 
 const chartBounds = computed(() => {
@@ -349,10 +444,35 @@ const getEquationGraphicPosition = () => {
   return [Math.max(width - 330, 80), Math.max(height - 130, 60)]
 }
 
-const createChartSeries = () =>
-  [
+const LEGEND_LINE_ICON = 'path://M0,0 L36,0 L36,3 L0,3 Z'
+
+const createLegendData = (series) =>
+  series.map(item => item.type === 'line'
+    ? {
+        // name: item.name,
+        name: '回归线(Mpa)',
+        icon: LEGEND_LINE_ICON,
+        itemStyle: { color: '#000' }
+      }
+    : item.name
+  )
+
+const createChartSeries = () => {
+  const explicitRegressionSeries = regressionChartItems.value.map((item, index) => ({
+    // name: item.name || `回归线 ${index + 1}`,
+    name: '回归线(Mpa)',
+    type: 'line',
+    data: item.data.map(row => getPointFromRow(row)).filter(Boolean),
+    symbol: 'none',
+    itemStyle: { color: '#000' },
+    lineStyle: { color: index === 0 ? '#333' : '#666', width: 2 },
+    tooltip: { show: false }
+  }))
+
+  const series = [
     {
-      name: pointChartItem.value?.name || '数据点',
+      // name: pointChartItem.value?.name || '数据点(Mpa)',
+      name: '数据点(Mpa)',
       type: 'scatter',
       data: chartPoints.value,
       symbolSize: 11,
@@ -360,14 +480,27 @@ const createChartSeries = () =>
       tooltip: { show: true }
     },
     {
-      name: '线性回归分析线',
+      name: '回归线(Mpa)',
       type: 'line',
       data: regressionLinePoints.value,
       symbol: 'none',
+      itemStyle: { color: '#000' },
       lineStyle: { color: '#333', width: 2 },
       tooltip: { show: false }
     }
-  ].filter(series => Array.isArray(series.data) && series.data.length)
+  ]
+
+  if (explicitRegressionSeries.length) {
+    series.splice(1, 1, ...explicitRegressionSeries)
+  }
+
+  return series
+    .filter((series, index, list) =>
+      Array.isArray(series.data) &&
+      series.data.length &&
+      list.findIndex(item => item.name === series.name) === index
+    )
+}
 
 function renderChart() {
   if (!chart) return
@@ -403,12 +536,12 @@ function renderChart() {
       borderColor: '#eeeeee',
       borderWidth: 1,
       padding: [8, 10],
-      data: series.map(item => item.name)
+      data: createLegendData(series)
     },
     grid: { left: 70, right: 28, top: 58, bottom: 58, containLabel: false },
     xAxis: {
       type: 'value',
-      name: 'Gp(10^8m3)',
+      name: 'Gp(10⁸m³)',
       nameLocation: 'middle',
       nameGap: 34,
       min: bounds.xMin,
@@ -496,26 +629,79 @@ async function fetchData() {
 
   loading.value = true
   try {
-    const pressureRes = await materialBalanceApi.getAverageFormationPressure(
-      props.projectId,
-      props.gasReservoirId,
-      wellName
-    )
-    const dynamicOriginalGasInPlaceId = findDynamicOriginalGasInPlaceId(pressureRes.data)
+    let nextResultData = null
+    let lastError = null
+    for (let attempt = 0; attempt < 10; attempt++) {
+      if (requestId !== requestSeq) return
 
-    if (dynamicOriginalGasInPlaceId === null || dynamicOriginalGasInPlaceId === undefined || dynamicOriginalGasInPlaceId === '') {
-      throw new Error('averageFormationPressure 接口未返回 DynamicOriginalGasInPlaceId')
+      try {
+        const pressureRes = await materialBalanceApi.getAverageFormationPressure(
+          props.projectId,
+          props.gasReservoirId,
+          wellName,
+          { silentError: true }
+        )
+        const averageRows = getAverageFormationPressureRows(pressureRes.data)
+        const resultRequests = averageRows
+          .map((row, index) => ({
+            row,
+            index,
+            id: getMaterialBalanceResultId(row)
+          }))
+          .filter(item => item.id !== null && item.id !== undefined && item.id !== '')
+
+        if (!resultRequests.length) {
+          const dynamicOriginalGasInPlaceId = getDynamicOriginalGasInPlaceIdFromNode()
+
+          if (dynamicOriginalGasInPlaceId === null || dynamicOriginalGasInPlaceId === undefined || dynamicOriginalGasInPlaceId === '') {
+            throw new Error('averageFormationPressure 接口未返回可用的 DynamicOriginalGasInPlaceId')
+          }
+
+          const fallbackRes = await materialBalanceApi.getResult(
+            props.projectId,
+            props.gasReservoirId,
+            dynamicOriginalGasInPlaceId,
+            null,
+            null,
+            { silentError: true }
+          )
+          nextResultData = fallbackRes.data
+          break
+        }
+
+        const resultResponses = await Promise.all(
+          resultRequests.map(item =>
+            materialBalanceApi.getResult(
+              props.projectId,
+              props.gasReservoirId,
+              item.id,
+              null,
+              null,
+              { silentError: true }
+            ).then(res => ({ ...item, result: res.data }))
+          )
+        )
+
+        const firstResult = resultResponses[0]?.result || {}
+        nextResultData = {
+          ...firstResult,
+          input: firstResult.input || resultResponses.find(item => item.result?.input)?.result?.input || {},
+          resultFields: firstResult.resultFields || resultResponses.find(item => item.result?.resultFields)?.result?.resultFields || [],
+          outputs: resultResponses.map(item => mergeResultWithAverageRow(item.result, item.row, item.index))
+        }
+        break
+      } catch (error) {
+        lastError = error
+        if (attempt === 9) break
+        await sleep(1000)
+      }
     }
 
-    const res = await materialBalanceApi.getResult(
-      props.projectId,
-      props.gasReservoirId,
-      dynamicOriginalGasInPlaceId
-    )
-    console.log("物质平衡测试输出：",res.data)
+    if (!nextResultData) throw lastError || new Error('物质平衡结果加载失败')
+    console.log("物质平衡测试输出：", nextResultData)
     if (requestId !== requestSeq) return
 
-    resultData.value = res.data
+    resultData.value = nextResultData
     console.log("物质平衡测试输出resultData.value：",resultData.value)
     activeChartTab.value = 0
     activePanelTab.value = 'input'
@@ -620,7 +806,7 @@ onBeforeUnmount(() => {
       <div class="table-wrap">
         <el-table :data="tableRows" size="small" height="150" border>
           <el-table-column prop="index" label="序号" width="70" />
-          <el-table-column prop="gp" label="Gp(10^8m3)" min-width="150" />
+          <el-table-column prop="gp" label="Gp(10⁸m³)" min-width="150" />
           <el-table-column prop="pressure" label="Pp(MPa)" min-width="130" />
           <el-table-column prop="selected" label="回归点" min-width="90" />
         </el-table>
