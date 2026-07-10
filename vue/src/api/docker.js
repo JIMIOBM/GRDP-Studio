@@ -33,7 +33,9 @@ dockerRequest.interceptors.response.use(
   (res) => res,
   (err) => {
     const msg = err.response?.data?.message || err.message || '请求失败'
-    ElMessage.error(`Docker 服务错误：${msg}`)
+    if (!err.config?.silentError) {
+      ElMessage.error(`Docker 服务错误：${msg}`)
+    }
     return Promise.reject(err)
   }
 )
@@ -86,20 +88,20 @@ export const materialBalanceApi = {
     dockerRequest.post('/projectanalysis/dynamicoriginalgasInplace/mb/calc', data),
 
 // /projectanalysis/dynamicoriginalgasInplace/averageFormationPressure/2/1/X-1
-    getAverageFormationPressure: (projectId, gasReservoirId, wellName) => {
+    getAverageFormationPressure: (projectId, gasReservoirId, wellName, options = {}) => {
         const params = {}
         return dockerRequest.get(
             `/projectanalysis/dynamicoriginalgasInplace/averageFormationPressure/${projectId}/${gasReservoirId}/${encodeURIComponent(wellName)}`,
-            Object.keys(params).length ? { params } : undefined
+            { ...(Object.keys(params).length ? { params } : {}), ...options }
         )
     },
-    getResult: (projectId, gasReservoirId, dynamicOriginalGasInPlaceId, page = null, size = null) => {
+    getResult: (projectId, gasReservoirId, dynamicOriginalGasInPlaceId, page = null, size = null, options = {}) => {
         const params = {}
         if (page !== null && page !== undefined) params.page = page
         if (size !== null && size !== undefined) params.size = size
         return dockerRequest.get(
             `/projectanalysis/dynamicoriginalgasInplace/result/${projectId}/${gasReservoirId}/${encodeURIComponent(dynamicOriginalGasInPlaceId)}`,
-            Object.keys(params).length ? { params } : undefined
+            { ...(Object.keys(params).length ? { params } : {}), ...options }
         )
     },
 }
