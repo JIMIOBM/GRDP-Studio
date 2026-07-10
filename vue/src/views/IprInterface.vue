@@ -9,6 +9,7 @@ import MaterialBalanceContent from '@/views/WellControlInventory/MaterialBalance
 import AnalyticMethodContent from '@/views/WellControlInventory/AnalyticMethodContent.vue'
 import WattenbargerContent from '@/views/WellControlInventory/WattenbargerContent.vue'
 import BlasingameContent from '@/views/WellControlInventory/BlasingameContent.vue'
+import DynamicBalanceContent from '@/views/WellControlInventory/DynamicBalanceContent.vue'
 import { NODETYPE } from '@/constants/nodeType'
 import { analyticMethodApi, materialBalanceApi, nodeApi, projectApi, typicalCurveApi, waterInvasionApi } from '@/api/docker'
 
@@ -893,6 +894,34 @@ const handleCommand = ({ group, name }) => { // 接收顶部菜单栏的点击�
       }
       activeNodeId.value = currentViewNode.value.id
       break
+    case '动态平衡':
+      if (!selectedWellName.value) {
+        ElMessage.warning('请先在左侧选择一口井')
+        return
+      }
+      currentView.value = 'dynamic-balance'
+      currentViewNode.value = {
+        id: `db-${selectedWellName.value}`,
+        label: '动态平衡',
+        wellName: selectedWellName.value,
+        raw: {}
+      }
+      activeNodeId.value = currentViewNode.value.id
+      break
+    case '动态平衡':
+      if (!selectedWellName.value) {
+        ElMessage.warning('请先在左侧选择一口井')
+        return
+      }
+      currentView.value = 'dynamic-balance'
+      currentViewNode.value = {
+        id: `db-${selectedWellName.value}`,
+        label: '动态平衡',
+        wellName: selectedWellName.value,
+        raw: {}
+      }
+      activeNodeId.value = currentViewNode.value.id
+      break
     default:
       ElMessage.success(`[${group}] ${name}`)
   }
@@ -967,6 +996,12 @@ onMounted(initTree)
         />
         <WattenbargerContent
           v-if="currentView === 'wattenbarger'"
+          :node="currentViewNode"
+          :project-id="PROJECT_ID"
+          :gas-reservoir-id="GAS_RESERVOIR_ID"
+        />
+        <DynamicBalanceContent
+          v-if="currentView === 'dynamic-balance'"
           :node="currentViewNode"
           :project-id="PROJECT_ID"
           :gas-reservoir-id="GAS_RESERVOIR_ID"
