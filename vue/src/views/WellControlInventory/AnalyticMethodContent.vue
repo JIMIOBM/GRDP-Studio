@@ -34,11 +34,11 @@ const rawNode = computed(() => props.node?.raw || {})
 const wellName = computed(() => props.node?.wellName || rawNode.value?.wellName || rawNode.value?.nodeTitle || '')
 const fields = computed(() => Array.isArray(resultData.value?.fields) ? resultData.value.fields : [])
 const input = computed(() =>
-  resultData.value?.input ||
-  resultData.value?.inputs ||
-  resultData.value?.parameter ||
-  resultData.value?.params ||
-  {}
+    resultData.value?.input ||
+    resultData.value?.inputs ||
+    resultData.value?.parameter ||
+    resultData.value?.params ||
+    {}
 )
 const output = computed(() => ({
   ...(resultData.value?.output || {}),
@@ -54,11 +54,11 @@ const chartItems = computed(() => resultData.value?.chartItems || resultData.val
 const getResultIdFromNode = () => {
   const raw = rawNode.value
   return raw.resultId || raw.analysisId || raw.analysisID || raw.analysis_id ||
-    raw.AnalysisMethodsId || raw.analysisMethodsId || raw.id || props.node?.resultId
+      raw.AnalysisMethodsId || raw.analysisMethodsId || raw.id || props.node?.resultId
 }
 
 const getFieldMeta = (name) => fields.value.find(item =>
-  item?.name === name || item?.field === name || item?.key === name || item?.prop === name
+    item?.name === name || item?.field === name || item?.key === name || item?.prop === name
 )
 const getFieldUnit = (name) => {
   const field = getFieldMeta(name)
@@ -93,16 +93,16 @@ const outputValue = (keys, fallback = '') => getValue(output.value, keys, fallba
 
 const gasType = computed(() => methodLabel(inputValue(['gasType'], '干气'), ['', '', '干气'], '干气'))
 const modificationMethod = computed(() =>
-  methodLabel(inputValue(['modificationMethod'], 0), MODIFICATION_METHODS, 'Wichert-Aziz 修正方法')
+    methodLabel(inputValue(['modificationMethod'], 0), MODIFICATION_METHODS, 'Wichert-Aziz 修正方法')
 )
 const deviationMethod = computed(() =>
-  methodLabel(inputValue(['deviationFactorMethod'], 0), DEVIATION_METHODS, 'Dranchuk-Abu-Kassem 方法')
+    methodLabel(inputValue(['deviationFactorMethod'], 0), DEVIATION_METHODS, 'Dranchuk-Abu-Kassem 方法')
 )
 const viscosityMethod = computed(() =>
-  methodLabel(inputValue(['viscosityMethod'], 0), VISCOSITY_METHODS, 'Lee-Gonzalez-Eakin 方法')
+    methodLabel(inputValue(['viscosityMethod'], 0), VISCOSITY_METHODS, 'Lee-Gonzalez-Eakin 方法')
 )
 const materialBalanceMethod = computed(() =>
-  methodLabel(inputValue(['mbEquationType', 'materialBalanceType'], 0), MATERIAL_BALANCE_METHODS, '封闭气藏')
+    methodLabel(inputValue(['mbEquationType', 'materialBalanceType'], 0), MATERIAL_BALANCE_METHODS, '封闭气藏')
 )
 const minimumWaterGasRatio = computed(() => inputValue(['minimumWaterGasRatio', 'waterGasRatioLimit'], -1))
 const waterGasRatioEnabled = computed(() => Number(minimumWaterGasRatio.value) > 0)
@@ -115,8 +115,8 @@ const productionColumns = computed(() => {
   ]
   if (!isDryGas.value) base.push({ field: 'dailyOilProduction', label: '油产量' })
   base.push(
-    { field: 'cumulativeGasProduction', label: '累产气量' },
-    { field: 'cumulativeWaterProduction', label: '累产水量' }
+      { field: 'cumulativeGasProduction', label: '累产气量' },
+      { field: 'cumulativeWaterProduction', label: '累产水量' }
   )
   return base
 })
@@ -209,7 +209,7 @@ const defaultTableColumns = [
 ]
 
 const productionUnitRow = computed(() =>
-  productionColumns.value.map(column => getFieldUnit(column.field) || '无')
+    productionColumns.value.map(column => getFieldUnit(column.field) || '无')
 )
 
 const tableColumns = computed(() => {
@@ -230,17 +230,17 @@ const getPoint = (item) => {
   const xField = item.xAxisField || item.xField || 'date'
   const yField = item.yAxisField || item.yField
   return (item.data || item.items || [])
-    .filter(row => !row?.isDeleted)
-    .map(row => {
-      const x = row.xValue ?? row[xField]
-      const y = Number(row.yValue ?? (yField ? row[yField] : row.y))
-      return [x, Number.isFinite(y) ? y : null]
-    })
-    .filter(point => point[0] !== undefined && point[0] !== null && point[1] !== null)
+      .filter(row => !row?.isDeleted)
+      .map(row => {
+        const x = row.xValue ?? row[xField]
+        const y = Number(row.yValue ?? (yField ? row[yField] : row.y))
+        return [x, Number.isFinite(y) ? y : null]
+      })
+      .filter(point => point[0] !== undefined && point[0] !== null && point[1] !== null)
 }
 
 const isPressureSeries = (name = '', field = '') =>
-  String(name).includes('压力') || String(field).includes('Pressure') || String(field).includes('pressure')
+    String(name).includes('压力') || String(field).includes('Pressure') || String(field).includes('pressure')
 
 const renderChart = () => {
   if (!chart || activeChartTab.value !== 'chart') return
@@ -318,18 +318,18 @@ const parseProductionRows = (XLSX, worksheet) => {
   }
 
   return table.slice(2)
-    .filter(row => row.slice(0, productionColumns.value.length).some(value => value !== '' && value !== null && value !== undefined))
-    .map(row => {
-      const item = {}
-      productionColumns.value.forEach((column, index) => {
-      const value = row[index]
-      item[column.field] = column.field === 'date'
-        ? normalizeExcelDate(XLSX, value)
-        : Number(value || 0)
+      .filter(row => row.slice(0, productionColumns.value.length).some(value => value !== '' && value !== null && value !== undefined))
+      .map(row => {
+        const item = {}
+        productionColumns.value.forEach((column, index) => {
+          const value = row[index]
+          item[column.field] = column.field === 'date'
+              ? normalizeExcelDate(XLSX, value)
+              : Number(value || 0)
+        })
+        item.dailyOilProduction = item.dailyOilProduction || 0
+        return item
       })
-      item.dailyOilProduction = item.dailyOilProduction || 0
-      return item
-    })
 }
 
 const importProductionData = async (event) => {
@@ -466,10 +466,10 @@ onBeforeUnmount(() => {
 <template>
   <div v-loading="loading" class="analytic-wrap">
     <aside
-      ref="paramsPanelEl"
-      class="params-panel"
-      :class="{ collapsed: paramsCollapsed }"
-      :style="{ width: paramsCollapsed ? '22px' : `${paramsPanelWidth}px`, minWidth: paramsCollapsed ? '22px' : `${paramsPanelWidth}px` }"
+        ref="paramsPanelEl"
+        class="params-panel"
+        :class="{ collapsed: paramsCollapsed }"
+        :style="{ width: paramsCollapsed ? '22px' : `${paramsPanelWidth}px`, minWidth: paramsCollapsed ? '22px' : `${paramsPanelWidth}px` }"
     >
       <div v-if="paramsCollapsed" class="panel-collapsed-tab" @click="toggleParamsPanel">
         参数设置
@@ -505,10 +505,10 @@ onBeforeUnmount(() => {
             <div class="wgr-label-row">
               <span>生产水气比下限</span>
               <el-switch
-                :model-value="waterGasRatioEnabled"
-                disabled
-                style="--el-switch-on-color:#e8a000;--el-switch-off-color:#ccc"
-                size="small"
+                  :model-value="waterGasRatioEnabled"
+                  disabled
+                  style="--el-switch-on-color:#e8a000;--el-switch-off-color:#ccc"
+                  size="small"
               />
             </div>
             <el-input size="small" readonly :disabled="!waterGasRatioEnabled" :model-value="minimumWaterGasRatio" />
@@ -520,11 +520,11 @@ onBeforeUnmount(() => {
             <el-button size="small" @click="openProductionImport">导入</el-button>
           </div>
           <input
-            ref="importFileInput"
-            class="hidden-file-input"
-            type="file"
-            accept=".xlsx,.xls"
-            @change="importProductionData"
+              ref="importFileInput"
+              class="hidden-file-input"
+              type="file"
+              accept=".xlsx,.xls"
+              @change="importProductionData"
           />
         </div>
 
@@ -568,12 +568,12 @@ onBeforeUnmount(() => {
         <el-table :data="outputItems" size="small" height="100%" border>
           <el-table-column type="index" label="序号" width="64" />
           <el-table-column
-            v-for="column in tableColumns"
-            :key="column.prop"
-            :prop="column.prop"
-            :label="column.label"
-            :min-width="column.minWidth"
-            :formatter="column.formatter"
+              v-for="column in tableColumns"
+              :key="column.prop"
+              :prop="column.prop"
+              :label="column.label"
+              :min-width="column.minWidth"
+              :formatter="column.formatter"
           />
         </el-table>
       </div>
