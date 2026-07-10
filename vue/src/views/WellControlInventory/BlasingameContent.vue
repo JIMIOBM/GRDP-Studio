@@ -597,17 +597,17 @@ onBeforeUnmount(() => {
       </template>
     </aside>
 
-    <main ref="chartAreaEl" class="chart-area">
+    <div ref="chartAreaEl" class="chart-area">
       <div class="chart-tabs">
-        <div class="chart-tab" :class="{ active: activeChartTab === 'chart' }" @click="activeChartTab = 'chart'">
-          Blasingame图
-        </div>
-        <div class="chart-tab" :class="{ active: activeChartTab === 'table' }" @click="activeChartTab = 'table'">
+        <button type="button" class="chart-tab" :class="{ active: activeChartTab === 'chart' }" @click="activeChartTab = 'chart'">
+          结果分析图
+        </button>
+        <button type="button" class="chart-tab" :class="{ active: activeChartTab === 'table' }" @click="activeChartTab = 'table'">
           数据列表
-        </div>
+        </button>
       </div>
 
-      <div v-show="activeChartTab === 'chart'" ref="chartEl" class="chart"></div>
+      <div v-show="activeChartTab === 'chart'" ref="chartEl" class="chart-instance"></div>
 
       <div
           v-if="activeChartTab === 'chart' && legendItems.length"
@@ -633,16 +633,16 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <div v-if="activeChartTab === 'table'" class="table-wrap">
-        <el-table :data="tableRows" size="small" height="100%" border>
-          <el-table-column prop="index" label="序号" width="64" />
-          <el-table-column prop="date" label="日期" min-width="130" />
-          <el-table-column prop="formationPressure" label="井底流压(MPa)" min-width="140" />
-          <el-table-column prop="gasProduction" label="气产量(10⁴m³/d)" min-width="150" />
-          <el-table-column prop="waterProduction" label="累产水量(10⁴m³)" min-width="150" />
+      <div v-if="activeChartTab === 'table'" class="data-list-panel">
+        <el-table :data="tableRows" size="small" height="100%" border stripe>
+          <el-table-column prop="index" label="序号" width="76" sortable />
+          <el-table-column prop="date" label="日期" min-width="150" sortable />
+          <el-table-column prop="formationPressure" label="井底流压(MPa)" min-width="160" sortable />
+          <el-table-column prop="gasProduction" label="气产量(10⁴m³/d)" min-width="170" sortable />
+          <el-table-column prop="waterProduction" label="累产水量(10⁴m³)" min-width="170" sortable />
         </el-table>
       </div>
-    </main>
+    </div>
   </div>
 </template>
 
@@ -830,22 +830,20 @@ onBeforeUnmount(() => {
 
 .chart-tabs {
   display: flex;
-  height: 26px;
+  height: 34px;
   border-bottom: 1px solid #e4e7ed;
   flex-shrink: 0;
   background: #fafafa;
 }
 
 .chart-tab {
-  padding: 0 18px;
-  display: flex;
-  align-items: center;
-  font-size: 12px;
-  color: #666;
-  cursor: pointer;
+  border: 0;
   border-right: 1px solid #e4e7ed;
+  background: transparent;
+  padding: 0 16px;
+  color: #555;
+  cursor: pointer;
   border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
   white-space: nowrap;
 
   &:hover {
@@ -856,11 +854,11 @@ onBeforeUnmount(() => {
     color: #409eff;
     border-bottom-color: #409eff;
     background: #fff;
-    font-weight: 500;
+    font-weight: 600;
   }
 }
 
-.chart {
+.chart-instance {
   flex: 1;
   min-height: 0;
   width: 100%;
@@ -909,9 +907,11 @@ onBeforeUnmount(() => {
   border: 1px solid transparent;
 }
 
-.table-wrap {
+.data-list-panel {
   flex: 1;
   min-height: 0;
-  padding: 8px;
+  width: 100%;
+  overflow: hidden;
+  background: #fff;
 }
 </style>
