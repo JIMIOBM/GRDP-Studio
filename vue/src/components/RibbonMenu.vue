@@ -148,15 +148,21 @@ const defaultTabs = [
 
 //控制当先显示哪一个页签
 const diagnosticCurveItems = ['Blasingame', 'Transient', 'AG', 'Wattenbarger', 'NPI']
+const constraintConditionItems = ['关键设备', '水合物', '冲蚀', '冻堵']
 
 const isDiagnosticDropdown = (col) =>
   Array.isArray(col?.dropdownItems) &&
   diagnosticCurveItems.every(item => col.dropdownItems.includes(item))
 
+const isConstraintDropdown = (col) =>
+  Array.isArray(col?.dropdownItems) &&
+  constraintConditionItems.every(item => col.dropdownItems.includes(item))
+
 const normalizeRibbonTabs = (tabs) => tabs.map(tab => ({
   ...tab,
   groups: (tab.groups || []).map(group => {
     let shouldMoveDiagnosticItems = false
+    let pendingConstraintItems = []
     return {
       ...group,
       columns: (group.columns || []).map(col => {
@@ -165,7 +171,18 @@ const normalizeRibbonTabs = (tabs) => tabs.map(tab => ({
           return {
             ...col,
             dropdown: false,
-            dropdownItems: []
+            dropdownItems: [],
+            passive: true
+          }
+        }
+
+        if (isConstraintDropdown(col)) {
+          pendingConstraintItems = [...constraintConditionItems]
+          return {
+            ...col,
+            dropdown: false,
+            dropdownItems: [],
+            passive: true
           }
         }
 
@@ -174,6 +191,15 @@ const normalizeRibbonTabs = (tabs) => tabs.map(tab => ({
           return {
             ...col,
             squares: diagnosticCurveItems
+          }
+        }
+
+        if (pendingConstraintItems.length && col?.type === 'squares' && Number(col.count) > 0) {
+          const items = pendingConstraintItems.slice(0, col.count)
+          pendingConstraintItems = pendingConstraintItems.slice(col.count)
+          return {
+            ...col,
+            squares: items
           }
         }
 
@@ -337,7 +363,8 @@ const getIcon = (label) => iconMap[normalizeIconKey(label)] || ''
             <div
                 v-else-if="col.type === 'large'"
                 class="col-large"
-                @click="onItemClick(group.title, col.label)"
+                :class="{ passive: col.passive }"
+                @click="!col.passive && onItemClick(group.title, col.label)"
             >
               <img
                   v-if="getIcon(col.label)"
@@ -351,7 +378,31 @@ const getIcon = (label) => iconMap[normalizeIconKey(label)] || ''
 
             <!-- 小方块占位列 -->
             <div v-else-if="col.type === 'squares'" class="col-squares">
-              <span class="pad-square" v-for="n in col.count" :key="n"></span>
+              <template v-if="Array.isArray(col.squares)">
+                <el-tooltip
+                    v-for="item in col.squares"
+                    :key="item"
+                    :content="item"
+                    placement="bottom"
+                >
+                  <span
+                      class="pad-square command-square"
+                      tabindex="0"
+                      role="button"
+                      :aria-label="item"
+                      @click="onItemClick(group.title, item)"
+                      @keydown.enter.prevent="onItemClick(group.title, item)"
+                  >
+                    <img
+                        v-if="getIcon(item)"
+                        class="square-icon"
+                        :src="getIcon(item)"
+                        :alt="item"
+                    >
+                  </span>
+                </el-tooltip>
+              </template>
+              <span v-else class="pad-square" v-for="n in col.count" :key="n"></span>
             </div>
 
           </template>
@@ -532,6 +583,15 @@ $square-border: #c2c2c2;
     outline: 1px solid #cfe0fb;
   }
 
+  &.passive {
+    cursor: default;
+  }
+
+  &.passive:hover {
+    background-color: transparent;
+    outline: none;
+  }
+
   .big-icon {
     width: 36px;
     height: 36px;
@@ -571,8 +631,29 @@ $square-border: #c2c2c2;
   .pad-square {
     width: 16px;
     height: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     background-color: $square-bg;
     border: 1px solid $square-border;
+  }
+
+  .command-square {
+    cursor: pointer;
+
+    &:hover,
+    &:focus-visible {
+      border-color: #4084d9;
+      background-color: #eaf3ff;
+      outline: none;
+    }
+  }
+
+  .square-icon {
+    width: 13px;
+    height: 13px;
+    object-fit: contain;
+    pointer-events: none;
   }
 }
 </style>
