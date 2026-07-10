@@ -275,6 +275,7 @@ const applyMaterialBalanceNodes = (node) => {
     ensureWell(wellName, wellNode.nodeId || `well-${wellName}`)
     addAnalysisNode(wellName, {
       ...wellNode,
+      parentNode: node,
       nodeType: NODETYPE.NodeType_DynamicOriginalGasInplace,
       nodeTitle: '物质平衡'
     })
@@ -368,6 +369,20 @@ const pollAnalyticMethodNode = async (wellName, maxRetries = 20, intervalMs = 15
 const fetchMaterialBalanceNode = async () => {
   const res = await nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, NODETYPE.NodeType_DynamicOriginalGasInplace)
   return res?.data?.node
+}
+
+const pollMaterialBalanceNode = async (wellName, maxRetries = 20, intervalMs = 1500) => {
+  for (let i = 0; i < maxRetries; i++) {
+    await new Promise(resolve => setTimeout(resolve, intervalMs))
+
+    const node = await fetchMaterialBalanceNode()
+    const subNodes = node?.subNodes ?? []
+    if (subNodes.some(sub => sub.nodeTitle === wellName || sub.wellName === wellName)) {
+      return node
+    }
+  }
+
+  throw new Error('物质平衡计算超时，请稍后刷新查看结果')
 }
 
 const runWaterInvasionForSelectedWell = async () => { //点击水侵分析的操作
@@ -475,40 +490,42 @@ const runMaterialBalanceForSelectedWell = async () => {
   try {
     await materialBalanceApi.calc({
       wellNames: [targetWellName],
-      gasReservoirType: 3,
+      gasReservoirType: 1,
       gasReservoirId: Number(GAS_RESERVOIR_ID),
       projectId: Number(PROJECT_ID),
       waterGasRatioLimit: 0.14
     })
 
-    ElMessage.info(`${targetWellName} 物质平衡计算已触发，正在加载结果...`)
+    ElMessage.info(`${targetWellName} 物质平衡计算中，请稍后...`)
 
-    let node = null
-    try {
-      node = await fetchMaterialBalanceNode()
-      applyMaterialBalanceNodes(node)
-    } catch (nodeError) {
-      console.warn('物质平衡节点加载失败，继续按井名加载结果', nodeError)
-    }
+    const node = await pollMaterialBalanceNode(targetWellName)
+    applyMaterialBalanceNodes(node)
 
     const subNodes = node?.subNodes ?? []
     const resultNode = subNodes.find(sub => sub.nodeTitle === targetWellName || sub.wellName === targetWellName) || {
       nodeTitle: targetWellName,
       wellName: targetWellName
     }
-    const treeNode = ensureMaterialBalanceNodeForWell(targetWellName, resultNode)
+    const materialBalanceRawNode = {
+      ...resultNode,
+      parentNode: node,
+      rootNode: node,
+      nodeType: NODETYPE.NodeType_DynamicOriginalGasInplace,
+      nodeTitle: '物质平衡'
+    }
+    const treeNode = ensureMaterialBalanceNodeForWell(targetWellName, materialBalanceRawNode)
     const viewNode = treeNode || {
-      id: resultNode?.nodeId || resultNode?.resultId || `mb-${targetWellName}`,
+      id: materialBalanceRawNode?.nodeId || materialBalanceRawNode?.resultId || `mb-${targetWellName}`,
       label: '物质平衡',
       type: NODETYPE.NodeType_DynamicOriginalGasInplace,
       wellName: targetWellName,
-      raw: resultNode
+      raw: materialBalanceRawNode
     }
 
     activeNodeId.value = viewNode.id
     currentView.value = 'material-balance'
     currentViewNode.value = viewNode
-    ElMessage.success(`${targetWellName} 物质平衡结果加载中`)
+    ElMessage.success(`${targetWellName} 物质平衡计算完成`)
   } catch (error) {
     ElMessage.error(error.message || '物质平衡计算失败')
     console.error('物质平衡计算失败', error)
