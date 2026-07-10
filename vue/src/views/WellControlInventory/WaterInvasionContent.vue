@@ -51,6 +51,7 @@ const output = computed(() => wellData.value?.outputs?.[activeChartIdx.value]?.o
 const outputFields = computed(() => OUTPUT_FIELD_CONFIGS[activeChartIdx.value] || [])
 const hasOutputResults = computed(() => outputFields.value.length > 0)
 const isWaterActivityTab = computed(() => activeChartIdx.value === 4)
+const isDataListTab = computed(() => activeTab.value?.type === 'table')
 const waterActivityOutput = computed(() => wellData.value?.outputs?.[4]?.output || {})
 
 //用于控制右侧浮动图例的位置
@@ -139,8 +140,8 @@ const getMethodValue = (methods, key) => {
 
 // 只保留有 chartItems 的 outputs，作为图表标签页
 const chartTabs = computed(() => {
-  if (!wellData.value?.outputs) return []
-  return wellData.value.outputs
+  if (!wellData.value) return []
+  const outputTabs = (wellData.value.outputs || [])
       .slice(0, CHART_TAB_LABELS.length)
       .map((o, index) => ({
         analysisId:  o.analysisId,
@@ -148,9 +149,61 @@ const chartTabs = computed(() => {
         chartItems:  o.chartItems || [],
         outputItems: o.outputItems || []
       }))
+  return [
+    ...outputTabs,
+    {
+      analysisId: 'water-invasion-data-list',
+      label: '数据列表',
+      type: 'table',
+      chartItems: [],
+      outputItems: []
+    }
+  ]
 })
 
 const activeTab = computed(() => chartTabs.value[activeChartIdx.value] || null)
+
+const getRowValue = (row, keys, fallback = '') => {
+  for (const key of keys) {
+    const value = row?.[key]
+    if (value !== undefined && value !== null && value !== '') return value
+  }
+  return fallback
+}
+
+const formatDateValue = (value) => {
+  if (!value) return ''
+  return String(value).slice(0, 10).replace(/-/g, '/')
+}
+
+const formatDecimalValue = (value, digits) => {
+  if (value === undefined || value === null || value === '') return ''
+  const num = Number(value)
+  if (!Number.isFinite(num)) return value
+  return num.toFixed(digits).replace(/\.?0+$/, '')
+}
+
+const dataListRows = computed(() => {
+  const inputId = input.value?.id
+  const matchedOutput = (wellData.value?.outputs || []).find(output => {
+    const analysisId = output?.analysisId
+    return String(analysisId) === String(inputId)
+  })
+  const rows = matchedOutput?.outputItems || []
+  return rows.map((row, index) => {
+    const isDeleted = getRowValue(row, ['isDeleted'], false)
+    return {
+      index: index + 1,
+      date: formatDateValue(getRowValue(row, ['date'])),
+      pressure: formatDecimalValue(getRowValue(row, ['pressure']), 4),
+      cumulativeGasProduction: formatDecimalValue(getRowValue(row, ['cumulativeGasProduction']), 4),
+      cumulativeWaterProduction: formatDecimalValue(getRowValue(row, ['cumulativeWaterProduction']), 4),
+      apparentPressure: formatDecimalValue(getRowValue(row, ['apparentPressure']), 4),
+      recoveryDegree: formatDecimalValue(getRowValue(row, ['recoveryDegree']), 2),
+      selected: isDeleted ? '否' : '是'
+    }
+  })
+})
 
 
 // ─── ECharts ───
@@ -491,6 +544,10 @@ function renderDriveMechanismChart(tab) {
 //总渲染入口，决定当前改该画哪种图
 function renderChart() {
   if (!chart || !activeTab.value) return
+  if (isDataListTab.value) {
+    chart.clear()
+    return
+  }
   if (isWaterActivityTab.value) {
     chart.clear()
     return
@@ -738,15 +795,35 @@ onBeforeUnmount(() => {
     <!-- 右侧图表区域 -->
     <div ref="chartAreaEl" class="chart-area">
       <div v-if="chartTabs.length" class="chart-tabs">
-        <div
+        <button
             v-for="(tab, i) in chartTabs"
             :key="tab.analysisId"
+            type="button"
             class="chart-tab"
             :class="{ active: i === activeChartIdx }"
             @click="activeChartIdx = i"
-        >{{ tab.label }}</div>
+        >{{ tab.label }}</button>
       </div>
-      <div v-show="!isWaterActivityTab" ref="chartEl" class="chart-instance"/>
+      <div v-show="!isWaterActivityTab && !isDataListTab" ref="chartEl" class="chart-instance"/>
+
+      <div v-if="isDataListTab" class="data-list-panel">
+        <el-table :data="dataListRows" size="small" height="100%" border stripe>
+          <el-table-column prop="index" label="序号" width="76" sortable />
+          <el-table-column prop="date" label="日期" min-width="150" sortable />
+          <el-table-column prop="pressure" label="地层压力(MPa)" min-width="160" sortable />
+          <el-table-column prop="cumulativeGasProduction" label="累产气量(10⁸m³)" min-width="170" sortable />
+          <el-table-column prop="cumulativeWaterProduction" label="累产水量(10⁴m³)" min-width="170" sortable />
+          <el-table-column prop="apparentPressure" label="无因次视压力(dless)" min-width="180" sortable />
+          <el-table-column prop="recoveryDegree" label="采出程度(%)" min-width="150" sortable />
+          <el-table-column
+            prop="selected"
+            label="是否参与分析"
+            min-width="150"
+            :filters="[{ text: '是', value: '是' }, { text: '否', value: '否' }]"
+            :filter-method="(value, row) => row.selected === value"
+          />
+        </el-table>
+      </div>
 
       <div
           v-if="legendItems.length"
@@ -987,6 +1064,7 @@ onBeforeUnmount(() => {
 }
 
 .chart-tabs {
+  height: 34px;
   display: flex;
   border-bottom: 1px solid #e4e7ed;
   flex-shrink: 0;
@@ -994,20 +1072,24 @@ onBeforeUnmount(() => {
 }
 
 .chart-tab {
-  padding: 6px 14px;
-  font-size: 12px;
-  color: #666;
+  border: 0;
+  border-right: 1px solid #e4e7ed;
+  background: transparent;
+  padding: 0 16px;
+  color: #555;
   cursor: pointer;
   border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
   white-space: nowrap;
-  transition: color 0.15s, border-color 0.15s;
-  &:hover { color: #409eff; }
+
+  &:hover {
+    color: #409eff;
+  }
+
   &.active {
     color: #409eff;
     border-bottom-color: #409eff;
     background: #fff;
-    font-weight: 500;
+    font-weight: 600;
   }
 }
 
@@ -1015,6 +1097,14 @@ onBeforeUnmount(() => {
   flex: 1;
   min-height: 0;
   width: 100%;
+}
+
+.data-list-panel {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  overflow: hidden;
+  background: #fff;
 }
 
 .floating-chart-legend {
