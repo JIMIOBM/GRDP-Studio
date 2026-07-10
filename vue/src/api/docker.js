@@ -72,6 +72,9 @@ export const analyticMethodApi = {
   historyFitting: (data) =>
     dockerRequest.post('/projectanalysis/analysismethods/historyfitting', data),
 
+  historyFittingByWell: (wellName, data) =>
+    dockerRequest.post(`/projectanalysis/analysismethods/${encodeURIComponent(wellName)}/historyfitting`, data),
+
   historyRefitting: (data) =>
     dockerRequest.post('/projectanalysis/analysismethods/historyrefitting', data),
 
