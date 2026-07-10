@@ -698,16 +698,15 @@ async function fetchData() {
     }
 
     if (!nextResultData) throw lastError || new Error('物质平衡结果加载失败')
-    console.log("物质平衡测试输出：", nextResultData)
     if (requestId !== requestSeq) return
 
     resultData.value = nextResultData
-    console.log("物质平衡测试输出resultData.value：",resultData.value)
     activeChartTab.value = 0
     activePanelTab.value = 'input'
     await nextTick()
     renderChart()
-    emit('refresh-tree')
+    // 物质平衡是批量计算，但本次页面只刷新当前井对应的左侧节点。
+    emit('refresh-tree', wellName)
   } catch (error) {
     if (requestId !== requestSeq) return
     console.error('[MaterialBalanceContent] load failed', error)
