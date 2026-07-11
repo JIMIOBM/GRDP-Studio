@@ -8,6 +8,7 @@ import MaterialBalanceContent from '@/views/WellControlInventory/MaterialBalance
 import AnalyticMethodContent from '@/views/WellControlInventory/AnalyticMethodContent.vue'
 import WattenbargerContent from '@/views/WellControlInventory/WattenbargerContent.vue'
 import BlasingameContent from '@/views/WellControlInventory/BlasingameContent.vue'
+import NpiContent from '@/views/WellControlInventory/NpiContent.vue'
 import DynamicBalanceContent from '@/views/WellControlInventory/DynamicBalanceContent.vue'
 import { NODETYPE } from '@/constants/nodeType'
 import { analyticMethodApi, materialBalanceApi, nodeApi, projectApi, typicalCurveApi, waterInvasionApi } from '@/api/docker'
@@ -116,9 +117,23 @@ const BLASINGAME_NODE_TYPES = new Set([
   NODETYPE.NodeType_FracturedHorizontalWellTypicalCurveBlasingame
 ])
 
+const NPI_NODE_TYPES = new Set([
+  NODETYPE.NodeType_TypicalCurveNPI,
+  NODETYPE.NodeType_VerticalWellTypicalCurveNPI,
+  NODETYPE.NodeType_HorizontalWellTypicalCurveNPI,
+  NODETYPE.NodeType_FracturedVerticalWellTypicalCurveNPI,
+  NODETYPE.NodeType_FracturedHorizontalWellTypicalCurveNPI
+])
+
 const isBlasingameNode = (item) => {
   const nodeType = item?.nodeType ?? item?.type
   return BLASINGAME_NODE_TYPES.has(nodeType) || getNodeName(item) === 'Blasingame'
+}
+
+const isNpiNode = (item) => {
+  const nodeType = item?.nodeType ?? item?.type
+  const nodeName = getNodeName(item)
+  return NPI_NODE_TYPES.has(nodeType) || nodeName === 'Normalized Pressure Integral' || nodeName === 'NPI'
 }
 
 const findBlasingameNodeByWell = (root, wellName) => {
@@ -142,6 +157,27 @@ const findBlasingameNodeByWell = (root, wellName) => {
       if (found) return found
     }
 
+    return null
+  }
+
+  return visit(root)
+}
+
+const findNpiNodeByWell = (root, wellName) => {
+  if (!root || !wellName) return null
+
+  const visit = (item, currentWellName = '') => {
+    if (!item) return null
+    const nodeName = getNodeName(item)
+    const nodeType = item?.nodeType ?? item?.type
+    const nextWellName = nodeType === NODETYPE.NodeType_Well || nodeName === wellName
+        ? nodeName
+        : currentWellName
+    if (nextWellName === wellName && isNpiNode(item)) return item
+    for (const child of getChildren(item)) {
+      const found = visit(child, nextWellName)
+      if (found) return found
+    }
     return null
   }
 
@@ -273,6 +309,45 @@ const addBlasingameNode = (wellName, rawNode = {}) => {
   }
 
   return blasingameNode
+}
+
+const addNpiNode = (wellName, rawNode = {}) => {
+  const wellItem = ensureWell(wellName, rawNode?.wellId || rawNode?.parentId)
+  const inventoryGroup = wellItem?.children.find(item => item.type === 'well-control-inventory')
+  if (!inventoryGroup) return null
+
+  const parentId = `${wellItem.id}-diagnostic-curve`
+  let diagnosticNode = inventoryGroup.children.find(item =>
+      item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve || item.label === '诊断曲线'
+  )
+  if (!diagnosticNode) {
+    diagnosticNode = {
+      id: parentId,
+      label: '诊断曲线',
+      type: NODETYPE.NodeType_TypicalCurve,
+      wellName,
+      defaultExpanded: true,
+      children: []
+    }
+    inventoryGroup.children.push(diagnosticNode)
+  }
+  diagnosticNode.defaultExpanded = true
+  diagnosticNode.children = diagnosticNode.children || []
+
+  const id = rawNode?.nodeId || rawNode?.id || `${parentId}-npi`
+  const npiNode = {
+    id,
+    label: 'NPI',
+    type: rawNode?.nodeType || rawNode?.type || NODETYPE.NodeType_TypicalCurveNPI,
+    wellName,
+    raw: rawNode
+  }
+  const existedIndex = diagnosticNode.children.findIndex(item =>
+      item.id === id || NPI_NODE_TYPES.has(item.type) || item.label === 'Normalized Pressure Integral' || item.label === 'NPI'
+  )
+  if (existedIndex >= 0) diagnosticNode.children[existedIndex] = npiNode
+  else diagnosticNode.children.push(npiNode)
+  return npiNode
 }
 
 const collectWellsFromProject = (payload) => {
@@ -423,6 +498,13 @@ const applyTypicalCurveNodes = (node) => {
       })
     }
 
+    if (wellName && nextInTypicalCurve && isNpiNode(item)) {
+      addNpiNode(wellName, {
+        ...item,
+        nodeTitle: 'Normalized Pressure Integral'
+      })
+    }
+
     children.forEach(child => visit(child, wellName, nextInTypicalCurve))
   }
 
@@ -567,6 +649,13 @@ const getBlasingameNodeOnce = async (wellName, delayMs = 1200) => {
   const rootNode = res?.data?.node
   const blasingameNode = findBlasingameNodeByWell(rootNode, wellName)
   return { rootNode, blasingameNode }
+}
+
+const getNpiNodeOnce = async (wellName, delayMs = 1200) => {
+  if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs))
+  const res = await nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, NODETYPE.NodeType_ProductivityInstabilityAnalysis)
+  const rootNode = res?.data?.node
+  return { rootNode, npiNode: findNpiNodeByWell(rootNode, wellName) }
 }
 
 const runWaterInvasionForSelectedWell = async () => { //点击水侵分析的操作
@@ -771,6 +860,63 @@ const runBlasingameForSelectedWell = async () => {
   }
 }
 
+const runNpiForSelectedWell = async () => {
+  const targetWellName = selectedWellName.value
+  if (!targetWellName) {
+    ElMessage.warning('请先在左侧选择一口井')
+    return
+  }
+  if (typicalCurveRunning.value) return
+
+  typicalCurveRunning.value = true
+  try {
+    await typicalCurveApi.fitting({
+      gasReservoirId: Number(GAS_RESERVOIR_ID),
+      projectId: Number(PROJECT_ID),
+      wellNames: [targetWellName],
+      fittingType: 3,
+      isSkipFitting: false,
+      dataSize: 300,
+      initScanDataSize: 10,
+      fineScanDataSize: 30,
+      minimumWaterGasRatio: 0.0602
+    })
+
+    ElMessage.info(`${targetWellName} NPI计算中，请稍候...`)
+    let resultNode = null
+    let rootNode = null
+    for (let i = 0; i < 20; i++) {
+      const result = await getNpiNodeOnce(targetWellName, 1500)
+      rootNode = result.rootNode
+      resultNode = result.npiNode
+      if (resultNode) break
+    }
+    if (!resultNode) throw new Error('NPI计算超时，请稍后刷新查看结果')
+
+    applyTypicalCurveNodes(rootNode)
+    const nodeId = resultNode.nodeId || resultNode.id
+    const resultRes = await typicalCurveApi.getResult(PROJECT_ID, GAS_RESERVOIR_ID, nodeId)
+    const viewNode = {
+      id: nodeId,
+      label: 'NPI',
+      type: resultNode?.nodeType || resultNode?.type || NODETYPE.NodeType_TypicalCurveNPI,
+      wellName: targetWellName,
+      raw: normalizePayload(resultRes),
+      treeNode: resultNode
+    }
+    activeNodeId.value = nodeId
+    currentView.value = 'npi'
+    currentViewNode.value = viewNode
+    ElMessage.success(`${targetWellName} NPI计算完成`)
+  } catch (error) {
+    const msg = error.response?.data?.msg || error.response?.data?.message || error.message
+    ElMessage.error(msg || 'NPI计算失败')
+    console.error('NPI计算失败', error)
+  } finally {
+    typicalCurveRunning.value = false
+  }
+}
+
 
 const openBlasingameNode = async (node) => {
   const targetWellName = node?.wellName || selectedWellName.value
@@ -811,6 +957,38 @@ const openBlasingameNode = async (node) => {
   } catch (error) {
     ElMessage.error(error.message || 'Blasingame结果加载失败')
     console.error('Blasingame结果加载失败', error)
+  }
+}
+
+const openNpiNode = async (node) => {
+  const targetWellName = node?.wellName || selectedWellName.value
+  if (!targetWellName) {
+    ElMessage.warning('请先在左侧选择一口井')
+    return
+  }
+  currentView.value = 'npi'
+  currentViewNode.value = node
+  try {
+    const nodeRes = await nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, NODETYPE.NodeType_ProductivityInstabilityAnalysis)
+    const rootNode = nodeRes?.data?.node
+    applyTypicalCurveNodes(rootNode)
+    const npiNode = findNpiNodeByWell(rootNode, targetWellName) || node?.raw || node
+    const nodeId = npiNode?.nodeId || npiNode?.id
+    if (!nodeId) throw new Error('没有找到 NPI 对应的 nodeId')
+    const resultRes = await typicalCurveApi.getResult(PROJECT_ID, GAS_RESERVOIR_ID, nodeId)
+    activeNodeId.value = nodeId
+    currentViewNode.value = {
+      ...node,
+      id: nodeId,
+      label: 'NPI',
+      type: npiNode?.nodeType || npiNode?.type || node?.type || NODETYPE.NodeType_TypicalCurveNPI,
+      wellName: targetWellName,
+      raw: normalizePayload(resultRes),
+      treeNode: npiNode
+    }
+  } catch (error) {
+    ElMessage.error(error.message || 'NPI结果加载失败')
+    console.error('NPI结果加载失败', error)
   }
 }
 
@@ -855,6 +1033,11 @@ const handleSelect = (node) => { // 点击左侧树节点
     return
   }
 
+  if (NPI_NODE_TYPES.has(node.type)) {
+    openNpiNode(node)
+    return
+  }
+
   if (node.type === NODETYPE.NodeType_VerticalWellTypicalCurveWb) {
     currentView.value = 'wattenbarger'
     currentViewNode.value = node
@@ -877,6 +1060,9 @@ const handleCommand = ({ group, name }) => { // 接收顶部菜单栏的点击�
       break
     case 'Blasingame':
       runBlasingameForSelectedWell()
+      break
+    case 'NPI':
+      runNpiForSelectedWell()
       break
     case 'Wattenbarger':
       if (!selectedWellName.value) {
@@ -989,6 +1175,12 @@ onMounted(initTree)
         />
         <BlasingameContent
             v-if="currentView === 'blasingame'"
+            :node="currentViewNode"
+            :project-id="PROJECT_ID"
+            :gas-reservoir-id="GAS_RESERVOIR_ID"
+        />
+        <NpiContent
+            v-if="currentView === 'npi'"
             :node="currentViewNode"
             :project-id="PROJECT_ID"
             :gas-reservoir-id="GAS_RESERVOIR_ID"
