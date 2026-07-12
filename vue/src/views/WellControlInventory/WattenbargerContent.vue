@@ -1,5 +1,5 @@
 <script setup>
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
 
 const props = defineProps({
@@ -11,6 +11,14 @@ const props = defineProps({
 const activeTab = ref('chart')
 const chartEl = ref(null)
 let chart = null
+
+const currentWellName = computed(() =>
+    props.node?.wellName || props.node?.raw?.wellName || props.node?.raw?.input?.wellName || props.node?.raw?.input?.wellNames?.[0] || ''
+)
+
+const chartTabTitle = computed(() =>
+    `诊断曲线-Wattenbarger-${currentWellName.value || '当前井'}-分析结果`
+)
 
 const demoData = [
   [0.08, 9.8], [0.16, 8.6], [0.32, 7.4], [0.64, 6.2],
@@ -99,9 +107,10 @@ onBeforeUnmount(() => {
     </aside>
 
     <main class="wb-main">
-      <div class="tabs">
-        <button :class="{ active: activeTab === 'chart' }" @click="activeTab = 'chart'">曲线图</button>
-        <button :class="{ active: activeTab === 'table' }" @click="activeTab = 'table'">数据列表</button>
+      <div class="dynamic-result-tabs">
+        <button type="button" class="dynamic-result-tab active" :title="chartTabTitle">
+          <span class="dynamic-result-tab-text">{{ chartTabTitle }}</span>
+        </button>
       </div>
 
       <div v-show="activeTab === 'chart'" ref="chartEl" class="chart"></div>
@@ -112,6 +121,15 @@ onBeforeUnmount(() => {
           <el-table-column prop="time" label="tD(dless)" min-width="160" />
           <el-table-column prop="rate" label="qD(dless)" min-width="160" />
         </el-table>
+      </div>
+
+      <div class="bottom-chart-tabs">
+        <button type="button" class="bottom-chart-tab" :class="{ active: activeTab === 'table' }" @click="activeTab = 'table'">
+          数据列表
+        </button>
+        <button type="button" class="bottom-chart-tab" :class="{ active: activeTab === 'chart' }" :title="chartTabTitle" @click="activeTab = 'chart'">
+          结果分析图
+        </button>
       </div>
     </main>
   </div>
@@ -166,27 +184,40 @@ onBeforeUnmount(() => {
   flex-direction: column;
 }
 
-.tabs {
+.dynamic-result-tabs {
   height: 34px;
+  flex-shrink: 0;
   display: flex;
+  align-items: center;
   border-bottom: 1px solid #e4e7ed;
   background: #fafafa;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
 
-  button {
-    border: 0;
-    border-right: 1px solid #e4e7ed;
-    background: transparent;
-    padding: 0 18px;
-    color: #555;
-    cursor: pointer;
+.dynamic-result-tab {
+  height: 34px;
+  max-width: 320px;
+  border: 0;
+  border-right: 1px solid #e4e7ed;
+  border-bottom: 2px solid #409eff;
+  background: transparent;
+  color: #409eff;
+  font-size: 14px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  cursor: default;
+  white-space: nowrap;
+}
 
-    &.active {
-      background: #fff;
-      color: #409eff;
-      font-weight: 600;
-      border-bottom: 2px solid #409eff;
-    }
-  }
+.dynamic-result-tab-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chart {
@@ -199,5 +230,37 @@ onBeforeUnmount(() => {
   flex: 1;
   min-height: 0;
   padding: 10px;
+}
+
+.bottom-chart-tabs {
+  display: flex;
+  align-items: flex-end;
+  height: 30px;
+  flex-shrink: 0;
+  background: #fff;
+  border-top: 1px solid #e4e7ed;
+}
+
+.bottom-chart-tab {
+  min-width: 88px;
+  height: 30px;
+  border: 0;
+  border-right: 1px solid #e4e7ed;
+  border-top: 2px solid transparent;
+  background: #fff;
+  color: #333;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+
+  &:hover {
+    color: #409eff;
+  }
+
+  &.active {
+    color: #409eff;
+    border-top-color: #409eff;
+    font-weight: 600;
+  }
 }
 </style>
