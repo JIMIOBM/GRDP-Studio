@@ -10,11 +10,16 @@ const props = defineProps({
 
 const activeTab = ref('chart')
 const chartEl = ref(null)
+const chartAreaEl = ref(null)
 
 const paramsPanelEl = ref(null)
 const paramsPanelWidth = ref(238)
 const paramsCollapsed = ref(false)
 const resizingParamsPanel = ref(false)
+const legendPosition = ref({ x: null, y: null })
+const draggingLegend = ref(false)
+const legendDragOffset = ref({ x: 0, y: 0 })
+const hiddenLegendNames = ref(new Set())
 
 let chart = null
 
@@ -50,6 +55,74 @@ const tableRows = demoData.map(([time, rate], index) => ({
   rate
 }))
 
+const legendItems = computed(() => [
+  {
+    name: 'Wattenbarger',
+    color: '#5470c6'
+  }
+])
+
+const legendStyle = computed(() => {
+  if (legendPosition.value.x === null || legendPosition.value.y === null) {
+    return { top: '42px', right: '22px' }
+  }
+  return {
+    left: `${legendPosition.value.x}px`,
+    top: `${legendPosition.value.y}px`
+  }
+})
+
+function isLegendItemHidden(name) {
+  return hiddenLegendNames.value.has(name)
+}
+
+function toggleLegendItem(name) {
+  const next = new Set(hiddenLegendNames.value)
+  if (next.has(name)) {
+    next.delete(name)
+  } else {
+    next.add(name)
+  }
+  hiddenLegendNames.value = next
+  renderChartSoon()
+}
+
+function onLegendDrag(event) {
+  if (!draggingLegend.value || !chartAreaEl.value) return
+  const rect = chartAreaEl.value.getBoundingClientRect()
+  const x = Math.max(0, Math.min(rect.width - 80, event.clientX - rect.left - legendDragOffset.value.x))
+  const y = Math.max(0, Math.min(rect.height - 30, event.clientY - rect.top - legendDragOffset.value.y))
+  legendPosition.value = { x, y }
+}
+
+function stopLegendDrag() {
+  if (!draggingLegend.value) return
+  draggingLegend.value = false
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+  window.removeEventListener('mousemove', onLegendDrag)
+  window.removeEventListener('mouseup', stopLegendDrag)
+}
+
+function startLegendDrag(event) {
+  if (!chartAreaEl.value) return
+  event.preventDefault()
+  const legendRect = event.currentTarget.getBoundingClientRect()
+  const areaRect = chartAreaEl.value.getBoundingClientRect()
+  const currentX = legendPosition.value.x ?? legendRect.left - areaRect.left
+  const currentY = legendPosition.value.y ?? legendRect.top - areaRect.top
+  legendPosition.value = { x: currentX, y: currentY }
+  legendDragOffset.value = {
+    x: event.clientX - legendRect.left,
+    y: event.clientY - legendRect.top
+  }
+  draggingLegend.value = true
+  document.body.style.cursor = 'move'
+  document.body.style.userSelect = 'none'
+  window.addEventListener('mousemove', onLegendDrag)
+  window.addEventListener('mouseup', stopLegendDrag)
+}
+
 function renderChart() {
   if (!chart) return
 
@@ -68,6 +141,9 @@ function renderChart() {
     tooltip: {
       trigger: 'item',
       formatter: params => `${params.marker}数据点<br/>tD: ${params.value[0]}<br/>qD: ${params.value[1]}`
+    },
+    legend: {
+      show: false
     },
     grid: {
       left: 72,
@@ -111,7 +187,7 @@ function renderChart() {
         }
       }
     },
-    series: [
+    series: isLegendItemHidden('Wattenbarger') ? [] : [
       {
         name: 'Wattenbarger',
         type: 'line',
@@ -190,6 +266,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('resize', renderChartSoon)
   stopParamsPanelResize()
+  stopLegendDrag()
   chart?.dispose()
   chart = null
 })
@@ -291,7 +368,7 @@ onBeforeUnmount(() => {
       </template>
     </aside>
 
-    <main class="wb-main">
+    <main ref="chartAreaEl" class="wb-main">
       <div class="dynamic-result-tabs">
         <button
             type="button"
@@ -307,6 +384,32 @@ onBeforeUnmount(() => {
           ref="chartEl"
           class="chart"
       />
+      <div
+          v-if="activeTab === 'chart' && legendItems.length"
+          class="floating-chart-legend"
+          :class="{ dragging: draggingLegend }"
+          :style="legendStyle"
+          @mousedown="startLegendDrag"
+      >
+        <div
+            v-for="item in legendItems"
+            :key="item.name"
+            class="floating-legend-item"
+            :class="{ hidden: isLegendItemHidden(item.name) }"
+            title="点击显示/隐藏"
+            @mousedown.stop
+            @click.stop="toggleLegendItem(item.name)"
+        >
+          <span
+              class="legend-dot"
+              :style="{
+              backgroundColor: isLegendItemHidden(item.name) ? 'transparent' : item.color,
+              borderColor: item.color
+            }"
+          ></span>
+          <span>{{ item.name }}</span>
+        </div>
+      </div>
 
       <div
           v-if="activeTab === 'table'"
@@ -491,6 +594,7 @@ onBeforeUnmount(() => {
 }
 
 .wb-main {
+  position: relative;
   flex: 1;
   min-width: 0;
   min-height: 0;
@@ -539,6 +643,49 @@ onBeforeUnmount(() => {
   flex: 1;
   min-height: 0;
   width: 100%;
+}
+
+.floating-chart-legend {
+  position: absolute;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-width: 280px;
+  padding: 7px 10px;
+  border: 1px solid #eeeeee;
+  background: rgba(255, 255, 255, 0.9);
+  color: #333;
+  font-size: 12px;
+  line-height: 1.2;
+  cursor: move;
+  user-select: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+
+  &.dragging {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.14);
+  }
+}
+
+.floating-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  cursor: pointer;
+
+  &.hidden {
+    color: #999;
+    opacity: 0.55;
+  }
+}
+
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1px solid transparent;
 }
 
 .table-wrap {

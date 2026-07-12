@@ -16,7 +16,12 @@ const resultData = ref(null)
 const activePanelTab = ref('input')
 const activeChartTab = ref(0)
 const chartEl = ref(null)
+const chartAreaEl = ref(null)
 const equationGraphicPosition = ref(null)
+const legendPosition = ref({ x: null, y: null })
+const draggingLegend = ref(false)
+const legendDragOffset = ref({ x: 0, y: 0 })
+const hiddenLegendNames = ref(new Set())
 
 const paramsPanelEl = ref(null)
 const paramsPanelWidth = ref(238)
@@ -462,6 +467,92 @@ const createLegendData = (series) =>
         : item.name
     )
 
+const legendItems = computed(() => {
+  const items = createLegendData(createChartSeries())
+  return items.map(item => {
+    if (typeof item === 'string') {
+      return {
+        name: item,
+        color: item.includes('回归线') ? '#333' : '#0037b5'
+      }
+    }
+
+    return {
+      name: item.name,
+      color: item.itemStyle?.color || '#333'
+    }
+  }).filter(item => item.name)
+})
+
+const legendStyle = computed(() => {
+  if (legendPosition.value.x === null || legendPosition.value.y === null) {
+    return { top: '42px', right: '22px' }
+  }
+
+  return {
+    left: `${legendPosition.value.x}px`,
+    top: `${legendPosition.value.y}px`
+  }
+})
+
+function isLegendItemHidden(name) {
+  return hiddenLegendNames.value.has(name)
+}
+
+function toggleLegendItem(name) {
+  const next = new Set(hiddenLegendNames.value)
+  if (next.has(name)) {
+    next.delete(name)
+  } else {
+    next.add(name)
+  }
+  hiddenLegendNames.value = next
+  renderChartSoon()
+}
+
+function filterLegendSeries(series) {
+  return series.filter(item => !isLegendItemHidden(item.name))
+}
+
+function onLegendDrag(event) {
+  if (!draggingLegend.value || !chartAreaEl.value) return
+
+  const rect = chartAreaEl.value.getBoundingClientRect()
+  const x = Math.max(0, Math.min(rect.width - 80, event.clientX - rect.left - legendDragOffset.value.x))
+  const y = Math.max(0, Math.min(rect.height - 30, event.clientY - rect.top - legendDragOffset.value.y))
+  legendPosition.value = { x, y }
+}
+
+function stopLegendDrag() {
+  if (!draggingLegend.value) return
+
+  draggingLegend.value = false
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+  window.removeEventListener('mousemove', onLegendDrag)
+  window.removeEventListener('mouseup', stopLegendDrag)
+}
+
+function startLegendDrag(event) {
+  if (!chartAreaEl.value) return
+
+  event.preventDefault()
+  const legendRect = event.currentTarget.getBoundingClientRect()
+  const areaRect = chartAreaEl.value.getBoundingClientRect()
+  const currentX = legendPosition.value.x ?? legendRect.left - areaRect.left
+  const currentY = legendPosition.value.y ?? legendRect.top - areaRect.top
+  legendPosition.value = { x: currentX, y: currentY }
+  legendDragOffset.value = {
+    x: event.clientX - legendRect.left,
+    y: event.clientY - legendRect.top
+  }
+  draggingLegend.value = true
+  document.body.style.cursor = 'move'
+  document.body.style.userSelect = 'none'
+  window.addEventListener('mousemove', onLegendDrag)
+  window.addEventListener('mouseup', stopLegendDrag)
+}
+
 const createChartSeries = () => {
   const explicitRegressionSeries = regressionChartItems.value.map((item, index) => ({
     // name: item.name || `回归线 ${index + 1}`,
@@ -512,7 +603,7 @@ function renderChart() {
 
   const reg = regression.value
   const bounds = chartBounds.value
-  const series = createChartSeries()
+  const series = filterLegendSeries(createChartSeries())
 
   chart.clear()
   chart.setOption({
@@ -531,18 +622,7 @@ function renderChart() {
         return `${params.marker}${params.seriesName}<br/>Gp: ${Number(value[0]).toFixed(3)}<br/>Pp: ${Number(value[1]).toFixed(3)} MPa`
       }
     },
-    legend: {
-      top: 28,
-      right: 22,
-      orient: 'vertical',
-      itemWidth: 14,
-      itemHeight: 14,
-      backgroundColor: 'rgba(255,255,255,0.92)',
-      borderColor: '#eeeeee',
-      borderWidth: 1,
-      padding: [8, 10],
-      data: createLegendData(series)
-    },
+    legend: { show: false },
     grid: { left: 70, right: 28, top: 58, bottom: 58, containLabel: false },
     xAxis: {
       type: 'value',
@@ -790,6 +870,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('resize', renderChartSoon)
   stopParamsPanelResize()
+  stopLegendDrag()
   chart?.dispose()
   chart = null
 })
@@ -883,7 +964,7 @@ onBeforeUnmount(() => {
       </template>
     </aside>
 
-    <main class="chart-area">
+    <main ref="chartAreaEl" class="chart-area">
       <div class="chart-tabs">
         <button
             v-for="(tab, index) in chartTabs"
@@ -895,6 +976,32 @@ onBeforeUnmount(() => {
         </button>
       </div>
       <div ref="chartEl" class="chart"></div>
+      <div
+          v-if="legendItems.length"
+          class="floating-chart-legend"
+          :class="{ dragging: draggingLegend }"
+          :style="legendStyle"
+          @mousedown="startLegendDrag"
+      >
+        <div
+            v-for="item in legendItems"
+            :key="item.name"
+            class="floating-legend-item"
+            :class="{ hidden: isLegendItemHidden(item.name) }"
+            title="点击显示/隐藏"
+            @mousedown.stop
+            @click.stop="toggleLegendItem(item.name)"
+        >
+          <span
+              class="legend-dot"
+              :style="{
+              backgroundColor: isLegendItemHidden(item.name) ? 'transparent' : item.color,
+              borderColor: item.color
+            }"
+          ></span>
+          <span>{{ item.name }}</span>
+        </div>
+      </div>
       <div class="table-wrap">
         <el-table :data="tableRows" size="small" height="150" border>
           <el-table-column prop="index" label="序号" width="70" />
@@ -1066,6 +1173,7 @@ onBeforeUnmount(() => {
 }
 
 .chart-area {
+  position: relative;
   flex: 1;
   min-width: 0;
   min-height: 0;
@@ -1106,6 +1214,49 @@ onBeforeUnmount(() => {
   flex: 1;
   min-height: 0;
   width: 100%;
+}
+
+.floating-chart-legend {
+  position: absolute;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-width: 280px;
+  padding: 7px 10px;
+  border: 1px solid #eeeeee;
+  background: rgba(255, 255, 255, 0.9);
+  color: #333;
+  font-size: 12px;
+  line-height: 1.2;
+  cursor: move;
+  user-select: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+
+  &.dragging {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.14);
+  }
+}
+
+.floating-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  cursor: pointer;
+
+  &.hidden {
+    color: #999;
+    opacity: 0.55;
+  }
+}
+
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1px solid transparent;
 }
 
 .table-wrap {
