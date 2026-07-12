@@ -875,23 +875,34 @@ const runBlasingameForSelectedWell = async () => {
     applyTypicalCurveNodes(rootNode)
 
     const resultNode = blasingameNode
-    addBlasingameNode(targetWellName, {
+    const nodeId = resultNode?.nodeId || resultNode?.id
+
+    if (!nodeId) {
+      throw new Error('没有找到 Blasingame 对应的 nodeId')
+    }
+
+    const resultRes = await typicalCurveApi.getResult(PROJECT_ID, GAS_RESERVOIR_ID, nodeId)
+    const result = normalizePayload(resultRes)
+
+    const treeNode = addBlasingameNode(targetWellName, {
       ...resultNode,
       nodeType: NODETYPE.NodeType_TypicalCurveBlasingame,
       nodeTitle: 'Blasingame'
     })
 
     const viewNode = {
-      id: resultNode?.nodeId || `blasingame-${targetWellName}`,
+      id: nodeId,
       label: 'Blasingame',
       type: NODETYPE.NodeType_TypicalCurveBlasingame,
       wellName: targetWellName,
-      raw: resultNode
+      raw: result,
+      treeNode: resultNode
     }
 
     activeNodeId.value = viewNode.id
     currentView.value = 'blasingame'
     currentViewNode.value = viewNode
+    activeNode.value = treeNode || viewNode
     ElMessage.success(`${targetWellName} Blasingame计算完成`)
   } catch (error) {
     ElMessage.error(error.message || 'Blasingame计算失败')

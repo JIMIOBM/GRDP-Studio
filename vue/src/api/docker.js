@@ -114,8 +114,15 @@ export const typicalCurveApi = {
   fitting: (data) =>
     dockerRequest.post('/projectanalysis/typicalcurve/fitting', data),
 
-  getResult: (projectId, gasReservoirId, nodeId) =>
-    dockerRequest.get(`/projectanalysis/typicalcurve/${projectId}/${gasReservoirId}/${nodeId}`)
+  getResult: (projectId, gasReservoirId, nodeId, page = null, size = null, options = {}) => {
+    const params = {}
+    if (page !== null && page !== undefined) params.page = page
+    if (size !== null && size !== undefined) params.size = size
+    return dockerRequest.get(
+      `/projectanalysis/typicalcurve/${projectId}/${gasReservoirId}/${nodeId}`,
+      { ...(Object.keys(params).length ? { params } : {}), ...options }
+    )
+  }
 }
 
 /* ===== 井列表 ===== */

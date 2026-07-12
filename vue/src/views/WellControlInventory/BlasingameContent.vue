@@ -1,6 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
+import { typicalCurveApi } from '@/api/docker'
 
 const props = defineProps({
   node: Object,
@@ -10,6 +11,8 @@ const props = defineProps({
 
 const activePanelTab = ref('input')
 const activeChartTab = ref('chart')
+const tableLoading = ref(false)
+const tableOutputItems = ref([])
 const chartEl = ref(null)
 const chartAreaEl = ref(null)
 const paramsPanelEl = ref(null)
@@ -25,8 +28,18 @@ let chart = null
 const raw = computed(() => props.node?.raw || {})
 const result = computed(() => raw.value?.result || raw.value?.output || raw.value?.outputs?.[0]?.output || {})
 const input = computed(() => raw.value?.input || raw.value?.inputs || raw.value?.parameter || {})
+const currentNodeId = computed(() =>
+    props.node?.treeNode?.nodeId || props.node?.raw?.nodeId || props.node?.raw?.id || props.node?.id
+)
 
 const asArray = (value) => Array.isArray(value) ? value : []
+
+const unwrapResponseData = (response) => response?.data?.data ?? response?.data ?? response
+
+const extractOutputItems = (payload) => {
+  const output = payload?.output || payload?.result?.output || payload?.outputs?.[0]?.output || payload
+  return asArray(output?.outputItems || payload?.outputItems)
+}
 
 const collectCandidateArrays = (source, keys) => {
   const list = []
@@ -172,30 +185,16 @@ function applyLegendVisibility(series) {
 }
 
 const tableRows = computed(() => {
-  if (records.value.length) {
-    return records.value.map((item, index) => ({
-      index: index + 1,
-      date: item.date || item.productionDate || '',
-      formationPressure: item.formationPressure ?? '',
-      gasProduction: item.cumulativeGasProduction ?? item.gasProduction ?? '',
-      waterProduction: item.cumulativeWaterProduction ?? item.waterProduction ?? ''
-    }))
-  }
+  const rows = tableOutputItems.value.length
+      ? tableOutputItems.value
+      : extractOutputItems(raw.value)
 
-  return [
-    ['2004-04-21', 27.5262, 0.0013, 0.0004],
-    ['2004-04-22', 31.1019, 0.0054, 0.0013],
-    ['2004-04-23', 32.6322, 0.0093, 0.0013],
-    ['2004-04-24', 30.2160, 0.0098, 0.0014],
-    ['2004-04-25', 29.4892, 0.0110, 0.0016],
-    ['2004-04-26', 31.1989, 0.0143, 0.0019],
-    ['2004-04-27', 31.6176, 0.0178, 0.0024]
-  ].map(([date, formationPressure, gasProduction, waterProduction], index) => ({
+  return rows.map((item, index) => ({
     index: index + 1,
-    date,
-    formationPressure,
-    gasProduction,
-    waterProduction
+    pseudotime: item.pseudotime ?? '',
+    regularizedProduction: item.regularizedProduction ?? '',
+    regularizedProductionIntegral: item.regularizedProductionIntegral ?? '',
+    regularizedProductionIntegralDerivative: item.regularizedProductionIntegralDerivative ?? ''
   }))
 })
 
@@ -474,7 +473,31 @@ function startLegendDrag(event) {
   window.addEventListener('mouseup', stopLegendDrag)
 }
 
-watch(() => props.node, renderChartSoon, { deep: true })
+async function fetchTableOutputItems() {
+  const nodeId = currentNodeId.value
+  if (!nodeId || !props.projectId || !props.gasReservoirId) return
+
+  tableLoading.value = true
+  try {
+    const response = await typicalCurveApi.getResult(props.projectId, props.gasReservoirId, nodeId, 1, -1)
+    tableOutputItems.value = extractOutputItems(unwrapResponseData(response))
+  } catch (error) {
+    console.error('Blasingame数据列表加载失败', error)
+  } finally {
+    tableLoading.value = false
+  }
+}
+
+function showTableTab() {
+  activeChartTab.value = 'table'
+  fetchTableOutputItems()
+}
+
+watch(() => props.node, () => {
+  tableOutputItems.value = []
+  if (activeChartTab.value === 'table') fetchTableOutputItems()
+  renderChartSoon()
+}, { deep: true })
 watch(activeChartTab, renderChartSoon)
 
 onMounted(() => {
@@ -602,7 +625,7 @@ onBeforeUnmount(() => {
         <button type="button" class="chart-tab" :class="{ active: activeChartTab === 'chart' }" @click="activeChartTab = 'chart'">
           结果分析图
         </button>
-        <button type="button" class="chart-tab" :class="{ active: activeChartTab === 'table' }" @click="activeChartTab = 'table'">
+        <button type="button" class="chart-tab" :class="{ active: activeChartTab === 'table' }" @click="showTableTab">
           数据列表
         </button>
       </div>
@@ -634,12 +657,12 @@ onBeforeUnmount(() => {
       </div>
 
       <div v-if="activeChartTab === 'table'" class="data-list-panel">
-        <el-table :data="tableRows" size="small" height="100%" border stripe>
+        <el-table :data="tableRows" :loading="tableLoading" size="small" height="100%" border stripe>
           <el-table-column prop="index" label="序号" width="76" sortable />
-          <el-table-column prop="date" label="日期" min-width="150" sortable />
-          <el-table-column prop="formationPressure" label="井底流压(MPa)" min-width="160" sortable />
-          <el-table-column prop="gasProduction" label="气产量(10⁴m³/d)" min-width="170" sortable />
-          <el-table-column prop="waterProduction" label="累产水量(10⁴m³)" min-width="170" sortable />
+          <el-table-column prop="pseudotime" label="物质平衡拟时间" min-width="170" sortable />
+          <el-table-column prop="regularizedProduction" label="重整产量(qDd)" min-width="170" sortable />
+          <el-table-column prop="regularizedProductionIntegral" label="重整产量积分(qDdi)" min-width="190" sortable />
+          <el-table-column prop="regularizedProductionIntegralDerivative" label="重整产量积分导数(qDdid)" min-width="220" sortable />
         </el-table>
       </div>
     </div>
