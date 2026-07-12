@@ -13,8 +13,8 @@ import DynamicBalanceContent from '@/views/WellControlInventory/DynamicBalanceCo
 import { NODETYPE } from '@/constants/nodeType'
 import { analyticMethodApi, materialBalanceApi, nodeApi, projectApi, typicalCurveApi, waterInvasionApi } from '@/api/docker'
 
-const PROJECT_ID = 1
-const GAS_RESERVOIR_ID = 1
+const PROJECT_ID = 4
+const GAS_RESERVOIR_ID = 3
 
 const WELL_GROUPS = [
   { id: 'data-management', label: '数据管理' },
@@ -460,6 +460,24 @@ const applyMaterialBalanceNodes = (node) => {
   })
 }
 
+const ensureMaterialBalanceNodeForWell = (wellName, rawNode = {}) => {
+  if (!wellName) return null
+
+  const wellItem = ensureWell(wellName, rawNode?.nodeId || rawNode?.wellId || `well-${wellName}`)
+  addAnalysisNode(wellName, {
+    ...rawNode,
+    nodeType: NODETYPE.NodeType_DynamicOriginalGasInplace,
+    nodeTitle: '物质平衡',
+    wellName
+  })
+
+  const targetGroup = wellItem?.children.find(item => item.type === 'well-control-inventory')
+  return targetGroup?.children.find(item =>
+      item.type === NODETYPE.NodeType_DynamicOriginalGasInplace &&
+      item.wellName === wellName
+  )
+}
+
 const clearTypicalCurveNodes = () => {
   const wells = getWellGroup()?.children ?? []
 
@@ -610,14 +628,22 @@ const pollAnalyticMethodNodes = async (wellNames, maxRetries = 20, intervalMs = 
   throw new Error('解析法计算超时，请稍后刷新查看结果')
 }
 
-const pollMaterialBalanceNode = async (wellName, maxRetries = 20, intervalMs = 1500) => {
+const fetchMaterialBalanceNode = async () => {
+  const res = await nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, NODETYPE.NodeType_DynamicOriginalGasInplace)
+  return res?.data?.node
+}
+
+const pollMaterialBalanceNode = async ( maxRetries = 20, intervalMs = 1500) => {
   for (let i = 0; i < maxRetries; i++) {
     await new Promise(resolve => setTimeout(resolve, intervalMs))
 
-    const res = await nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, NODETYPE.NodeType_DynamicOriginalGasInplace)
-    const node = res?.data?.node
-    const subNodes = node?.subNodes ?? []
-    if (!wellName || subNodes.some(sub => sub.nodeTitle === wellName || sub.wellName === wellName)) {
+    // const res = await nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, NODETYPE.NodeType_DynamicOriginalGasInplace)
+    // const node = res?.data?.node
+    // const subNodes = node?.subNodes ?? []
+    // if (!wellName || subNodes.some(sub => sub.nodeTitle === wellName || sub.wellName === wellName)) {
+    const node = await fetchMaterialBalanceNode()
+    // const subNodes = node?.subNodes ?? []
+    if (node) {
       return node
     }
   }
@@ -756,6 +782,8 @@ const runAnalyticMethodForSelectedWell = async () => {
 
 const runMaterialBalanceForSelectedWell = async () => {
   const targetWellName = selectedWellName.value
+  // 接口需要批量计算全部井，但页面仍只展示当前选中井的计算状态。
+  const allWellNames = getAllWellNames()
 
   if (!targetWellName) {
     ElMessage.warning('请先在左侧选择一口井')
@@ -763,25 +791,38 @@ const runMaterialBalanceForSelectedWell = async () => {
   }
 
   if (materialBalanceRunning.value) return
-
   materialBalanceRunning.value = true
   try {
     await materialBalanceApi.calc({
-      wellNames: [targetWellName],
-      gasReservoirType: 3,
+      wellNames: allWellNames,
+      gasReservoirType: 1,
       gasReservoirId: Number(GAS_RESERVOIR_ID),
       projectId: Number(PROJECT_ID),
-      waterGasRatioLimit: 0.14
+      waterGasRatioLimit: 0.0602
     })
 
     ElMessage.info(`${targetWellName} 物质平衡计算中，请稍候...`)
-    const node = await pollMaterialBalanceNode(targetWellName)
+    const node = await pollMaterialBalanceNode()
     applyMaterialBalanceNodes(node)
 
     const subNodes = node?.subNodes ?? []
-    const resultNode = subNodes.find(sub => sub.nodeTitle === targetWellName || sub.wellName === targetWellName) || subNodes[0] || node
-    const viewNode = {
-      id: resultNode?.nodeId || resultNode?.resultId || `mb-${targetWellName}`,
+    const resultNode = subNodes.find(sub => sub.nodeTitle === targetWellName || sub.wellName === targetWellName)
+    // node 返回的列表只包含具有物质平衡结果的井。
+    // 当前井不在列表中时，不再创建虚假的物质平衡节点。
+    if (!resultNode) {
+      ElMessage.warning(`${targetWellName}井物质平衡结果不存在`)
+      return
+    }
+    const materialBalanceRawNode = {
+      ...resultNode,
+      parentNode: node,
+      rootNode: node,
+      nodeType: NODETYPE.NodeType_DynamicOriginalGasInplace,
+      nodeTitle: '物质平衡'
+    }
+    const treeNode = ensureMaterialBalanceNodeForWell(targetWellName, materialBalanceRawNode)
+    const viewNode = treeNode||{
+      id: materialBalanceRawNode?.nodeId || materialBalanceRawNode?.resultId || `mb-${targetWellName}`,
       label: '物质平衡',
       type: NODETYPE.NodeType_DynamicOriginalGasInplace,
       wellName: targetWellName,
