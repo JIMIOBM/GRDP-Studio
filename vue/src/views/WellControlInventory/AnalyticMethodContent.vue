@@ -26,6 +26,10 @@ const paramsPanelEl = ref(null)
 const paramsPanelWidth = ref(238)
 const paramsCollapsed = ref(false)
 const resizingParamsPanel = ref(false)
+const legendPosition = ref({ x: null, y: null })
+const draggingLegend = ref(false)
+const legendDragOffset = ref({ x: 0, y: 0 })
+const hiddenLegendNames = ref(new Set())
 let chart = null
 
 const normalizePayload = (res) => res?.data?.data ?? res?.data ?? res
@@ -127,44 +131,25 @@ const inputFields = computed(() => ({
     { label: withUnit('天然气比重', 'specificGravity', 'dless'), value: inputValue(['specificGravity']) },
     { label: withUnit('H2S摩尔百分含量', 'hydrogenSulfide', '%'), value: inputValue(['hydrogenSulfide']) },
     { label: withUnit('CO2摩尔百分含量', 'carbonDioxide', '%'), value: inputValue(['carbonDioxide']) },
-    { label: withUnit('N2摩尔百分含量', 'nitrogen', '%'), value: inputValue(['nitrogen']) },
-    { label: withUnit('标况下凝析油密度', 'condensateOilDensity'), value: inputValue(['condensateOilDensity']) }
+    { label: withUnit('N2摩尔百分含量', 'nitrogen', '%'), value: inputValue(['nitrogen']) }
   ],
   method: [
     { label: '非烃气体修正方法', value: modificationMethod.value, select: true },
     { label: '天然气偏差系数计算方法', value: deviationMethod.value, select: true },
-    { label: '天然气粘度计算方法', value: viscosityMethod.value, select: true },
-    { label: '物质平衡方程类型', value: materialBalanceMethod.value, select: true }
+    { label: '天然气粘度计算方法', value: viscosityMethod.value, select: true }
   ],
-  control: [
-    { label: '抽稀点数', value: inputValue(['dataSize']) }
-  ],
-  reservoir: [
-    { label: withUnit('动态地质储量', 'originalGasVolume', '10^8m3'), value: inputValue(['originalGasVolume']) },
+  other: [
     { label: withUnit('原始地层压力', 'originalFormationPressure', 'MPa'), value: inputValue(['originalFormationPressure']) },
-    { label: withUnit('地层温度', 'formationTemperature', 'degC'), value: inputValue(['formationTemperature']) },
+    { label: withUnit('气井地层温度', 'formationTemperature', '℃'), value: inputValue(['formationTemperature']) },
+    { label: withUnit('井筒半径', 'wellboreRadius', 'm'), value: inputValue(['wellboreRadius', 'wellRadius']) },
+    { label: withUnit('动态地质储量', 'originalGasVolume', '10^8m3'), value: inputValue(['originalGasVolume']) },
+    { label: '物质平衡方程类型', value: materialBalanceMethod.value, select: true },
     { label: withUnit('储层厚度', 'reservoirThickness', 'm'), value: inputValue(['reservoirThickness']) },
     { label: withUnit('储层孔隙度', 'reservoirPorosity', '%'), value: inputValue(['reservoirPorosity']) },
     { label: withUnit('束缚水饱和度', 'waterSaturation', '%'), value: inputValue(['waterSaturation']) },
+    { label: withUnit('地层水压缩系数', 'waterCompressionCoefficient', 'MPa^-1'), value: inputValue(['waterCompressionCoefficient']) },
     { label: withUnit('储层岩石压缩系数', 'rockCompressionCoefficient', 'MPa^-1'), value: inputValue(['rockCompressionCoefficient']) },
-    { label: withUnit('地层水压缩系数', 'waterCompressionCoefficient', 'MPa^-1'), value: inputValue(['waterCompressionCoefficient']) }
-  ],
-  well: [
-    { label: withUnit('井筒半径', 'wellboreRadius', 'm'), value: inputValue(['wellboreRadius', 'wellRadius']) },
-    { label: withUnit('渗透率', 'permeability', 'mD'), value: inputValue(['permeability']) },
-    { label: withUnit('表皮系数', 'skinFactor', 'dless'), value: inputValue(['skinFactor']) },
-    { label: withUnit('裂缝半长', 'fractureHalfLength', 'm'), value: inputValue(['fractureHalfLength']) },
-    { label: withUnit('水平段长度', 'horizontalLength', 'm'), value: inputValue(['horizontalLength']) },
-    { label: withUnit('水平井半长', 'horizontalHalfLength', 'm'), value: inputValue(['horizontalHalfLength']) },
-    { label: '压裂段数', value: inputValue(['fracturingSegment']) }
-  ],
-  shale: [
-    { label: '无因次地层半径', value: inputValue(['dimensionlessFormationRadius']) },
-    { label: '无因次井半径', value: inputValue(['dimensionlessWellboreRadius']) },
-    { label: '无因次水平井长度', value: inputValue(['dimensionlessHorizontalLength']) },
-    { label: withUnit('兰氏压力', 'langmuirPressure'), value: inputValue(['langmuirPressure']) },
-    { label: withUnit('兰氏体积', 'langmuirVolume'), value: inputValue(['langmuirVolume']) },
-    { label: withUnit('岩石密度', 'shaleRockDensity'), value: inputValue(['shaleRockDensity']) }
+    { label: withUnit('生产水气比上限', 'minimumWaterGasRatio', 'm3/10^4m3'), value: minimumWaterGasRatio.value }
   ]
 }))
 
@@ -172,10 +157,7 @@ const displayedFieldGroups = computed(() => {
   const groups = [
     ['气体性质', inputFields.value.gas],
     ['计算方法', inputFields.value.method],
-    ['控制参数', inputFields.value.control],
-    ['储层参数', inputFields.value.reservoir],
-    ['井筒与裂缝参数', inputFields.value.well],
-    ['页岩气参数', inputFields.value.shale]
+    ['其它数据', inputFields.value.other]
   ]
   return groups.map(([title, items]) => ({
     title,
@@ -184,15 +166,8 @@ const displayedFieldGroups = computed(() => {
 })
 
 const outputFields = computed(() => [
-  { label: '井型', value: outputValue(['wellType']) },
-  { label: '是否压裂', value: outputValue(['isFractured']) },
   { label: withUnit('渗透率', 'permeability', 'mD'), value: outputValue(['permeability']) },
-  { label: withUnit('表皮系数', 'skinFactor', 'dless'), value: outputValue(['skinFactor']) },
-  { label: withUnit('裂缝半长', 'fractureHalfLength', 'm'), value: outputValue(['fractureHalfLength', 'effectiveFractureHalfLength']) },
-  { label: withUnit('裂缝渗透率', 'fracturePermeability', 'mD'), value: outputValue(['fracturePermeability']) },
-  { label: withUnit('动态地质储量', 'originalGasVolume', '10^8m3'), value: outputValue(['originalGasVolume']) },
-  { label: withUnit('井控面积', 'wellControlArea', 'km2'), value: outputValue(['wellControlArea']) },
-  { label: withUnit('井控半径', 'wellControlRadius', 'm'), value: outputValue(['wellControlRadius']) }
+  { label: withUnit('表皮系数', 'skinFactor', 'dless'), value: outputValue(['skinFactor']) }
 ].filter(item => item.value !== undefined && item.value !== null && item.value !== ''))
 const hasOutputResults = computed(() => outputFields.value.length > 0)
 
@@ -201,30 +176,39 @@ const formatDate = (_row, _column, value) => value ? String(value).slice(0, 10) 
 const defaultTableColumns = [
   { prop: 'date', label: '生产时间', minWidth: 130, formatter: formatDate },
   { prop: 'dailyGasProduction', label: '气产量(10^4m3/d)', minWidth: 150 },
-  { prop: 'cumulativeGasProduction', label: '累产气量(10^8m3)', minWidth: 150 },
   { prop: 'bottomPressure', label: '真实井底流压(MPa)', minWidth: 160 },
-  { prop: 'theoreticalBottomPressure', label: '理论井底流压(MPa)', minWidth: 170 },
-  { prop: 'qa', label: 'qa', minWidth: 110 },
-  { prop: 'qf', label: 'qf', minWidth: 110 }
+  { prop: 'theoreticalBottomPressure', label: '理论井底流压(MPa)', minWidth: 170 }
 ]
 
 const productionUnitRow = computed(() =>
     productionColumns.value.map(column => getFieldUnit(column.field) || '无')
 )
 
-const tableColumns = computed(() => {
-  if (!outputItems.value.length) return defaultTableColumns
-  const sample = outputItems.value.find(item => item && typeof item === 'object') || {}
-  const keys = Object.keys(sample).filter(key => !['id', 'isDeleted'].includes(key))
-  if (!keys.length) return defaultTableColumns
+const tableColumns = computed(() => defaultTableColumns)
 
-  return keys.map(key => ({
-    prop: key,
-    label: getFieldLabel(key, key),
-    minWidth: key.toLowerCase().includes('date') ? 130 : 130,
-    formatter: key.toLowerCase().includes('date') ? formatDate : undefined
-  }))
-})
+const ANALYTIC_CHART_FIELDS = new Set(['dailyGasProduction', 'bottomPressure', 'theoreticalBottomPressure'])
+const ANALYTIC_CHART_NAMES = ['气产量', '真实井底流压', '理论井底流压']
+const normalizeChartName = (name = '') => String(name).trim().replace(/[（(].*$/, '').trim()
+const displayedChartItems = computed(() => chartItems.value.filter(item => {
+  const field = item.yAxisField || item.yField || ''
+  const name = normalizeChartName(item.name)
+  return ANALYTIC_CHART_FIELDS.has(field) || ANALYTIC_CHART_NAMES.includes(name)
+}))
+const CHART_COLORS = ['#ffd400', '#8b3f42', '#bc8c6d']
+const legendItems = computed(() => displayedChartItems.value.map((item, index) => ({
+  name: item.name || item.yAxisField || item.yField,
+  color: CHART_COLORS[index % CHART_COLORS.length]
+})))
+const legendStyle = computed(() => legendPosition.value.x === null || legendPosition.value.y === null
+    ? { top: '36px', right: '18px' }
+    : { left: `${legendPosition.value.x}px`, top: `${legendPosition.value.y}px` })
+const isLegendItemHidden = name => hiddenLegendNames.value.has(name)
+const toggleLegendItem = (name) => {
+  const next = new Set(hiddenLegendNames.value)
+  next.has(name) ? next.delete(name) : next.add(name)
+  hiddenLegendNames.value = next
+  renderChartSoon()
+}
 
 const getPoint = (item) => {
   const xField = item.xAxisField || item.xField || 'date'
@@ -242,32 +226,92 @@ const getPoint = (item) => {
 const isPressureSeries = (name = '', field = '') =>
     String(name).includes('压力') || String(field).includes('Pressure') || String(field).includes('pressure')
 
+const formatChartDate = (value, separator = '/') => {
+  const text = String(value ?? '')
+  const match = text.match(/^(\d{4})[-/]?(\d{2})[-/]?(\d{2})/)
+  return match ? `${match[1]}${separator}${match[2]}${separator}${match[3]}` : text
+}
+
+const getChartYear = value => formatChartDate(value).slice(0, 4)
+
 const renderChart = () => {
   if (!chart || activeChartTab.value !== 'chart') return
-  if (!chartItems.value.length) {
+  if (!displayedChartItems.value.length) {
     chart.clear()
     return
   }
 
-  const legend = chartItems.value.map(item => item.name || item.yAxisField || item.yField)
-  const series = chartItems.value.map(item => ({
+  const series = displayedChartItems.value.map((item, index) => ({
     name: item.name || item.yAxisField || item.yField,
     type: 'line',
-    showSymbol: false,
-    smooth: true,
+    showSymbol: true,
+    symbol: 'circle',
+    symbolSize: index === 1 ? 4 : 3,
+    smooth: false,
+    color: CHART_COLORS[index % CHART_COLORS.length],
+    lineStyle: { width: index === 1 ? 1 : 1.5 },
     yAxisIndex: isPressureSeries(item.name, item.yAxisField || item.yField) ? 1 : 0,
     data: getPoint(item)
-  }))
+  })).filter(item => !hiddenLegendNames.value.has(item.name))
+  const categoryValues = series[0]?.data?.map(point => point[0]) || []
 
   chart.setOption({
     animation: false,
-    tooltip: { trigger: 'axis' },
-    legend: { top: 8, type: 'scroll', data: legend },
-    grid: { top: 46, left: 58, right: 70, bottom: 44, containLabel: true },
-    xAxis: { type: 'category', boundaryGap: false },
+    tooltip: {
+      trigger: 'axis',
+      formatter: params => {
+        const rows = Array.isArray(params) ? params : [params]
+        if (!rows.length) return ''
+        const date = formatChartDate(rows[0]?.axisValue ?? rows[0]?.value?.[0])
+        return [date, ...rows.map(row => {
+          const value = Array.isArray(row.value) ? row.value[1] : row.value
+          return `${row.marker || ''}${row.seriesName}：${value ?? ''}`
+        })].join('<br/>')
+      }
+    },
+    title: {
+      text: `井${wellName.value}的解析法结果图`,
+      left: 'center',
+      top: 8,
+      textStyle: { fontSize: 14, fontWeight: 600, color: '#303133' }
+    },
+    legend: { show: false },
+    grid: { top: 52, left: 58, right: 66, bottom: 48, containLabel: true },
+    xAxis: {
+      type: 'category',
+      name: '生产时间',
+      nameLocation: 'middle',
+      nameGap: 30,
+      boundaryGap: false,
+      axisLine: { lineStyle: { color: '#666' } },
+      axisLabel: {
+        color: '#666',
+        hideOverlap: true,
+        interval: (index, value) => index === 0 || getChartYear(value) !== getChartYear(categoryValues[index - 1]),
+        formatter: value => getChartYear(value)
+      },
+      splitLine: { show: true, lineStyle: { color: '#eeeeee', width: 1 } }
+    },
     yAxis: [
-      { type: 'value', name: '产量' },
-      { type: 'value', name: '压力', position: 'right' }
+      {
+        type: 'value',
+        name: '气产量(10⁴m³/d)',
+        nameLocation: 'middle',
+        nameGap: 42,
+        axisLine: { show: true, lineStyle: { color: '#666' } },
+        axisLabel: { color: '#666' },
+        splitLine: { show: true, lineStyle: { color: '#e8e8e8', width: 1 } }
+      },
+      {
+        type: 'value',
+        name: '压力(MPa)',
+        nameLocation: 'middle',
+        nameGap: 42,
+        position: 'right',
+        axisLine: { show: true, lineStyle: { color: '#666' } },
+        axisLabel: { color: '#666' },
+        splitLine: { show: false }
+      }
     ],
     series
   }, true)
@@ -425,6 +469,43 @@ function startParamsPanelResize(event) {
   window.addEventListener('mouseup', stopParamsPanelResize)
 }
 
+function onLegendDrag(event) {
+  if (!draggingLegend.value || !chartAreaEl.value) return
+  const rect = chartAreaEl.value.getBoundingClientRect()
+  const x = Math.max(0, Math.min(rect.width - 80, event.clientX - rect.left - legendDragOffset.value.x))
+  const y = Math.max(0, Math.min(rect.height - 30, event.clientY - rect.top - legendDragOffset.value.y))
+  legendPosition.value = { x, y }
+}
+
+function stopLegendDrag() {
+  if (!draggingLegend.value) return
+  draggingLegend.value = false
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+  window.removeEventListener('mousemove', onLegendDrag)
+  window.removeEventListener('mouseup', stopLegendDrag)
+}
+
+function startLegendDrag(event) {
+  if (!chartAreaEl.value) return
+  event.preventDefault()
+  const legendRect = event.currentTarget.getBoundingClientRect()
+  const areaRect = chartAreaEl.value.getBoundingClientRect()
+  legendPosition.value = {
+    x: legendPosition.value.x ?? legendRect.left - areaRect.left,
+    y: legendPosition.value.y ?? legendRect.top - areaRect.top
+  }
+  legendDragOffset.value = {
+    x: event.clientX - legendRect.left,
+    y: event.clientY - legendRect.top
+  }
+  draggingLegend.value = true
+  document.body.style.cursor = 'move'
+  document.body.style.userSelect = 'none'
+  window.addEventListener('mousemove', onLegendDrag)
+  window.addEventListener('mouseup', stopLegendDrag)
+}
+
 const fetchData = async () => {
   if (!props.projectId || !props.gasReservoirId || !wellName.value) return
   loading.value = true
@@ -459,6 +540,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('resize', renderChartSoon)
   stopParamsPanelResize()
+  stopLegendDrag()
   chart?.dispose()
 })
 </script>
@@ -499,20 +581,6 @@ onBeforeUnmount(() => {
               </div>
             </div>
           </template>
-
-          <div class="sec-label">水气比过滤</div>
-          <div class="field field-with-switch">
-            <div class="wgr-label-row">
-              <span>生产水气比下限</span>
-              <el-switch
-                  :model-value="waterGasRatioEnabled"
-                  disabled
-                  style="--el-switch-on-color:#e8a000;--el-switch-off-color:#ccc"
-                  size="small"
-              />
-            </div>
-            <el-input size="small" readonly :disabled="!waterGasRatioEnabled" :model-value="minimumWaterGasRatio" />
-          </div>
 
           <div class="sec-label">生产数据</div>
           <div class="btn-row">
@@ -563,6 +631,30 @@ onBeforeUnmount(() => {
       </div>
 
       <div v-show="activeChartTab === 'chart'" ref="chartEl" class="chart"></div>
+
+      <div
+          v-if="activeChartTab === 'chart' && legendItems.length"
+          class="floating-chart-legend"
+          :class="{ dragging: draggingLegend }"
+          :style="legendStyle"
+          @mousedown="startLegendDrag"
+      >
+        <div
+            v-for="item in legendItems"
+            :key="item.name"
+            class="floating-legend-item"
+            :class="{ hidden: isLegendItemHidden(item.name) }"
+            title="点击显示/隐藏"
+            @mousedown.stop
+            @click.stop="toggleLegendItem(item.name)"
+        >
+          <span
+              class="legend-dot"
+              :style="{ backgroundColor: isLegendItemHidden(item.name) ? 'transparent' : item.color, borderColor: item.color }"
+          ></span>
+          <span>{{ item.name }}</span>
+        </div>
+      </div>
 
       <div v-if="activeChartTab === 'table'" class="table-wrap">
         <el-table :data="outputItems" size="small" height="100%" border>
@@ -810,6 +902,49 @@ onBeforeUnmount(() => {
   flex: 1;
   min-height: 0;
   width: 100%;
+}
+
+.floating-chart-legend {
+  position: absolute;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-width: 280px;
+  padding: 7px 10px;
+  border: 1px solid #eeeeee;
+  background: rgba(255, 255, 255, 0.9);
+  color: #333;
+  font-size: 12px;
+  line-height: 1.2;
+  cursor: move;
+  user-select: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+
+  &.dragging {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.14);
+  }
+}
+
+.floating-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  cursor: pointer;
+
+  &.hidden {
+    color: #999;
+    opacity: 0.55;
+  }
+}
+
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1px solid transparent;
 }
 
 .table-wrap {
