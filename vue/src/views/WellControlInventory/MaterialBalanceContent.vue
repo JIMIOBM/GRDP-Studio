@@ -18,17 +18,22 @@ const activeChartTab = ref(0)
 const chartEl = ref(null)
 const equationGraphicPosition = ref(null)
 
+const paramsPanelEl = ref(null)
+const paramsPanelWidth = ref(238)
+const paramsCollapsed = ref(false)
+const resizingParamsPanel = ref(false)
+
 let chart = null
 let requestSeq = 0
 
 const rawNode = computed(() => props.node?.raw || {})
 const currentWellName = computed(() =>
-  props.node?.wellName ||
-  rawNode.value?.wellName ||
-  rawNode.value?.name ||
-  props.node?.name ||
-  props.node?.label ||
-  ''
+    props.node?.wellName ||
+    rawNode.value?.wellName ||
+    rawNode.value?.name ||
+    props.node?.name ||
+    props.node?.label ||
+    ''
 )
 
 const findDynamicOriginalGasInPlaceId = (value) => {
@@ -67,20 +72,20 @@ const findDynamicOriginalGasInPlaceId = (value) => {
 }
 
 const getDynamicOriginalGasInPlaceIdFromNode = () =>
-  findDynamicOriginalGasInPlaceId({
-    node: props.node,
-    raw: rawNode.value,
-    parentNode: rawNode.value?.parentNode,
-    rootNode: rawNode.value?.rootNode
-  })
+    findDynamicOriginalGasInPlaceId({
+      node: props.node,
+      raw: rawNode.value,
+      parentNode: rawNode.value?.parentNode,
+      rootNode: rawNode.value?.rootNode
+    })
 
 const getAverageFormationPressureRows = (payload) => {
   const rows =
-    payload?.data?.data ??
-    payload?.data ??
-    payload?.items ??
-    payload?.rows ??
-    payload
+      payload?.data?.data ??
+      payload?.data ??
+      payload?.items ??
+      payload?.rows ??
+      payload
 
   if (Array.isArray(rows)) return rows
   return rows ? [rows] : []
@@ -89,12 +94,12 @@ const getAverageFormationPressureRows = (payload) => {
 const getMaterialBalanceResultId = (row) => {
   if (!row || typeof row !== 'object') return null
   return (
-    row.DynamicOriginalGasInPlaceId ??
-    row.dynamicOriginalGasInPlaceId ??
-    row.dynamicOriginalGasInplaceId ??
-    row.dynamicOriginalGasInplaceID ??
-    row.id ??
-    null
+      row.DynamicOriginalGasInPlaceId ??
+      row.dynamicOriginalGasInPlaceId ??
+      row.dynamicOriginalGasInplaceId ??
+      row.dynamicOriginalGasInplaceID ??
+      row.id ??
+      null
   )
 }
 
@@ -126,12 +131,12 @@ const input = computed(() => resultData.value?.input || {})
 
 const getChartItems = (value) => {
   const items =
-    value?.chartItems ??
-    value?.charttItems ??
-    value?.charttItem ??
-    value?.chartItem ??
-    value?.charts ??
-    []
+      value?.chartItems ??
+      value?.charttItems ??
+      value?.charttItem ??
+      value?.chartItem ??
+      value?.charts ??
+      []
   return Array.isArray(items) ? items : []
 }
 
@@ -191,18 +196,18 @@ const displayedOutputFields = computed(() => {
   const value = output.value || {}
   const fields = Array.isArray(resultData.value?.resultFields) ? resultData.value.resultFields : []
   const rows = fields
-    .filter(field => field?.name && value[field.name] !== undefined && value[field.name] !== null && value[field.name] !== '')
-    .map(field => ({
-      key: field.name,
-      label: getFieldLabel(field),
-      value: formatFieldValue(value[field.name], field)
-    }))
+      .filter(field => field?.name && value[field.name] !== undefined && value[field.name] !== null && value[field.name] !== '')
+      .map(field => ({
+        key: field.name,
+        label: getFieldLabel(field),
+        value: formatFieldValue(value[field.name], field)
+      }))
 
   if (rows.length) return rows
 
   return Object.entries(value)
-    .filter(([, fieldValue]) => fieldValue !== undefined && fieldValue !== null && fieldValue !== '')
-    .map(([key, fieldValue]) => ({ key, label: key, value: fieldValue }))
+      .filter(([, fieldValue]) => fieldValue !== undefined && fieldValue !== null && fieldValue !== '')
+      .map(([key, fieldValue]) => ({ key, label: key, value: fieldValue }))
 })
 
 const MODIFICATION_METHODS = {
@@ -280,9 +285,9 @@ const groupedInputSections = computed(() => [
 ])
 
 const hasDisplayedInputFields = computed(() =>
-  groupedInputSections.value.some(section =>
-    section.fields.some(field => field.value !== undefined && field.value !== null && field.value !== '')
-  )
+    groupedInputSections.value.some(section =>
+        section.fields.some(field => field.value !== undefined && field.value !== null && field.value !== '')
+    )
 )
 
 const getPointFromRow = (row) => {
@@ -295,24 +300,24 @@ const getPointFromRow = (row) => {
   if (!row || typeof row !== 'object') return null
 
   const x = toNumber(
-    row.xValue ??
-    row.gp ??
-    row.Gp ??
-    row.cumulativeGasProduction ??
-    row.cumulativeGas ??
-    row.cumGas ??
-    row.x
+      row.xValue ??
+      row.gp ??
+      row.Gp ??
+      row.cumulativeGasProduction ??
+      row.cumulativeGas ??
+      row.cumGas ??
+      row.x
   )
   const y = toNumber(
-    row.yValue ??
-    row.pressure ??
-    row.pp ??
-    row.Pp ??
-    row.averageFormationPressure ??
-    row.formationPressure ??
-    row.calculatedStaticPressure ??
-    row.actualStaticPressure ??
-    row.y
+      row.yValue ??
+      row.pressure ??
+      row.pp ??
+      row.Pp ??
+      row.averageFormationPressure ??
+      row.formationPressure ??
+      row.calculatedStaticPressure ??
+      row.actualStaticPressure ??
+      row.y
   )
 
   return x !== null && y !== null ? [x, y] : null
@@ -324,21 +329,21 @@ const isRegressionItem = (item, index) => {
 }
 
 const pointChartItem = computed(() =>
-  activeChartItems.value.find((item, index) => Array.isArray(item?.data) && item.data.length && !isRegressionItem(item, index)) ||
-  activeChartItems.value.find(item => Array.isArray(item?.data) && item.data.length) ||
-  null
+    activeChartItems.value.find((item, index) => Array.isArray(item?.data) && item.data.length && !isRegressionItem(item, index)) ||
+    activeChartItems.value.find(item => Array.isArray(item?.data) && item.data.length) ||
+    null
 )
 
 const regressionChartItems = computed(() =>
-  activeChartItems.value.filter((item, index) => Array.isArray(item?.data) && item.data.length && isRegressionItem(item, index))
+    activeChartItems.value.filter((item, index) => Array.isArray(item?.data) && item.data.length && isRegressionItem(item, index))
 )
 
 const primaryPointRows = computed(() => Array.isArray(pointChartItem.value?.data) ? pointChartItem.value.data : [])
 
 const chartPoints = computed(() =>
-  primaryPointRows.value
-    .map(row => getPointFromRow(row))
-    .filter(Boolean)
+    primaryPointRows.value
+        .map(row => getPointFromRow(row))
+        .filter(Boolean)
 )
 
 const regression = computed(() => {
@@ -380,17 +385,17 @@ const regressionLinePoints = computed(() => {
   const item = regressionChartItems.value[0]
   if (item?.data?.length) {
     return item.data
-      .map(row => getPointFromRow(row))
-      .filter(Boolean)
+        .map(row => getPointFromRow(row))
+        .filter(Boolean)
   }
 
   return calculatedRegressionLinePoints.value
 })
 
 const chartTitle = computed(() =>
-  output.value?.dynamicOriginalGasInplaceMethodDescription ||
-  chartTabs.value[activeChartTab.value]?.label ||
-  '定容气藏物质平衡方程-根据计算静压'
+    output.value?.dynamicOriginalGasInplaceMethodDescription ||
+    chartTabs.value[activeChartTab.value]?.label ||
+    '定容气藏物质平衡方程-根据计算静压'
 )
 
 const chartBounds = computed(() => {
@@ -411,18 +416,18 @@ const chartBounds = computed(() => {
 })
 
 const tableRows = computed(() =>
-  primaryPointRows.value
-    .map((row, index) => {
-      const point = getPointFromRow(row)
-      if (!point) return null
-      return {
-        index: index + 1,
-        gp: point[0],
-        pressure: point[1],
-        selected: row?.isDeleted === true ? '否' : '是'
-      }
-    })
-    .filter(Boolean)
+    primaryPointRows.value
+        .map((row, index) => {
+          const point = getPointFromRow(row)
+          if (!point) return null
+          return {
+            index: index + 1,
+            gp: point[0],
+            pressure: point[1],
+            selected: row?.isDeleted === true ? '否' : '是'
+          }
+        })
+        .filter(Boolean)
 )
 
 const getMethodValue = (methods, key) => {
@@ -447,15 +452,15 @@ const getEquationGraphicPosition = () => {
 const LEGEND_LINE_ICON = 'path://M0,0 L36,0 L36,3 L0,3 Z'
 
 const createLegendData = (series) =>
-  series.map(item => item.type === 'line'
-    ? {
-        // name: item.name,
-        name: '回归线(Mpa)',
-        icon: LEGEND_LINE_ICON,
-        itemStyle: { color: '#000' }
-      }
-    : item.name
-  )
+    series.map(item => item.type === 'line'
+        ? {
+          // name: item.name,
+          name: '回归线(Mpa)',
+          icon: LEGEND_LINE_ICON,
+          itemStyle: { color: '#000' }
+        }
+        : item.name
+    )
 
 const createChartSeries = () => {
   const explicitRegressionSeries = regressionChartItems.value.map((item, index) => ({
@@ -495,11 +500,11 @@ const createChartSeries = () => {
   }
 
   return series
-    .filter((series, index, list) =>
-      Array.isArray(series.data) &&
-      series.data.length &&
-      list.findIndex(item => item.name === series.name) === index
-    )
+      .filter((series, index, list) =>
+          Array.isArray(series.data) &&
+          series.data.length &&
+          list.findIndex(item => item.name === series.name) === index
+      )
 }
 
 function renderChart() {
@@ -616,6 +621,55 @@ function renderChart() {
   }, true)
 }
 
+function renderChartSoon() {
+  nextTick(() => {
+    requestAnimationFrame(() => {
+      chart?.resize()
+      renderChart()
+    })
+  })
+}
+
+function toggleParamsPanel() {
+  paramsCollapsed.value = !paramsCollapsed.value
+  renderChartSoon()
+}
+
+function onParamsPanelResize(event) {
+  if (!resizingParamsPanel.value) return
+
+  const left = paramsPanelEl.value?.getBoundingClientRect().left || 0
+  paramsPanelWidth.value = Math.max(238, Math.min(520, event.clientX - left))
+
+  chart?.resize()
+}
+
+function stopParamsPanelResize() {
+  if (!resizingParamsPanel.value) return
+
+  resizingParamsPanel.value = false
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+
+  window.removeEventListener('mousemove', onParamsPanelResize)
+  window.removeEventListener('mouseup', stopParamsPanelResize)
+
+  renderChartSoon()
+}
+
+function startParamsPanelResize(event) {
+  if (paramsCollapsed.value) return
+
+  event.preventDefault()
+
+  resizingParamsPanel.value = true
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+
+  window.addEventListener('mousemove', onParamsPanelResize)
+  window.addEventListener('mouseup', stopParamsPanelResize)
+}
+
 async function fetchData() {
   const requestId = ++requestSeq
   const wellName = currentWellName.value
@@ -636,19 +690,19 @@ async function fetchData() {
 
       try {
         const pressureRes = await materialBalanceApi.getAverageFormationPressure(
-          props.projectId,
-          props.gasReservoirId,
-          wellName,
-          { silentError: true }
+            props.projectId,
+            props.gasReservoirId,
+            wellName,
+            { silentError: true }
         )
         const averageRows = getAverageFormationPressureRows(pressureRes.data)
         const resultRequests = averageRows
-          .map((row, index) => ({
-            row,
-            index,
-            id: getMaterialBalanceResultId(row)
-          }))
-          .filter(item => item.id !== null && item.id !== undefined && item.id !== '')
+            .map((row, index) => ({
+              row,
+              index,
+              id: getMaterialBalanceResultId(row)
+            }))
+            .filter(item => item.id !== null && item.id !== undefined && item.id !== '')
 
         if (!resultRequests.length) {
           const dynamicOriginalGasInPlaceId = getDynamicOriginalGasInPlaceIdFromNode()
@@ -658,28 +712,28 @@ async function fetchData() {
           }
 
           const fallbackRes = await materialBalanceApi.getResult(
-            props.projectId,
-            props.gasReservoirId,
-            dynamicOriginalGasInPlaceId,
-            null,
-            null,
-            { silentError: true }
+              props.projectId,
+              props.gasReservoirId,
+              dynamicOriginalGasInPlaceId,
+              null,
+              null,
+              { silentError: true }
           )
           nextResultData = fallbackRes.data
           break
         }
 
         const resultResponses = await Promise.all(
-          resultRequests.map(item =>
-            materialBalanceApi.getResult(
-              props.projectId,
-              props.gasReservoirId,
-              item.id,
-              null,
-              null,
-              { silentError: true }
-            ).then(res => ({ ...item, result: res.data }))
-          )
+            resultRequests.map(item =>
+                materialBalanceApi.getResult(
+                    props.projectId,
+                    props.gasReservoirId,
+                    item.id,
+                    null,
+                    null,
+                    { silentError: true }
+                ).then(res => ({ ...item, result: res.data }))
+            )
         )
 
         const firstResult = resultResponses[0]?.result || {}
@@ -729,74 +783,113 @@ watch([chartPoints, regressionLinePoints], () => nextTick(renderChart), { deep: 
 
 onMounted(() => {
   chart = echarts.init(chartEl.value)
-  window.addEventListener('resize', chart.resize)
-  renderChart()
+  window.addEventListener('resize', renderChartSoon)
+  renderChartSoon()
 })
 
 onBeforeUnmount(() => {
-  if (chart) {
-    window.removeEventListener('resize', chart.resize)
-    chart.dispose()
-  }
+  window.removeEventListener('resize', renderChartSoon)
+  stopParamsPanelResize()
+  chart?.dispose()
+  chart = null
 })
 </script>
 
 <template>
   <div v-loading="loading" class="mb-wrap">
-    <aside class="params-panel">
-      <div class="panel-head">参数设置</div>
+    <aside
+        ref="paramsPanelEl"
+        class="params-panel"
+        :class="{ collapsed: paramsCollapsed, resizing: resizingParamsPanel }"
+        :style="{
+        width: paramsCollapsed ? '22px' : `${paramsPanelWidth}px`,
+        minWidth: paramsCollapsed ? '22px' : `${paramsPanelWidth}px`
+      }"
+    >
+      <div
+          v-if="paramsCollapsed"
+          class="panel-collapsed-tab"
+          @click="toggleParamsPanel"
+      >
+        参数设置
+      </div>
 
-      <div v-show="activePanelTab === 'input'" class="panel-body">
-        <div v-if="!hasDisplayedInputFields" class="empty">暂无接口输入结果</div>
-        <template v-for="section in groupedInputSections" :key="section.title">
-          <div class="section-title">{{ section.title }}</div>
-          <div
-            v-for="item in section.fields"
-            v-show="item.value !== undefined && item.value !== null && item.value !== ''"
-            :key="item.key"
-            class="field"
+      <template v-if="!paramsCollapsed">
+        <div class="panel-head">
+          <span>参数设置</span>
+          <button
+              class="panel-toggle"
+              type="button"
+              title="收起参数设置"
+              @click="toggleParamsPanel"
           >
-            <label>{{ item.label }}</label>
-            <el-select
-              v-if="item.options"
-              size="small"
-              :model-value="item.value"
-              style="width: 100%"
-            >
-              <el-option
-                v-for="option in item.options"
-                :key="option.value"
-                :label="option.label"
-                :value="option.value"
-              />
-            </el-select>
-            <el-input v-else size="small" readonly :model-value="item.value" />
-          </div>
-        </template>
-      </div>
-
-      <div v-show="activePanelTab === 'output'" class="panel-body">
-        <div class="section-title">输出结果</div>
-        <div v-if="!displayedOutputFields.length" class="empty">暂无接口输出结果</div>
-        <div v-for="item in displayedOutputFields" :key="item.key" class="field">
-          <label>{{ item.label }}</label>
-          <el-input size="small" readonly :model-value="item.value" />
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="#777">
+              <path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z" />
+            </svg>
+          </button>
         </div>
-      </div>
 
-      <div class="panel-tabs">
-        <button :class="{ active: activePanelTab === 'input' }" @click="activePanelTab = 'input'">输入</button>
-        <button :class="{ active: activePanelTab === 'output' }" @click="activePanelTab = 'output'">输出</button>
-      </div>
+        <div v-show="activePanelTab === 'input'" class="panel-body">
+          <div v-if="!hasDisplayedInputFields" class="empty">暂无接口输入结果</div>
+          <template v-for="section in groupedInputSections" :key="section.title">
+            <div class="section-title">{{ section.title }}</div>
+            <div class="field-grid">
+              <div
+                  v-for="item in section.fields"
+                  v-show="item.value !== undefined && item.value !== null && item.value !== ''"
+                  :key="item.key"
+                  class="field"
+              >
+                <label>{{ item.label }}</label>
+                <el-select
+                    v-if="item.options"
+                    size="small"
+                    :model-value="item.value"
+                    style="width: 100%"
+                >
+                  <el-option
+                      v-for="option in item.options"
+                      :key="option.value"
+                      :label="option.label"
+                      :value="option.value"
+                  />
+                </el-select>
+                <el-input v-else size="small" readonly :model-value="item.value" />
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <div v-show="activePanelTab === 'output'" class="panel-body">
+          <div class="section-title">输出结果</div>
+          <div v-if="!displayedOutputFields.length" class="empty">暂无接口输出结果</div>
+          <div class="field-grid">
+            <div v-for="item in displayedOutputFields" :key="item.key" class="field">
+              <label>{{ item.label }}</label>
+              <el-input size="small" readonly :model-value="item.value" />
+            </div>
+          </div>
+        </div>
+
+        <div class="panel-tabs">
+          <button :class="{ active: activePanelTab === 'input' }" @click="activePanelTab = 'input'">输入</button>
+          <button :class="{ active: activePanelTab === 'output' }" @click="activePanelTab = 'output'">输出</button>
+        </div>
+
+        <div
+            class="params-resizer"
+            @mousedown="startParamsPanelResize"
+        />
+      </template>
     </aside>
 
     <main class="chart-area">
       <div class="chart-tabs">
         <button
-          v-for="(tab, index) in chartTabs"
-          :key="tab.label"
-          :class="{ active: activeChartTab === index }"
-          @click="activeChartTab = index"
+            v-for="(tab, index) in chartTabs"
+            :key="tab.label"
+            :class="{ active: activeChartTab === index }"
+            @click="activeChartTab = index"
         >
           {{ tab.label }}
         </button>
@@ -820,48 +913,121 @@ onBeforeUnmount(() => {
   height: 100%;
   min-height: 0;
   background: #fff;
-}
-
-.params-panel {
-  width: 315px;
-  min-width: 315px;
-  display: flex;
-  flex-direction: column;
-  border-right: 1px solid #e0e0e0;
   overflow: hidden;
 }
 
+.params-panel {
+  width: 238px;
+  min-width: 238px;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  border-right: 1px solid #e0e0e0;
+  overflow: hidden;
+  transition: width 0.16s ease, min-width 0.16s ease;
+
+  &.collapsed {
+    background: transparent;
+    border-right: 0;
+  }
+
+  &.resizing {
+    transition: none;
+  }
+}
+
 .panel-head {
-  height: 40px;
-  line-height: 40px;
-  padding: 0 16px;
-  border-bottom: 1px solid #eeeeee;
-  font-size: 15px;
-  color: #222;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 7px 12px 6px;
+  border-bottom: 1px solid #f0f0f0;
+  flex-shrink: 0;
+  font-size: 13px;
+  color: #333;
+}
+
+.panel-toggle {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: 2px;
+
+  &:hover {
+    background: #eef4ff;
+  }
+}
+
+.panel-collapsed-tab {
+  width: 22px;
+  height: 76px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  font-size: 13px;
+  color: #333;
+  cursor: pointer;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-left: 0;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+
+  &:hover {
+    background: #eef4ff;
+    color: #1f6fd6;
+  }
 }
 
 .panel-body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 10px 16px 16px;
+  padding: 4px 12px 14px;
+}
+
+.params-resizer {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 4;
+
+  &:hover {
+    background: rgba(64, 132, 217, 0.18);
+  }
+}
+
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  column-gap: 24px;
 }
 
 .section-title {
   font-size: 14px;
   color: #333;
-  margin: 8px 0 9px;
+  margin: 10px 0 7px;
   font-weight: 600;
 }
 
 .field {
-  margin-bottom: 10px;
+  margin-bottom: 9px;
 
   label {
     display: block;
-    margin-bottom: 4px;
+    margin-bottom: 3px;
     color: #555;
-    font-size: 13px;
+    font-size: 12px;
   }
 }
 
@@ -876,6 +1042,7 @@ onBeforeUnmount(() => {
   height: 36px;
   display: flex;
   border-top: 1px solid #e0e0e0;
+  flex-shrink: 0;
 
   button {
     flex: 1;
@@ -905,6 +1072,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   background: #fff;
+  overflow: hidden;
 }
 
 .chart-tabs {
@@ -912,6 +1080,9 @@ onBeforeUnmount(() => {
   display: flex;
   border-bottom: 1px solid #e4e7ed;
   background: #fafafa;
+  flex-shrink: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
 
   button {
     border: 0;
@@ -920,6 +1091,7 @@ onBeforeUnmount(() => {
     padding: 0 16px;
     color: #555;
     cursor: pointer;
+    flex-shrink: 0;
 
     &.active {
       background: #fff;
@@ -940,5 +1112,6 @@ onBeforeUnmount(() => {
   height: 170px;
   padding: 10px;
   border-top: 1px solid #eeeeee;
+  flex-shrink: 0;
 }
 </style>

@@ -233,7 +233,7 @@ function toggleParamsPanel() {
 function onParamsPanelResize(event) {
   if (!resizingParamsPanel.value) return
   const leftBoundary = paramsPanelEl.value?.getBoundingClientRect().left || 0
-  const width = Math.max(180, Math.min(520, event.clientX - leftBoundary))
+  const width = Math.max(238, Math.min(520, event.clientX - leftBoundary))
   paramsPanelWidth.value = width
   chart?.resize()
 }

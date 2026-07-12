@@ -113,12 +113,12 @@ const equationTypeOptions = [
 const formatNumber = (value) => {
   const num = parseFloat(value)
   if (isNaN(num)) return String(value)
-  
+
   if (/[eE]/.test(String(value))) {
     const fixed = num.toFixed(10)
     return fixed.replace(/\.?0+$/, '')
   }
-  
+
   return String(value)
 }
 
@@ -162,7 +162,7 @@ const otherData = computed(() => [
 
 const chartPoints = computed(() => {
   if (!resultData.value?.data || !Array.isArray(resultData.value.data)) return []
-  
+
   return resultData.value.data
     .filter(item => item.isDeleted === false)
     .map(item => {
@@ -175,7 +175,7 @@ const chartPoints = computed(() => {
 
 const allPoints = computed(() => {
   if (!resultData.value?.data || !Array.isArray(resultData.value.data)) return []
-  
+
   return resultData.value.data
     .map(item => {
       const x = Number(item.pseudotime)
@@ -195,27 +195,27 @@ const regression = computed(() => {
 
 const renderChart = () => {
   if (!chart) return
-  
+
   const { slope, intercept, r2 } = regression.value
-  
+
   const xs = chartPoints.value.map(([x]) => x)
   const dataMinX = xs.length ? Math.min(...xs) : 300
   const dataMaxX = xs.length ? Math.max(...xs) : 3600
-  
+
   const rayStartX = dataMinX
   const rayStartY = slope * rayStartX + intercept
   const rayEndX = dataMaxX
   const rayEndY = slope * rayEndX + intercept
-  
+
   const series = [
     {
       name: '背景数据点',
       type: 'scatter',
       data: allPoints.value,
       symbolSize: 6,
-      itemStyle: { 
-        color: '#ccc', 
-        opacity: 0.6 
+      itemStyle: {
+        color: '#ccc',
+        opacity: 0.6
       }
     },
     {
@@ -223,9 +223,9 @@ const renderChart = () => {
       type: 'scatter',
       data: chartPoints.value,
       symbolSize: 10,
-      itemStyle: { 
-        color: '#0037b5', 
-        opacity: 0.85 
+      itemStyle: {
+        color: '#0037b5',
+        opacity: 0.85
       }
     },
     {
@@ -329,7 +329,7 @@ const renderChart = () => {
 const fetchData = async () => {
   const wellId = currentWellId.value
   const wellName = currentWellName.value
-  
+
   if (!wellId || !props.projectId || !props.gasReservoirId) {
     noData.value = true
     return
@@ -338,18 +338,18 @@ const fetchData = async () => {
   loading.value = true
   resultData.value = null
   noData.value = false
-  
+
   try {
     const res = await dockerRequest.get(
       `/projectanalysis/dynamicoriginalgasInplace/result/${props.projectId}/${props.gasReservoirId}/${wellId}`
     )
-    
+
     resultData.value = res.data
-    
+
     if (!res.data?.data || !Array.isArray(res.data.data) || res.data.data.length === 0) {
       noData.value = true
     }
-    
+
   } catch (e) {
     console.error(`[DynamicBalanceContent] Failed to fetch data for ${wellName}`, e)
     noData.value = true
@@ -376,7 +376,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div v-loading="loading" class="db-wrap">
-    <div 
+    <div
       class="params-panel"
       :class="{ collapsed: panelCollapsed }"
       :style="{ width: panelCollapsed ? '22px' : '380px', minWidth: panelCollapsed ? '22px' : '380px' }"
@@ -466,16 +466,16 @@ onBeforeUnmount(() => {
       </div>
 
       <div v-show="!panelCollapsed" class="panel-tabs">
-        <button 
-          class="tab-btn" 
-          :class="{ active: activeTab === 'input' }" 
+        <button
+          class="tab-btn"
+          :class="{ active: activeTab === 'input' }"
           @click="activeTab = 'input'"
         >
           输入
         </button>
-        <button 
-          class="tab-btn" 
-          :class="{ active: activeTab === 'output' }" 
+        <button
+          class="tab-btn"
+          :class="{ active: activeTab === 'output' }"
           @click="activeTab = 'output'"
         >
           输出
