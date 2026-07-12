@@ -1,4 +1,4 @@
-<script setup>
+﻿<script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
 import { typicalCurveApi } from '@/api/docker'
@@ -30,6 +30,12 @@ const result = computed(() => raw.value?.result || raw.value?.output || raw.valu
 const input = computed(() => raw.value?.input || raw.value?.inputs || raw.value?.parameter || {})
 const currentNodeId = computed(() =>
     props.node?.treeNode?.nodeId || props.node?.raw?.nodeId || props.node?.raw?.id || props.node?.id
+)
+const currentWellName = computed(() =>
+    props.node?.wellName || raw.value?.wellName || input.value?.wellName || input.value?.wellNames?.[0] || ''
+)
+const chartTabTitle = computed(() =>
+    `诊断曲线-Blasingame-${currentWellName.value || '当前井'}-分析结果`
 )
 
 const asArray = (value) => Array.isArray(value) ? value : []
@@ -621,12 +627,9 @@ onBeforeUnmount(() => {
     </aside>
 
     <div ref="chartAreaEl" class="chart-area">
-      <div class="chart-tabs">
-        <button type="button" class="chart-tab" :class="{ active: activeChartTab === 'chart' }" @click="activeChartTab = 'chart'">
-          结果分析图
-        </button>
-        <button type="button" class="chart-tab" :class="{ active: activeChartTab === 'table' }" @click="showTableTab">
-          数据列表
+      <div class="dynamic-result-tabs">
+        <button type="button" class="dynamic-result-tab active" :title="chartTabTitle">
+          <span class="dynamic-result-tab-text">{{ chartTabTitle }}</span>
         </button>
       </div>
 
@@ -664,6 +667,15 @@ onBeforeUnmount(() => {
           <el-table-column prop="regularizedProductionIntegral" label="重整产量积分(qDdi)" min-width="190" sortable />
           <el-table-column prop="regularizedProductionIntegralDerivative" label="重整产量积分导数(qDdid)" min-width="220" sortable />
         </el-table>
+      </div>
+
+      <div class="bottom-chart-tabs">
+        <button type="button" class="bottom-chart-tab" :class="{ active: activeChartTab === 'table' }" @click="showTableTab">
+          数据列表
+        </button>
+        <button type="button" class="bottom-chart-tab" :class="{ active: activeChartTab === 'chart' }" :title="chartTabTitle" @click="activeChartTab = 'chart'">
+          结果分析图
+        </button>
       </div>
     </div>
   </div>
@@ -851,22 +863,72 @@ onBeforeUnmount(() => {
   position: relative;
 }
 
-.chart-tabs {
-  display: flex;
+.dynamic-result-tabs {
   height: 34px;
-  border-bottom: 1px solid #e4e7ed;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid #e4e7ed;
   background: #fafafa;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
-.chart-tab {
+.dynamic-result-tab {
+  height: 34px;
+  max-width: 320px;
   border: 0;
   border-right: 1px solid #e4e7ed;
-  background: transparent;
-  padding: 0 16px;
-  color: #555;
-  cursor: pointer;
   border-bottom: 2px solid transparent;
+  background: transparent;
+  color: #409eff;
+  font-size: 14px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  cursor: default;
+  white-space: nowrap;
+
+  &.active {
+    border-bottom-color: #409eff;
+    background: #fff;
+  }
+}
+
+.dynamic-result-tab-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chart-instance {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+.bottom-chart-tabs {
+  display: flex;
+  align-items: flex-end;
+  height: 30px;
+  flex-shrink: 0;
+  background: #fff;
+  border-top: 1px solid #e4e7ed;
+}
+
+.bottom-chart-tab {
+  min-width: 88px;
+  height: 30px;
+  border: 0;
+  border-right: 1px solid #e4e7ed;
+  border-top: 2px solid transparent;
+  background: #fff;
+  color: #333;
+  font-size: 13px;
+  cursor: pointer;
   white-space: nowrap;
 
   &:hover {
@@ -875,16 +937,9 @@ onBeforeUnmount(() => {
 
   &.active {
     color: #409eff;
-    border-bottom-color: #409eff;
-    background: #fff;
+    border-top-color: #409eff;
     font-weight: 600;
   }
-}
-
-.chart-instance {
-  flex: 1;
-  min-height: 0;
-  width: 100%;
 }
 
 .floating-chart-legend {

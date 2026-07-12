@@ -40,6 +40,7 @@ const OUTPUT_FIELD_CONFIGS = [
 const loading        = ref(false)   // 接口加载状态
 const wellData       = ref(null)  //接口返回的谁侵分析详细数据
 const activeChartIdx = ref(0)  // 选中的图表页签下标
+const activeContentTab = ref('chart')
 const activeParamTab = ref('input')  //左侧参数面板输入\输出显示
 const paramsPanelWidth = ref(238)  //参数面板宽度
 const paramsCollapsed = ref(false)  //参数面板是否收起
@@ -51,8 +52,12 @@ const output = computed(() => wellData.value?.outputs?.[activeChartIdx.value]?.o
 const outputFields = computed(() => OUTPUT_FIELD_CONFIGS[activeChartIdx.value] || [])
 const hasOutputResults = computed(() => outputFields.value.length > 0)
 const isWaterActivityTab = computed(() => activeChartIdx.value === 4)
-const isDataListTab = computed(() => activeTab.value?.type === 'table')
+const isDataListTab = computed(() => activeContentTab.value === 'table')
 const waterActivityOutput = computed(() => wellData.value?.outputs?.[4]?.output || {})
+const currentWellName = computed(() => props.node?.wellName || wellData.value?.input?.wellName || '')
+const chartTabTitle = computed(() =>
+    `动态分析-水侵动态分析-${currentWellName.value || '当前井'}-分析结果`
+)
 
 //用于控制右侧浮动图例的位置
 const legendPosition = ref({ x: null, y: null })
@@ -141,7 +146,7 @@ const getMethodValue = (methods, key) => {
 // 只保留有 chartItems 的 outputs，作为图表标签页
 const chartTabs = computed(() => {
   if (!wellData.value) return []
-  const outputTabs = (wellData.value.outputs || [])
+  return (wellData.value.outputs || [])
       .slice(0, CHART_TAB_LABELS.length)
       .map((o, index) => ({
         analysisId:  o.analysisId,
@@ -149,16 +154,6 @@ const chartTabs = computed(() => {
         chartItems:  o.chartItems || [],
         outputItems: o.outputItems || []
       }))
-  return [
-    ...outputTabs,
-    {
-      analysisId: 'water-invasion-data-list',
-      label: '数据列表',
-      type: 'table',
-      chartItems: [],
-      outputItems: []
-    }
-  ]
 })
 
 const activeTab = computed(() => chartTabs.value[activeChartIdx.value] || null)
@@ -581,6 +576,7 @@ async function fetchData() { //请求水侵分析详情
 
   loading.value        = true
   activeChartIdx.value = 0
+  activeContentTab.value = 'chart'
   activeParamTab.value = 'input'
   wellData.value       = null
 
@@ -609,6 +605,11 @@ watch(activeChartIdx, () => {
   if (!hasOutputResults.value && activeParamTab.value === 'output') {
     activeParamTab.value = 'input'
   }
+  renderChartSoon()
+  renderChartSoon(180)
+})
+
+watch(activeContentTab, () => {
   renderChartSoon()
   renderChartSoon(180)
 })
@@ -794,7 +795,13 @@ onBeforeUnmount(() => {
 
     <!-- 右侧图表区域 -->
     <div ref="chartAreaEl" class="chart-area">
-      <div v-if="chartTabs.length" class="chart-tabs">
+      <div class="dynamic-result-tabs">
+        <button type="button" class="dynamic-result-tab active" :title="chartTabTitle">
+          <span class="dynamic-result-tab-text">{{ chartTabTitle }}</span>
+        </button>
+      </div>
+
+      <div v-if="activeContentTab === 'chart' && chartTabs.length" class="chart-tabs">
         <button
             v-for="(tab, i) in chartTabs"
             :key="tab.analysisId"
@@ -804,7 +811,7 @@ onBeforeUnmount(() => {
             @click="activeChartIdx = i"
         >{{ tab.label }}</button>
       </div>
-      <div v-show="!isWaterActivityTab && !isDataListTab" ref="chartEl" class="chart-instance"/>
+      <div v-show="activeContentTab === 'chart' && !isWaterActivityTab" ref="chartEl" class="chart-instance"/>
 
       <div v-if="isDataListTab" class="data-list-panel">
         <el-table :data="dataListRows" size="small" height="100%" border stripe>
@@ -826,7 +833,7 @@ onBeforeUnmount(() => {
       </div>
 
       <div
-          v-if="legendItems.length"
+          v-if="activeContentTab === 'chart' && legendItems.length"
           class="floating-chart-legend"
           :class="{ dragging: draggingLegend }"
           :style="legendStyle"
@@ -846,7 +853,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <div v-if="isWaterActivityTab" class="water-activity-panel">
+      <div v-if="activeContentTab === 'chart' && isWaterActivityTab" class="water-activity-panel">
         <div class="activity-form">
           <div class="activity-field">
             <label>气藏废弃时的水侵量(10⁴m³):</label>
@@ -886,6 +893,26 @@ onBeforeUnmount(() => {
             </tr>
           </tbody>
         </table>
+      </div>
+
+      <div class="bottom-chart-tabs">
+        <button
+          type="button"
+          class="bottom-chart-tab"
+          :class="{ active: activeContentTab === 'table' }"
+          @click="activeContentTab = 'table'"
+        >
+          数据列表
+        </button>
+        <button
+          type="button"
+          class="bottom-chart-tab"
+          :class="{ active: activeContentTab === 'chart' }"
+          :title="chartTabTitle"
+          @click="activeContentTab = 'chart'"
+        >
+          结果分析图
+        </button>
       </div>
     </div>
 
@@ -1063,6 +1090,46 @@ onBeforeUnmount(() => {
   position: relative;
 }
 
+.dynamic-result-tabs {
+  height: 34px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid #e4e7ed;
+  background: #fafafa;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.dynamic-result-tab {
+  height: 34px;
+  max-width: 340px;
+  border: 0;
+  border-right: 1px solid #e4e7ed;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: #409eff;
+  font-size: 14px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  cursor: default;
+  white-space: nowrap;
+
+  &.active {
+    border-bottom-color: #409eff;
+    background: #fff;
+  }
+}
+
+.dynamic-result-tab-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .chart-tabs {
   height: 34px;
   display: flex;
@@ -1105,6 +1172,33 @@ onBeforeUnmount(() => {
   width: 100%;
   overflow: hidden;
   background: #fff;
+}
+
+.bottom-chart-tabs {
+  display: flex;
+  align-items: flex-end;
+  height: 30px;
+  flex-shrink: 0;
+  border-top: 1px solid #e4e7ed;
+  background: #fff;
+}
+
+.bottom-chart-tab {
+  height: 30px;
+  min-width: 82px;
+  padding: 0 14px;
+  border: 0;
+  border-right: 1px solid #e4e7ed;
+  background: #fff;
+  color: #333;
+  font-size: 13px;
+  cursor: pointer;
+
+  &.active {
+    color: #409eff;
+    font-weight: 600;
+    background: #fff;
+  }
 }
 
 .floating-chart-legend {

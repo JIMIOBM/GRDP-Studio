@@ -13,8 +13,8 @@ import DynamicBalanceContent from '@/views/WellControlInventory/DynamicBalanceCo
 import { NODETYPE } from '@/constants/nodeType'
 import { analyticMethodApi, materialBalanceApi, nodeApi, projectApi, typicalCurveApi, waterInvasionApi } from '@/api/docker'
 
-const PROJECT_ID = 4
-const GAS_RESERVOIR_ID = 3
+const PROJECT_ID = 1
+const GAS_RESERVOIR_ID = 1
 
 const WELL_GROUPS = [
   { id: 'data-management', label: '数据管理' },
