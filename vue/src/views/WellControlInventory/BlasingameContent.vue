@@ -2,12 +2,20 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
 import { typicalCurveApi } from '@/api/docker'
+import blasingameGraph from '@/constants/typeCurves/blasingamegraph.json'
+import fissureBlasingameGraph from '@/constants/typeCurves/fissureBlasingamegraph.json'
+import horizontalBlasingameGraph from '@/constants/typeCurves/HorizontalBlasingamegraph.json'
+import horizontalFracturedBlasingameGraph from '@/constants/typeCurves/HorizontalFracturedBlasingamegraph.json'
 
 const props = defineProps({
   node: Object,
   projectId: [Number, String],
   gasReservoirId: [Number, String]
 })
+
+const MODIFICATION_METHODS = ['Wichert-Aziz 修正方法', 'Carr-Kobayashi-Burrous 修正方法']
+const DEVIATION_METHODS = ['Dranchuk-Abu-Kassem 方法', 'Dranchuk-Purvis-Robinson 方法', 'Hall-Yarborough 方法']
+const VISCOSITY_METHODS = ['Lee-Gonzalez-Eakin 方法', 'Carr-Kobayashi-Burrous 方法', 'Sutton 方法']
 
 const activePanelTab = ref('input')
 const activeChartTab = ref('chart')
@@ -28,6 +36,14 @@ let chart = null
 const raw = computed(() => props.node?.raw || {})
 const result = computed(() => raw.value?.result || raw.value?.output || raw.value?.outputs?.[0]?.output || {})
 const input = computed(() => raw.value?.input || raw.value?.inputs || raw.value?.parameter || {})
+const analysis = computed(() =>
+    raw.value?.analysis ||
+    raw.value?.data?.analysis ||
+    raw.value?.result?.analysis ||
+    raw.value?.output?.analysis ||
+    raw.value?.outputs?.[0]?.analysis ||
+    {}
+)
 const currentNodeId = computed(() =>
     props.node?.treeNode?.nodeId || props.node?.raw?.nodeId || props.node?.raw?.id || props.node?.id
 )
@@ -39,6 +55,32 @@ const chartTabTitle = computed(() =>
 )
 
 const asArray = (value) => Array.isArray(value) ? value : []
+
+const BLASINGAME_BASELINE_FILES = {
+  vertical: {
+    normal: blasingameGraph,
+    fractured: fissureBlasingameGraph
+  },
+  horizontal: {
+    normal: horizontalBlasingameGraph,
+    fractured: horizontalFracturedBlasingameGraph
+  }
+}
+
+const BASELINE_COLORS = [
+  '#91cc75',
+  '#73c0de',
+  '#fac858',
+  '#fc8452',
+  '#ee6666',
+  '#5470c6',
+  '#9a60b4',
+  '#3ba272',
+  '#ea7ccc',
+  '#2f7ed8',
+  '#f7a35c',
+  '#8085e9'
+]
 
 const unwrapResponseData = (response) => response?.data?.data ?? response?.data ?? response
 
@@ -90,15 +132,22 @@ const methodLabel = (value, labels, fallback = '') => {
 const inputValue = (keys, fallback = '') => getValue(input.value, keys, fallback)
 const resultValue = (keys, fallback = '') => getValue(result.value, keys, fallback)
 
+const getMethodValue = (methods, key) => {
+  const value = input.value?.[key]
+  if (value === undefined || value === null || value === '') return ''
+  if (typeof value === 'number') return methods[value] || String(value)
+  return value
+}
+
 const gasType = computed(() => methodLabel(inputValue(['gasType'], 2), ['', '', '干气'], '干气'))
 const modificationMethod = computed(() =>
-    methodLabel(inputValue(['modificationMethod'], 0), ['Wichert-Aziz 修正方法', 'Carr-Kobayashi-Burrous 修正方法'], 'Wichert-Aziz 修正方法')
+    getMethodValue(MODIFICATION_METHODS, 'modificationMethod') || 'Wichert-Aziz 修正方法'
 )
 const deviationMethod = computed(() =>
-    methodLabel(inputValue(['deviationFactorMethod'], 0), ['Dranchuk-Abu-Kassem 方法', 'Dranchuk-Purvis-Robinson 方法', 'Hall-Yarborough 方法'], 'Dranchuk-Abu-Kassem 方法')
+    getMethodValue(DEVIATION_METHODS, 'deviationFactorMethod') || 'Dranchuk-Abu-Kassem 方法'
 )
 const viscosityMethod = computed(() =>
-    methodLabel(inputValue(['viscosityMethod'], 0), ['Lee-Gonzalez-Eakin 方法', 'Carr-Kobayashi-Burrous 方法', 'Sutton 方法'], 'Lee-Gonzalez-Eakin 方法')
+    getMethodValue(VISCOSITY_METHODS, 'viscosityMethod') || 'Lee-Gonzalez-Eakin 方法'
 )
 const fittingMode = computed(() => {
   const isSkip = inputValue(['isSkipFitting'], false)
@@ -222,6 +271,65 @@ const toSeriesPoints = (item, yKeys = ['yValue', 'y', 'value', 'qDd', 'qDdi', 'q
         .map(point => getPoint(point, ['xValue', 'x', 'tCaDd', 'tcaDd', 'tcaD', 'tD', 'td'], yKeys))
         .filter(Boolean)
 
+const normalizeBoolean = (value) => {
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'number') return value === 1
+  const text = String(value ?? '').trim().toLowerCase()
+  return ['true', '1', 'yes', 'y', '是', '裂压', '压裂'].includes(text)
+}
+
+const isHorizontalWellType = (value) => {
+  const text = String(value ?? '').trim().toLowerCase()
+  return ['3', 'horizontal', 'horizontalwell', '水平井'].includes(text) || text.includes('水平')
+}
+
+const selectedBaselinePayload = computed(() => {
+  const wellType = analysis.value?.wellType ?? input.value?.wellType
+  const isFractured = analysis.value?.isFractured ?? input.value?.isFractured
+  const wellGroup = isHorizontalWellType(wellType) ? 'horizontal' : 'vertical'
+  const fractureGroup = normalizeBoolean(isFractured) ? 'fractured' : 'normal'
+  return BLASINGAME_BASELINE_FILES[wellGroup][fractureGroup]
+})
+
+const normalizeBaselineGroup = (group, groupName = '') => {
+  const xValues = asArray(group?.tcaDd || group?.tCaDd || group?.x || group?.xData)
+  if (!xValues.length) return []
+
+  return Object.entries(group)
+      .filter(([key, values]) =>
+          !['tcaDd', 'tCaDd', 'x', 'xData'].includes(key) &&
+          Array.isArray(values) &&
+          values.length
+      )
+      .map(([key, values]) => {
+        const data = values
+            .map((y, index) => {
+              const x = Number(xValues[index])
+              const value = Number(y)
+              if (!Number.isFinite(x) || !Number.isFinite(value) || x <= 0 || value <= 0) return null
+              return [x, value]
+            })
+            .filter(Boolean)
+        return {
+          name: groupName ? `${groupName}-${key}` : key,
+          data
+        }
+      })
+      .filter(item => item.data.length)
+}
+
+const baselineTypeCurves = computed(() => {
+  const payload = selectedBaselinePayload.value
+  if (!payload || typeof payload !== 'object') return []
+
+  if (asArray(payload.tcaDd || payload.tCaDd).length) {
+    return normalizeBaselineGroup(payload)
+  }
+
+  return Object.entries(payload)
+      .flatMap(([key, value]) => normalizeBaselineGroup(value, key))
+})
+
 const chartSeriesItems = computed(() =>
     collectCandidateArrays(raw.value, [
       'chartItems',
@@ -305,13 +413,27 @@ function renderChart() {
   if (!chart) return
 
   const series = [
+    ...baselineTypeCurves.value.map((item, index) => ({
+      name: item.name,
+      type: 'line',
+      data: item.data,
+      showSymbol: false,
+      smooth: true,
+      silent: true,
+      z: 1,
+      lineStyle: {
+        width: 1,
+        color: BASELINE_COLORS[index % BASELINE_COLORS.length]
+      }
+    })),
     ...parsedTypeCurves.value.map((item, index) => ({
       name: item.name,
       type: 'line',
       data: item.data,
       showSymbol: false,
       smooth: true,
-      lineStyle: { width: 1, color: ['#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de', '#3ba272', '#fc8452', '#9a60b4'][index % 8] }
+      z: 2,
+      lineStyle: { width: 1, color: BASELINE_COLORS[(index + baselineTypeCurves.value.length) % BASELINE_COLORS.length] }
     })),
     {
       name: 'qDd-实际数据',
@@ -545,21 +667,49 @@ onBeforeUnmount(() => {
         <div v-if="activePanelTab === 'input'" class="panel-body">
           <div class="sec-label">气体性质</div>
           <div class="field-grid">
-            <div v-for="field in inputFields.gas" :key="field.label" class="field">
-              <label>{{ field.label }}</label>
-              <el-select v-if="field.select" size="small" disabled :model-value="field.value" style="width:100%">
-                <el-option :label="field.value" :value="field.value" />
+            <div class="field">
+              <label>天然气类型</label>
+              <el-select size="small" :model-value="gasType" style="width:100%">
+                <el-option label="干气" value="干气" />
+                <el-option label="湿气" value="湿气" />
               </el-select>
-              <el-input v-else size="small" readonly :model-value="field.value" />
+            </div>
+            <div class="field">
+              <label>天然气比重(dless)</label>
+              <el-input size="small" readonly :model-value="inputValue(['specificGravity'], 0.58)" />
+            </div>
+            <div class="field">
+              <label>H₂S摩尔百分含量(%)</label>
+              <el-input size="small" readonly :model-value="inputValue(['hydrogenSulfide'], 4.62)" />
+            </div>
+            <div class="field">
+              <label>CO₂摩尔百分含量(%)</label>
+              <el-input size="small" readonly :model-value="inputValue(['carbonDioxide'], 3.96)" />
+            </div>
+            <div class="field">
+              <label>N₂摩尔百分含量(%)</label>
+              <el-input size="small" readonly :model-value="inputValue(['nitrogen'], 0)" />
             </div>
           </div>
 
           <div class="sec-label">计算方法</div>
           <div class="field-grid">
-            <div v-for="field in inputFields.method" :key="field.label" class="field">
-              <label>{{ field.label }}</label>
-              <el-select size="small" disabled :model-value="field.value" style="width:100%">
-                <el-option :label="field.value" :value="field.value" />
+            <div class="field">
+              <label>非烃气体修正方法</label>
+              <el-select size="small" :model-value="modificationMethod" style="width:100%">
+                <el-option v-for="m in MODIFICATION_METHODS" :key="m" :label="m" :value="m" />
+              </el-select>
+            </div>
+            <div class="field">
+              <label>天然气偏差系数计算方法</label>
+              <el-select size="small" :model-value="deviationMethod" style="width:100%">
+                <el-option v-for="m in DEVIATION_METHODS" :key="m" :label="m" :value="m" />
+              </el-select>
+            </div>
+            <div class="field">
+              <label>天然气粘度计算方法</label>
+              <el-select size="small" :model-value="viscosityMethod" style="width:100%">
+                <el-option v-for="m in VISCOSITY_METHODS" :key="m" :label="m" :value="m" />
               </el-select>
             </div>
           </div>
