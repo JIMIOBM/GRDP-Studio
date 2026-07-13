@@ -66,14 +66,19 @@ const activeNodeId = ref('')  // 当前左侧树选中的节点 ID. 用于高亮
 const activeNode = ref(null)  // 当前选中的完整节点对象
 const currentView = ref(null)  // currentView.value = 'water-invasion'，即确定右侧部分区域所显示的界面
 const currentViewNode = ref(null)  // 传给右侧内容组件的节点对象
-const wellKeyword = ref('')  // 左侧搜索框输入的井名关键字
+const wellKeyword = ref('')
+const sideTreeCollapsed = ref(false)
 const waterInvasionRunning = ref(false)  //用于判断水侵分析是否正在运行
 const analyticMethodRunning = ref(false)
 const materialBalanceRunning = ref(false)
 const typicalCurveRunning = ref(false)
 const WATER_INVASION_ANALYSIS_ERROR = '水侵分析计算失败，未生成分析结果节点'
 const BLASINGAME_FITTING_REGRESSION_ERROR = '计算动态储量错误:参与回归分析的数据点数必须大于0'
-const selectedWellName = ref('')  //当前选中的井名
+const selectedWellName = ref('')
+
+const toggleSideTree = () => {
+  sideTreeCollapsed.value = !sideTreeCollapsed.value
+}  //当前选中的井名
 
 const filteredTreeData = computed(() => {   //搜索井名，控制左侧树搜索
   const keyword = wellKeyword.value.trim().toLowerCase()
@@ -1182,17 +1187,32 @@ onMounted(initTree)
 
     <div class="ipr-main">
       <!--      左侧菜单栏-->
-      <aside class="side-panel">
-        <div class="side-search">
+      <aside class="side-panel" :class="{ collapsed: sideTreeCollapsed }">
+        <button
+            v-if="sideTreeCollapsed"
+            class="side-collapsed-tab"
+            type="button"
+            title="&#x5C55;&#x5F00;&#x76EE;&#x5F55;"
+            @click="toggleSideTree"
+        >
+          &#x76EE;&#x5F55;
+        </button>
+
+        <div v-show="!sideTreeCollapsed" class="side-search">
           <el-input
               v-model="wellKeyword"
               size="small"
               clearable
-              placeholder="搜索井名"
+              placeholder="&#x641C;&#x7D22;&#x4E95;&#x540D;"
           />
+          <button class="side-toggle" type="button" title="&#x6536;&#x8D77;&#x76EE;&#x5F55;" @click="toggleSideTree">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="#777">
+              <path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z"/>
+            </svg>
+          </button>
         </div>
 
-        <div class="side-tree">
+        <div v-show="!sideTreeCollapsed" class="side-tree">
           <TreeNode
               v-for="node in filteredTreeData"
               :key="node.id"
@@ -1274,21 +1294,73 @@ $border: #e0e0e0;
 
 .side-panel {
   width: 210px;
+  min-width: 210px;
   display: flex;
   flex-direction: column;
   border-right: 1px solid $border;
   background-color: #fff;
+  position: relative;
+  transition: width 0.16s ease, min-width 0.16s ease;
+
+  &.collapsed {
+    width: 22px;
+    min-width: 22px;
+    border-right: 0;
+  }
 
   .side-search {
     padding: 6px 6px 4px;
     border-bottom: 1px solid $border;
     flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 4px;
   }
 
   .side-tree {
     flex: 1;
     overflow-y: auto;
     padding: 6px 4px;
+  }
+}
+
+.side-toggle {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: 2px;
+  flex-shrink: 0;
+
+  &:hover {
+    background: #eef4ff;
+  }
+}
+
+.side-collapsed-tab {
+  width: 22px;
+  height: 54px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #333;
+  cursor: pointer;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  font-size: 13px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  &:hover {
+    background: #eef4ff;
+    color: #1677ff;
   }
 }
 

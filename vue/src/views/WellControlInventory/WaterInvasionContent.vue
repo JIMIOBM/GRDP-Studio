@@ -35,6 +35,45 @@ const OUTPUT_FIELD_CONFIGS = [
     { label: '水体倍数(dless)', keys: ['waterBodySizeMultiple'] }
   ]
 ]
+const DATA_LIST_COLUMN_CONFIGS = [
+  [
+    { prop: 'index', label: '序号', width: 76, keys: null },
+    { prop: 'date', label: '日期', minWidth: 150, keys: ['date'], type: 'date' },
+    { prop: 'pressure', label: '地层压力(MPa)', minWidth: 160, keys: ['pressure'], digits: 4 },
+    { prop: 'cumulativeGasProduction', label: '累产气量(10⁸m³)', minWidth: 170, keys: ['cumulativeGasProduction'], digits: 4 },
+    { prop: 'cumulativeWaterProduction', label: '累产水量(10⁴m³)', minWidth: 170, keys: ['cumulativeWaterProduction'], digits: 4 },
+    { prop: 'apparentPressure', label: '无因次视压力(dless)', minWidth: 180, keys: ['apparentPressure'], digits: 4 },
+    { prop: 'recoveryDegree', label: '采出程度(%)', minWidth: 150, keys: ['recoveryDegree'], digits: 2 },
+    { prop: 'selected', label: '是否参与分析', minWidth: 150, keys: ['isDeleted'], type: 'selected' }
+  ],
+  [
+    { prop: 'index', label: '序号', width: 76, keys: null },
+    { prop: 'date', label: '日期', minWidth: 150, keys: ['date'], type: 'date' },
+    { prop: 'pressure', label: '地层压力(MPa)', minWidth: 160, keys: ['pressure'], digits: 4 },
+    { prop: 'cumulativeGasProduction', label: '累产气量(10⁸m³)', minWidth: 170, keys: ['cumulativeGasProduction'], digits: 4 },
+    { prop: 'cumulativeWaterProduction', label: '累产水量(10⁴m³)', minWidth: 170, keys: ['cumulativeWaterProduction'], digits: 4 },
+    { prop: 'apparentPressure', label: '无因次视压力(dless)', minWidth: 180, keys: ['apparentPressure'], digits: 4 },
+    { prop: 'recoveryDegree', label: '采出程度(%)', minWidth: 150, keys: ['recoveryDegree'], digits: 2 },
+    { prop: 'selected', label: '是否参与分析', minWidth: 150, keys: ['isDeleted'], type: 'selected' }
+  ],
+  [
+    { prop: 'index', label: '序号', width: 76, keys: null },
+    { prop: 'date', label: '日期', minWidth: 150, keys: ['date'], type: 'date' },
+    { prop: 'pressure', label: '地层压力(MPa)', minWidth: 160, keys: ['pressure'], digits: 4 },
+    { prop: 'cumulativeGasProduction', label: '累产气量(10⁸m³)', minWidth: 170, keys: ['cumulativeGasProduction'], digits: 4 },
+    { prop: 'cumulativeWaterProduction', label: '累产水量(10⁴m³)', minWidth: 170, keys: ['cumulativeWaterProduction'], digits: 4 },
+    { prop: 'waterInflux', label: '水侵量(10⁴m³)', minWidth: 170, keys: ['waterInflux'], digits: 4 }
+  ],
+  [
+    { prop: 'index', label: '序号', width: 76, keys: null },
+    { prop: 'date', label: '日期', minWidth: 150, keys: ['date'], type: 'date' },
+    { prop: 'cumulativeGasProduction', label: '累产气量(10⁸m³)', minWidth: 170, keys: ['cumulativeGasProduction'], digits: 4 },
+    { prop: 'cumulativeWaterProduction', label: '累产水量(10⁴m³)', minWidth: 170, keys: ['cumulativeWaterProduction'], digits: 4 },
+    { prop: 'gasDriveIndex', label: '天然气驱动指数(dless)', minWidth: 190, keys: ['gasDriveIndex'], digits: 4 },
+    { prop: 'reservoirVolumetricDriveIndex', label: '气藏容积驱动指数(dless)', minWidth: 210, keys: ['reservoirVolumetricDriveIndex'], digits: 4 },
+    { prop: 'waterInvasionEnergyDriveIndex', label: '水侵能量驱动指数(dless)', minWidth: 210, keys: ['waterInvasionEnergyDriveIndex'], digits: 4 }
+  ]
+]
 
 // ─── 状态 ───
 const loading        = ref(false)   // 接口加载状态
@@ -48,15 +87,16 @@ const resizingParamsPanel = ref(false)  // 用户是否正在拖拽调整参数�
 
 // ─── 从接口数据派生 ───
 const input = computed(() => wellData.value?.input || {})
-const output = computed(() => wellData.value?.outputs?.[activeChartIdx.value]?.output || {})
+const output = computed(() => chartTabs.value[activeChartIdx.value]?.output || {})
 const outputFields = computed(() => OUTPUT_FIELD_CONFIGS[activeChartIdx.value] || [])
 const hasOutputResults = computed(() => outputFields.value.length > 0)
 const isWaterActivityTab = computed(() => activeChartIdx.value === 4)
+const hasDataListForActiveTab = computed(() => activeChartIdx.value >= 0 && activeChartIdx.value < 4)
 const isDataListTab = computed(() => activeContentTab.value === 'table')
-const waterActivityOutput = computed(() => wellData.value?.outputs?.[4]?.output || {})
+const waterActivityOutput = computed(() => chartTabs.value[4]?.output || {})
 const currentWellName = computed(() => props.node?.wellName || wellData.value?.input?.wellName || '')
 const chartTabTitle = computed(() =>
-    `动态分析-水侵动态分析-${currentWellName.value || '当前井'}-分析结果`
+    `\u6c34\u4fb5\u5206\u6790-${currentWellName.value || '\u5f53\u524d\u4e95'}-\u5206\u6790\u7ed3\u679c`
 )
 
 //用于控制右侧浮动图例的位置
@@ -152,6 +192,7 @@ const chartTabs = computed(() => {
         analysisId:  o.analysisId,
         label:       CHART_TAB_LABELS[index],
         chartItems:  o.chartItems || [],
+        output:      o.output || {},
         outputItems: o.outputItems || []
       }))
 })
@@ -178,30 +219,37 @@ const formatDecimalValue = (value, digits) => {
   return num.toFixed(digits).replace(/\.?0+$/, '')
 }
 
+const dataListColumns = computed(() => DATA_LIST_COLUMN_CONFIGS[activeChartIdx.value] || [])
+
+const YES_TEXT = '\u662f'
+const NO_TEXT = '\u5426'
+
+const isTruthyValue = (value) => value === true || value === 'true' || value === 1 || value === '1'
+
+const formatDataListValue = (row, column) => {
+  if (!column.keys) return ''
+  const value = getRowValue(row, column.keys)
+  if (column.type === 'date') return formatDateValue(value)
+  if (column.type === 'selected') return isTruthyValue(value) ? NO_TEXT : YES_TEXT
+  if (column.digits !== undefined) return formatDecimalValue(value, column.digits)
+  return value ?? ''
+}
+
 const dataListRows = computed(() => {
-  const inputId = input.value?.id
-  const matchedOutput = (wellData.value?.outputs || []).find(output => {
-    const analysisId = output?.analysisId
-    return String(analysisId) === String(inputId)
-  })
-  const rows = matchedOutput?.outputItems || []
-  return rows.map((row, index) => {
-    const isDeleted = getRowValue(row, ['isDeleted'], false)
-    return {
-      index: index + 1,
-      date: formatDateValue(getRowValue(row, ['date'])),
-      pressure: formatDecimalValue(getRowValue(row, ['pressure']), 4),
-      cumulativeGasProduction: formatDecimalValue(getRowValue(row, ['cumulativeGasProduction']), 4),
-      cumulativeWaterProduction: formatDecimalValue(getRowValue(row, ['cumulativeWaterProduction']), 4),
-      apparentPressure: formatDecimalValue(getRowValue(row, ['apparentPressure']), 4),
-      recoveryDegree: formatDecimalValue(getRowValue(row, ['recoveryDegree']), 2),
-      selected: isDeleted ? '否' : '是'
-    }
-  })
+  if (!hasDataListForActiveTab.value) return []
+  const rows = activeTab.value?.outputItems || []
+  return rows.map((row, index) =>
+    dataListColumns.value.reduce((record, column) => {
+      record[column.prop] = column.prop === 'index'
+        ? index + 1
+        : formatDataListValue(row, column)
+      return record
+    }, {})
+  )
 })
 
 
-// ─── ECharts ───
+// ECharts
 const chartEl = ref(null)
 const chartAreaEl = ref(null)
 const paramsPanelEl = ref(null)
@@ -605,6 +653,9 @@ watch(activeChartIdx, () => {
   if (!hasOutputResults.value && activeParamTab.value === 'output') {
     activeParamTab.value = 'input'
   }
+  if (!hasDataListForActiveTab.value && activeContentTab.value === 'table') {
+    activeContentTab.value = 'chart'
+  }
   renderChartSoon()
   renderChartSoon(180)
 })
@@ -801,7 +852,7 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <div v-if="activeContentTab === 'chart' && chartTabs.length" class="chart-tabs">
+      <div v-if="chartTabs.length" class="chart-tabs">
         <button
             v-for="(tab, i) in chartTabs"
             :key="tab.analysisId"
@@ -813,21 +864,18 @@ onBeforeUnmount(() => {
       </div>
       <div v-show="activeContentTab === 'chart' && !isWaterActivityTab" ref="chartEl" class="chart-instance"/>
 
-      <div v-if="isDataListTab" class="data-list-panel">
+      <div v-if="isDataListTab && hasDataListForActiveTab" class="data-list-panel">
         <el-table :data="dataListRows" size="small" height="100%" border stripe>
-          <el-table-column prop="index" label="序号" width="76" sortable />
-          <el-table-column prop="date" label="日期" min-width="150" sortable />
-          <el-table-column prop="pressure" label="地层压力(MPa)" min-width="160" sortable />
-          <el-table-column prop="cumulativeGasProduction" label="累产气量(10⁸m³)" min-width="170" sortable />
-          <el-table-column prop="cumulativeWaterProduction" label="累产水量(10⁴m³)" min-width="170" sortable />
-          <el-table-column prop="apparentPressure" label="无因次视压力(dless)" min-width="180" sortable />
-          <el-table-column prop="recoveryDegree" label="采出程度(%)" min-width="150" sortable />
           <el-table-column
-            prop="selected"
-            label="是否参与分析"
-            min-width="150"
-            :filters="[{ text: '是', value: '是' }, { text: '否', value: '否' }]"
-            :filter-method="(value, row) => row.selected === value"
+            v-for="column in dataListColumns"
+            :key="column.prop"
+            :prop="column.prop"
+            :label="column.label"
+            :width="column.width"
+            :min-width="column.minWidth"
+            sortable
+            :filters="column.type === 'selected' ? [{ text: YES_TEXT, value: YES_TEXT }, { text: NO_TEXT, value: NO_TEXT }] : undefined"
+            :filter-method="column.type === 'selected' ? ((value, row) => row[column.prop] === value) : undefined"
           />
         </el-table>
       </div>
@@ -895,7 +943,7 @@ onBeforeUnmount(() => {
         </table>
       </div>
 
-      <div class="bottom-chart-tabs">
+      <div v-if="hasDataListForActiveTab" class="bottom-chart-tabs">
         <button
           type="button"
           class="bottom-chart-tab"
