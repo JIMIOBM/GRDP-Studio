@@ -430,7 +430,7 @@ function toggleParamsPanel() {
 function onParamsPanelResize(event) {
   if (!resizingParamsPanel.value) return
   const left = paramsPanelEl.value?.getBoundingClientRect().left || 0
-  paramsPanelWidth.value = Math.max(180, Math.min(520, event.clientX - left))
+  paramsPanelWidth.value = Math.max(238, Math.min(520, event.clientX - left))
   chart?.resize()
 }
 
@@ -595,9 +595,11 @@ onBeforeUnmount(() => {
 
         <div v-else-if="hasOutputResults" class="panel-body">
           <div class="sec-label">输出结果</div>
-          <div v-for="field in outputFields" :key="field.label" class="field">
-            <label>{{ field.label }}</label>
-            <el-input size="small" readonly :model-value="field.value" />
+          <div class="field-grid">
+            <div v-for="field in outputFields" :key="field.label" class="field">
+              <label>{{ field.label }}</label>
+              <el-input size="small" readonly :model-value="field.value" />
+            </div>
           </div>
         </div>
 

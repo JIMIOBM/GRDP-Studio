@@ -345,7 +345,12 @@ onBeforeUnmount(() => {
         </div>
         <div v-else class="panel-body">
           <div class="sec-label">输出结果</div>
-          <div v-for="field in outputFields" :key="field.label" class="field"><label>{{ field.label }}</label><el-input size="small" readonly :model-value="field.value" /></div>
+          <div class="field-grid">
+            <div v-for="field in outputFields" :key="field.label" class="field">
+              <label>{{ field.label }}</label>
+              <el-input size="small" readonly :model-value="field.value" />
+            </div>
+          </div>
         </div>
         <div class="param-tabs">
           <div class="param-tab" :class="{ active: activePanelTab === 'input' }" @click="activePanelTab = 'input'">输入</div>
