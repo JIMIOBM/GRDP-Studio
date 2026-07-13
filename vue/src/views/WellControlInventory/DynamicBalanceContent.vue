@@ -26,6 +26,17 @@ const currentWellName = computed(() =>
   ''
 )
 
+const isFlowBalance = computed(() => [57, 58].includes(Number(
+  props.node?.type ??
+  props.node?.raw?.nodeType ??
+  props.node?.raw?.type ??
+  props.node?.raw?.nodeTypeId
+)))
+const chartTitle = computed(() => isFlowBalance.value
+  ? (props.node?.label || props.node?.raw?.nodeTitle || '流动平衡')
+  : '动态物质平衡'
+)
+
 const wellIdMap = {
   'X-1': 51,
   'X-2': 52,
@@ -34,7 +45,18 @@ const wellIdMap = {
   'X-5': 56
 }
 
-const currentWellId = computed(() => wellIdMap[currentWellName.value] || 51)
+const currentResultId = computed(() => {
+  const raw = props.node?.raw || {}
+  return raw.DynamicOriginalGasInPlaceId ??
+    raw.dynamicOriginalGasInPlaceId ??
+    raw.dynamicOriginalGasInplaceId ??
+    raw.resultId ??
+    props.node?.resultId ??
+    raw.nodeId ??
+    props.node?.id ??
+    wellIdMap[currentWellName.value] ??
+    null
+})
 
 const output = computed(() => {
   if (!resultData.value?.result) return {}
@@ -244,7 +266,7 @@ const renderChart = () => {
   chart.setOption({
     animation: false,
     title: {
-      text: '动态物质平衡',
+      text: chartTitle.value,
       left: 'center',
       top: 8,
       textStyle: { fontSize: 16, fontWeight: 600, color: '#333' }
@@ -327,10 +349,10 @@ const renderChart = () => {
 }
 
 const fetchData = async () => {
-  const wellId = currentWellId.value
+  const resultId = currentResultId.value
   const wellName = currentWellName.value
 
-  if (!wellId || !props.projectId || !props.gasReservoirId) {
+  if (!resultId || !props.projectId || !props.gasReservoirId) {
     noData.value = true
     return
   }
@@ -341,7 +363,7 @@ const fetchData = async () => {
 
   try {
     const res = await dockerRequest.get(
-      `/projectanalysis/dynamicoriginalgasInplace/result/${props.projectId}/${props.gasReservoirId}/${wellId}`
+      `/projectanalysis/dynamicoriginalgasInplace/result/${props.projectId}/${props.gasReservoirId}/${encodeURIComponent(resultId)}`
     )
 
     resultData.value = res.data
@@ -361,7 +383,7 @@ const fetchData = async () => {
   }
 }
 
-watch(() => props.node?.wellName, fetchData, { immediate: true })
+watch(() => [props.node?.id, props.node?.wellName, props.projectId, props.gasReservoirId], fetchData, { immediate: true })
 
 onMounted(() => {
   chart = echarts.init(chartEl.value)

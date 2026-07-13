@@ -90,6 +90,9 @@ export const materialBalanceApi = {
   calc: (data) =>
     dockerRequest.post('/projectanalysis/dynamicoriginalgasInplace/mb/calc', data),
 
+  calcFMB: (data) =>
+    dockerRequest.post('/projectanalysis/dynamicoriginalgasInplace/fmb/calc', data),
+
 // /projectanalysis/dynamicoriginalgasInplace/averageFormationPressure/2/1/X-1
     getAverageFormationPressure: (projectId, gasReservoirId, wellName, options = {}) => {
         const params = {}
