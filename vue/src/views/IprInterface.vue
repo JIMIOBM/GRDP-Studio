@@ -30,7 +30,7 @@ const NODE_GROUP_BY_TYPE = {
   [NODETYPE.NodeType_AnalysisMethods]: 'well-control-inventory',
   [NODETYPE.NodeType_DynamicOriginalGasInplace]: 'well-control-inventory',
   [NODETYPE.NodeType_TypicalCurveBlasingame]: 'well-control-inventory',
-  [NODETYPE.NodeType_VerticalWellTypicalCurveWb]: 'well-control-inventory',
+  [NODETYPE.NodeType_TypicalCurveWattenbarger]: 'well-control-inventory',
   [NODETYPE.NodeType_ProductionDeclineAnalysis]: 'data-management',
   [NODETYPE.NodeType_ProductivityInstabilityAnalysis]: 'data-management',
   [NODETYPE.NodeType_ProductionAnalysis]: 'data-management',
@@ -48,7 +48,7 @@ const NODE_LABEL_BY_TYPE = {
   [NODETYPE.NodeType_DynamicOriginalGasInplace]: '物质平衡',
   [NODETYPE.NodeType_TypicalCurve]: '诊断曲线',
   [NODETYPE.NodeType_TypicalCurveBlasingame]: 'Blasingame',
-  [NODETYPE.NodeType_VerticalWellTypicalCurveWb]: 'Wattenbarger',
+  [NODETYPE.NodeType_TypicalCurveWattenbarger]: 'Wattenbarger',
   [NODETYPE.NodeType_ProductionDeclineAnalysis]: '产量递减分析',
   [NODETYPE.NodeType_ProductivityInstabilityAnalysis]: '产量不稳定分析',
   [NODETYPE.NodeType_ProductionAnalysis]: '生产分析',
@@ -125,6 +125,14 @@ const NPI_NODE_TYPES = new Set([
   NODETYPE.NodeType_FracturedHorizontalWellTypicalCurveNPI
 ])
 
+const WATTENBARGER_NODE_TYPES = new Set([
+  NODETYPE.NodeType_TypicalCurveWattenbarger,
+  NODETYPE.NodeType_VerticalWellTypicalCurveWattenbarger,
+  NODETYPE.NodeType_HorizontalWellTypicalCurveWattenbarger,
+  NODETYPE.NodeType_FracturedVerticalWellTypicalCurveWattenbarger,
+  NODETYPE.NodeType_FracturedHorizontalWellTypicalCurveWattenbarger
+])
+
 const isBlasingameNode = (item) => {
   const nodeType = item?.nodeType ?? item?.type
   return BLASINGAME_NODE_TYPES.has(nodeType) || getNodeName(item) === 'Blasingame'
@@ -134,6 +142,11 @@ const isNpiNode = (item) => {
   const nodeType = item?.nodeType ?? item?.type
   const nodeName = getNodeName(item)
   return NPI_NODE_TYPES.has(nodeType) || nodeName === 'Normalized Pressure Integral' || nodeName === 'NPI'
+}
+
+const isWattenbargerNode=(item) =>{
+  const nodeType = item?.nodeType ?? item?.type
+  return WATTENBARGER_NODE_TYPES.has(nodeType) || getNodeName(item) === 'Wattenbarger'
 }
 
 const findBlasingameNodeByWell = (root, wellName) => {
@@ -183,6 +196,29 @@ const findNpiNodeByWell = (root, wellName) => {
 
   return visit(root)
 }
+
+const findWattenbargerNodeByWell = (root, wellName) => {
+  if (!root || !wellName) return null
+
+  const visit = (item, currentWellName = '') => {
+    if (!item) return null
+    const nodeName = getNodeName(item)
+    const nodeType = item?.nodeType ?? item?.type
+    const nextWellName = nodeType === NODETYPE.NodeType_Well || nodeName === wellName
+        ? nodeName
+        : currentWellName
+    if (nextWellName === wellName && isWattenbargerNode(item)) {
+      return item
+    }
+    for (const child of getChildren(item)) {
+      const found = visit(child, nextWellName)
+      if (found) return found
+    }
+    return null
+  }
+  return visit(root)
+}
+
 
 const createEmptyWell = (wellName, wellId) => ({ //创建一口空井
   id: wellId || `well-${wellName}`,
@@ -348,6 +384,52 @@ const addNpiNode = (wellName, rawNode = {}) => {
   if (existedIndex >= 0) diagnosticNode.children[existedIndex] = npiNode
   else diagnosticNode.children.push(npiNode)
   return npiNode
+}
+
+const addWattenbargerNode = (wellName, rawNode = {}) => {
+  const wellItem = ensureWell(wellName, rawNode?.wellId || rawNode?.parentId)
+  const inventoryGroup = wellItem?.children.find(item => item.type === 'well-control-inventory')
+  if (!inventoryGroup) return null
+
+  const parentId = `${wellItem.id}-diagnostic-curve`
+  let diagnosticNode = inventoryGroup.children.find(item =>
+      item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve || item.label === '诊断曲线'
+  )
+
+  if (!diagnosticNode) {
+    diagnosticNode = {
+      id: parentId,
+      label: '诊断曲线',
+      type: NODETYPE.NodeType_TypicalCurve,
+      wellName,
+      defaultExpanded: true,
+      children: []
+    }
+    inventoryGroup.children.push(diagnosticNode)
+  } else {
+    diagnosticNode.defaultExpanded = true
+    diagnosticNode.children = diagnosticNode.children || []
+  }
+
+  const id = rawNode?.nodeId || rawNode?.id || `${parentId}-wattenbarger`
+  const wattenbargerNode = {
+    id,
+    label: 'Wattenbarger',
+    type: NODETYPE.NodeType_TypicalCurveWattenbarger,
+    wellName,
+    raw: rawNode
+  }
+
+  const existedIndex = diagnosticNode.children.findIndex(item =>
+      item.id === id || item.type === NODETYPE.NodeType_TypicalCurveWattenbarger || item.label === 'Wattenbarger'
+  )
+  if (existedIndex >= 0) {
+    diagnosticNode.children[existedIndex] = wattenbargerNode
+  } else {
+    diagnosticNode.children.push(wattenbargerNode)
+  }
+
+  return wattenbargerNode
 }
 
 const collectWellsFromProject = (payload) => {
@@ -523,6 +605,14 @@ const applyTypicalCurveNodes = (node) => {
       })
     }
 
+    if (wellName && nextInTypicalCurve && isWattenbargerNode(item)) {
+      addWattenbargerNode(wellName, {
+        ...item,
+        nodeType: NODETYPE.NodeType_TypicalCurveWattenbarger,
+        nodeTitle: 'Wattenbarger'
+      })
+    }
+
     children.forEach(child => visit(child, wellName, nextInTypicalCurve))
   }
 
@@ -682,6 +772,13 @@ const getNpiNodeOnce = async (wellName, delayMs = 1200) => {
   const res = await nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, NODETYPE.NodeType_ProductivityInstabilityAnalysis)
   const rootNode = res?.data?.node
   return { rootNode, npiNode: findNpiNodeByWell(rootNode, wellName) }
+}
+
+const getWattenbargerNodeOnce = async (wellName, delayMs = 1200) => {
+  if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs))
+  const res = await nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, NODETYPE.NodeType_ProductivityInstabilityAnalysis)
+  const rootNode = res?.data?.node
+  return { rootNode, wattenbargerNode: findWattenbargerNodeByWell(rootNode, wellName) }
 }
 
 const runWaterInvasionForSelectedWell = async () => { //点击水侵分析的操作
@@ -958,6 +1055,59 @@ const runNpiForSelectedWell = async () => {
   }
 }
 
+const runWattenbargerForSelectedWell = async () => {
+  const targetWellName = selectedWellName.value
+  if (!targetWellName) {
+    ElMessage.warning('请先在左侧选择一口井')
+    return
+  }
+  if (typicalCurveRunning.value) return
+  typicalCurveRunning.value = true
+  try {
+    await typicalCurveApi.fitting({
+      gasReservoirId: Number(GAS_RESERVOIR_ID),
+      projectId: Number(PROJECT_ID),
+      wellNames: [targetWellName],
+      fittingType: 1,
+      isSkipFitting: false,
+      dataSize: 300,
+      fineScanDataSize: 30,
+      initScanDataSize: 10,
+      minimumWaterGasRatio: 0.0602
+    })
+    ElMessage.info(`${targetWellName} Wattenbarger计算中，请稍候...`)
+    const { rootNode, wattenbargerNode } = await getWattenbargerNodeOnce(targetWellName)
+    if (!wattenbargerNode) throw new Error('Wattenbarger计算超时，请稍后刷新查看结果')
+
+    applyTypicalCurveNodes(rootNode)
+
+    const resultNode = wattenbargerNode
+    addWattenbargerNode(targetWellName, {
+      ...resultNode,
+      nodeType: NODETYPE.NodeType_TypicalCurveWattenbarger,
+      nodeTitle: 'Wattenbarger'
+    })
+
+    const viewNode = {
+      id: resultNode?.nodeId || `wattenbarger-${targetWellName}`,
+      label: 'Wattenbarger',
+      type: NODETYPE.NodeType_TypicalCurveWattenbarger,
+      wellName: targetWellName,
+      raw: resultNode
+    }
+
+    activeNodeId.value = viewNode.id
+    currentView.value = 'wattenbarger'
+    currentViewNode.value = viewNode
+    ElMessage.success(`${targetWellName} Wattenbarger计算完成`)
+  } catch (error) {
+    ElMessage.error(error.message || 'Wattenbarger计算失败')
+    console.error('Wattenbarger计算失败', error)
+  } finally {
+    typicalCurveRunning.value = false
+  }
+}
+
 
 const openBlasingameNode = async (node) => {
   const targetWellName = node?.wellName || selectedWellName.value
@@ -1033,6 +1183,48 @@ const openNpiNode = async (node) => {
   }
 }
 
+const openWattenbargerNode = async (node) => {
+  const targetWellName = node?.wellName || selectedWellName.value
+
+  if (!targetWellName) {
+    ElMessage.warning('请先在左侧选择一口井')
+    return
+  }
+
+  currentView.value = 'wattenbarger'
+  currentViewNode.value = node
+
+  try {
+    const nodeRes = await nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, NODETYPE.NodeType_ProductivityInstabilityAnalysis)
+    const rootNode = nodeRes?.data?.node
+    applyTypicalCurveNodes(rootNode)
+
+    const wattenbargerNode = findWattenbargerNodeByWell(rootNode, targetWellName) || node?.raw || node
+    const nodeId = wattenbargerNode?.nodeId || wattenbargerNode?.id
+
+    if (!nodeId) {
+      throw new Error('没有找到 Wattenbarger 对应的 nodeId')
+    }
+
+    const resultRes = await typicalCurveApi.getResult(PROJECT_ID, GAS_RESERVOIR_ID, nodeId)
+    const result = normalizePayload(resultRes)
+
+    activeNodeId.value = nodeId
+    currentViewNode.value = {
+      ...node,
+      id: nodeId,
+      label: 'Wattenbarger',
+      type: NODETYPE.NodeType_TypicalCurveWattenbarger,
+      wellName: targetWellName,
+      raw: result,
+      treeNode: wattenbargerNode
+    }
+  } catch (error) {
+    ElMessage.error(error.message || 'Wattenbarger结果加载失败')
+    console.error('Wattenbarger结果加载失败', error)
+  }
+}
+
 const initTree = async () => {
   await refreshProjectTree()
   await refreshWaterInvasionNodes()
@@ -1079,9 +1271,8 @@ const handleSelect = (node) => { // 点击左侧树节点
     return
   }
 
-  if (node.type === NODETYPE.NodeType_VerticalWellTypicalCurveWb) {
-    currentView.value = 'wattenbarger'
-    currentViewNode.value = node
+  if (node.type === NODETYPE.NodeType_TypicalCurveWattenbarger) {
+    openWattenbargerNode(node)
     return
   }
 
@@ -1106,19 +1297,7 @@ const handleCommand = ({ group, name }) => { // 接收顶部菜单栏的点击�
       runNpiForSelectedWell()
       break
     case 'Wattenbarger':
-      if (!selectedWellName.value) {
-        ElMessage.warning('请先在左侧选择一口井')
-        return
-      }
-      currentView.value = 'wattenbarger'
-      currentViewNode.value = {
-        id: `wb-${selectedWellName.value}`,
-        label: 'Wattenbarger',
-        type: NODETYPE.NodeType_VerticalWellTypicalCurveWb,
-        wellName: selectedWellName.value,
-        raw: {}
-      }
-      activeNodeId.value = currentViewNode.value.id
+      runWattenbargerForSelectedWell()
       break
     case '动态平衡':
       if (!selectedWellName.value) {
