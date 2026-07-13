@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import RibbonMenu from '@/components/RibbonMenu.vue'
 import TreeNode from '@/views/TreeNode.vue'
@@ -14,8 +15,9 @@ import FlowBalanceContent from '@/views/WellControlInventory/FlowBalanceContent.
 import { NODETYPE } from '@/constants/nodeType'
 import { analyticMethodApi, materialBalanceApi, nodeApi, projectApi, typicalCurveApi, waterInvasionApi } from '@/api/docker'
 
-const PROJECT_ID = 1
-const GAS_RESERVOIR_ID = 1
+const route = useRoute()
+const PROJECT_ID = Number(route.query.projectId || 1)
+const GAS_RESERVOIR_ID = Number(route.query.gasReservoirId || 1)
 
 const WELL_GROUPS = [
   { id: 'data-management', label: '数据管理' },
