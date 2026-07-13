@@ -17,6 +17,7 @@ const activePanelTab = ref('input')
 const activeChartTab = ref(0)
 const chartEl = ref(null)
 const equationGraphicPosition = ref(null)
+const paramsCollapsed = ref(false)
 
 let chart = null
 let requestSeq = 0
@@ -84,6 +85,12 @@ const getAverageFormationPressureRows = (payload) => {
 
   if (Array.isArray(rows)) return rows
   return rows ? [rows] : []
+}
+
+//参数面板收起和拖拽
+function toggleParamsPanel() {
+  paramsCollapsed.value = !paramsCollapsed.value
+  setTimeout(() => chart?.resize(), 180)
 }
 
 const getMaterialBalanceResultId = (row) => {
@@ -743,8 +750,19 @@ onBeforeUnmount(() => {
 
 <template>
   <div v-loading="loading" class="mb-wrap">
-    <aside class="params-panel">
-      <div class="panel-head">参数设置</div>
+    <aside class="params-panel" :class="{ collapsed: paramsCollapsed }">
+      <div v-if="paramsCollapsed" class="panel-collapsed-tab" @click="toggleParamsPanel">
+        参数设置
+      </div>
+
+      <div class="panel-head">
+        <span>参数设置</span>
+        <button class="panel-toggle" type="button" title="收起参数设置" @click="toggleParamsPanel">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="#777">
+            <path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z"/>
+          </svg>
+        </button>
+      </div>
 
       <div v-show="activePanelTab === 'input'" class="panel-body">
         <div v-if="!hasDisplayedInputFields" class="empty">暂无接口输入结果</div>
@@ -820,48 +838,95 @@ onBeforeUnmount(() => {
   height: 100%;
   min-height: 0;
   background: #fff;
-}
-
-.params-panel {
-  width: 315px;
-  min-width: 315px;
-  display: flex;
-  flex-direction: column;
-  border-right: 1px solid #e0e0e0;
   overflow: hidden;
 }
 
+.params-panel {
+  width: 238px;
+  min-width: 238px;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #e0e0e0;
+  position: relative;
+  overflow: hidden;
+  transition: width 0.16s ease, min-width 0.16s ease;
+
+  &.collapsed {
+    width: 22px;
+    min-width: 22px;
+    background: transparent;
+    border-right: 0;
+
+    > :not(.panel-collapsed-tab) { display: none; }
+  }
+}
+
 .panel-head {
-  height: 40px;
-  line-height: 40px;
-  padding: 0 16px;
-  border-bottom: 1px solid #eeeeee;
-  font-size: 15px;
-  color: #222;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 7px 12px 6px;
+  border-bottom: 1px solid #f0f0f0;
+  flex-shrink: 0;
+  font-size: 13px;
+  color: #333;
+}
+
+.panel-toggle {
+  padding: 3px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  line-height: 0;
+
+  &:hover { background: #eef4ff; }
+}
+
+.panel-collapsed-tab {
+  height: 76px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  writing-mode: vertical-rl;
+  font-size: 13px;
+  color: #333;
+  cursor: pointer;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-left: 0;
+
+  &:hover {
+    background: #eef4ff;
+    color: #1f6fd6;
+  }
 }
 
 .panel-body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 10px 16px 16px;
+  padding: 4px 12px 14px;
 }
 
 .section-title {
-  font-size: 14px;
+  font-size: 13px;
   color: #333;
-  margin: 8px 0 9px;
-  font-weight: 600;
+  margin: 10px 0 7px;
+  font-weight: 500;
+
+  &:first-child {
+    margin-top: 4px;
+  }
 }
 
 .field {
-  margin-bottom: 10px;
+  margin-bottom: 9px;
 
   label {
     display: block;
-    margin-bottom: 4px;
+    margin-bottom: 3px;
     color: #555;
-    font-size: 13px;
+    font-size: 12px;
   }
 }
 
@@ -873,17 +938,22 @@ onBeforeUnmount(() => {
 }
 
 .panel-tabs {
-  height: 36px;
   display: flex;
+  height: 30px;
   border-top: 1px solid #e0e0e0;
+  flex-shrink: 0;
 
   button {
     flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
     border: 0;
     border-right: 1px solid #e0e0e0;
-    background: #fff;
-    color: #333;
-    font-size: 14px;
+    background: transparent;
+    color: #555;
+    font-size: 13px;
     cursor: pointer;
 
     &:last-child {
@@ -892,7 +962,7 @@ onBeforeUnmount(() => {
 
     &.active {
       background: #f4d000;
-      color: #111;
+      color: #1a1a1a;
       font-weight: 600;
     }
   }
@@ -927,6 +997,23 @@ onBeforeUnmount(() => {
       font-weight: 600;
       border-bottom: 2px solid #409eff;
     }
+  }
+}
+
+.panel-toggle {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: 2px;
+
+  &:hover {
+    background: #eef4ff;
   }
 }
 
