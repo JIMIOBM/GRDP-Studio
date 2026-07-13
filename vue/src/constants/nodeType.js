@@ -94,7 +94,11 @@ export const NODETYPE = {
     NodeType_ProductionDeclineAnalysis_PLE: 87,
     NodeType_ProductionDeclineAnalysis_DUONG: 88,
     NodeType_ProductionDeclineAnalysis_SEDM: 89,
-    NodeType_VerticalWellTypicalCurveWb: 93,
+    NodeType_TypicalCurveWattenbarger: 93,
+    NodeType_VerticalWellTypicalCurveWattenbarger:94,
+    NodeType_HorizontalWellTypicalCurveWattenbarger:95,
+    NodeType_FracturedVerticalWellTypicalCurveWattenbarger:96,
+    NodeType_FracturedHorizontalWellTypicalCurveWattenbarger:97,
     NodeType_DynamicOriginal: 200,                                     // 动态分析（根节点）
 }
 
