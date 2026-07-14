@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
 import { typicalCurveApi } from '@/api/docker'
+import wattenbargerTypeCurveData from '@/constants/typeCurves/wattenbarger.json'
 
 const props = defineProps({
   node: Object,
@@ -22,7 +23,19 @@ const draggingLegend = ref(false)
 const legendDragOffset = ref({ x: 0, y: 0 })
 const hiddenLegendNames = ref(new Set())
 const fetchedRaw = ref(null)
+const readonlySelectKey = ref(0)
 let chart = null
+
+const TYPE_CURVE_COLORS = ['#4fa3ff', '#66c2a5', '#f6c85f', '#f2711c', '#9b59b6', '#5dade2', '#e67e22', '#8dd3c7', '#d98880', '#7f8c8d', '#c39bd3', '#76d7c4']
+
+const WATTENBARGER_XF_VALUES = [2, 4, 8, 16, 32, 64]
+
+const zipCurvePoints = (xValues, yValues) => asArray(yValues).map((y, index) => {
+  const x = Number(xValues[index])
+  const value = Number(y)
+  if (!Number.isFinite(x) || !Number.isFinite(value) || x <= 0 || value <= 0) return null
+  return [x, value]
+}).filter(Boolean)
 
 const normalizePayload = (res) => res?.data?.data ?? res?.data ?? res
 const raw = computed(() => fetchedRaw.value || props.node?.raw || {})
@@ -33,9 +46,15 @@ const result = computed(() => ({
 }))
 const input = computed(() => raw.value?.input || raw.value?.inputs || raw.value?.parameter || {})
 const chartItems = computed(() => raw.value?.chartItems || raw.value?.outputs?.[0]?.chartItems || [])
+const isRealResultId = (id) => Boolean(id) && !/^wattenbarger-/i.test(String(id))
 const resultId = computed(() =>
-    props.node?.resultId || props.node?.raw?.resultId || props.node?.raw?.nodeId || props.node?.raw?.id || props.node?.id
+    [props.node?.resultId, props.node?.raw?.resultId, props.node?.raw?.nodeId, props.node?.raw?.id, props.node?.id]
+        .find(isRealResultId)
 )
+const wellName = computed(() =>
+    props.node?.wellName || props.node?.raw?.wellName || raw.value?.wellName || input.value?.wellName || ''
+)
+const resultTabTitle = computed(() => `诊断曲线-Wattenbarger-${wellName.value || '当前井'}-分析结果`)
 
 const asArray = (value) => Array.isArray(value) ? value : []
 
@@ -98,22 +117,28 @@ const fittingMode = computed(() => {
 })
 const waterGasRatioLimit = computed(() => inputValue(['minimumWaterGasRatio', 'waterGasRatioLimit'], ''))
 const waterGasRatioEnabled = computed(() => Number(waterGasRatioLimit.value) > 0)
+const GAS_TYPE_OPTIONS = ['干气', '湿气', '凝析气']
+const MODIFICATION_METHOD_OPTIONS = ['Wichert-Aziz 修正方法', 'Carr-Kobayashi-Burrous 修正方法']
+const DEVIATION_METHOD_OPTIONS = ['Dranchuk-Abu-Kassem 方法', 'Dranchuk-Purvis-Robinson 方法', 'Hall-Yarborough 方法']
+const VISCOSITY_METHOD_OPTIONS = ['Lee-Gonzalez-Eakin 方法', 'Carr-Kobayashi-Burrous 方法', 'Sutton 方法']
+const FITTING_MODE_OPTIONS = ['自动拟合', '跳过拟合']
+const MATERIAL_BALANCE_TYPE_OPTIONS = ['封闭气藏', '定容气藏', '页岩气藏']
 
 const inputFields = computed(() => ({
   gas: [
-    { label: '天然气类型', value: gasType.value, select: true },
+    { label: '天然气类型', value: gasType.value, select: true, options: GAS_TYPE_OPTIONS },
     { label: '天然气比重(dless)', value: inputValue(['specificGravity'], 0.58) },
     { label: 'H₂S摩尔百分含量(%)', value: inputValue(['hydrogenSulfide'], 4.62) },
     { label: 'CO₂摩尔百分含量(%)', value: inputValue(['carbonDioxide'], 3.96) },
     { label: 'N₂摩尔百分含量(%)', value: inputValue(['nitrogen'], 0) }
   ],
   method: [
-    { label: '非烃气体修正方法', value: modificationMethod.value, select: true },
-    { label: '天然气偏差系数计算方法', value: deviationMethod.value, select: true },
-    { label: '天然气粘度计算方法', value: viscosityMethod.value, select: true }
+    { label: '非烃气体修正方法', value: modificationMethod.value, select: true, options: MODIFICATION_METHOD_OPTIONS },
+    { label: '天然气偏差系数计算方法', value: deviationMethod.value, select: true, options: DEVIATION_METHOD_OPTIONS },
+    { label: '天然气粘度计算方法', value: viscosityMethod.value, select: true, options: VISCOSITY_METHOD_OPTIONS }
   ],
   control: [
-    { label: '拟合方式', value: fittingMode.value, select: true },
+    { label: '拟合方式', value: fittingMode.value, select: true, options: FITTING_MODE_OPTIONS },
     { label: '抽样点数', value: inputValue(['dataSize'], 300) },
     { label: '粗扫数据点数量', value: inputValue(['initScanDataSize'], 10) },
     { label: '精扫数据点数量', value: inputValue(['fineSandDataSize'], 30) }
@@ -123,7 +148,7 @@ const inputFields = computed(() => ({
     { label: '气井地层温度(℃)', value: inputValue(['formationTemperature'], 80) },
     { label: '井筒半径(m)', value: inputValue(['wellboreRadius', 'wellRadius'], 0.06) },
     { label: '动态地质储量(10⁸m³)', value: resultValue(['originalGasVolume'], inputValue(['originalGasVolume'], '')) },
-    { label: '物质平衡方程类型', value: inputValue(['materialBalanceTypeDesc', 'dynamicOriginalGasInplaceMethodDescription'], '封闭气藏'), select: true },
+    { label: '物质平衡方程类型', value: inputValue(['materialBalanceTypeDesc', 'dynamicOriginalGasInplaceMethodDescription'], '封闭气藏'), select: true, options: MATERIAL_BALANCE_TYPE_OPTIONS },
     { label: '储层厚度(m)', value: inputValue(['reservoirThickness'], 128.33) },
     { label: '储层孔隙度(%)', value: inputValue(['reservoirPorosity', 'porosity'], 4.23) },
     { label: '束缚水饱和度(%)', value: inputValue(['waterSaturation'], 26.16) },
@@ -133,7 +158,7 @@ const inputFields = computed(() => ({
 }))
 
 const outputFields = computed(() => [
-  { label: '√Kxf(m·mD¹/²)', value: resultValue(['fractureConductivityCoefficient'], '') },
+  { label: '√KXf(m·mD¹/²)', value: resultValue(['fractureConductivityCoefficient'], '') },
   { label: '有效裂缝半长(m)', value: resultValue(['effectiveFractureHalfLength'], '') },
   { label: '储层长度(m)', value: resultValue(['reservoirLength'], '') },
   { label: '储层宽度(m)', value: resultValue(['reservoirWidth'], '') },
@@ -162,8 +187,15 @@ function isLegendItemHidden(name) {
 }
 
 function isLegendSeriesVisible(name) {
-  if (!legendItems.value.some(item => item.name === name)) return true
-  return !hiddenLegendNames.value.has(name)
+  const hidden=hiddenLegendNames.value
+  //qDd同时控制散点+曲线
+  if(name==='qDd-实际数据'||/^qDd-/i.test(name))  return !hidden.has('qDd-实际数据')
+  //DER同时控制散点+曲线
+  if(name==='1/DER-实际数据'||/^DER-/i.test(name))  return !hidden.has('1/DER-实际数据')
+
+  return true
+  // if (!legendItems.value.some(item => item.name === name)) return true
+  // return !hiddenLegendNames.value.has(name)
 }
 
 function toggleLegendItem(name) {
@@ -179,6 +211,10 @@ function toggleLegendItem(name) {
 
 function applyLegendVisibility(series) {
   return series.filter(item => isLegendSeriesVisible(item.name))
+}
+
+function keepReadonlySelectValue() {
+  readonlySelectKey.value += 1
 }
 
 const tableRows = computed(() => {
@@ -263,23 +299,15 @@ const actualSeries = computed(() => {
 })
 
 const typeCurves = computed(() => {
-  const curveItems = raw.value?.typicalCurveItems || raw.value?.curveItems || raw.value?.typeCurves || []
-  if (Array.isArray(curveItems) && curveItems.length) {
-    return curveItems.map((item, index) => ({
-      name: item.name || item.title || `曲线${index + 1}`,
-      data: (item.data || item.items || []).map(point => getPoint(point, ['xValue', 'x', 'tCaDd'], ['yValue', 'y', 'qDd'])).filter(Boolean)
-    })).filter(item => item.data.length)
-  }
+  const xValues = asArray(wattenbargerTypeCurveData.tcaDd)
 
-  return Array.from({ length: 15 }).map((_, index) => {
-    const shift = index * 0.08
-    const slope = 0.38 + index * 0.012
-    const data = [0.001, 0.003, 0.01, 0.03, 0.1, 0.3, 1, 3, 10, 30, 100].map(x => {
-      const bend = 1 + Math.pow(x / (0.9 + index * 0.12), 0.7)
-      const y = Math.max(0.01, (1.2 + shift) / bend + slope / Math.sqrt(x + 0.06))
-      return [x, y]
-    })
-    return { name: `典型曲线${index + 1}`, data }
+  return WATTENBARGER_XF_VALUES.flatMap((xf) => {
+    const qDdData = zipCurvePoints(xValues, wattenbargerTypeCurveData[`qDdYexf${xf}`])
+    const derData = zipCurvePoints(xValues, wattenbargerTypeCurveData[`DERYexf${xf}`])
+    return [
+      {name: `qDd-Yexf${xf}`, data: qDdData},
+      {name: `DER-Yexf${xf}`, data: derData}
+    ].filter(item => item.data.length)
   })
 })
 
@@ -299,7 +327,9 @@ const parsedTypeCurves = computed(() =>
         .filter(item => item?.data?.length)
 )
 
-const visibleTypeCurves = computed(() => parsedTypeCurves.value.length ? parsedTypeCurves.value : typeCurves.value)
+// const visibleTypeCurves = computed(() => parsedTypeCurves.value.length ? parsedTypeCurves.value : typeCurves.value)
+
+const visibleTypeCurves = computed(() => typeCurves.value)
 
 function renderChart() {
   if (!chart) return
@@ -311,7 +341,9 @@ function renderChart() {
       data: item.data,
       showSymbol: false,
       smooth: true,
-      lineStyle: { width: 1, color: ['#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de', '#3ba272', '#fc8452', '#9a60b4'][index % 8] }
+      silent: true,
+      z:1,
+      lineStyle: { width: 1, color: TYPE_CURVE_COLORS[index % TYPE_CURVE_COLORS.length] }
     })),
     {
       name: 'qDd-实际数据',
@@ -386,7 +418,7 @@ function renderChart() {
       type: 'log',
       min: 0.001,
       max: 100,
-      name: 'qDd,DER',
+      name: 'qDd,1/DER',
       nameLocation: 'middle',
       nameGap: 48,
       splitLine: { show: true, lineStyle: { color: '#dfe7f2' } },
@@ -535,8 +567,20 @@ onBeforeUnmount(() => {
           <div class="field-grid">
             <div v-for="field in inputFields.gas" :key="field.label" class="field">
               <label>{{ field.label }}</label>
-              <el-select v-if="field.select" size="small" disabled :model-value="field.value" style="width:100%">
-                <el-option :label="field.value" :value="field.value" />
+              <el-select
+                  v-if="field.select"
+                  :key="`${readonlySelectKey}-${field.label}`"
+                  size="small"
+                  :model-value="field.value"
+                  style="width:100%"
+                  @change="keepReadonlySelectValue"
+              >
+                <el-option
+                    v-for="option in field.options || [field.value]"
+                    :key="option"
+                    :label="option"
+                    :value="option"
+                />
               </el-select>
               <el-input v-else size="small" readonly :model-value="field.value" />
             </div>
@@ -546,8 +590,19 @@ onBeforeUnmount(() => {
           <div class="field-grid">
             <div v-for="field in inputFields.method" :key="field.label" class="field">
               <label>{{ field.label }}</label>
-              <el-select size="small" disabled :model-value="field.value" style="width:100%">
-                <el-option :label="field.value" :value="field.value" />
+              <el-select
+                  :key="`${readonlySelectKey}-${field.label}`"
+                  size="small"
+                  :model-value="field.value"
+                  style="width:100%"
+                  @change="keepReadonlySelectValue"
+              >
+                <el-option
+                    v-for="option in field.options || [field.value]"
+                    :key="option"
+                    :label="option"
+                    :value="option"
+                />
               </el-select>
             </div>
           </div>
@@ -556,8 +611,20 @@ onBeforeUnmount(() => {
           <div class="field-grid">
             <div v-for="field in inputFields.control" :key="field.label" class="field">
               <label>{{ field.label }}</label>
-              <el-select v-if="field.select" size="small" disabled :model-value="field.value" style="width:100%">
-                <el-option :label="field.value" :value="field.value" />
+              <el-select
+                  v-if="field.select"
+                  :key="`${readonlySelectKey}-${field.label}`"
+                  size="small"
+                  :model-value="field.value"
+                  style="width:100%"
+                  @change="keepReadonlySelectValue"
+              >
+                <el-option
+                    v-for="option in field.options || [field.value]"
+                    :key="option"
+                    :label="option"
+                    :value="option"
+                />
               </el-select>
               <el-input v-else size="small" readonly :model-value="field.value" />
             </div>
@@ -579,8 +646,20 @@ onBeforeUnmount(() => {
           <div class="field-grid">
             <div v-for="field in inputFields.other" :key="field.label" class="field">
               <label>{{ field.label }}</label>
-              <el-select v-if="field.select" size="small" disabled :model-value="field.value" style="width:100%">
-                <el-option :label="field.value" :value="field.value" />
+              <el-select
+                  v-if="field.select"
+                  :key="`${readonlySelectKey}-${field.label}`"
+                  size="small"
+                  :model-value="field.value"
+                  style="width:100%"
+                  @change="keepReadonlySelectValue"
+              >
+                <el-option
+                    v-for="option in field.options || [field.value]"
+                    :key="option"
+                    :label="option"
+                    :value="option"
+                />
               </el-select>
               <el-input v-else size="small" readonly :model-value="field.value" />
             </div>
@@ -617,12 +696,9 @@ onBeforeUnmount(() => {
     </aside>
 
     <div ref="chartAreaEl" class="chart-area">
-      <div class="chart-tabs">
-        <button type="button" class="chart-tab" :class="{ active: activeChartTab === 'chart' }" @click="activeChartTab = 'chart'">
-          结果分析图
-        </button>
-        <button type="button" class="chart-tab" :class="{ active: activeChartTab === 'table' }" @click="activeChartTab = 'table'">
-          数据列表
+      <div class="dynamic-result-tabs">
+        <button type="button" class="dynamic-result-tab active" :title="resultTabTitle">
+          <span class="dynamic-result-tab-text">{{ resultTabTitle }}</span>
         </button>
       </div>
 
@@ -660,6 +736,15 @@ onBeforeUnmount(() => {
           <el-table-column prop="regularizedPressureDerivativeReciprocal" label="压力导数倒数(1/DER)" min-width="190" sortable />
           <el-table-column prop="regularizedPressureIntegralDerivativeReciprocal" label="压力积分导数倒数" min-width="190" sortable />
         </el-table>
+      </div>
+
+      <div class="chart-tabs">
+        <button type="button" class="chart-tab" :class="{ active: activeChartTab === 'table' }" @click="activeChartTab = 'table'">
+          数据列表
+        </button>
+        <button type="button" class="chart-tab" :class="{ active: activeChartTab === 'chart' }" @click="activeChartTab = 'chart'">
+          结果分析图
+        </button>
       </div>
     </div>
   </div>
@@ -847,10 +932,51 @@ onBeforeUnmount(() => {
   position: relative;
 }
 
+.dynamic-result-tabs {
+  height: 34px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid #e4e7ed;
+  background: #fafafa;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.dynamic-result-tab {
+  height: 34px;
+  max-width: 320px;
+  border: 0;
+  border-right: 1px solid #e4e7ed;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: #409eff;
+  font-size: 14px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  cursor: default;
+  white-space: nowrap;
+
+  &.active {
+    border-bottom-color: #409eff;
+    background: #fff;
+  }
+}
+
+.dynamic-result-tab-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .chart-tabs {
   display: flex;
   height: 34px;
-  border-bottom: 1px solid #e4e7ed;
+  border-top: 1px solid #e4e7ed;
   flex-shrink: 0;
   background: #fafafa;
 }
