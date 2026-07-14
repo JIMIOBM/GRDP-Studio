@@ -992,12 +992,8 @@ onBeforeUnmount(() => {
             @mousedown.stop
             @click.stop="toggleLegendItem(item.name)"
         >
-          <span
-              class="legend-dot"
-              :style="{
-              backgroundColor: isLegendItemHidden(item.name) ? 'transparent' : item.color,
-              borderColor: item.color
-            }"
+          <span :class="item.name.includes('回归线') ? 'legend-line' : 'legend-dot'" :style="{backgroundColor: isLegendItemHidden(item.name) ? 'transparent' : item.color,
+      borderColor: item.color}"
           ></span>
           <span>{{ item.name }}</span>
         </div>
@@ -1264,5 +1260,13 @@ onBeforeUnmount(() => {
   padding: 10px;
   border-top: 1px solid #eeeeee;
   flex-shrink: 0;
+}
+
+// 回归线在图例中显示为黑色横线，而不是数据点圆圈。
+.legend-line {
+  width: 18px;
+  height: 2px;
+  flex-shrink: 0;
+  border: none;
 }
 </style>
