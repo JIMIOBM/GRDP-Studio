@@ -13,8 +13,8 @@ import DynamicBalanceContent from '@/views/WellControlInventory/DynamicBalanceCo
 import { NODETYPE } from '@/constants/nodeType'
 import { analyticMethodApi, materialBalanceApi, nodeApi, projectApi, typicalCurveApi, waterInvasionApi } from '@/api/docker'
 
-const PROJECT_ID = 1
-const GAS_RESERVOIR_ID = 1
+const PROJECT_ID = 4
+const GAS_RESERVOIR_ID = 3
 
 const WELL_GROUPS = [
   { id: 'data-management', label: '数据管理' },
@@ -904,8 +904,10 @@ const runMaterialBalanceForSelectedWell = async () => {
     })
 
     ElMessage.info(`${targetWellName} 物质平衡计算中，请稍候...`)
+
     const node = await pollMaterialBalanceNode()
-    applyMaterialBalanceNodes(node)
+    //这里暂时不处理其他井，只新增当前井的节点
+    // applyMaterialBalanceNodes(node)
 
     const subNodes = node?.subNodes ?? []
     const resultNode = subNodes.find(sub => sub.nodeTitle === targetWellName || sub.wellName === targetWellName)
@@ -1084,7 +1086,7 @@ const runWattenbargerForSelectedWell = async () => {
       gasReservoirId: Number(GAS_RESERVOIR_ID),
       projectId: Number(PROJECT_ID),
       wellNames: [targetWellName],
-      fittingType: 1,
+      fittingType: 5,
       isSkipFitting: false,
       dataSize: 300,
       fineScanDataSize: 30,
@@ -1092,29 +1094,39 @@ const runWattenbargerForSelectedWell = async () => {
       minimumWaterGasRatio: 0.0602
     })
     ElMessage.info(`${targetWellName} Wattenbarger计算中，请稍候...`)
-    const { rootNode, wattenbargerNode } = await getWattenbargerNodeOnce(targetWellName)
-    if (!wattenbargerNode) throw new Error('Wattenbarger计算超时，请稍后刷新查看结果')
+    let rootNode = null
+    let resultNode = null
+    for (let i = 0; i < 20; i++) {
+      const result = await getWattenbargerNodeOnce(targetWellName, 1500)
+      rootNode = result.rootNode
+      resultNode = result.wattenbargerNode
+      if (resultNode) break
+    }
+    if (!resultNode) throw new Error('Wattenbarger计算超时，请稍后刷新查看结果')
 
     applyTypicalCurveNodes(rootNode)
 
-    const resultNode = wattenbargerNode
-    addWattenbargerNode(targetWellName, {
+    const treeNode = addWattenbargerNode(targetWellName, {
       ...resultNode,
       nodeType: NODETYPE.NodeType_TypicalCurveWattenbarger,
       nodeTitle: 'Wattenbarger'
     })
+    const nodeId = resultNode.nodeId || resultNode.id
+    const resultRes = await typicalCurveApi.getResult(PROJECT_ID, GAS_RESERVOIR_ID, nodeId)
 
     const viewNode = {
-      id: resultNode?.nodeId || `wattenbarger-${targetWellName}`,
+      id: nodeId,
       label: 'Wattenbarger',
-      type: NODETYPE.NodeType_TypicalCurveWattenbarger,
+      type: resultNode?.nodeType || resultNode?.type || NODETYPE.NodeType_TypicalCurveWattenbarger,
       wellName: targetWellName,
-      raw: resultNode
+      raw: normalizePayload(resultRes),
+      treeNode: resultNode
     }
 
     activeNodeId.value = viewNode.id
     currentView.value = 'wattenbarger'
     currentViewNode.value = viewNode
+    activeNode.value = treeNode || viewNode
     ElMessage.success(`${targetWellName} Wattenbarger计算完成`)
   } catch (error) {
     ElMessage.error(error.message || 'Wattenbarger计算失败')
@@ -1245,7 +1257,7 @@ const initTree = async () => {
   await refreshProjectTree()
   await refreshWaterInvasionNodes()
   await refreshAnalyticMethodNodes()
-  await refreshMaterialBalanceNodes()
+  // await refreshMaterialBalanceNodes()
   await refreshTypicalCurveNodes()
 }
 
@@ -1351,7 +1363,7 @@ const handleCommand = ({ group, name }) => { // 接收顶部菜单栏的点击�
 const handleRefreshTree = () => {
   refreshWaterInvasionNodes()
   refreshAnalyticMethodNodes()
-  refreshMaterialBalanceNodes()
+  // refreshMaterialBalanceNodes()
   refreshTypicalCurveNodes()
 }
 
