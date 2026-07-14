@@ -1,6 +1,7 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import { Delete } from '@element-plus/icons-vue'
 import RibbonMenu from '@/components/RibbonMenu.vue'
 import TreeNode from '@/views/TreeNode.vue'
 import WaterInvasionContent from '@/views/WellControlInventory/WaterInvasionContent.vue'
@@ -75,6 +76,12 @@ const typicalCurveRunning = ref(false)
 const WATER_INVASION_ANALYSIS_ERROR = '水侵分析计算失败，未生成分析结果节点'
 const BLASINGAME_FITTING_REGRESSION_ERROR = '计算动态储量错误:参与回归分析的数据点数必须大于0'
 const selectedWellName = ref('')
+const treeContextMenu = ref({
+  visible: false,
+  x: 0,
+  y: 0,
+  node: null
+})
 
 const toggleSideTree = () => {
   sideTreeCollapsed.value = !sideTreeCollapsed.value
@@ -153,6 +160,18 @@ const isWattenbargerNode=(item) =>{
   const nodeType = item?.nodeType ?? item?.type
   return WATTENBARGER_NODE_TYPES.has(nodeType) || getNodeName(item) === 'Wattenbarger'
 }
+
+const isWaterInvasionNode = (item) => {
+  const nodeType = item?.nodeType ?? item?.type
+  return nodeType === NODETYPE.NodeType_WaterInvasionAnalysis || getNodeName(item) === '水侵分析'
+}
+
+const isTreeContextMenuNode = (item) => isWaterInvasionNode(item) || isBlasingameNode(item)
+
+const treeContextMenuLabel = computed(() => {
+  if (isBlasingameNode(treeContextMenu.value.node)) return '删除Blasingame分析结果'
+  return '删除水侵动态分析结果'
+})
 
 const findBlasingameNodeByWell = (root, wellName) => {
   if (!root || !wellName) return null
@@ -1249,7 +1268,40 @@ const initTree = async () => {
   await refreshTypicalCurveNodes()
 }
 
+const closeTreeContextMenu = () => {
+  treeContextMenu.value.visible = false
+}
+
+const handleNodeContextMenu = (node, event) => {
+  if (!isTreeContextMenuNode(node)) {
+    closeTreeContextMenu()
+    return
+  }
+
+  const menuWidth = 190
+  const menuHeight = 42
+  const x = Math.min(event.clientX, window.innerWidth - menuWidth - 8)
+  const y = Math.min(event.clientY, window.innerHeight - menuHeight - 8)
+
+  treeContextMenu.value = {
+    visible: true,
+    x: Math.max(8, x),
+    y: Math.max(8, y),
+    node
+  }
+}
+
+const handleDeleteContextNode = () => {
+  const node = treeContextMenu.value.node
+  closeTreeContextMenu()
+
+  if (!node) return
+
+  ElMessage.info(`${treeContextMenuLabel.value}：删除接口待确认`)
+}
+
 const handleSelect = (node) => { // 点击左侧树节点
+  closeTreeContextMenu()
   const isWellMenuGroup = WELL_GROUPS.some(group => group.id === node.type)
   const nodeWellName = node.wellName || (node.type === NODETYPE.NodeType_Well ? node.label : '')
 
@@ -1355,7 +1407,16 @@ const handleRefreshTree = () => {
   refreshTypicalCurveNodes()
 }
 
-onMounted(initTree)
+onMounted(() => {
+  initTree()
+  window.addEventListener('click', closeTreeContextMenu)
+  window.addEventListener('resize', closeTreeContextMenu)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('click', closeTreeContextMenu)
+  window.removeEventListener('resize', closeTreeContextMenu)
+})
 </script>
 
 <template>
@@ -1398,6 +1459,7 @@ onMounted(initTree)
               :node="node"
               :active-id="activeNodeId"
               @select="handleSelect"
+              @node-contextmenu="handleNodeContextMenu"
           />
         </div>
       </aside>
@@ -1450,6 +1512,21 @@ onMounted(initTree)
         />
       </main>
     </div>
+
+    <Teleport to="body">
+      <div
+          v-if="treeContextMenu.visible"
+          class="tree-context-menu"
+          :style="{ left: `${treeContextMenu.x}px`, top: `${treeContextMenu.y}px` }"
+          @click.stop
+          @contextmenu.prevent
+      >
+        <button class="tree-context-menu-item" type="button" @click="handleDeleteContextNode">
+          <el-icon class="tree-context-menu-icon"><Delete /></el-icon>
+          <span>{{ treeContextMenuLabel }}</span>
+        </button>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -1549,5 +1626,42 @@ $border: #e0e0e0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+
+:global(.tree-context-menu) {
+  position: fixed;
+  z-index: 4000;
+  min-width: 178px;
+  padding: 6px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.18);
+}
+
+:global(.tree-context-menu-item) {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #333;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 32px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+:global(.tree-context-menu-item:hover) {
+  background: #f5f7fa;
+}
+
+:global(.tree-context-menu-icon) {
+  color: #d93025;
+  font-size: 16px;
 }
 </style>

@@ -95,6 +95,12 @@ const hasDataListForActiveTab = computed(() => activeChartIdx.value >= 0 && acti
 const isDataListTab = computed(() => activeContentTab.value === 'table')
 const waterActivityOutput = computed(() => chartTabs.value[4]?.output || {})
 const currentWellName = computed(() => props.node?.wellName || wellData.value?.input?.wellName || '')
+const PRODUCTION_TEMPLATE_COLUMNS = [
+  { label: '日期', unit: '无' },
+  { label: '地层压力', unit: 'MPa' },
+  { label: '累产气量', unit: '10^8m3' },
+  { label: '累产水量', unit: '10^4m3' }
+]
 const chartTabTitle = computed(() =>
     `\u6c34\u4fb5\u5206\u6790-${currentWellName.value || '\u5f53\u524d\u4e95'}-\u5206\u6790\u7ed3\u679c`
 )
@@ -104,6 +110,24 @@ const legendPosition = ref({ x: null, y: null })
 const draggingLegend = ref(false)
 const legendDragOffset = ref({ x: 0, y: 0 })
 const hiddenLegendNames = ref(new Set())
+
+const getXlsx = async () => import('xlsx')
+
+const saveWorkbook = (XLSX, workbook, filename) => {
+  XLSX.writeFile(workbook, filename)
+}
+
+const downloadProductionTemplate = async () => {
+  const XLSX = await getXlsx()
+  const rows = [
+    PRODUCTION_TEMPLATE_COLUMNS.map(column => column.label),
+    PRODUCTION_TEMPLATE_COLUMNS.map(column => column.unit)
+  ]
+  const sheet = XLSX.utils.aoa_to_sheet(rows)
+  const workbook = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(workbook, sheet, '生产数据')
+  saveWorkbook(XLSX, workbook, `水侵分析生产数据模板-${currentWellName.value || 'well'}.xlsx`)
+}
 
 const legendItems = computed(() => {
   if (isWaterActivityTab.value) return []
@@ -812,7 +836,7 @@ onBeforeUnmount(() => {
 
         <div class="sec-label">生产数据</div>
         <div class="btn-row">
-          <el-button size="small">模版下载</el-button>
+          <el-button size="small" @click="downloadProductionTemplate">模版下载</el-button>
           <el-button size="small">导入</el-button>
         </div>
       </div>
