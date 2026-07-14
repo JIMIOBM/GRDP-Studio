@@ -1107,13 +1107,19 @@ const runWattenbargerForSelectedWell = async () => {
     ElMessage.info(`${targetWellName} Wattenbarger计算中，请稍候...`)
     let rootNode = null
     let resultNode = null
-    for (let i = 0; i < 20; i++) {
-      const result = await getWattenbargerNodeOnce(targetWellName, 1500)
-      rootNode = result.rootNode
-      resultNode = result.wattenbargerNode
-      if (resultNode) break
+    const result = await getWattenbargerNodeOnce(targetWellName, 1500)
+    rootNode = result.rootNode
+    resultNode = result.wattenbargerNode
+    //关掉接口轮询，一旦没有结果返回 直接报错
+    // for (let i = 0; i < 20; i++) {
+    //   const result = await getWattenbargerNodeOnce(targetWellName, 1500)
+    //   rootNode = result.rootNode
+    //   resultNode = result.wattenbargerNode
+    //   if (resultNode) break
+    // }
+    if (!resultNode) {ElMessage.warning(`${targetWellName}井Wattenbarger结果不存在`)
+      return
     }
-    if (!resultNode) throw new Error('Wattenbarger计算超时，请稍后刷新查看结果')
 
     applyTypicalCurveNodes(rootNode)
 
