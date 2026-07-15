@@ -1,6 +1,7 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import { Delete } from '@element-plus/icons-vue'
 import RibbonMenu from '@/components/RibbonMenu.vue'
 import TreeNode from '@/views/TreeNode.vue'
 import WaterInvasionContent from '@/views/WellControlInventory/WaterInvasionContent.vue'
@@ -80,6 +81,12 @@ const WATER_INVASION_ANALYSIS_ERROR = '水侵分析计算失败，未生成分�
 const BLASINGAME_FITTING_REGRESSION_ERROR = '计算动态储量错误:参与回归分析的数据点数必须大于0'
 const AG_FITTING_REGRESSION_ERROR = '计算AG节点错误:参与回归分析的数据点数必须大于0'
 const selectedWellName = ref('')
+const treeContextMenu = ref({
+  visible: false,
+  x: 0,
+  y: 0,
+  node: null
+})
 
 const toggleSideTree = () => {
   sideTreeCollapsed.value = !sideTreeCollapsed.value
@@ -170,6 +177,18 @@ const isAGNode = (item) => {
   const nodeType = item?.nodeType ?? item?.type
   return AG_NODE_TYPES.has(nodeType) || getNodeName(item) === 'Agarwal-Gardner'
 }
+
+const isWaterInvasionNode = (item) => {
+  const nodeType = item?.nodeType ?? item?.type
+  return nodeType === NODETYPE.NodeType_WaterInvasionAnalysis || getNodeName(item) === '水侵分析'
+}
+
+const isTreeContextMenuNode = (item) => isWaterInvasionNode(item) || isBlasingameNode(item)
+
+const treeContextMenuLabel = computed(() => {
+  if (isBlasingameNode(treeContextMenu.value.node)) return '删除Blasingame分析结果'
+  return '删除水侵动态分析结果'
+})
 
 const findBlasingameNodeByWell = (root, wellName) => {
   if (!root || !wellName) return null
@@ -833,8 +852,9 @@ const pollMaterialBalanceNode = async (maxRetries = 20, intervalMs = 1500) => {
       return node
     }
   }
-
-  throw new Error('物质平衡计算超时，请稍后刷新查看结果')
+  const rootNode = await fetchMaterialBalanceNode()
+  const resultNode = rootNode?.subNodes?.find(sub => sub.nodeTitle === wellName || sub.wellName === wellName)
+  return { rootNode, resultNode }
 }
 
 const pollTypicalCurveNode = async (wellName, maxRetries = 20, intervalMs = 1500) => {
@@ -987,7 +1007,7 @@ const runAnalyticMethodForSelectedWell = async () => {
 const runMaterialBalanceForSelectedWell = async () => {
   const targetWellName = selectedWellName.value
   // 接口需要批量计算全部井，但页面仍只展示当前选中井的计算状态。
-  const allWellNames = getAllWellNames()
+  // const allWellNames = getAllWellNames()
 
   if (!targetWellName) {
     ElMessage.warning('请先在左侧选择一口井')
@@ -998,7 +1018,7 @@ const runMaterialBalanceForSelectedWell = async () => {
   materialBalanceRunning.value = true
   try {
     await materialBalanceApi.calc({
-      wellNames: allWellNames,
+      wellNames: [targetWellName],
       gasReservoirType: 1,
       gasReservoirId: Number(GAS_RESERVOIR_ID),
       projectId: Number(PROJECT_ID),
@@ -1006,21 +1026,24 @@ const runMaterialBalanceForSelectedWell = async () => {
     })
 
     ElMessage.info(`${targetWellName} 物质平衡计算中，请稍候...`)
-    const node = await pollMaterialBalanceNode()
-    applyMaterialBalanceNodes(node)
 
-    const subNodes = node?.subNodes ?? []
-    const resultNode = subNodes.find(sub => sub.nodeTitle === targetWellName || sub.wellName === targetWellName)
-    // node 返回的列表只包含具有物质平衡结果的井。
-    // 当前井不在列表中时，不再创建虚假的物质平衡节点。
+    // 计算完成后读取后端保存的节点。
+    const { rootNode, resultNode } =
+        await getMaterialBalanceNodeOnce(targetWellName)
+
     if (!resultNode) {
       ElMessage.warning(`${targetWellName}井物质平衡结果不存在`)
       return
     }
+
+// node 接口现在只包含曾经计算过物质平衡的井，
+// 因此可以恢复全部历史节点。
+    applyMaterialBalanceNodes(rootNode)
+
     const materialBalanceRawNode = {
       ...resultNode,
-      parentNode: node,
-      rootNode: node,
+      parentNode: rootNode,
+      rootNode,
       nodeType: NODETYPE.NodeType_DynamicOriginalGasInplace,
       nodeTitle: '物质平衡'
     }
@@ -1186,7 +1209,7 @@ const runWattenbargerForSelectedWell = async () => {
       gasReservoirId: Number(GAS_RESERVOIR_ID),
       projectId: Number(PROJECT_ID),
       wellNames: [targetWellName],
-      fittingType: 1,
+      fittingType: 5,
       isSkipFitting: false,
       dataSize: 300,
       fineScanDataSize: 30,
@@ -1194,29 +1217,45 @@ const runWattenbargerForSelectedWell = async () => {
       minimumWaterGasRatio: 0.0602
     })
     ElMessage.info(`${targetWellName} Wattenbarger计算中，请稍候...`)
-    const { rootNode, wattenbargerNode } = await getWattenbargerNodeOnce(targetWellName)
-    if (!wattenbargerNode) throw new Error('Wattenbarger计算超时，请稍后刷新查看结果')
+    let rootNode = null
+    let resultNode = null
+    const result = await getWattenbargerNodeOnce(targetWellName, 1500)
+    rootNode = result.rootNode
+    resultNode = result.wattenbargerNode
+    //关掉接口轮询，一旦没有结果返回 直接报错
+    // for (let i = 0; i < 20; i++) {
+    //   const result = await getWattenbargerNodeOnce(targetWellName, 1500)
+    //   rootNode = result.rootNode
+    //   resultNode = result.wattenbargerNode
+    //   if (resultNode) break
+    // }
+    if (!resultNode) {ElMessage.warning(`${targetWellName}井Wattenbarger结果不存在`)
+      return
+    }
 
     applyTypicalCurveNodes(rootNode)
 
-    const resultNode = wattenbargerNode
-    addWattenbargerNode(targetWellName, {
+    const treeNode = addWattenbargerNode(targetWellName, {
       ...resultNode,
       nodeType: NODETYPE.NodeType_TypicalCurveWattenbarger,
       nodeTitle: 'Wattenbarger'
     })
+    const nodeId = resultNode.nodeId || resultNode.id
+    const resultRes = await typicalCurveApi.getResult(PROJECT_ID, GAS_RESERVOIR_ID, nodeId)
 
     const viewNode = {
-      id: resultNode?.nodeId || `wattenbarger-${targetWellName}`,
+      id: nodeId,
       label: 'Wattenbarger',
-      type: NODETYPE.NodeType_TypicalCurveWattenbarger,
+      type: resultNode?.nodeType || resultNode?.type || NODETYPE.NodeType_TypicalCurveWattenbarger,
       wellName: targetWellName,
-      raw: resultNode
+      raw: normalizePayload(resultRes),
+      treeNode: resultNode
     }
 
     activeNodeId.value = viewNode.id
     currentView.value = 'wattenbarger'
     currentViewNode.value = viewNode
+    activeNode.value = treeNode || viewNode
     ElMessage.success(`${targetWellName} Wattenbarger计算完成`)
   } catch (error) {
     ElMessage.error(error.message || 'Wattenbarger计算失败')
@@ -1462,7 +1501,40 @@ const initTree = async () => {
   await refreshTypicalCurveNodes()
 }
 
+const closeTreeContextMenu = () => {
+  treeContextMenu.value.visible = false
+}
+
+const handleNodeContextMenu = (node, event) => {
+  if (!isTreeContextMenuNode(node)) {
+    closeTreeContextMenu()
+    return
+  }
+
+  const menuWidth = 190
+  const menuHeight = 42
+  const x = Math.min(event.clientX, window.innerWidth - menuWidth - 8)
+  const y = Math.min(event.clientY, window.innerHeight - menuHeight - 8)
+
+  treeContextMenu.value = {
+    visible: true,
+    x: Math.max(8, x),
+    y: Math.max(8, y),
+    node
+  }
+}
+
+const handleDeleteContextNode = () => {
+  const node = treeContextMenu.value.node
+  closeTreeContextMenu()
+
+  if (!node) return
+
+  ElMessage.info(`${treeContextMenuLabel.value}：删除接口待确认`)
+}
+
 const handleSelect = (node) => { // 点击左侧树节点
+  closeTreeContextMenu()
   const isWellMenuGroup = WELL_GROUPS.some(group => group.id === node.type)
   const nodeWellName = node.wellName || (node.type === NODETYPE.NodeType_Well ? node.label : '')
 
@@ -1561,7 +1633,16 @@ const handleRefreshTree = () => {
   refreshTypicalCurveNodes()
 }
 
-onMounted(initTree)
+onMounted(() => {
+  initTree()
+  window.addEventListener('click', closeTreeContextMenu)
+  window.addEventListener('resize', closeTreeContextMenu)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('click', closeTreeContextMenu)
+  window.removeEventListener('resize', closeTreeContextMenu)
+})
 </script>
 
 <template>
@@ -1613,6 +1694,21 @@ onMounted(initTree)
           :gas-reservoir-id="GAS_RESERVOIR_ID" />
       </main>
     </div>
+
+    <Teleport to="body">
+      <div
+          v-if="treeContextMenu.visible"
+          class="tree-context-menu"
+          :style="{ left: `${treeContextMenu.x}px`, top: `${treeContextMenu.y}px` }"
+          @click.stop
+          @contextmenu.prevent
+      >
+        <button class="tree-context-menu-item" type="button" @click="handleDeleteContextNode">
+          <el-icon class="tree-context-menu-icon"><Delete /></el-icon>
+          <span>{{ treeContextMenuLabel }}</span>
+        </button>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -1712,5 +1808,42 @@ $border: #e0e0e0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+
+:global(.tree-context-menu) {
+  position: fixed;
+  z-index: 4000;
+  min-width: 178px;
+  padding: 6px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.18);
+}
+
+:global(.tree-context-menu-item) {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #333;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 32px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+:global(.tree-context-menu-item:hover) {
+  background: #f5f7fa;
+}
+
+:global(.tree-context-menu-icon) {
+  color: #d93025;
+  font-size: 16px;
 }
 </style>

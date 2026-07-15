@@ -54,6 +54,14 @@ const chartTabTitle = computed(() =>
     `诊断曲线-Blasingame-${currentWellName.value || '当前井'}-分析结果`
 )
 
+const PRODUCTION_TEMPLATE_COLUMNS = [
+  { label: '日期', unit: '无' },
+  { label: '井底流压', unit: 'MPa' },
+  { label: '气产量', unit: '10^4m3/d' },
+  { label: '累产气量', unit: '10^8m3' },
+  { label: '累产水量', unit: '10^4m3' }
+]
+
 const asArray = (value) => Array.isArray(value) ? value : []
 
 const BLASINGAME_BASELINE_FILES = {
@@ -87,6 +95,24 @@ const unwrapResponseData = (response) => response?.data?.data ?? response?.data 
 const extractOutputItems = (payload) => {
   const output = payload?.output || payload?.result?.output || payload?.outputs?.[0]?.output || payload
   return asArray(output?.outputItems || payload?.outputItems)
+}
+
+const getXlsx = async () => import('xlsx')
+
+const saveWorkbook = (XLSX, workbook, filename) => {
+  XLSX.writeFile(workbook, filename)
+}
+
+const downloadProductionTemplate = async () => {
+  const XLSX = await getXlsx()
+  const rows = [
+    PRODUCTION_TEMPLATE_COLUMNS.map(column => column.label),
+    PRODUCTION_TEMPLATE_COLUMNS.map(column => column.unit)
+  ]
+  const sheet = XLSX.utils.aoa_to_sheet(rows)
+  const workbook = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(workbook, sheet, '生产数据')
+  saveWorkbook(XLSX, workbook, `Blasingame生产数据模板-${currentWellName.value || 'well'}.xlsx`)
 }
 
 const collectCandidateArrays = (source, keys) => {
@@ -750,7 +776,7 @@ onBeforeUnmount(() => {
 
           <div class="sec-label">生产数据</div>
           <div class="btn-row">
-            <el-button size="small">模板下载</el-button>
+            <el-button size="small" @click="downloadProductionTemplate">模板下载</el-button>
             <el-button size="small">导入</el-button>
           </div>
         </div>
