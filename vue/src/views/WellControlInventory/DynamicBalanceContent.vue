@@ -1,15 +1,13 @@
 ﻿<script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
-import dockerRequest from '@/api/docker'
+import { dynamicBalanceApi } from '@/api/docker'
 
 const props = defineProps({
   node: Object,
   projectId: [Number, String],
   gasReservoirId: [Number, String]
 })
-
-const emit = defineEmits(['refresh-tree'])
 
 const loading = ref(false)
 const chartEl = ref(null)
@@ -26,15 +24,13 @@ const currentWellName = computed(() =>
   ''
 )
 
-const wellIdMap = {
-  'X-1': 51,
-  'X-2': 52,
-  'X-3': 53,
-  'X-4': 55,
-  'X-5': 56
-}
-
-const currentWellId = computed(() => wellIdMap[currentWellName.value] || 51)
+const resultId = computed(() =>
+  props.node?.resultId ||
+  props.node?.raw?.nodeId ||
+  props.node?.nodeId ||
+  props.node?.id ||
+  ''
+)
 
 const output = computed(() => {
   if (!resultData.value?.result) return {}
@@ -42,20 +38,10 @@ const output = computed(() => {
 })
 
 const reliability = computed(() => {
-  const rel = output.value.reliability
-  if (rel && rel !== 'undefined' && rel !== 'null') {
-    return rel
-  }
-  if (currentWellName.value === 'X-1') {
-    return '分析结果可靠性偏低'
-  }
-  if (currentWellName.value === 'X-4') {
-    return '分析结果可靠性较高'
-  }
-  if (currentWellName.value === 'X-5') {
-    return '分析结果可靠性较高'
-  }
-  return '分析结果可靠性偏低'
+  return output.value.reliablity ||
+    output.value.reliability ||
+    output.value.reliabilityDescription ||
+    ''
 })
 
 const inputParams = computed(() => {
@@ -134,37 +120,57 @@ const getInputValue = (keys, fallback = '') => {
 }
 
 const gasProperties = computed(() => [
-  { key: 'gasType', label: fieldLabels.gasType, value: getInputValue(['gasType'], '干气'), type: 'select', options: gasTypeOptions },
-  { key: 'specificGravity', label: fieldLabels.relativeDensity, value: getInputValue(['specificGravity', 'relativeDensity'], '0.58'), type: 'number' },
-  { key: 'hydrogenSulfide', label: fieldLabels.h2sContent, value: getInputValue(['hydrogenSulfide', 'h2sContent'], '4.62'), type: 'number' },
-  { key: 'carbonDioxide', label: fieldLabels.co2Content, value: getInputValue(['carbonDioxide', 'co2Content'], '3.96'), type: 'number' },
-  { key: 'nitrogen', label: fieldLabels.nitrogenContent, value: getInputValue(['nitrogen', 'nitrogenContent'], '0'), type: 'number' }
+  { key: 'gasType', label: fieldLabels.gasType, value: getInputValue('gasType'), type: 'select', options: gasTypeOptions },
+  { key: 'specificGravity', label: fieldLabels.relativeDensity, value: getInputValue(['specificGravity', 'relativeDensity']), type: 'number' },
+  { key: 'hydrogenSulfide', label: fieldLabels.h2sContent, value: getInputValue(['hydrogenSulfide', 'h2sContent']), type: 'number' },
+  { key: 'carbonDioxide', label: fieldLabels.co2Content, value: getInputValue(['carbonDioxide', 'co2Content']), type: 'number' },
+  { key: 'nitrogen', label: fieldLabels.nitrogenContent, value: getInputValue(['nitrogen', 'nitrogenContent']), type: 'number' }
 ])
+
+const getMethodValue = (key, legacyKey, options) => {
+  const value = inputParams.value?.[key] ?? inputParams.value?.[legacyKey]
+  if (value === undefined || value === null || value === '') return ''
+  if (typeof value === 'number') return options[value]?.value || ''
+  return value
+}
 
 const calculationMethods = computed(() => [
-  { key: 'nonHydrocarbonCorrectionMethod', label: fieldLabels.nonHydrocarbonCorrectionMethod, value: getInputValue(['nonHydrocarbonCorrectionMethod'], 'Wichert-Aziz修正方法'), type: 'select', options: nonHydrocarbonCorrectionOptions },
-  { key: 'zFactorCalculationMethod', label: fieldLabels.zFactorCalculationMethod, value: getInputValue(['zFactorCalculationMethod'], 'Dranchuk-Abu-Kassem方法'), type: 'select', options: zFactorCalculationOptions },
-  { key: 'viscosityCalculationMethod', label: fieldLabels.viscosityCalculationMethod, value: getInputValue(['viscosityCalculationMethod'], 'Lee-Gonzalez-Eakin方法'), type: 'select', options: viscosityCalculationOptions }
+  { key: 'modificationMethod', label: fieldLabels.nonHydrocarbonCorrectionMethod, value: getMethodValue('modificationMethod', 'nonHydrocarbonCorrectionMethod', nonHydrocarbonCorrectionOptions), type: 'select', options: nonHydrocarbonCorrectionOptions },
+  { key: 'deviationFactorMethod', label: fieldLabels.zFactorCalculationMethod, value: getMethodValue('deviationFactorMethod', 'zFactorCalculationMethod', zFactorCalculationOptions), type: 'select', options: zFactorCalculationOptions },
+  { key: 'viscosityMethod', label: fieldLabels.viscosityCalculationMethod, value: getMethodValue('viscosityMethod', 'viscosityCalculationMethod', viscosityCalculationOptions), type: 'select', options: viscosityCalculationOptions }
 ])
 
+const equationTypeValue = computed(() => {
+  const value = inputParams.value?.mbEquationType ?? inputParams.value?.equationType
+  if (value === 0) return '封闭气藏'
+  if (value === 1) return '水侵气藏'
+  return value || ''
+})
+
 const otherData = computed(() => [
-  { key: 'originalFormationPressure', label: fieldLabels.initialReservoirPressure, value: getInputValue(['originalFormationPressure', 'initialReservoirPressure'], '50'), type: 'number' },
-  { key: 'formationTemperature', label: fieldLabels.reservoirTemperature, value: getInputValue(['formationTemperature', 'reservoirTemperature'], '80'), type: 'number' },
-  { key: 'equationType', label: fieldLabels.equationType, value: getInputValue(['equationType', 'mbEquationType'], '封闭气藏'), type: 'select', options: equationTypeOptions },
-  { key: 'unstableFlowTime', label: fieldLabels.unstableFlowTime, value: getInputValue(['unstableFlowTime'], '180'), type: 'number' },
-  { key: 'samplingPoints', label: fieldLabels.samplingPoints, value: getInputValue(['samplingPoints'], '300'), type: 'number', hasSwitch: true, switchValue: true },
-  { key: 'waterGasRatioLimit', label: fieldLabels.waterGasRatioLimit, value: getInputValue(['waterGasRatioLimit'], '0.0602'), type: 'number', hasSwitch: true, switchValue: true },
-  { key: 'reservoirOriginalGasVolume', label: fieldLabels.gasReservoirVolume, value: getInputValue(['reservoirOriginalGasVolume', 'gasReservoirVolume'], '500'), type: 'number' },
-  { key: 'waterSaturation', label: fieldLabels.connateWaterSaturation, value: getInputValue(['waterSaturation', 'connateWaterSaturation'], '26.16'), type: 'number' },
-  { key: 'rockCompressionCoefficient', label: fieldLabels.rockCompressibility, value: getInputValue(['rockCompressionCoefficient', 'rockCompressibility'], '1.0000E-4'), type: 'number' },
-  { key: 'waterCompressionCoefficient', label: fieldLabels.waterCompressibility, value: getInputValue(['waterCompressionCoefficient', 'waterCompressibility'], '3.7445E-4'), type: 'number' }
+  { key: 'originalPressure', label: fieldLabels.initialReservoirPressure, value: getInputValue(['originalPressure', 'originalFormationPressure', 'initialReservoirPressure']), type: 'number' },
+  { key: 'temperature', label: fieldLabels.reservoirTemperature, value: getInputValue(['temperature', 'formationTemperature', 'reservoirTemperature']), type: 'number' },
+  { key: 'mbEquationType', label: fieldLabels.equationType, value: equationTypeValue.value, type: 'select', options: equationTypeOptions },
+  { key: 'unstableFlowPeriodLength', label: fieldLabels.unstableFlowTime, value: getInputValue(['unstableFlowPeriodLength', 'unstableFlowTime']), type: 'number' },
+  { key: 'dataSize', label: fieldLabels.samplingPoints, value: getInputValue(['dataSize', 'samplingPoints']), type: 'number', hasSwitch: true, switchValue: Number(inputParams.value?.dataSize) > 0 },
+  { key: 'waterGasRatioLimit', label: fieldLabels.waterGasRatioLimit, value: getInputValue('waterGasRatioLimit'), type: 'number', hasSwitch: true, switchValue: Number(inputParams.value?.waterGasRatioLimit) >= 0 },
+  { key: 'reservoirOriginalGasVolume', label: fieldLabels.gasReservoirVolume, value: getInputValue(['reservoirOriginalGasVolume', 'gasReservoirVolume']), type: 'number' },
+  { key: 'waterSaturation', label: fieldLabels.connateWaterSaturation, value: getInputValue(['waterSaturation', 'connateWaterSaturation']), type: 'number' },
+  { key: 'rockCompressionCoefficient', label: fieldLabels.rockCompressibility, value: getInputValue(['rockCompressionCoefficient', 'rockCompressibility']), type: 'number' },
+  { key: 'waterCompressionCoefficient', label: fieldLabels.waterCompressibility, value: getInputValue(['waterCompressionCoefficient', 'waterCompressibility']), type: 'number' }
 ])
 
 const chartPoints = computed(() => {
-  if (!resultData.value?.data || !Array.isArray(resultData.value.data)) return []
-
+  const chartItem = resultData.value?.chartItems?.find(item => item.yAxisField === 'pressure')
+  if (chartItem?.data?.length) {
+    return chartItem.data
+      .filter(item => item.isDeleted !== true)
+      .map(item => [Number(item.xValue), Number(item.yValue)])
+      .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y))
+  }
+  if (!Array.isArray(resultData.value?.data)) return []
   return resultData.value.data
-    .filter(item => item.isDeleted === false)
+    .filter(item => item.isDeleted !== true)
     .map(item => {
       const x = Number(item.pseudotime)
       const y = Number(item.pressure)
@@ -174,9 +180,16 @@ const chartPoints = computed(() => {
 })
 
 const allPoints = computed(() => {
-  if (!resultData.value?.data || !Array.isArray(resultData.value.data)) return []
-
+  const chartItem = resultData.value?.chartItems?.find(item => item.yAxisField === 'pressure')
+  if (chartItem?.data?.length) {
+    return chartItem.data
+      .filter(item => item.isDeleted === true)
+      .map(item => [Number(item.xValue), Number(item.yValue)])
+      .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y))
+  }
+  if (!Array.isArray(resultData.value?.data)) return []
   return resultData.value.data
+    .filter(item => item.isDeleted === true)
     .map(item => {
       const x = Number(item.pseudotime)
       const y = Number(item.pressure)
@@ -187,25 +200,31 @@ const allPoints = computed(() => {
 
 const regression = computed(() => {
   const result = output.value
-  const slope = parseFloat(result.gradient) || parseFloat(result.slope) || 3.133e-4
-  const intercept = parseFloat(result.intercept) || 0.1567
-  const r2 = parseFloat(result.rsquared) || 0.6323
+  const slope = Number(result.gradient ?? result.slope)
+  const intercept = Number(result.intercept)
+  const r2 = Number(result.rsquared)
   return { slope, intercept, r2 }
+})
+
+const regressionPoints = computed(() => {
+  const chartItem = resultData.value?.chartItems?.find(item => item.yAxisField === 'linearRegressionPressure')
+  if (chartItem?.data?.length) {
+    return chartItem.data
+      .map(item => [Number(item.xValue), Number(item.yValue)])
+      .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y))
+  }
+  const { slope, intercept } = regression.value
+  const xs = chartPoints.value.map(([x]) => x)
+  if (!xs.length || !Number.isFinite(slope) || !Number.isFinite(intercept)) return []
+  const minX = Math.min(...xs)
+  const maxX = Math.max(...xs)
+  return [[minX, slope * minX + intercept], [maxX, slope * maxX + intercept]]
 })
 
 const renderChart = () => {
   if (!chart) return
 
   const { slope, intercept, r2 } = regression.value
-
-  const xs = chartPoints.value.map(([x]) => x)
-  const dataMinX = xs.length ? Math.min(...xs) : 300
-  const dataMaxX = xs.length ? Math.max(...xs) : 3600
-
-  const rayStartX = dataMinX
-  const rayStartY = slope * rayStartX + intercept
-  const rayEndX = dataMaxX
-  const rayEndY = slope * rayEndX + intercept
 
   const series = [
     {
@@ -231,10 +250,7 @@ const renderChart = () => {
     {
       name: '回归线(MPa/(10⁴m³/d))',
       type: 'line',
-      data: [
-        [rayStartX, rayStartY],
-        [rayEndX, rayEndY]
-      ],
+      data: regressionPoints.value,
       symbol: 'none',
       lineStyle: { color: '#333', width: 2.5 },
       tooltip: { show: false }
@@ -272,8 +288,7 @@ const renderChart = () => {
     xAxis: {
       type: 'value',
       name: 'tca(d)',
-      min: 0,
-      max: 3600,
+      scale: true,
       nameLocation: 'middle',
       nameGap: 35,
       minorTick: { show: true },
@@ -284,8 +299,7 @@ const renderChart = () => {
     yAxis: {
       type: 'value',
       name: '(Pi - Pwf)/qsc(MPa/(10⁴m³/d))',
-      min: 0.2,
-      max: 1.4,
+      scale: true,
       nameLocation: 'middle',
       nameGap: 55,
       minorTick: { show: true },
@@ -303,7 +317,9 @@ const renderChart = () => {
           {
             type: 'text',
             style: {
-              text: `Y = ${slope.toExponential(4)}*X + ${intercept.toExponential(4)}`,
+              text: Number.isFinite(slope) && Number.isFinite(intercept)
+                ? `Y = ${slope.toExponential(4)}*X + ${intercept.toExponential(4)}`
+                : '',
               fontSize: 11,
               fill: '#666'
             },
@@ -313,7 +329,7 @@ const renderChart = () => {
           {
             type: 'text',
             style: {
-              text: `R² = ${r2.toFixed(4)}`,
+              text: Number.isFinite(r2) ? `R² = ${r2.toFixed(4)}` : '',
               fontSize: 11,
               fill: '#666'
             },
@@ -326,11 +342,24 @@ const renderChart = () => {
   }, true)
 }
 
-const fetchData = async () => {
-  const wellId = currentWellId.value
-  const wellName = currentWellName.value
+const handleResize = () => chart?.resize()
 
-  if (!wellId || !props.projectId || !props.gasReservoirId) {
+const ensureChart = () => {
+  if (!chart && chartEl.value) chart = echarts.init(chartEl.value)
+}
+
+const fetchData = async () => {
+  const wellName = currentWellName.value
+  const currentResultId = resultId.value
+
+  if (props.node?.loading) {
+    loading.value = true
+    resultData.value = null
+    noData.value = false
+    return
+  }
+
+  if (!currentResultId || !props.projectId || !props.gasReservoirId) {
     noData.value = true
     return
   }
@@ -340,36 +369,46 @@ const fetchData = async () => {
   noData.value = false
 
   try {
-    const res = await dockerRequest.get(
-      `/projectanalysis/dynamicoriginalgasInplace/result/${props.projectId}/${props.gasReservoirId}/${wellId}`
-    )
-
-    resultData.value = res.data
-
-    if (!res.data?.data || !Array.isArray(res.data.data) || res.data.data.length === 0) {
-      noData.value = true
+    const nodePayload = props.node?.raw
+    if (nodePayload?.result && Array.isArray(nodePayload?.data)) {
+      resultData.value = nodePayload
+    } else {
+      const res = await dynamicBalanceApi.getResult(
+        props.projectId,
+        props.gasReservoirId,
+        currentResultId,
+        { silentError: true }
+      )
+      resultData.value = res.data?.result ? res.data : (res.data?.data ?? res.data)
     }
+
+    noData.value = !Array.isArray(resultData.value?.data) || resultData.value.data.length === 0
 
   } catch (e) {
     console.error(`[DynamicBalanceContent] Failed to fetch data for ${wellName}`, e)
     noData.value = true
   } finally {
     await nextTick()
+    ensureChart()
     renderChart()
     loading.value = false
-    emit('refresh-tree')
   }
 }
 
-watch(() => props.node?.wellName, fetchData, { immediate: true })
+watch(
+  () => [props.node?.wellName, resultId.value, props.node?.raw],
+  fetchData,
+  { immediate: true }
+)
 
 onMounted(() => {
-  chart = echarts.init(chartEl.value)
-  window.addEventListener('resize', () => chart?.resize())
+  ensureChart()
+  renderChart()
+  window.addEventListener('resize', handleResize)
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('resize', () => chart?.resize())
+  window.removeEventListener('resize', handleResize)
   chart?.dispose()
 })
 </script>
@@ -487,7 +526,7 @@ onBeforeUnmount(() => {
       <div v-if="noData" class="no-data">
         <p>暂无数据</p>
       </div>
-      <div v-else ref="chartEl" class="chart-instance" />
+      <div v-show="!noData" ref="chartEl" class="chart-instance" />
     </div>
   </div>
 </template>
