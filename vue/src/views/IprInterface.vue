@@ -15,7 +15,7 @@ import AGContent from '@/views/WellControlInventory/AGContent.vue'
 import { NODETYPE } from '@/constants/nodeType'
 import { analyticMethodApi, dynamicBalanceApi, materialBalanceApi, nodeApi, projectApi, typicalCurveApi, waterInvasionApi } from '@/api/docker'
 
-const PROJECT_ID = 2
+const PROJECT_ID = 1
 const GAS_RESERVOIR_ID = 1
 
 const WELL_GROUPS = [

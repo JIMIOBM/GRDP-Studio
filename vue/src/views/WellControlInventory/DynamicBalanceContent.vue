@@ -101,7 +101,7 @@ const formatNumber = (value) => {
   if (isNaN(num)) return String(value)
 
   if (/[eE]/.test(String(value))) {
-    const fixed = num.toFixed(10)
+    const fixed = num.toFixed(10)//1
     return fixed.replace(/\.?0+$/, '')
   }
 
