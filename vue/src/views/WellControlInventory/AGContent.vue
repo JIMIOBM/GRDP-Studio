@@ -264,11 +264,11 @@ const tableRows = computed(() => {
       : extractOutputItems(raw.value)
 
   return rows.map((item, index) => ({
-    index: index + 1,
-    pseudotime: item.pseudotime ?? '',
-    regularizedProduction: item.regularizedProduction ?? '',
-    regularizedProductionIntegral: item.regularizedProductionIntegral ?? '',
-    regularizedProductionIntegralDerivative: item.regularizedProductionIntegralDerivative ?? ''
+   index: index + 1,
+      pseudotime: item.pseudotime ?? item.tcaDd ?? item.tCaDd ?? item.xValue ?? '',
+      regularizedProduction: item.regularizedProduction ?? item.qDd ?? item.qdd ?? '',
+      regularizedPressureDerivativeReciprocal: item.regularizedPressureDerivativeReciprocal ?? item.DER ?? '',
+      regularizedPressureIntegralDerivativeReciprocal: item.regularizedPressureIntegralDerivativeReciprocal ?? item.DERd ?? ''
   }))
 })
 
@@ -840,8 +840,8 @@ onBeforeUnmount(() => {
           <el-table-column prop="index" label="序号" width="76" sortable />
           <el-table-column prop="pseudotime" label="物质平衡拟时间" min-width="170" sortable />
           <el-table-column prop="regularizedProduction" label="重整产量(qDd)" min-width="170" sortable />
-          <el-table-column prop="regularizedProductionIntegral" label="重整产量积分(qDdi)" min-width="190" sortable />
-          <el-table-column prop="regularizedProductionIntegralDerivative" label="重整产量积分导数(qDdid)" min-width="220" sortable />
+          <el-table-column prop="regularizedPressureDerivativeReciprocal" label="重整压力导数的倒数(1/DER)" min-width="190" sortable />
+          <el-table-column prop="regularizedPressureIntegralDerivativeReciprocal" label="重整压力积分导数的倒数(1/DERI)" min-width="220" sortable />
         </el-table>
       </div>
 
