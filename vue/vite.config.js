@@ -17,6 +17,11 @@ export default defineConfig(({ mode }) => {
       port: 5173,
       open: true,
       proxy: {
+        // Independent read-only FlowBalance development backend.
+        '/flowbalance': {
+          target: 'http://127.0.0.1:8891',
+          changeOrigin: true
+        },
         // SpringBoot backend
         '/api': {
           target: 'http://localhost:8080',

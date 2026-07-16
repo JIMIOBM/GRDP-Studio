@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Delete } from '@element-plus/icons-vue'
 import RibbonMenu from '@/components/RibbonMenu.vue'
@@ -11,12 +12,14 @@ import WattenbargerContent from '@/views/WellControlInventory/WattenbargerConten
 import BlasingameContent from '@/views/WellControlInventory/BlasingameContent.vue'
 import NpiContent from '@/views/WellControlInventory/NpiContent.vue'
 import DynamicBalanceContent from '@/views/WellControlInventory/DynamicBalanceContent.vue'
+import FlowBalanceContent from '@/views/WellControlInventory/FlowBalanceContent.vue'
 import AGContent from '@/views/WellControlInventory/AGContent.vue'
 import { NODETYPE } from '@/constants/nodeType'
-import { analyticMethodApi, dynamicBalanceApi, materialBalanceApi, nodeApi, projectApi, typicalCurveApi, waterInvasionApi } from '@/api/docker'
+import { analyticMethodApi, dynamicBalanceApi, flowBalanceApi, materialBalanceApi, nodeApi, projectApi, typicalCurveApi, waterInvasionApi } from '@/api/docker'
 
-const PROJECT_ID = 1
-const GAS_RESERVOIR_ID = 1
+const route = useRoute()
+const PROJECT_ID = Number(route.query.projectId || 1)
+const GAS_RESERVOIR_ID = Number(route.query.gasReservoirId || 1)
 
 const WELL_GROUPS = [
   { id: 'data-management', label: '数据管理' },
@@ -31,6 +34,8 @@ const NODE_GROUP_BY_TYPE = {
   [NODETYPE.NodeType_WaterInvasionAnalysis]: 'well-control-inventory',  //水侵分析节点，要放到井控库存下面
   [NODETYPE.NodeType_AnalysisMethods]: 'well-control-inventory',
   [NODETYPE.NodeType_DynamicOriginalGasInplace]: 'well-control-inventory',
+[NODETYPE.NodeType_FlowingBalanceMethodBasedOnTopPressure]: 'well-control-inventory',
+  [NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure]: 'well-control-inventory',
   [NODETYPE.NodeType_DynamicMaterialBalanceMethodBlasingame]: 'well-control-inventory',
   [NODETYPE.NodeType_TypicalCurveBlasingame]: 'well-control-inventory',
   [NODETYPE.NodeType_TypicalCurveWattenbarger]: 'well-control-inventory',
@@ -51,6 +56,8 @@ const NODE_LABEL_BY_TYPE = {
   [NODETYPE.NodeType_WaterInvasionAnalysis]: '水侵分析',
   [NODETYPE.NodeType_AnalysisMethods]: '解析法',
   [NODETYPE.NodeType_DynamicOriginalGasInplace]: '物质平衡',
+[NODETYPE.NodeType_FlowingBalanceMethodBasedOnTopPressure]: '流动平衡-井口流压',
+  [NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure]: '流动平衡-井底流压',
   [NODETYPE.NodeType_DynamicMaterialBalanceMethodBlasingame]: '动态平衡',
   [NODETYPE.NodeType_TypicalCurve]: '诊断曲线',
   [NODETYPE.NodeType_TypicalCurveBlasingame]: 'Blasingame',
@@ -78,6 +85,7 @@ const sideTreeCollapsed = ref(false)
 const waterInvasionRunning = ref(false)  //用于判断水侵分析是否正在运行
 const analyticMethodRunning = ref(false)
 const materialBalanceRunning = ref(false)
+const flowBalanceRunning = ref(false)
 const dynamicBalanceRunning = ref(false)
 const typicalCurveRunning = ref(false)
 const WATER_INVASION_ANALYSIS_ERROR = '水侵分析计算失败，未生成分析结果节点'
@@ -339,6 +347,17 @@ const ensureWell = (wellName, wellId) => { //确保井存在
 
 const addAnalysisNode = (wellName, rawNode) => {  // 添加分析节点
   const nodeType = rawNode?.nodeType ?? rawNode?.type
+
+  if (FLOW_BALANCE_NODE_TYPES.has(Number(nodeType))) {
+    const isRuntime = rawNode.persisted === false && rawNode.idKind === 'runtime'
+    const isPersisted = rawNode.persisted === true || rawNode.persistedResultId
+    if (!isRuntime && !isPersisted) return
+    if (!rawNode.resultId) return
+    if (!rawNode.input) return
+    if (!rawNode.result) return
+    if (!Array.isArray(rawNode.data) || rawNode.data.length === 0) return
+  }
+
   const groupId = NODE_GROUP_BY_TYPE[nodeType] || rawNode?.menuType || rawNode?.groupType
   const groupConfig = WELL_GROUPS.find(group => group.id === groupId || group.label === groupId)
   if (!groupConfig) return
@@ -365,6 +384,7 @@ const addAnalysisNode = (wellName, rawNode) => {  // 添加分析节点
   } else {
     targetGroup.children.push(analysisNode)
   }
+  return analysisNode
 }
 
 const addBlasingameNode = (wellName, rawNode = {}) => {
@@ -665,6 +685,60 @@ const applyMaterialBalanceNodes = (node) => {
   })
 }
 
+const FLOW_BALANCE_NODE_TYPES = new Set([
+  NODETYPE.NodeType_FlowingBalanceMethodBasedOnTopPressure,
+  NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure
+])
+
+const getFlowingBalanceNodeType = (item) =>
+  Number(item?.nodeType ?? item?.type ?? item?.nodeTypeId)
+
+const applyFlowingBalanceNodes = (node) => {
+  const wellNames = new Set(getAllWellNames())
+
+  const visit = (item, currentWellName = '') => {
+    if (!item) return
+    const nodeName = getNodeName(item)
+    const wellName = wellNames.has(nodeName) ? nodeName : currentWellName
+    const nodeType = getFlowingBalanceNodeType(item)
+
+    if (wellName && FLOW_BALANCE_NODE_TYPES.has(nodeType)) {
+      addAnalysisNode(wellName, {
+        ...item,
+        wellName,
+        nodeType,
+        nodeTitle: NODE_LABEL_BY_TYPE[nodeType]
+      })
+    }
+
+    getChildren(item).forEach(child => visit(child, wellName))
+  }
+
+  visit(node)
+}
+
+const findFlowingBalanceNode = (node, wellName) => {
+  const wellNames = new Set(getAllWellNames())
+  let found = null
+
+  const visit = (item, currentWellName = '') => {
+    if (!item || found) return
+    const nodeName = getNodeName(item)
+    const nextWellName = wellNames.has(nodeName) ? nodeName : currentWellName
+    const nodeType = getFlowingBalanceNodeType(item)
+
+    if (nextWellName === wellName && FLOW_BALANCE_NODE_TYPES.has(nodeType)) {
+      found = item
+      return
+    }
+
+    getChildren(item).forEach(child => visit(child, nextWellName))
+  }
+
+  visit(node)
+  return found
+}
+
 const findDynamicBalanceNode = (rootNode, wellName) => {
   const wellNode = (rootNode?.subNodes || []).find(item =>
     item.nodeTitle === wellName || item.wellName === wellName
@@ -884,6 +958,16 @@ const getMaterialBalanceNodeOnce = async (wellName, delayMs = 1200) => {
     ].includes(type)
   })
   return { rootNode, resultNode }
+}
+
+const pollFlowingBalanceNode = async (wellName, maxRetries = 20, intervalMs = 1500) => {
+  for (let i = 0; i < maxRetries; i++) {
+    await new Promise(resolve => setTimeout(resolve, intervalMs))
+    const node = await fetchMaterialBalanceNode()
+    if (findFlowingBalanceNode(node, wellName)) return node
+  }
+
+  throw new Error('流动平衡计算超时，请稍后刷新查看结果')
 }
 
 const pollTypicalCurveNode = async (wellName, maxRetries = 20, intervalMs = 1500) => {
@@ -1125,6 +1209,72 @@ const openDynamicBalanceNode = async (node) => {
     currentViewNode.value = { ...node, loading: false }
     ElMessage.error(error.response?.data?.msg || error.message || '动态平衡结果加载失败')
     console.error('动态平衡结果加载失败', error)
+  }
+}
+
+const runFlowBalanceForSelectedWell = async () => {
+  const targetWellName = selectedWellName.value
+
+  if (!targetWellName) {
+    ElMessage.warning('请先在左侧选择一口井')
+    return
+  }
+
+  if (flowBalanceRunning.value) return
+  flowBalanceRunning.value = true
+
+  try {
+    ElMessage.info(`${targetWellName} 流动平衡计算中，请稍候...`)
+    const response = await flowBalanceApi.calc({
+      wellNames: [targetWellName],
+      gasReservoirId: Number(GAS_RESERVOIR_ID),
+      projectId: Number(PROJECT_ID),
+      waterGasRatioLimit: 0.0602
+    })
+
+    const payload = normalizePayload(response)
+    if (!payload?.nodes || !Array.isArray(payload.nodes)) {
+      throw new Error('FlowBalance 接口未返回有效结果')
+    }
+    const nodes = payload.nodes
+    const requiredTypes = [
+      NODETYPE.NodeType_FlowingBalanceMethodBasedOnTopPressure,
+      NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure
+    ]
+    const missingTypes = requiredTypes.filter(type => !nodes.some(node => Number(node.nodeType) === Number(type)))
+    if (missingTypes.length) throw new Error(`FlowBalance 缺少真实节点类型：${missingTypes.join(', ')}`)
+
+    const treeNodes = nodes.map(resultNode => {
+      if (!resultNode.resultId) {
+        throw new Error('FlowBalance 结果缺少有效的 resultId')
+      }
+      const nodeType = Number(resultNode.nodeType)
+      return addAnalysisNode(targetWellName, {
+        ...resultNode,
+        id: resultNode.resultId,
+        nodeType,
+        nodeTitle: NODE_LABEL_BY_TYPE[nodeType],
+        persisted: false,
+        idKind: 'runtime',
+        runtimeRunId: payload.runId,
+        persistedResultId: payload.persistedResultId || null
+      })
+    }).filter(Boolean)
+
+    const viewNode = treeNodes.find(node => Number(node.type) === requiredTypes[0])
+    if (!viewNode) throw new Error(`${targetWellName}井流动平衡运行节点创建失败`)
+
+    activeNodeId.value = viewNode.id
+    activeNode.value = viewNode
+    currentView.value = 'flow-balance'
+    currentViewNode.value = viewNode
+    ElMessage.success(`${targetWellName} 流动平衡计算完成`)
+  } catch (error) {
+    const msg = error.response?.data?.msg || error.response?.data?.message || error.message
+    ElMessage.error(msg || '流动平衡计算失败')
+    console.error('流动平衡计算失败', error)
+  } finally {
+    flowBalanceRunning.value = false
   }
 }
 
@@ -1515,6 +1665,52 @@ const openNpiNode = async (node) => {
   }
 }
 
+const refreshFlowBalanceNodes = async () => {
+  try {
+    const result = await flowBalanceApi.getNodes(
+      Number(PROJECT_ID),
+      Number(GAS_RESERVOIR_ID),
+      getAllWellNames()
+    )
+    const payload = normalizePayload(result)
+    const nodes = Array.isArray(payload?.nodes) ? payload.nodes : []
+    if (!nodes.length) return
+
+    const latestByKey = new Map()
+    nodes.forEach(persistedNode => {
+      const nodeType = Number(persistedNode.nodeType)
+      if (!FLOW_BALANCE_NODE_TYPES.has(nodeType)) return
+      const key = `${persistedNode.wellName}-${nodeType}`
+      const existing = latestByKey.get(key)
+      if (!existing || persistedNode.nodeId > existing.nodeId) {
+        latestByKey.set(key, persistedNode)
+      }
+    })
+
+    for (const [, persistedNode] of latestByKey) {
+      try {
+        const resultRes = await flowBalanceApi.getNodeResult(persistedNode.nodeId)
+        const detail = resultRes?.data
+        if (!detail) continue
+        const fullNode = { ...persistedNode, ...detail }
+        const nodeType = Number(fullNode.nodeType)
+        addAnalysisNode(fullNode.wellName, {
+          ...fullNode,
+          id: fullNode.nodeId || `${fullNode.wellName}-${nodeType}-${fullNode.resultId}`,
+          nodeType,
+          nodeTitle: NODE_LABEL_BY_TYPE[nodeType],
+          persisted: true,
+          idKind: 'persistent'
+        })
+      } catch (err) {
+        console.error(`加载持久化节点 ${persistedNode.nodeId} 结果失败`, err)
+      }
+    }
+  } catch (error) {
+    console.error('加载持久化流动平衡节点失败', error)
+  }
+}
+
 const openWattenbargerNode = async (node) => {
   const targetWellName = node?.wellName || selectedWellName.value
 
@@ -1569,7 +1765,6 @@ const openAGNode = async (node) => {
     const nodeRes = await nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, NODETYPE.NodeType_ProductivityInstabilityAnalysis)
     const rootNode = nodeRes?.data?.node
     applyTypicalCurveNodes(rootNode)
-    //applyTypicalCurveNodes(rootNode)
 
     const agNode = findAGNodeByWell(rootNode, targetWellName) || node?.raw || node
     const nodeId = agNode?.nodeId || agNode?.id
@@ -1603,6 +1798,7 @@ const initTree = async () => {
   await refreshAnalyticMethodNodes()
   await refreshMaterialBalanceNodes()
   await refreshTypicalCurveNodes()
+  await refreshFlowBalanceNodes()
 }
 
 const closeTreeContextMenu = () => {
@@ -1666,6 +1862,12 @@ const handleSelect = (node) => { // 点击左侧树节点
     return
   }
 
+if (FLOW_BALANCE_NODE_TYPES.has(Number(node.type))) {
+    currentView.value = 'flow-balance'
+    currentViewNode.value = node
+    return
+  }
+
   if (node.type === NODETYPE.NodeType_DynamicMaterialBalanceMethodBlasingame) {
     openDynamicBalanceNode(node)
     return
@@ -1704,6 +1906,9 @@ const handleCommand = ({ group, name }) => { // 接收顶部菜单栏的点击�
     case '物质平衡':
       runMaterialBalanceForSelectedWell()
       break
+    case '流动平衡':
+      runFlowBalanceForSelectedWell()
+      break
     case 'Blasingame':
       runBlasingameForSelectedWell()
       break
@@ -1729,6 +1934,7 @@ const handleRefreshTree = () => {
   refreshAnalyticMethodNodes()
   refreshMaterialBalanceNodes()
   refreshTypicalCurveNodes()
+  refreshFlowBalanceNodes()
 }
 
 onMounted(() => {
@@ -1774,22 +1980,62 @@ onBeforeUnmount(() => {
 
       <!--     右侧的主要内容区域-->
       <main class="content-area">
-        <WaterInvasionContent v-if="currentView === 'water-invasion'" :node="currentViewNode" :project-id="PROJECT_ID"
-          :gas-reservoir-id="GAS_RESERVOIR_ID" @refresh-tree="handleRefreshTree" />
-        <AnalyticMethodContent v-if="currentView === 'analytic-method'" :node="currentViewNode" :project-id="PROJECT_ID"
-          :gas-reservoir-id="GAS_RESERVOIR_ID" />
-        <MaterialBalanceContent v-if="currentView === 'material-balance'" :node="currentViewNode"
-          :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" @refresh-tree="handleRefreshTree" />
-        <BlasingameContent v-if="currentView === 'blasingame'" :node="currentViewNode" :project-id="PROJECT_ID"
-          :gas-reservoir-id="GAS_RESERVOIR_ID" />
-        <NpiContent v-if="currentView === 'npi'" :node="currentViewNode" :project-id="PROJECT_ID"
-          :gas-reservoir-id="GAS_RESERVOIR_ID" />
-        <WattenbargerContent v-if="currentView === 'wattenbarger'" :node="currentViewNode" :project-id="PROJECT_ID"
-          :gas-reservoir-id="GAS_RESERVOIR_ID" />
-        <DynamicBalanceContent v-if="currentView === 'dynamic-balance'" :node="currentViewNode" :project-id="PROJECT_ID"
-          :gas-reservoir-id="GAS_RESERVOIR_ID" />
-        <AGContent v-if="currentView === 'Agarwal-Gardner'" :node="currentViewNode" :project-id="PROJECT_ID"
-          :gas-reservoir-id="GAS_RESERVOIR_ID" />
+        <WaterInvasionContent
+            v-if="currentView === 'water-invasion'"
+            :node="currentViewNode"
+            :project-id="PROJECT_ID"
+            :gas-reservoir-id="GAS_RESERVOIR_ID"
+            @refresh-tree="handleRefreshTree"
+        />
+        <AnalyticMethodContent
+            v-if="currentView === 'analytic-method'"
+            :node="currentViewNode"
+            :project-id="PROJECT_ID"
+            :gas-reservoir-id="GAS_RESERVOIR_ID"
+        />
+        <MaterialBalanceContent
+            v-if="currentView === 'material-balance'"
+            :node="currentViewNode"
+            :project-id="PROJECT_ID"
+            :gas-reservoir-id="GAS_RESERVOIR_ID"
+            @refresh-tree="handleRefreshTree"
+        />
+        <FlowBalanceContent
+            v-if="currentView === 'flow-balance'"
+            :node="currentViewNode"
+            :project-id="PROJECT_ID"
+            :gas-reservoir-id="GAS_RESERVOIR_ID"
+        />
+        <BlasingameContent
+            v-if="currentView === 'blasingame'"
+            :node="currentViewNode"
+            :project-id="PROJECT_ID"
+            :gas-reservoir-id="GAS_RESERVOIR_ID"
+        />
+        <NpiContent
+            v-if="currentView === 'npi'"
+            :node="currentViewNode"
+            :project-id="PROJECT_ID"
+            :gas-reservoir-id="GAS_RESERVOIR_ID"
+        />
+        <WattenbargerContent
+            v-if="currentView === 'wattenbarger'"
+            :node="currentViewNode"
+            :project-id="PROJECT_ID"
+            :gas-reservoir-id="GAS_RESERVOIR_ID"
+        />
+        <DynamicBalanceContent
+            v-if="currentView === 'dynamic-balance'"
+            :node="currentViewNode"
+            :project-id="PROJECT_ID"
+            :gas-reservoir-id="GAS_RESERVOIR_ID"
+        />
+        <AGContent
+            v-if="currentView === 'Agarwal-Gardner'"
+            :node="currentViewNode"
+            :project-id="PROJECT_ID"
+            :gas-reservoir-id="GAS_RESERVOIR_ID"
+        />
       </main>
     </div>
 
@@ -1826,6 +2072,7 @@ $border: #e0e0e0;
   flex: 1;
   display: flex;
   min-height: 0;
+  overflow: hidden;
 }
 
 .side-panel {
@@ -1902,12 +2149,12 @@ $border: #e0e0e0;
 
 .content-area {
   flex: 1;
+  min-height: 0;
   background-color: #fff;
   overflow: hidden;
   display: flex;
   flex-direction: column;
 }
-
 :global(.tree-context-menu) {
   position: fixed;
   z-index: 4000;
