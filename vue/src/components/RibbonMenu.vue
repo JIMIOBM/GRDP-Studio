@@ -263,7 +263,7 @@ const getIcon = (label) => iconMap[normalizeIconKey(label)] || ''
     <!-- 功能区主体 -->
     <div class="ribbon-body">
       <div class="ribbon-group" v-for="group in activeTabGroups" :key="group.title">
-        <div class="group-content">
+        <div class="group-content" :class="{ 'production-group': group.title === '配产配注' }">
           <template v-for="(col, ci) in group.columns" :key="ci">
 
             <!-- 复选项列 -->
@@ -463,6 +463,14 @@ $square-border: #c2c2c2;
   align-items: stretch;
   background-color: $ribbon-bg;
   min-height: 112px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 .ribbon-group {
@@ -474,8 +482,8 @@ $square-border: #c2c2c2;
     flex: 1;
     display: flex;
     align-items: center;
-    gap: 14px;
-    padding: 8px 12px;
+    gap: 10px;
+    padding: 6px 10px;
   }
 
   .group-title {
@@ -573,7 +581,8 @@ $square-border: #c2c2c2;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-width: 52px;
+  width: 48px;
+  min-width: 48px;
   padding: 4px 6px;
   border-radius: 3px;
   cursor: pointer;
@@ -608,8 +617,8 @@ $square-border: #c2c2c2;
   .big-label {
     margin-top: 5px;
     font-size: 13px;
-    color: #333;
     white-space: nowrap;
+    color: #333;
   }
 
   .dropdown-arrow {
@@ -654,6 +663,23 @@ $square-border: #c2c2c2;
     height: 13px;
     object-fit: contain;
     pointer-events: none;
+  }
+}
+
+.production-group {
+  gap: 8px;
+
+  .col-large {
+    width: auto;
+    min-width: 70px;
+    flex: 0 0 auto;
+  }
+
+  .big-label {
+    width: auto;
+    max-width: none;
+    white-space: nowrap;
+    overflow: visible;
   }
 }
 </style>
@@ -709,4 +735,3 @@ $square-border: #c2c2c2;
   }
 }
 </style>
-

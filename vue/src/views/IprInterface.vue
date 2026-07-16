@@ -13,7 +13,7 @@ import NpiContent from '@/views/WellControlInventory/NpiContent.vue'
 import DynamicBalanceContent from '@/views/WellControlInventory/DynamicBalanceContent.vue'
 import FlowBalanceContent from '@/views/WellControlInventory/FlowBalanceContent.vue'
 import { NODETYPE } from '@/constants/nodeType'
-import { analyticMethodApi, materialBalanceApi, nodeApi, projectApi, typicalCurveApi, waterInvasionApi } from '@/api/docker'
+import { analyticMethodApi, flowBalanceApi, materialBalanceApi, nodeApi, projectApi, typicalCurveApi, waterInvasionApi } from '@/api/docker'
 
 const route = useRoute()
 const PROJECT_ID = Number(route.query.projectId || 1)
@@ -245,6 +245,17 @@ const ensureWell = (wellName, wellId) => { //确保井存在
 
 const addAnalysisNode = (wellName, rawNode) => {  // 添加分析节点
   const nodeType = rawNode?.nodeType ?? rawNode?.type
+
+  if (FLOW_BALANCE_NODE_TYPES.has(Number(nodeType))) {
+    const isRuntime = rawNode.persisted === false && rawNode.idKind === 'runtime'
+    const isPersisted = rawNode.persisted === true || rawNode.persistedResultId
+    if (!isRuntime && !isPersisted) return
+    if (!rawNode.resultId) return
+    if (!rawNode.input) return
+    if (!rawNode.result) return
+    if (!Array.isArray(rawNode.data) || rawNode.data.length === 0) return
+  }
+
   const groupId = NODE_GROUP_BY_TYPE[nodeType] || rawNode?.menuType || rawNode?.groupType
   const groupConfig = WELL_GROUPS.find(group => group.id === groupId || group.label === groupId)
   if (!groupConfig) return
@@ -271,6 +282,7 @@ const addAnalysisNode = (wellName, rawNode) => {  // 添加分析节点
   } else {
     targetGroup.children.push(analysisNode)
   }
+  return analysisNode
 }
 
 const addBlasingameNode = (wellName, rawNode = {}) => {
@@ -637,7 +649,6 @@ const refreshMaterialBalanceNodes = async () => {
   try {
     const res = await nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, NODETYPE.NodeType_DynamicOriginalGasInplace)
     applyMaterialBalanceNodes(res?.data?.node)
-    applyFlowingBalanceNodes(res?.data?.node)
   } catch {
     // 没有已有物质平衡结果时保持项目树不变。
   }
@@ -926,29 +937,45 @@ const runFlowBalanceForSelectedWell = async () => {
   flowBalanceRunning.value = true
 
   try {
-    await materialBalanceApi.calcFMB({
+    ElMessage.info(`${targetWellName} 流动平衡计算中，请稍候...`)
+    const response = await flowBalanceApi.calc({
       wellNames: [targetWellName],
-      gasReservoirType: 1,
       gasReservoirId: Number(GAS_RESERVOIR_ID),
       projectId: Number(PROJECT_ID),
       waterGasRatioLimit: 0.0602
     })
 
-    ElMessage.info(`${targetWellName} 流动平衡计算中，请稍候...`)
-    const rootNode = await pollFlowingBalanceNode(targetWellName)
-    applyFlowingBalanceNodes(rootNode)
-
-    const resultNode = findFlowingBalanceNode(rootNode, targetWellName)
-    if (!resultNode) throw new Error(`${targetWellName}井流动平衡结果不存在`)
-
-    const nodeType = getFlowingBalanceNodeType(resultNode)
-    const viewNode = {
-      id: resultNode.nodeId || resultNode.resultId || `fmb-${targetWellName}-${nodeType}`,
-      label: NODE_LABEL_BY_TYPE[nodeType] || '流动平衡',
-      type: nodeType,
-      wellName: targetWellName,
-      raw: resultNode
+    const payload = normalizePayload(response)
+    if (!payload?.nodes || !Array.isArray(payload.nodes)) {
+      throw new Error('FlowBalance 接口未返回有效结果')
     }
+    const nodes = payload.nodes
+    const requiredTypes = [
+      NODETYPE.NodeType_FlowingBalanceMethodBasedOnTopPressure,
+      NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure
+    ]
+    const missingTypes = requiredTypes.filter(type => !nodes.some(node => Number(node.nodeType) === Number(type)))
+    if (missingTypes.length) throw new Error(`FlowBalance 缺少真实节点类型：${missingTypes.join(', ')}`)
+
+    const treeNodes = nodes.map(resultNode => {
+      if (!resultNode.resultId) {
+        throw new Error('FlowBalance 结果缺少有效的 resultId')
+      }
+      const nodeType = Number(resultNode.nodeType)
+      return addAnalysisNode(targetWellName, {
+        ...resultNode,
+        id: resultNode.resultId,
+        nodeType,
+        nodeTitle: NODE_LABEL_BY_TYPE[nodeType],
+        persisted: false,
+        idKind: 'runtime',
+        runtimeRunId: payload.runId,
+        persistedResultId: payload.persistedResultId || null
+      })
+    }).filter(Boolean)
+
+    const viewNode = treeNodes.find(node => Number(node.type) === requiredTypes[0])
+    if (!viewNode) throw new Error(`${targetWellName}井流动平衡运行节点创建失败`)
 
     activeNodeId.value = viewNode.id
     activeNode.value = viewNode
@@ -1167,12 +1194,59 @@ const openNpiNode = async (node) => {
   }
 }
 
+const refreshFlowBalanceNodes = async () => {
+  try {
+    const result = await flowBalanceApi.getNodes(
+      Number(PROJECT_ID),
+      Number(GAS_RESERVOIR_ID),
+      getAllWellNames()
+    )
+    const payload = normalizePayload(result)
+    const nodes = Array.isArray(payload?.nodes) ? payload.nodes : []
+    if (!nodes.length) return
+
+    const latestByKey = new Map()
+    nodes.forEach(persistedNode => {
+      const nodeType = Number(persistedNode.nodeType)
+      if (!FLOW_BALANCE_NODE_TYPES.has(nodeType)) return
+      const key = `${persistedNode.wellName}-${nodeType}`
+      const existing = latestByKey.get(key)
+      if (!existing || persistedNode.nodeId > existing.nodeId) {
+        latestByKey.set(key, persistedNode)
+      }
+    })
+
+    for (const [, persistedNode] of latestByKey) {
+      try {
+        const resultRes = await flowBalanceApi.getNodeResult(persistedNode.nodeId)
+        const detail = resultRes?.data
+        if (!detail) continue
+        const fullNode = { ...persistedNode, ...detail }
+        const nodeType = Number(fullNode.nodeType)
+        addAnalysisNode(fullNode.wellName, {
+          ...fullNode,
+          id: fullNode.nodeId || `${fullNode.wellName}-${nodeType}-${fullNode.resultId}`,
+          nodeType,
+          nodeTitle: NODE_LABEL_BY_TYPE[nodeType],
+          persisted: true,
+          idKind: 'persistent'
+        })
+      } catch (err) {
+        console.error(`加载持久化节点 ${persistedNode.nodeId} 结果失败`, err)
+      }
+    }
+  } catch (error) {
+    console.error('加载持久化流动平衡节点失败', error)
+  }
+}
+
 const initTree = async () => {
   await refreshProjectTree()
   await refreshWaterInvasionNodes()
   await refreshAnalyticMethodNodes()
   await refreshMaterialBalanceNodes()
   await refreshTypicalCurveNodes()
+  await refreshFlowBalanceNodes()
 }
 
 const handleSelect = (node) => { // 点击左侧树节点
@@ -1301,6 +1375,7 @@ const handleRefreshTree = () => {
   refreshAnalyticMethodNodes()
   refreshMaterialBalanceNodes()
   refreshTypicalCurveNodes()
+  refreshFlowBalanceNodes()
 }
 
 onMounted(initTree)
@@ -1408,6 +1483,7 @@ $border: #e0e0e0;
   flex: 1;
   display: flex;
   min-height: 0;
+  overflow: hidden;
 }
 
 .side-panel {
@@ -1432,6 +1508,7 @@ $border: #e0e0e0;
 
 .content-area {
   flex: 1;
+  min-height: 0;
   background-color: #fff;
   overflow: hidden;
   display: flex;

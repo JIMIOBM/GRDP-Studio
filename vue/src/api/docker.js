@@ -14,6 +14,20 @@ const dockerRequest = axios.create({
   withCredentials: true
 })
 
+const flowBalanceRequest = axios.create({
+  baseURL: '/flowbalance',
+  timeout: 120000
+})
+
+flowBalanceRequest.interceptors.response.use(
+  (res) => res,
+  (err) => {
+    const msg = err.response?.data?.message || err.message || '请求失败'
+    ElMessage.error(`FlowBalance 服务错误：${msg}`)
+    return Promise.reject(err)
+  }
+)
+
 dockerRequest.interceptors.request.use(
   (config) => {
     const accountStr = localStorage.getItem('account')
@@ -110,6 +124,17 @@ export const materialBalanceApi = {
             { ...(Object.keys(params).length ? { params } : {}), ...options }
         )
     },
+}
+
+/* ===== 独立 FlowBalance 开发服务（只读数据库 + 内存计算） ===== */
+export const flowBalanceApi = {
+  calc: (data) => flowBalanceRequest.post('/calc', data),
+  getNodes: (projectId, gasReservoirId, wellNames = []) => {
+    const params = { projectId, gasReservoirId }
+    if (wellNames.length) params.wellNames = wellNames.join(',')
+    return flowBalanceRequest.get('/nodes', { params })
+  },
+  getNodeResult: (nodeId) => flowBalanceRequest.get(`/results/${nodeId}`)
 }
 
 /* ===== 产量不稳定分析 - 典型曲线 ===== */
