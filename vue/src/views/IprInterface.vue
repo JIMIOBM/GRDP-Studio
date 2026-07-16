@@ -1831,8 +1831,8 @@ $border: #e0e0e0;
 }
 
 .side-panel {
-  width: 210px;
-  min-width: 210px;
+  width: 230px;
+  min-width: 230px;
   display: flex;
   flex-direction: column;
   border-right: 1px solid $border;
