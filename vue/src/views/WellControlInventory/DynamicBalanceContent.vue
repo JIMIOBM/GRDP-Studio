@@ -1,4 +1,4 @@
-﻿﻿nom ﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿<script setup>
+﻿<script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
 import { dynamicBalanceApi } from '@/api/docker'
@@ -20,24 +20,24 @@ const panelCollapsed = ref(false)
 const legendPosition = ref({ x: null, y: null })
 const draggingLegend = ref(false)
 const legendDragOffset = ref({ x: 0, y: 0 })
-const paramsPanelWidth = ref(380)
+const paramsPanelWidth = ref(238)
 const resizingParamsPanel = ref(false)
 const equationGraphicPosition = ref(null)
 
 let chart = null
 
 const currentWellName = computed(() =>
-  props.node?.wellName ||
-  props.node?.label ||
-  ''
+    props.node?.wellName ||
+    props.node?.label ||
+    ''
 )
 
 const resultId = computed(() =>
-  props.node?.resultId ||
-  props.node?.raw?.nodeId ||
-  props.node?.nodeId ||
-  props.node?.id ||
-  ''
+    props.node?.resultId ||
+    props.node?.raw?.nodeId ||
+    props.node?.nodeId ||
+    props.node?.id ||
+    ''
 )
 
 const output = computed(() => {
@@ -47,9 +47,9 @@ const output = computed(() => {
 
 const reliability = computed(() => {
   return output.value.reliablity ||
-    output.value.reliability ||
-    output.value.reliabilityDescription ||
-    ''
+      output.value.reliability ||
+      output.value.reliabilityDescription ||
+      ''
 })
 
 const inputParams = computed(() => {
@@ -172,38 +172,38 @@ const chartPoints = computed(() => {
   const chartItem = resultData.value?.chartItems?.find(item => item.yAxisField === 'pressure')
   if (chartItem?.data?.length) {
     return chartItem.data
-      .filter(item => item.isDeleted !== true)
-      .map(item => [Number(item.xValue), Number(item.yValue)])
-      .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y))
+        .filter(item => item.isDeleted !== true)
+        .map(item => [Number(item.xValue), Number(item.yValue)])
+        .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y))
   }
   if (!Array.isArray(resultData.value?.data)) return []
   return resultData.value.data
-    .filter(item => item.isDeleted !== true)
-    .map(item => {
-      const x = Number(item.pseudotime)
-      const y = Number(item.pressure)
-      return [x, y]
-    })
-    .filter(([x, y]) => x > 0 && y > 0)
+      .filter(item => item.isDeleted !== true)
+      .map(item => {
+        const x = Number(item.pseudotime)
+        const y = Number(item.pressure)
+        return [x, y]
+      })
+      .filter(([x, y]) => x > 0 && y > 0)
 })
 
 const allPoints = computed(() => {
   const chartItem = resultData.value?.chartItems?.find(item => item.yAxisField === 'pressure')
   if (chartItem?.data?.length) {
     return chartItem.data
-      .filter(item => item.isDeleted === true)
-      .map(item => [Number(item.xValue), Number(item.yValue)])
-      .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y))
+        .filter(item => item.isDeleted === true)
+        .map(item => [Number(item.xValue), Number(item.yValue)])
+        .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y))
   }
   if (!Array.isArray(resultData.value?.data)) return []
   return resultData.value.data
-    .filter(item => item.isDeleted === true)
-    .map(item => {
-      const x = Number(item.pseudotime)
-      const y = Number(item.pressure)
-      return [x, y]
-    })
-    .filter(([x, y]) => x > 0 && y > 0)
+      .filter(item => item.isDeleted === true)
+      .map(item => {
+        const x = Number(item.pseudotime)
+        const y = Number(item.pressure)
+        return [x, y]
+      })
+      .filter(([x, y]) => x > 0 && y > 0)
 })
 
 const regression = computed(() => {
@@ -218,8 +218,8 @@ const regressionPoints = computed(() => {
   const chartItem = resultData.value?.chartItems?.find(item => item.yAxisField === 'linearRegressionPressure')
   if (chartItem?.data?.length) {
     return chartItem.data
-      .map(item => [Number(item.xValue), Number(item.yValue)])
-      .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y))
+        .map(item => [Number(item.xValue), Number(item.yValue)])
+        .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y))
   }
   const { slope, intercept } = regression.value
   const xs = chartPoints.value.map(([x]) => x)
@@ -438,8 +438,8 @@ const renderChart = () => {
             top: 8,
             style: {
               text: Number.isFinite(slope) && Number.isFinite(intercept)
-                ? `Y = ${slope.toExponential(4)}*X + ${intercept.toExponential(4)}`
-                : '',
+                  ? `Y = ${slope.toExponential(4)}*X + ${intercept.toExponential(4)}`
+                  : '',
               fill: '#333',
               font: '14px Arial',
               lineHeight: 22
@@ -496,10 +496,10 @@ const fetchData = async () => {
       resultData.value = nodePayload
     } else {
       const res = await dynamicBalanceApi.getResult(
-        props.projectId,
-        props.gasReservoirId,
-        currentResultId,
-        { silentError: true }
+          props.projectId,
+          props.gasReservoirId,
+          currentResultId,
+          { silentError: true }
       )
       resultData.value = res.data?.result ? res.data : (res.data?.data ?? res.data)
     }
@@ -518,9 +518,9 @@ const fetchData = async () => {
 }
 
 watch(
-  () => [props.node?.wellName, resultId.value, props.node?.raw],
-  fetchData,
-  { immediate: true }
+    () => [props.node?.wellName, resultId.value, props.node?.raw],
+    fetchData,
+    { immediate: true }
 )
 
 onMounted(() => {
@@ -538,10 +538,10 @@ onBeforeUnmount(() => {
 <template>
   <div v-loading="loading" class="db-wrap">
     <div
-      ref="paramsPanelEl"
-      class="params-panel"
-      :class="{ collapsed: panelCollapsed, resizing: resizingParamsPanel }"
-      :style="{ width: panelCollapsed ? '22px' : `${paramsPanelWidth}px`, minWidth: panelCollapsed ? '22px' : `${paramsPanelWidth}px` }"
+        ref="paramsPanelEl"
+        class="params-panel"
+        :class="{ collapsed: panelCollapsed, resizing: resizingParamsPanel }"
+        :style="{ width: panelCollapsed ? '22px' : `${paramsPanelWidth}px`, minWidth: panelCollapsed ? '22px' : `${paramsPanelWidth}px` }"
     >
       <div v-if="panelCollapsed" class="panel-collapsed-tab" @click="panelCollapsed = false">
         参数设置
@@ -558,87 +558,90 @@ onBeforeUnmount(() => {
 
       <div v-show="!panelCollapsed" class="panel-body">
         <div v-if="activeTab === 'input'">
-          <div class="section">
-            <div class="section-title">气体性质</div>
-            <div class="section-body">
-              <div v-for="item in gasProperties" :key="item.key" class="param-item">
-                <label>{{ item.label }}</label>
-                <el-select v-if="item.type === 'select'" size="small" :model-value="item.value">
-                  <el-option v-for="opt in item.options" :key="opt.value" :label="opt.label" :value="opt.value" />
-                </el-select>
-                <el-input v-else size="small" :model-value="item.value" />
-              </div>
+          <div class="sec-label">气体性质</div>
+          <div class="field-grid">
+            <div v-for="item in gasProperties" :key="item.key" class="field">
+              <label>{{ item.label }}</label>
+              <el-select v-if="item.type === 'select'" size="small" :model-value="item.value" style="width:100%">
+                <el-option v-for="opt in item.options" :key="opt.value" :label="opt.label" :value="opt.value" />
+              </el-select>
+              <el-input v-else size="small" readonly :model-value="item.value" />
             </div>
           </div>
 
-          <div class="section">
-            <div class="section-title">计算方法</div>
-            <div class="section-body">
-              <div v-for="item in calculationMethods" :key="item.key" class="param-item">
-                <label>{{ item.label }}</label>
-                <el-select size="small" :model-value="item.value">
-                  <el-option v-for="opt in item.options" :key="opt.value" :label="opt.label" :value="opt.value" />
-                </el-select>
-              </div>
+          <div class="sec-label">计算方法</div>
+          <div class="field-grid">
+            <div v-for="item in calculationMethods" :key="item.key" class="field">
+              <label>{{ item.label }}</label>
+              <el-select size="small" :model-value="item.value" style="width:100%">
+                <el-option v-for="opt in item.options" :key="opt.value" :label="opt.label" :value="opt.value" />
+              </el-select>
             </div>
           </div>
 
-          <div class="section">
-            <div class="section-title">其它数据</div>
-            <div class="section-body">
-              <div v-for="item in otherData" :key="item.key" class="param-item">
-                <label>{{ item.label }}</label>
-                <div class="field-with-switch" v-if="item.hasSwitch">
-                  <el-input size="small" :model-value="item.value" />
-                  <el-switch :model-value="item.switchValue" />
+          <div class="sec-label">其它数据</div>
+          <div class="field-grid">
+            <template v-for="item in otherData" :key="item.key">
+              <div v-if="item.hasSwitch" class="field field-with-switch">
+                <div class="wgr-label-row">
+                  <span>{{ item.label }}</span>
+                  <el-switch
+                      :model-value="item.switchValue"
+                      disabled
+                      style="--el-switch-on-color:#e8a000;--el-switch-off-color:#ccc"
+                      size="small"
+                  />
                 </div>
-                <el-select v-else-if="item.type === 'select'" size="small" :model-value="item.value">
+                <el-input size="small" readonly :disabled="!item.switchValue" :model-value="item.value" />
+              </div>
+              <div v-else class="field">
+                <label>{{ item.label }}</label>
+                <el-select v-if="item.type === 'select'" size="small" :model-value="item.value" style="width:100%">
                   <el-option v-for="opt in item.options" :key="opt.value" :label="opt.label" :value="opt.value" />
                 </el-select>
-                <el-input v-else size="small" :model-value="item.value" />
+                <el-input v-else size="small" readonly :model-value="item.value" />
               </div>
-            </div>
+            </template>
           </div>
         </div>
 
         <div v-else>
-          <div class="output-section">
-            <div class="output-field">
-              <label>动态储量(10⁸m³)</label>
-              <el-input size="small" readonly :model-value="output.originalGasVolume" />
-            </div>
-            <div class="output-field">
-              <label>回归分析截距(MPa/(10⁴m³/d))</label>
-              <el-input size="small" readonly :model-value="output.intercept" />
-            </div>
-            <div class="output-field">
-              <label>回归分析斜率([MPa/(10⁴m³/d)]/d)</label>
-              <el-input size="small" readonly :model-value="output.gradient || output.slope" />
-            </div>
-            <div class="output-field">
-              <label>R²(无)</label>
-              <el-input size="small" readonly :model-value="output.rsquared" />
-            </div>
-            <div class="output-field">
-              <label>结果可靠性</label>
-              <el-input size="small" readonly :model-value="reliability" />
-            </div>
+          <div class="sec-label">输出结果</div>
+          <div class="field">
+            <label>动态储量(10⁸m³)</label>
+            <el-input size="small" readonly :model-value="output.originalGasVolume" />
+          </div>
+          <div class="field">
+            <label>回归分析截距(MPa/(10⁴m³/d))</label>
+            <el-input size="small" readonly :model-value="output.intercept" />
+          </div>
+          <div class="field">
+            <label>回归分析斜率([MPa/(10⁴m³/d)]/d)</label>
+            <el-input size="small" readonly :model-value="output.gradient || output.slope" />
+          </div>
+          <div class="field">
+            <label>R²(无)</label>
+            <el-input size="small" readonly :model-value="output.rsquared" />
+          </div>
+          <div class="field">
+            <label>结果可靠性</label>
+            <el-input size="small" readonly :model-value="reliability" />
           </div>
         </div>
       </div>
 
       <div v-show="!panelCollapsed" class="panel-tabs">
         <button
-          class="tab-btn"
-          :class="{ active: activeTab === 'input' }"
-          @click="activeTab = 'input'"
+            class="tab-btn"
+            :class="{ active: activeTab === 'input' }"
+            @click="activeTab = 'input'"
         >
           输入
         </button>
         <button
-          class="tab-btn"
-          :class="{ active: activeTab === 'output' }"
-          @click="activeTab = 'output'"
+            class="tab-btn"
+            :class="{ active: activeTab === 'output' }"
+            @click="activeTab = 'output'"
         >
           输出
         </button>
@@ -723,9 +726,12 @@ onBeforeUnmount(() => {
   cursor: pointer;
   background: #fff;
   border: 1px solid #e0e0e0;
+  border-left: 0;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 
   &:hover {
-    background: #f5f5f5;
+    background: #eef4ff;
+    color: #1f6fd6;
   }
 }
 
@@ -760,84 +766,74 @@ onBeforeUnmount(() => {
 .panel-body {
   flex: 1;
   overflow-y: auto;
-  padding: 10px;
+  padding: 4px 12px 14px;
 }
 
-.section {
-  margin-bottom: 15px;
+.sec-label {
+  font-weight: 500;
+  color: #333;
+  font-size: 13px;
+  margin: 10px 0 7px;
+  &:first-child { margin-top: 4px; }
 }
 
-.section-title {
-  padding: 6px 10px;
-  background: #f5f5f5;
-  font-size: 12px;
-  font-weight: 600;
-  color: #555;
-  margin-bottom: 8px;
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  column-gap: 24px;
 }
 
-.section-body {
-  padding: 0 5px;
-}
-
-.param-item {
-  margin-bottom: 8px;
-
+.field {
+  margin-bottom: 9px;
   label {
     display: block;
+    color: #555;
     font-size: 12px;
-    color: #666;
     margin-bottom: 3px;
   }
 }
 
 .field-with-switch {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-
-  :deep(.el-input) {
-    flex: 1;
+  .el-input {
+    margin-top: 3px;
   }
+}
+
+.wgr-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 3px;
+  span { color: #555; font-size: 12px; }
 }
 
 .panel-tabs {
   display: flex;
+  height: 30px;
   border-top: 1px solid #e0e0e0;
-  background: #fafafa;
+  flex-shrink: 0;
 }
 
 .tab-btn {
   flex: 1;
-  padding: 10px;
-  border: none;
-  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-size: 13px;
-  color: #666;
+  color: #555;
   cursor: pointer;
+  border: 0;
+  background: transparent;
+  border-right: 1px solid #e0e0e0;
+
+  &:last-child {
+    border-right: none;
+  }
 
   &.active {
-    background: #ffc53d;
+    background-color: #f4d000;
     color: #1a1a1a;
-  }
-
-  &:hover:not(.active) {
-    background: #f0f0f0;
-  }
-}
-
-.output-section {
-  padding: 15px;
-}
-
-.output-field {
-  margin-bottom: 12px;
-
-  label {
-    display: block;
-    font-size: 12px;
-    color: #555;
-    margin-bottom: 4px;
+    font-weight: 600;
   }
 }
 
@@ -907,3 +903,4 @@ onBeforeUnmount(() => {
   }
 }
 </style>
+
