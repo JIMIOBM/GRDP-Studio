@@ -15,8 +15,8 @@ import AGContent from '@/views/WellControlInventory/AGContent.vue'
 import { NODETYPE } from '@/constants/nodeType'
 import { analyticMethodApi, dynamicBalanceApi, materialBalanceApi, nodeApi, projectApi, typicalCurveApi, waterInvasionApi } from '@/api/docker'
 
-const PROJECT_ID = 1
-const GAS_RESERVOIR_ID = 1
+const PROJECT_ID = 6
+const GAS_RESERVOIR_ID = 3
 
 const WELL_GROUPS = [
   { id: 'data-management', label: '数据管理' },
@@ -1291,7 +1291,6 @@ const runMaterialBalanceForSelectedWell = async () => {
 
 // node 接口现在只包含曾经计算过物质平衡的井，
 // 因此可以恢复全部历史节点。
-    await applyMaterialBalanceNodes(rootNode)
 
     const materialBalanceRows = await getMaterialBalanceRowsForWell(targetWellName, { silentError: true })
     const materialBalanceRawNode = {
@@ -1386,7 +1385,6 @@ const runDynamicBalanceForSelectedWell = async () => {
       throw new Error('动态平衡计算失败，未生成分析结果节点')
     }
 
-    await applyMaterialBalanceNodes(rootNode)
     const treeNode = {
       id: resultNode.nodeId,
       label: '动态平衡',
@@ -1394,6 +1392,12 @@ const runDynamicBalanceForSelectedWell = async () => {
       wellName: targetWellName,
       raw: resultNode
     }
+    addAnalysisNode(targetWellName, {
+      ...resultNode,
+      nodeType: NODETYPE.NodeType_DynamicMaterialBalanceMethodBlasingame,
+      nodeTitle: '动态平衡',
+      wellName: targetWellName
+    })
     await openDynamicBalanceNode(treeNode)
     ElMessage.success(`${targetWellName} 动态平衡计算完成`)
   } catch (error) {
