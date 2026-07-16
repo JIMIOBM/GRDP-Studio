@@ -78,7 +78,12 @@ export const waterInvasionApi = {
    * @param {number} data.waterGasRatioLimit - 气水比限值（-1 表示不限）
    */
   analyze: (data) =>
-    dockerRequest.post('/projectanalysis/waterinvasionanalysis', data)
+    dockerRequest.post('/projectanalysis/waterinvasionanalysis', data),
+
+  deleteResult: (projectId, gasReservoirId, wellName) =>
+    dockerRequest.delete(`/projectanalysis/waterinvasionanalysis/${projectId}/${gasReservoirId}`, {
+      data: { wellName }
+    })
 }
 
 /* ===== 产量不稳定分析 - 解析法 ===== */
@@ -124,6 +129,12 @@ export const materialBalanceApi = {
             { ...(Object.keys(params).length ? { params } : {}), ...options }
         )
     },
+
+    deleteResult: (projectId, gasReservoirId, dynamicOriginalGasInPlaceId, options = {}) =>
+        dockerRequest.delete(
+            `/projectanalysis/dynamicoriginalgasInplace/result/${projectId}/${gasReservoirId}/${encodeURIComponent(dynamicOriginalGasInPlaceId)}`,
+            options
+        ),
 }
 
 /* ===== 独立 FlowBalance 开发服务（只读数据库 + 内存计算） ===== */
@@ -162,7 +173,12 @@ export const typicalCurveApi = {
       `/projectanalysis/typicalcurve/${projectId}/${gasReservoirId}/${nodeId}`,
       { ...(Object.keys(params).length ? { params } : {}), ...options }
     )
-  }
+  },
+
+  deleteResult: (projectId, gasReservoirId, analysisId) =>
+    dockerRequest.delete(`/projectanalysis/typicalcurve/${projectId}/${gasReservoirId}`, {
+      data: { analysisId: Number(analysisId) }
+    })
 }
 
 /* ===== 井列表 ===== */

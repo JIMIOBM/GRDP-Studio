@@ -178,7 +178,8 @@ const isWattenbargerNode = (item) => {
 }
 const isAGNode = (item) => {
   const nodeType = item?.nodeType ?? item?.type
-  return AG_NODE_TYPES.has(nodeType) || getNodeName(item) === 'Agarwal-Gardner'
+  const nodeName = getNodeName(item)
+  return AG_NODE_TYPES.has(nodeType) || nodeName === 'Agarwal-Gardner' || nodeName === 'AG'
 }
 
 const isWaterInvasionNode = (item) => {
@@ -186,12 +187,159 @@ const isWaterInvasionNode = (item) => {
   return nodeType === NODETYPE.NodeType_WaterInvasionAnalysis || getNodeName(item) === '水侵分析'
 }
 
-const isTreeContextMenuNode = (item) => isWaterInvasionNode(item) || isBlasingameNode(item)
+const getInventoryResultName = (item) => {
+  const nodeType = item?.nodeType ?? item?.type
+  if (nodeType === NODETYPE.NodeType_WaterInvasionAnalysis) return '水侵分析'
+  if (nodeType === NODETYPE.NodeType_AnalysisMethods) return '解析法'
+  if (nodeType === NODETYPE.NodeType_DynamicOriginalGasInplace) return '物质平衡'
+  if (nodeType === NODETYPE.NodeType_DynamicMaterialBalanceMethodBlasingame) return '动态平衡'
+
+  const nodeName = getNodeName(item)
+  if (nodeName === '水侵分析') return '水侵分析'
+  if (nodeName === '解析法') return '解析法'
+  if (nodeName === '物质平衡') return '物质平衡'
+  if (nodeName === '动态平衡') return '动态平衡'
+  return ''
+}
+
+const getTypicalCurveResultName = (item) => {
+  if (isBlasingameNode(item)) return 'Blasingame'
+  if (isAGNode(item)) return 'Agarwal-Gardner'
+  if (isNpiNode(item)) return 'NPI'
+  if (isWattenbargerNode(item)) return 'Wattenbarger'
+  return ''
+}
+
+const isTypicalCurveResultNode = (item) => Boolean(getTypicalCurveResultName(item))
+const isInventoryResultNode = (item) => Boolean(getInventoryResultName(item))
+
+const isTreeContextMenuNode = (item) => isInventoryResultNode(item) || isTypicalCurveResultNode(item)
 
 const treeContextMenuLabel = computed(() => {
-  if (isBlasingameNode(treeContextMenu.value.node)) return '删除Blasingame分析结果'
+  const resultName = getTypicalCurveResultName(treeContextMenu.value.node) || getInventoryResultName(treeContextMenu.value.node)
+  if (resultName) return `\u5220\u9664${resultName}\u7ed3\u679c`
   return '删除水侵动态分析结果'
 })
+
+const getAnalysisId = (node) =>
+  node?.raw?.analysisId ?? node?.raw?.analysisID ?? node?.raw?.analysis_id ??
+  node?.raw?.DynamicOriginalGasInPlaceId ?? node?.raw?.dynamicOriginalGasInPlaceId ??
+  node?.raw?.dynamicOriginalGasInplaceId ?? node?.raw?.dynamicOriginalGasInplaceID ??
+  node?.raw?.nodeId ?? node?.raw?.id ?? node?.analysisId ?? node?.analysisID ??
+  node?.DynamicOriginalGasInPlaceId ?? node?.dynamicOriginalGasInPlaceId ??
+  node?.dynamicOriginalGasInplaceId ?? node?.dynamicOriginalGasInplaceID ??
+  node?.analysis_id ?? node?.nodeId ?? node?.id
+
+const getAverageFormationPressureRows = (payload) => {
+  const rows =
+    payload?.data?.data ??
+    payload?.data ??
+    payload?.items ??
+    payload?.rows ??
+    payload
+
+  if (Array.isArray(rows)) return rows
+  return rows ? [rows] : []
+}
+
+const getMaterialBalanceAverageRowId = (row) =>
+  row?.DynamicOriginalGasInPlaceId ??
+  row?.dynamicOriginalGasInPlaceId ??
+  row?.dynamicOriginalGasInplaceId ??
+  row?.dynamicOriginalGasInplaceID ??
+  row?.id
+
+const isMaterialBalanceAverageRow = (row) => {
+  const type = Number(row?.dynamicOriginalGasInplaceType ?? row?.dynamicOriginalGasInPlaceType)
+  const description = String(row?.dynamicOriginalGasInplaceMethodDescription || row?.dynamicOriginalGasInPlaceMethodDescription || '')
+  return type === 1 || type === 2 || /物质平衡.*(实测静压|计算静压)/.test(description)
+}
+
+const getMaterialBalanceRowsForWell = async (wellName, options = {}) => {
+  if (!wellName) return []
+
+  const pressureRes = await materialBalanceApi.getAverageFormationPressure(
+    PROJECT_ID,
+    GAS_RESERVOIR_ID,
+    wellName,
+    options
+  )
+
+  return getAverageFormationPressureRows(pressureRes.data)
+    .filter(isMaterialBalanceAverageRow)
+}
+
+const getMaterialBalanceDeleteIds = async (node) => {
+  const ids = []
+  const addId = (id) => {
+    if (id === undefined || id === null || id === '') return
+    const value = String(id)
+    if (!ids.includes(value)) ids.push(value)
+  }
+  const nodeId = getAnalysisId(node)
+
+  const wellName = node?.wellName || selectedWellName.value
+  if (!wellName) {
+    addId(nodeId)
+    return ids
+  }
+
+  const materialBalanceRows = await getMaterialBalanceRowsForWell(wellName, { silentError: true })
+
+  materialBalanceRows
+    .map(getMaterialBalanceAverageRowId)
+    .forEach(addId)
+
+  addId(nodeId)
+  return ids
+}
+
+const removeTreeNode = (targetNode) => {
+  if (!targetNode) return false
+
+  const targetId = targetNode.id
+  const targetType = targetNode.type
+  const targetWellName = targetNode.wellName
+
+  const visit = (nodes = []) => {
+    const index = nodes.findIndex(item =>
+      item === targetNode ||
+      (targetId !== undefined && String(item.id) === String(targetId)) ||
+      (
+        targetType !== undefined &&
+        targetWellName &&
+        item.type === targetType &&
+        item.wellName === targetWellName
+      )
+    )
+
+    if (index >= 0) {
+      nodes.splice(index, 1)
+      return true
+    }
+
+    return nodes.some(item => visit(item.children || []))
+  }
+
+  return visit(treeData.value)
+}
+
+const clearCurrentViewAfterDelete = (deletedNode) => {
+  if (!deletedNode) return
+
+  const deletedId = deletedNode.id
+  const sameId = deletedId !== undefined && String(currentViewNode.value?.id) === String(deletedId)
+  const sameResult =
+    currentViewNode.value?.type === deletedNode.type &&
+    currentViewNode.value?.wellName === deletedNode.wellName
+
+  if (sameId || sameResult) {
+    currentView.value = null
+    currentViewNode.value = null
+    activeNodeId.value = ''
+    activeNode.value = null
+  }
+}
 
 const findBlasingameNodeByWell = (root, wellName) => {
   if (!root || !wellName) return null
@@ -337,6 +485,30 @@ const ensureWell = (wellName, wellId) => { //确保井存在
   return wellItem
 }
 
+const WELL_CONTROL_NODE_ORDER = new Map([
+  [NODETYPE.NodeType_WaterInvasionAnalysis, 10],
+  [NODETYPE.NodeType_AnalysisMethods, 20],
+  [NODETYPE.NodeType_DynamicOriginalGasInplace, 30],
+  [NODETYPE.NodeType_DynamicMaterialBalanceMethodBlasingame, 40],
+  [NODETYPE.NodeType_TypicalCurve, 50]
+])
+
+const TYPICAL_CURVE_NODE_ORDER = new Map([
+  [NODETYPE.NodeType_TypicalCurveBlasingame, 10],
+  [NODETYPE.NodeType_TypicalCurveAG, 20],
+  [NODETYPE.NodeType_TypicalCurveNPI, 30],
+  [NODETYPE.NodeType_TypicalCurveWattenbarger, 40]
+])
+
+const sortNodesByFixedOrder = (nodes, orderMap) => {
+  nodes.sort((a, b) => {
+    const left = orderMap.get(a?.type) ?? 999
+    const right = orderMap.get(b?.type) ?? 999
+    if (left !== right) return left - right
+    return String(a?.label || '').localeCompare(String(b?.label || ''), 'zh-Hans')
+  })
+}
+
 const addAnalysisNode = (wellName, rawNode) => {  // 添加分析节点
   const nodeType = rawNode?.nodeType ?? rawNode?.type
   const groupId = NODE_GROUP_BY_TYPE[nodeType] || rawNode?.menuType || rawNode?.groupType
@@ -364,6 +536,10 @@ const addAnalysisNode = (wellName, rawNode) => {  // 添加分析节点
     targetGroup.children[existedIndex] = analysisNode
   } else {
     targetGroup.children.push(analysisNode)
+  }
+
+  if (targetGroup.type === 'well-control-inventory') {
+    sortNodesByFixedOrder(targetGroup.children, WELL_CONTROL_NODE_ORDER)
   }
 }
 
@@ -410,6 +586,8 @@ const addBlasingameNode = (wellName, rawNode = {}) => {
     diagnosticNode.children.push(blasingameNode)
   }
 
+  sortNodesByFixedOrder(diagnosticNode.children, TYPICAL_CURVE_NODE_ORDER)
+  sortNodesByFixedOrder(inventoryGroup.children, WELL_CONTROL_NODE_ORDER)
   return blasingameNode
 }
 
@@ -449,6 +627,8 @@ const addNpiNode = (wellName, rawNode = {}) => {
   )
   if (existedIndex >= 0) diagnosticNode.children[existedIndex] = npiNode
   else diagnosticNode.children.push(npiNode)
+  sortNodesByFixedOrder(diagnosticNode.children, TYPICAL_CURVE_NODE_ORDER)
+  sortNodesByFixedOrder(inventoryGroup.children, WELL_CONTROL_NODE_ORDER)
   return npiNode
 }
 
@@ -495,6 +675,8 @@ const addWattenbargerNode = (wellName, rawNode = {}) => {
     diagnosticNode.children.push(wattenbargerNode)
   }
 
+  sortNodesByFixedOrder(diagnosticNode.children, TYPICAL_CURVE_NODE_ORDER)
+  sortNodesByFixedOrder(inventoryGroup.children, WELL_CONTROL_NODE_ORDER)
   return wattenbargerNode
 }
 
@@ -540,6 +722,8 @@ const addAGNode = (wellName, rawNode = {}) => {
     diagnosticNode.children.push(agNode)
   }
 
+  sortNodesByFixedOrder(diagnosticNode.children, TYPICAL_CURVE_NODE_ORDER)
+  sortNodesByFixedOrder(inventoryGroup.children, WELL_CONTROL_NODE_ORDER)
   return agNode
 }
 
@@ -637,19 +821,33 @@ const applyAnalyticMethodNodes = (node) => {
   })
 }
 
-const applyMaterialBalanceNodes = (node) => {
+const applyMaterialBalanceNodes = async (node) => {
   if (!node?.subNodes?.length) return
 
-  node.subNodes.forEach(wellNode => {
+  for (const wellNode of node.subNodes) {
     const wellName = wellNode.nodeTitle || wellNode.wellName
-    if (!wellName) return
+    if (!wellName) continue
+
+    let materialBalanceRows = []
+    try {
+      materialBalanceRows = await getMaterialBalanceRowsForWell(wellName, { silentError: true })
+    } catch {
+      materialBalanceRows = []
+    }
+    if (materialBalanceRows.length) {
 
     ensureWell(wellName, wellNode.nodeId || `well-${wellName}`)
     addAnalysisNode(wellName, {
       ...wellNode,
       nodeType: NODETYPE.NodeType_DynamicOriginalGasInplace,
+      materialBalanceRows,
       nodeTitle: '物质平衡'
     })
+
+    }
+    else {
+      removeMaterialBalanceNodeForWell(wellName)
+    }
 
     const dynamicNode = (wellNode.subNodes || []).find(item =>
       (item.nodeType ?? item.type) === NODETYPE.NodeType_DynamicMaterialBalanceMethodBlasingame
@@ -662,7 +860,7 @@ const applyMaterialBalanceNodes = (node) => {
         wellName
       })
     }
-  })
+  }
 }
 
 const findDynamicBalanceNode = (rootNode, wellName) => {
@@ -676,6 +874,7 @@ const findDynamicBalanceNode = (rootNode, wellName) => {
 
 const ensureMaterialBalanceNodeForWell = (wellName, rawNode = {}) => {
   if (!wellName) return null
+  if (Array.isArray(rawNode.materialBalanceRows) && !rawNode.materialBalanceRows.length) return null
 
   const wellItem = ensureWell(wellName, rawNode?.nodeId || rawNode?.wellId || `well-${wellName}`)
   addAnalysisNode(wellName, {
@@ -689,6 +888,31 @@ const ensureMaterialBalanceNodeForWell = (wellName, rawNode = {}) => {
   return targetGroup?.children.find(item =>
     item.type === NODETYPE.NodeType_DynamicOriginalGasInplace &&
     item.wellName === wellName
+  )
+}
+
+const clearMaterialBalanceNodes = () => {
+  const wells = getWellGroup()?.children ?? []
+
+  wells.forEach(well => {
+    const inventoryGroup = well.children?.find(item => item.type === 'well-control-inventory')
+    if (!inventoryGroup?.children?.length) return
+
+    inventoryGroup.children = inventoryGroup.children.filter(item =>
+      item.type !== NODETYPE.NodeType_DynamicOriginalGasInplace
+    )
+  })
+}
+
+const removeMaterialBalanceNodeForWell = (wellName) => {
+  if (!wellName) return
+
+  const well = getWellGroup()?.children.find(item => item.wellName === wellName || item.label === wellName)
+  const inventoryGroup = well?.children?.find(item => item.type === 'well-control-inventory')
+  if (!inventoryGroup?.children?.length) return
+
+  inventoryGroup.children = inventoryGroup.children.filter(item =>
+    item.type !== NODETYPE.NodeType_DynamicOriginalGasInplace
   )
 }
 
@@ -803,7 +1027,7 @@ const findAnalyticMethodNode = (wellName) => {
 const refreshMaterialBalanceNodes = async () => {
   try {
     const res = await nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, NODETYPE.NodeType_DynamicOriginalGasInplace)
-    applyMaterialBalanceNodes(res?.data?.node)
+    await applyMaterialBalanceNodes(res?.data?.node)
   } catch {
     // 没有已有物质平衡结果时保持项目树不变。
   }
@@ -1067,16 +1291,25 @@ const runMaterialBalanceForSelectedWell = async () => {
 
 // node 接口现在只包含曾经计算过物质平衡的井，
 // 因此可以恢复全部历史节点。
-    applyMaterialBalanceNodes(rootNode)
+    await applyMaterialBalanceNodes(rootNode)
 
+    const materialBalanceRows = await getMaterialBalanceRowsForWell(targetWellName, { silentError: true })
     const materialBalanceRawNode = {
       ...resultNode,
       parentNode: rootNode,
       rootNode,
       nodeType: NODETYPE.NodeType_DynamicOriginalGasInplace,
+      materialBalanceRows,
       nodeTitle: '物质平衡'
     }
     const treeNode = ensureMaterialBalanceNodeForWell(targetWellName, materialBalanceRawNode)
+    if (!treeNode) {
+      ElMessage.warning(`${targetWellName}\u4e95\u6ca1\u6709\u53ef\u5c55\u793a\u7684\u7269\u8d28\u5e73\u8861\u66f2\u7ebf`)
+      /*
+      ElMessage.warning(`${targetWellName}井没有可展示的物质平衡曲线`)
+      */
+      return
+    }
     const viewNode = treeNode || {
       id: materialBalanceRawNode?.nodeId || materialBalanceRawNode?.resultId || `mb-${targetWellName}`,
       label: '物质平衡',
@@ -1153,7 +1386,7 @@ const runDynamicBalanceForSelectedWell = async () => {
       throw new Error('动态平衡计算失败，未生成分析结果节点')
     }
 
-    applyMaterialBalanceNodes(rootNode)
+    await applyMaterialBalanceNodes(rootNode)
     const treeNode = {
       id: resultNode.nodeId,
       label: '动态平衡',
@@ -1615,7 +1848,7 @@ const handleNodeContextMenu = (node, event) => {
     return
   }
 
-  const menuWidth = 190
+  const menuWidth = 240
   const menuHeight = 42
   const x = Math.min(event.clientX, window.innerWidth - menuWidth - 8)
   const y = Math.min(event.clientY, window.innerHeight - menuHeight - 8)
@@ -1628,13 +1861,94 @@ const handleNodeContextMenu = (node, event) => {
   }
 }
 
-const handleDeleteContextNode = () => {
+const handleDeleteContextNode = async () => {
   const node = treeContextMenu.value.node
+  const deleteLabel = treeContextMenuLabel.value
   closeTreeContextMenu()
 
   if (!node) return
 
-  ElMessage.info(`${treeContextMenuLabel.value}：删除接口待确认`)
+  if (node.type === NODETYPE.NodeType_WaterInvasionAnalysis) {
+    const wellName = node.wellName || selectedWellName.value
+    if (!wellName) {
+      ElMessage.error('没有找到水侵分析对应井名')
+      return
+    }
+
+    try {
+      await waterInvasionApi.deleteResult(PROJECT_ID, GAS_RESERVOIR_ID, wellName)
+      removeTreeNode(node)
+      clearCurrentViewAfterDelete(node)
+      ElMessage.success(`${deleteLabel}成功`)
+    } catch (error) {
+      ElMessage.error(error.response?.data?.message || error.message || `${deleteLabel}失败`)
+      console.error(`${deleteLabel}失败`, error)
+    }
+    return
+  }
+
+  if (node.type === NODETYPE.NodeType_DynamicOriginalGasInplace) {
+    try {
+      const deleteIds = await getMaterialBalanceDeleteIds(node)
+      if (!deleteIds.length) {
+        ElMessage.error('没有找到物质平衡结果 ID')
+        return
+      }
+
+      await Promise.all(
+        deleteIds.map(id =>
+          materialBalanceApi.deleteResult(PROJECT_ID, GAS_RESERVOIR_ID, id, { silentError: true })
+        )
+      )
+      removeTreeNode(node)
+      clearCurrentViewAfterDelete(node)
+      ElMessage.success(`${deleteLabel}成功`)
+    } catch (error) {
+      ElMessage.error(error.response?.data?.message || error.message || `${deleteLabel}失败`)
+      console.error(`${deleteLabel}失败`, error)
+    }
+    return
+  }
+
+  if (node.type === NODETYPE.NodeType_DynamicMaterialBalanceMethodBlasingame) {
+    const resultId = getAnalysisId(node)
+    if (!resultId || Number.isNaN(Number(resultId))) {
+      ElMessage.error('没有找到动态平衡结果 ID')
+      return
+    }
+
+    try {
+      await materialBalanceApi.deleteResult(PROJECT_ID, GAS_RESERVOIR_ID, resultId)
+      removeTreeNode(node)
+      clearCurrentViewAfterDelete(node)
+      ElMessage.success(`${deleteLabel}成功`)
+    } catch (error) {
+      ElMessage.error(error.response?.data?.message || error.message || `${deleteLabel}失败`)
+      console.error(`${deleteLabel}失败`, error)
+    }
+    return
+  }
+
+  if (!isTypicalCurveResultNode(node)) {
+    ElMessage.info(`${deleteLabel}：删除接口待确认`)
+    return
+  }
+
+  const analysisId = getAnalysisId(node)
+  if (!analysisId || Number.isNaN(Number(analysisId))) {
+    ElMessage.error(`没有找到${getTypicalCurveResultName(node)}结果 ID`)
+    return
+  }
+
+  try {
+    await typicalCurveApi.deleteResult(PROJECT_ID, GAS_RESERVOIR_ID, analysisId)
+    removeTreeNode(node)
+    clearCurrentViewAfterDelete(node)
+    ElMessage.success(`${deleteLabel}成功`)
+  } catch (error) {
+    ElMessage.error(error.response?.data?.message || error.message || `${deleteLabel}失败`)
+    console.error(`${deleteLabel}失败`, error)
+  }
 }
 
 const handleSelect = (node) => { // 点击左侧树节点
@@ -1768,7 +2082,7 @@ onBeforeUnmount(() => {
 
         <div v-show="!sideTreeCollapsed" class="side-tree">
           <TreeNode v-for="node in filteredTreeData" :key="node.id" :node="node" :active-id="activeNodeId"
-            @select="handleSelect" />
+            @select="handleSelect" @node-contextmenu="handleNodeContextMenu" />
         </div>
       </aside>
 

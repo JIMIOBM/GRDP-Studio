@@ -108,6 +108,12 @@ const getMaterialBalanceResultId = (row) => {
   )
 }
 
+const isMaterialBalanceAverageRow = (row) => {
+  const type = Number(row?.dynamicOriginalGasInplaceType ?? row?.dynamicOriginalGasInPlaceType)
+  const description = String(row?.dynamicOriginalGasInplaceMethodDescription || row?.dynamicOriginalGasInPlaceMethodDescription || '')
+  return type === 1 || type === 2 || /物质平衡.*(实测静压|计算静压)/.test(description)
+}
+
 const getMaterialBalanceTabLabel = (row, index) => {
   const description = row?.dynamicOriginalGasInplaceMethodDescription || row?.dynamicOriginalGasInPlaceMethodDescription || ''
   if (/实测静压/.test(description)) return '根据实测静压'
@@ -776,6 +782,7 @@ async function fetchData() {
             { silentError: true }
         )
         const averageRows = getAverageFormationPressureRows(pressureRes.data)
+            .filter(isMaterialBalanceAverageRow)
         const resultRequests = averageRows
             .map((row, index) => ({
               row,
@@ -839,8 +846,6 @@ async function fetchData() {
     activePanelTab.value = 'input'
     await nextTick()
     renderChart()
-    // 物质平衡是批量计算，但本次页面只刷新当前井对应的左侧节点。
-    emit('refresh-tree', wellName)
   } catch (error) {
     if (requestId !== requestSeq) return
     console.error('[MaterialBalanceContent] load failed', error)
