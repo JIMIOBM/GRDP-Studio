@@ -8,7 +8,7 @@ const props = defineProps({
   defaultExpanded: { type: Boolean, default: true }
 })
 
-const emit = defineEmits(['select'])
+const emit = defineEmits(['select', 'node-contextmenu'])
 
 const expanded = ref(props.node.defaultExpanded ?? props.defaultExpanded)
 const hasChildren = () => props.node.children && props.node.children.length > 0
@@ -25,6 +25,10 @@ const handleClick = () => {
 }
 
 const onChildSelect = (n) => emit('select', n)
+const handleContextMenu = (event) => {
+  emit('node-contextmenu', props.node, event)
+}
+const onChildContextMenu = (node, event) => emit('node-contextmenu', node, event)
 </script>
 
 <template>
@@ -33,6 +37,7 @@ const onChildSelect = (n) => emit('select', n)
       class="node-label"
       :class="{ active: node.id === activeId }"
       @click="handleClick"
+      @contextmenu.prevent.stop="handleContextMenu"
     >
       <el-icon v-if="hasChildren()" class="caret">
         <ArrowDown v-if="expanded" />
@@ -56,6 +61,7 @@ const onChildSelect = (n) => emit('select', n)
         :active-id="activeId"
         :default-expanded="defaultExpanded"
         @select="onChildSelect"
+        @node-contextmenu="onChildContextMenu"
       />
     </div>
   </div>

@@ -1,7 +1,7 @@
-﻿<script setup>
+﻿﻿nom ﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿<script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
-import dockerRequest from '@/api/docker'
+import { dynamicBalanceApi } from '@/api/docker'
 
 const props = defineProps({
   node: Object,
@@ -9,14 +9,20 @@ const props = defineProps({
   gasReservoirId: [Number, String]
 })
 
-const emit = defineEmits(['refresh-tree'])
-
 const loading = ref(false)
 const chartEl = ref(null)
+const chartAreaEl = ref(null)
+const paramsPanelEl = ref(null)
 const resultData = ref(null)
 const noData = ref(false)
 const activeTab = ref('input')
 const panelCollapsed = ref(false)
+const legendPosition = ref({ x: null, y: null })
+const draggingLegend = ref(false)
+const legendDragOffset = ref({ x: 0, y: 0 })
+const paramsPanelWidth = ref(380)
+const resizingParamsPanel = ref(false)
+const equationGraphicPosition = ref(null)
 
 let chart = null
 
@@ -26,37 +32,13 @@ const currentWellName = computed(() =>
   ''
 )
 
-const isFlowBalance = computed(() => [57, 58].includes(Number(
-  props.node?.type ??
-  props.node?.raw?.nodeType ??
-  props.node?.raw?.type ??
-  props.node?.raw?.nodeTypeId
-)))
-const chartTitle = computed(() => isFlowBalance.value
-  ? (props.node?.label || props.node?.raw?.nodeTitle || '流动平衡')
-  : '动态物质平衡'
+const resultId = computed(() =>
+  props.node?.resultId ||
+  props.node?.raw?.nodeId ||
+  props.node?.nodeId ||
+  props.node?.id ||
+  ''
 )
-
-const wellIdMap = {
-  'X-1': 51,
-  'X-2': 52,
-  'X-3': 53,
-  'X-4': 55,
-  'X-5': 56
-}
-
-const currentResultId = computed(() => {
-  const raw = props.node?.raw || {}
-  return raw.DynamicOriginalGasInPlaceId ??
-    raw.dynamicOriginalGasInPlaceId ??
-    raw.dynamicOriginalGasInplaceId ??
-    raw.resultId ??
-    props.node?.resultId ??
-    raw.nodeId ??
-    props.node?.id ??
-    wellIdMap[currentWellName.value] ??
-    null
-})
 
 const output = computed(() => {
   if (!resultData.value?.result) return {}
@@ -64,20 +46,10 @@ const output = computed(() => {
 })
 
 const reliability = computed(() => {
-  const rel = output.value.reliability
-  if (rel && rel !== 'undefined' && rel !== 'null') {
-    return rel
-  }
-  if (currentWellName.value === 'X-1') {
-    return '分析结果可靠性偏低'
-  }
-  if (currentWellName.value === 'X-4') {
-    return '分析结果可靠性较高'
-  }
-  if (currentWellName.value === 'X-5') {
-    return '分析结果可靠性较高'
-  }
-  return '分析结果可靠性偏低'
+  return output.value.reliablity ||
+    output.value.reliability ||
+    output.value.reliabilityDescription ||
+    ''
 })
 
 const inputParams = computed(() => {
@@ -137,7 +109,7 @@ const formatNumber = (value) => {
   if (isNaN(num)) return String(value)
 
   if (/[eE]/.test(String(value))) {
-    const fixed = num.toFixed(10)
+    const fixed = num.toFixed(10)//1
     return fixed.replace(/\.?0+$/, '')
   }
 
@@ -156,37 +128,57 @@ const getInputValue = (keys, fallback = '') => {
 }
 
 const gasProperties = computed(() => [
-  { key: 'gasType', label: fieldLabels.gasType, value: getInputValue(['gasType'], '干气'), type: 'select', options: gasTypeOptions },
-  { key: 'specificGravity', label: fieldLabels.relativeDensity, value: getInputValue(['specificGravity', 'relativeDensity'], '0.58'), type: 'number' },
-  { key: 'hydrogenSulfide', label: fieldLabels.h2sContent, value: getInputValue(['hydrogenSulfide', 'h2sContent'], '4.62'), type: 'number' },
-  { key: 'carbonDioxide', label: fieldLabels.co2Content, value: getInputValue(['carbonDioxide', 'co2Content'], '3.96'), type: 'number' },
-  { key: 'nitrogen', label: fieldLabels.nitrogenContent, value: getInputValue(['nitrogen', 'nitrogenContent'], '0'), type: 'number' }
+  { key: 'gasType', label: fieldLabels.gasType, value: getInputValue('gasType'), type: 'select', options: gasTypeOptions },
+  { key: 'specificGravity', label: fieldLabels.relativeDensity, value: getInputValue(['specificGravity', 'relativeDensity']), type: 'number' },
+  { key: 'hydrogenSulfide', label: fieldLabels.h2sContent, value: getInputValue(['hydrogenSulfide', 'h2sContent']), type: 'number' },
+  { key: 'carbonDioxide', label: fieldLabels.co2Content, value: getInputValue(['carbonDioxide', 'co2Content']), type: 'number' },
+  { key: 'nitrogen', label: fieldLabels.nitrogenContent, value: getInputValue(['nitrogen', 'nitrogenContent']), type: 'number' }
 ])
+
+const getMethodValue = (key, legacyKey, options) => {
+  const value = inputParams.value?.[key] ?? inputParams.value?.[legacyKey]
+  if (value === undefined || value === null || value === '') return ''
+  if (typeof value === 'number') return options[value]?.value || ''
+  return value
+}
 
 const calculationMethods = computed(() => [
-  { key: 'nonHydrocarbonCorrectionMethod', label: fieldLabels.nonHydrocarbonCorrectionMethod, value: getInputValue(['nonHydrocarbonCorrectionMethod'], 'Wichert-Aziz修正方法'), type: 'select', options: nonHydrocarbonCorrectionOptions },
-  { key: 'zFactorCalculationMethod', label: fieldLabels.zFactorCalculationMethod, value: getInputValue(['zFactorCalculationMethod'], 'Dranchuk-Abu-Kassem方法'), type: 'select', options: zFactorCalculationOptions },
-  { key: 'viscosityCalculationMethod', label: fieldLabels.viscosityCalculationMethod, value: getInputValue(['viscosityCalculationMethod'], 'Lee-Gonzalez-Eakin方法'), type: 'select', options: viscosityCalculationOptions }
+  { key: 'modificationMethod', label: fieldLabels.nonHydrocarbonCorrectionMethod, value: getMethodValue('modificationMethod', 'nonHydrocarbonCorrectionMethod', nonHydrocarbonCorrectionOptions), type: 'select', options: nonHydrocarbonCorrectionOptions },
+  { key: 'deviationFactorMethod', label: fieldLabels.zFactorCalculationMethod, value: getMethodValue('deviationFactorMethod', 'zFactorCalculationMethod', zFactorCalculationOptions), type: 'select', options: zFactorCalculationOptions },
+  { key: 'viscosityMethod', label: fieldLabels.viscosityCalculationMethod, value: getMethodValue('viscosityMethod', 'viscosityCalculationMethod', viscosityCalculationOptions), type: 'select', options: viscosityCalculationOptions }
 ])
 
+const equationTypeValue = computed(() => {
+  const value = inputParams.value?.mbEquationType ?? inputParams.value?.equationType
+  if (value === 0) return '封闭气藏'
+  if (value === 1) return '水侵气藏'
+  return value || ''
+})
+
 const otherData = computed(() => [
-  { key: 'originalFormationPressure', label: fieldLabels.initialReservoirPressure, value: getInputValue(['originalFormationPressure', 'initialReservoirPressure'], '50'), type: 'number' },
-  { key: 'formationTemperature', label: fieldLabels.reservoirTemperature, value: getInputValue(['formationTemperature', 'reservoirTemperature'], '80'), type: 'number' },
-  { key: 'equationType', label: fieldLabels.equationType, value: getInputValue(['equationType', 'mbEquationType'], '封闭气藏'), type: 'select', options: equationTypeOptions },
-  { key: 'unstableFlowTime', label: fieldLabels.unstableFlowTime, value: getInputValue(['unstableFlowTime'], '180'), type: 'number' },
-  { key: 'samplingPoints', label: fieldLabels.samplingPoints, value: getInputValue(['samplingPoints'], '300'), type: 'number', hasSwitch: true, switchValue: true },
-  { key: 'waterGasRatioLimit', label: fieldLabels.waterGasRatioLimit, value: getInputValue(['waterGasRatioLimit'], '0.0602'), type: 'number', hasSwitch: true, switchValue: true },
-  { key: 'reservoirOriginalGasVolume', label: fieldLabels.gasReservoirVolume, value: getInputValue(['reservoirOriginalGasVolume', 'gasReservoirVolume'], '500'), type: 'number' },
-  { key: 'waterSaturation', label: fieldLabels.connateWaterSaturation, value: getInputValue(['waterSaturation', 'connateWaterSaturation'], '26.16'), type: 'number' },
-  { key: 'rockCompressionCoefficient', label: fieldLabels.rockCompressibility, value: getInputValue(['rockCompressionCoefficient', 'rockCompressibility'], '1.0000E-4'), type: 'number' },
-  { key: 'waterCompressionCoefficient', label: fieldLabels.waterCompressibility, value: getInputValue(['waterCompressionCoefficient', 'waterCompressibility'], '3.7445E-4'), type: 'number' }
+  { key: 'originalPressure', label: fieldLabels.initialReservoirPressure, value: getInputValue(['originalPressure', 'originalFormationPressure', 'initialReservoirPressure']), type: 'number' },
+  { key: 'temperature', label: fieldLabels.reservoirTemperature, value: getInputValue(['temperature', 'formationTemperature', 'reservoirTemperature']), type: 'number' },
+  { key: 'mbEquationType', label: fieldLabels.equationType, value: equationTypeValue.value, type: 'select', options: equationTypeOptions },
+  { key: 'unstableFlowPeriodLength', label: fieldLabels.unstableFlowTime, value: getInputValue(['unstableFlowPeriodLength', 'unstableFlowTime']), type: 'number' },
+  { key: 'dataSize', label: fieldLabels.samplingPoints, value: getInputValue(['dataSize', 'samplingPoints']), type: 'number', hasSwitch: true, switchValue: Number(inputParams.value?.dataSize) > 0 },
+  { key: 'waterGasRatioLimit', label: fieldLabels.waterGasRatioLimit, value: getInputValue('waterGasRatioLimit'), type: 'number', hasSwitch: true, switchValue: Number(inputParams.value?.waterGasRatioLimit) >= 0 },
+  { key: 'reservoirOriginalGasVolume', label: fieldLabels.gasReservoirVolume, value: getInputValue(['reservoirOriginalGasVolume', 'gasReservoirVolume']), type: 'number' },
+  { key: 'waterSaturation', label: fieldLabels.connateWaterSaturation, value: getInputValue(['waterSaturation', 'connateWaterSaturation']), type: 'number' },
+  { key: 'rockCompressionCoefficient', label: fieldLabels.rockCompressibility, value: getInputValue(['rockCompressionCoefficient', 'rockCompressibility']), type: 'number' },
+  { key: 'waterCompressionCoefficient', label: fieldLabels.waterCompressibility, value: getInputValue(['waterCompressionCoefficient', 'waterCompressibility']), type: 'number' }
 ])
 
 const chartPoints = computed(() => {
-  if (!resultData.value?.data || !Array.isArray(resultData.value.data)) return []
-
+  const chartItem = resultData.value?.chartItems?.find(item => item.yAxisField === 'pressure')
+  if (chartItem?.data?.length) {
+    return chartItem.data
+      .filter(item => item.isDeleted !== true)
+      .map(item => [Number(item.xValue), Number(item.yValue)])
+      .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y))
+  }
+  if (!Array.isArray(resultData.value?.data)) return []
   return resultData.value.data
-    .filter(item => item.isDeleted === false)
+    .filter(item => item.isDeleted !== true)
     .map(item => {
       const x = Number(item.pseudotime)
       const y = Number(item.pressure)
@@ -196,9 +188,16 @@ const chartPoints = computed(() => {
 })
 
 const allPoints = computed(() => {
-  if (!resultData.value?.data || !Array.isArray(resultData.value.data)) return []
-
+  const chartItem = resultData.value?.chartItems?.find(item => item.yAxisField === 'pressure')
+  if (chartItem?.data?.length) {
+    return chartItem.data
+      .filter(item => item.isDeleted === true)
+      .map(item => [Number(item.xValue), Number(item.yValue)])
+      .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y))
+  }
+  if (!Array.isArray(resultData.value?.data)) return []
   return resultData.value.data
+    .filter(item => item.isDeleted === true)
     .map(item => {
       const x = Number(item.pseudotime)
       const y = Number(item.pressure)
@@ -209,25 +208,122 @@ const allPoints = computed(() => {
 
 const regression = computed(() => {
   const result = output.value
-  const slope = parseFloat(result.gradient) || parseFloat(result.slope) || 3.133e-4
-  const intercept = parseFloat(result.intercept) || 0.1567
-  const r2 = parseFloat(result.rsquared) || 0.6323
+  const slope = Number(result.gradient ?? result.slope)
+  const intercept = Number(result.intercept)
+  const r2 = Number(result.rsquared)
   return { slope, intercept, r2 }
 })
+
+const regressionPoints = computed(() => {
+  const chartItem = resultData.value?.chartItems?.find(item => item.yAxisField === 'linearRegressionPressure')
+  if (chartItem?.data?.length) {
+    return chartItem.data
+      .map(item => [Number(item.xValue), Number(item.yValue)])
+      .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y))
+  }
+  const { slope, intercept } = regression.value
+  const xs = chartPoints.value.map(([x]) => x)
+  if (!xs.length || !Number.isFinite(slope) || !Number.isFinite(intercept)) return []
+  const minX = Math.min(...xs)
+  const maxX = Math.max(...xs)
+  return [[minX, slope * minX + intercept], [maxX, slope * maxX + intercept]]
+})
+
+const legendStyle = computed(() => {
+  if (legendPosition.value.x === null || legendPosition.value.y === null) {
+    return { top: '42px', right: '22px' }
+  }
+  return {
+    left: `${legendPosition.value.x}px`,
+    top: `${legendPosition.value.y}px`
+  }
+})
+
+function onLegendDrag(event) {
+  if (!draggingLegend.value || !chartAreaEl.value) return
+
+  const rect = chartAreaEl.value.getBoundingClientRect()
+  const x = Math.max(0, Math.min(rect.width - 80, event.clientX - rect.left - legendDragOffset.value.x))
+  const y = Math.max(0, Math.min(rect.height - 30, event.clientY - rect.top - legendDragOffset.value.y))
+  legendPosition.value = { x, y }
+}
+
+function stopLegendDrag() {
+  if (!draggingLegend.value) return
+
+  draggingLegend.value = false
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+  window.removeEventListener('mousemove', onLegendDrag)
+  window.removeEventListener('mouseup', stopLegendDrag)
+}
+
+function startLegendDrag(event) {
+  if (!chartAreaEl.value) return
+
+  event.preventDefault()
+  const legendRect = event.currentTarget.getBoundingClientRect()
+  const areaRect = chartAreaEl.value.getBoundingClientRect()
+  const currentX = legendPosition.value.x ?? legendRect.left - areaRect.left
+  const currentY = legendPosition.value.y ?? legendRect.top - areaRect.top
+  legendPosition.value = { x: currentX, y: currentY }
+  legendDragOffset.value = {
+    x: event.clientX - legendRect.left,
+    y: event.clientY - legendRect.top
+  }
+  draggingLegend.value = true
+  document.body.style.cursor = 'move'
+  document.body.style.userSelect = 'none'
+  window.addEventListener('mousemove', onLegendDrag)
+  window.addEventListener('mouseup', stopLegendDrag)
+}
+
+const getEquationGraphicPosition = () => {
+  if (equationGraphicPosition.value) return equationGraphicPosition.value
+  const width = chart?.getWidth?.() || 900
+  const height = chart?.getHeight?.() || 520
+  return [Math.max(width - 330, 80), Math.max(height - 130, 60)]
+}
+
+function onParamsPanelResize(event) {
+  if (!resizingParamsPanel.value) return
+
+  const left = paramsPanelEl.value?.getBoundingClientRect().left || 0
+  paramsPanelWidth.value = Math.max(238, Math.min(520, event.clientX - left))
+
+  chart?.resize()
+}
+
+function stopParamsPanelResize() {
+  if (!resizingParamsPanel.value) return
+
+  resizingParamsPanel.value = false
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+
+  window.removeEventListener('mousemove', onParamsPanelResize)
+  window.removeEventListener('mouseup', stopParamsPanelResize)
+
+  chart?.resize()
+}
+
+function startParamsPanelResize(event) {
+  if (panelCollapsed.value) return
+
+  event.preventDefault()
+
+  resizingParamsPanel.value = true
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+
+  window.addEventListener('mousemove', onParamsPanelResize)
+  window.addEventListener('mouseup', stopParamsPanelResize)
+}
 
 const renderChart = () => {
   if (!chart) return
 
   const { slope, intercept, r2 } = regression.value
-
-  const xs = chartPoints.value.map(([x]) => x)
-  const dataMinX = xs.length ? Math.min(...xs) : 300
-  const dataMaxX = xs.length ? Math.max(...xs) : 3600
-
-  const rayStartX = dataMinX
-  const rayStartY = slope * rayStartX + intercept
-  const rayEndX = dataMaxX
-  const rayEndY = slope * rayEndX + intercept
 
   const series = [
     {
@@ -253,10 +349,7 @@ const renderChart = () => {
     {
       name: '回归线(MPa/(10⁴m³/d))',
       type: 'line',
-      data: [
-        [rayStartX, rayStartY],
-        [rayEndX, rayEndY]
-      ],
+      data: regressionPoints.value,
       symbol: 'none',
       lineStyle: { color: '#333', width: 2.5 },
       tooltip: { show: false }
@@ -266,7 +359,7 @@ const renderChart = () => {
   chart.setOption({
     animation: false,
     title: {
-      text: chartTitle.value,
+      text: '动态物质平衡',
       left: 'center',
       top: 8,
       textStyle: { fontSize: 16, fontWeight: 600, color: '#333' }
@@ -280,11 +373,7 @@ const renderChart = () => {
       },
       formatter: p => `${p.marker}${p.seriesName}: ${Number(p.value?.[1] ?? p.value).toFixed(4)}`
     },
-    legend: {
-      data: ['数据点(MPa/(10⁴m³/d))', '回归线(MPa/(10⁴m³/d))'],
-      top: 35,
-      left: 'center'
-    },
+    legend: { show: false },
     grid: {
       left: 100,
       right: 80,
@@ -294,8 +383,7 @@ const renderChart = () => {
     xAxis: {
       type: 'value',
       name: 'tca(d)',
-      min: 0,
-      max: 3600,
+      scale: true,
       nameLocation: 'middle',
       nameGap: 35,
       minorTick: { show: true },
@@ -306,8 +394,7 @@ const renderChart = () => {
     yAxis: {
       type: 'value',
       name: '(Pi - Pwf)/qsc(MPa/(10⁴m³/d))',
-      min: 0.2,
-      max: 1.4,
+      scale: true,
       nameLocation: 'middle',
       nameGap: 55,
       minorTick: { show: true },
@@ -318,29 +405,58 @@ const renderChart = () => {
     series,
     graphic: [
       {
+        id: 'regression-equation',
         type: 'group',
-        left: 'right',
-        bottom: 30,
+        z: 1000,
+        zlevel: 10,
+        draggable: true,
+        cursor: 'move',
+        position: getEquationGraphicPosition(),
+        ondrag: function () {
+          equationGraphicPosition.value = [
+            Number.isFinite(this.x) ? this.x : this.position?.[0],
+            Number.isFinite(this.y) ? this.y : this.position?.[1]
+          ]
+        },
         children: [
           {
-            type: 'text',
+            type: 'rect',
+            z: 1000,
+            zlevel: 10,
+            shape: { x: 0, y: 0, width: 260, height: 58, r: 3 },
             style: {
-              text: `Y = ${slope.toExponential(4)}*X + ${intercept.toExponential(4)}`,
-              fontSize: 11,
-              fill: '#666'
-            },
-            left: 10,
-            top: 0
+              fill: 'rgba(255,255,255,0.9)',
+              stroke: '#dcdfe6',
+              lineWidth: 1
+            }
           },
           {
             type: 'text',
-            style: {
-              text: `R² = ${r2.toFixed(4)}`,
-              fontSize: 11,
-              fill: '#666'
-            },
+            z: 1001,
+            zlevel: 10,
             left: 10,
-            top: 18
+            top: 8,
+            style: {
+              text: Number.isFinite(slope) && Number.isFinite(intercept)
+                ? `Y = ${slope.toExponential(4)}*X + ${intercept.toExponential(4)}`
+                : '',
+              fill: '#333',
+              font: '14px Arial',
+              lineHeight: 22
+            }
+          },
+          {
+            type: 'text',
+            z: 1001,
+            zlevel: 10,
+            left: 10,
+            top: 30,
+            style: {
+              text: Number.isFinite(r2) ? `R² = ${r2.toFixed(4)}` : '',
+              fill: '#333',
+              font: '14px Arial',
+              lineHeight: 22
+            }
           }
         ]
       }
@@ -348,11 +464,24 @@ const renderChart = () => {
   }, true)
 }
 
-const fetchData = async () => {
-  const resultId = currentResultId.value
-  const wellName = currentWellName.value
+const handleResize = () => chart?.resize()
 
-  if (!resultId || !props.projectId || !props.gasReservoirId) {
+const ensureChart = () => {
+  if (!chart && chartEl.value) chart = echarts.init(chartEl.value)
+}
+
+const fetchData = async () => {
+  const wellName = currentWellName.value
+  const currentResultId = resultId.value
+
+  if (props.node?.loading) {
+    loading.value = true
+    resultData.value = null
+    noData.value = false
+    return
+  }
+
+  if (!currentResultId || !props.projectId || !props.gasReservoirId) {
     noData.value = true
     return
   }
@@ -362,36 +491,46 @@ const fetchData = async () => {
   noData.value = false
 
   try {
-    const res = await dockerRequest.get(
-      `/projectanalysis/dynamicoriginalgasInplace/result/${props.projectId}/${props.gasReservoirId}/${encodeURIComponent(resultId)}`
-    )
-
-    resultData.value = res.data
-
-    if (!res.data?.data || !Array.isArray(res.data.data) || res.data.data.length === 0) {
-      noData.value = true
+    const nodePayload = props.node?.raw
+    if (nodePayload?.result && Array.isArray(nodePayload?.data)) {
+      resultData.value = nodePayload
+    } else {
+      const res = await dynamicBalanceApi.getResult(
+        props.projectId,
+        props.gasReservoirId,
+        currentResultId,
+        { silentError: true }
+      )
+      resultData.value = res.data?.result ? res.data : (res.data?.data ?? res.data)
     }
+
+    noData.value = !Array.isArray(resultData.value?.data) || resultData.value.data.length === 0
 
   } catch (e) {
     console.error(`[DynamicBalanceContent] Failed to fetch data for ${wellName}`, e)
     noData.value = true
   } finally {
     await nextTick()
+    ensureChart()
     renderChart()
     loading.value = false
-    emit('refresh-tree')
   }
 }
 
-watch(() => [props.node?.id, props.node?.wellName, props.projectId, props.gasReservoirId], fetchData, { immediate: true })
+watch(
+  () => [props.node?.wellName, resultId.value, props.node?.raw],
+  fetchData,
+  { immediate: true }
+)
 
 onMounted(() => {
-  chart = echarts.init(chartEl.value)
-  window.addEventListener('resize', () => chart?.resize())
+  ensureChart()
+  renderChart()
+  window.addEventListener('resize', handleResize)
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('resize', () => chart?.resize())
+  window.removeEventListener('resize', handleResize)
   chart?.dispose()
 })
 </script>
@@ -399,9 +538,10 @@ onBeforeUnmount(() => {
 <template>
   <div v-loading="loading" class="db-wrap">
     <div
+      ref="paramsPanelEl"
       class="params-panel"
-      :class="{ collapsed: panelCollapsed }"
-      :style="{ width: panelCollapsed ? '22px' : '380px', minWidth: panelCollapsed ? '22px' : '380px' }"
+      :class="{ collapsed: panelCollapsed, resizing: resizingParamsPanel }"
+      :style="{ width: panelCollapsed ? '22px' : `${paramsPanelWidth}px`, minWidth: panelCollapsed ? '22px' : `${paramsPanelWidth}px` }"
     >
       <div v-if="panelCollapsed" class="panel-collapsed-tab" @click="panelCollapsed = false">
         参数设置
@@ -503,13 +643,29 @@ onBeforeUnmount(() => {
           输出
         </button>
       </div>
+      <div v-if="!panelCollapsed" class="params-resizer" @mousedown="startParamsPanelResize"></div>
     </div>
 
-    <div class="chart-area">
+    <div ref="chartAreaEl" class="chart-area">
       <div v-if="noData" class="no-data">
         <p>暂无数据</p>
       </div>
-      <div v-else ref="chartEl" class="chart-instance" />
+      <div v-show="!noData" ref="chartEl" class="chart-instance" />
+      <div
+          class="floating-chart-legend"
+          :class="{ dragging: draggingLegend }"
+          :style="legendStyle"
+          @mousedown="startLegendDrag"
+      >
+        <div class="floating-legend-item">
+          <span class="legend-dot" style="backgroundColor: #0037b5; borderColor: #0037b5"></span>
+          <span>数据点(MPa/(10⁴m³/d))</span>
+        </div>
+        <div class="floating-legend-item">
+          <span class="legend-line" style="backgroundColor: #333; borderColor: #333"></span>
+          <span>回归线(MPa/(10⁴m³/d))</span>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -527,11 +683,30 @@ onBeforeUnmount(() => {
   border-right: 1px solid #e0e0e0;
   background: #fff;
   overflow: hidden;
+  position: relative;
   transition: width 0.16s ease, min-width 0.16s ease;
 
   &.collapsed {
     background: transparent;
     border-right: 0;
+  }
+
+  &.resizing {
+    transition: none;
+  }
+}
+
+.params-resizer {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 4;
+
+  &:hover {
+    background: rgba(64, 132, 217, 0.18);
   }
 }
 
@@ -687,5 +862,48 @@ onBeforeUnmount(() => {
   text-align: center;
   color: #999;
   font-size: 14px;
+}
+
+.floating-chart-legend {
+  position: absolute;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-width: 280px;
+  padding: 7px 10px;
+  border: 1px solid #eeeeee;
+  background: rgba(255, 255, 255, 0.9);
+  color: #333;
+  font-size: 12px;
+  line-height: 1.2;
+  cursor: move;
+  user-select: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+
+  &.dragging {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.14);
+  }
+}
+
+.floating-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  .legend-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+    flex-shrink: 0;
+  }
+
+  .legend-line {
+    width: 20px;
+    height: 2px;
+    display: inline-block;
+    flex-shrink: 0;
+  }
 }
 </style>

@@ -1,7 +1,8 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { Delete } from '@element-plus/icons-vue'
 import RibbonMenu from '@/components/RibbonMenu.vue'
 import TreeNode from '@/views/TreeNode.vue'
 import WaterInvasionContent from '@/views/WellControlInventory/WaterInvasionContent.vue'
@@ -12,8 +13,9 @@ import BlasingameContent from '@/views/WellControlInventory/BlasingameContent.vu
 import NpiContent from '@/views/WellControlInventory/NpiContent.vue'
 import DynamicBalanceContent from '@/views/WellControlInventory/DynamicBalanceContent.vue'
 import FlowBalanceContent from '@/views/WellControlInventory/FlowBalanceContent.vue'
+import AGContent from '@/views/WellControlInventory/AGContent.vue'
 import { NODETYPE } from '@/constants/nodeType'
-import { analyticMethodApi, flowBalanceApi, materialBalanceApi, nodeApi, projectApi, typicalCurveApi, waterInvasionApi } from '@/api/docker'
+import { analyticMethodApi, dynamicBalanceApi, flowBalanceApi, materialBalanceApi, nodeApi, projectApi, typicalCurveApi, waterInvasionApi } from '@/api/docker'
 
 const route = useRoute()
 const PROJECT_ID = Number(route.query.projectId || 1)
@@ -32,9 +34,12 @@ const NODE_GROUP_BY_TYPE = {
   [NODETYPE.NodeType_WaterInvasionAnalysis]: 'well-control-inventory',  //水侵分析节点，要放到井控库存下面
   [NODETYPE.NodeType_AnalysisMethods]: 'well-control-inventory',
   [NODETYPE.NodeType_DynamicOriginalGasInplace]: 'well-control-inventory',
-  [NODETYPE.NodeType_FlowingBalanceMethodBasedOnTopPressure]: 'well-control-inventory',
+[NODETYPE.NodeType_FlowingBalanceMethodBasedOnTopPressure]: 'well-control-inventory',
   [NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure]: 'well-control-inventory',
+  [NODETYPE.NodeType_DynamicMaterialBalanceMethodBlasingame]: 'well-control-inventory',
   [NODETYPE.NodeType_TypicalCurveBlasingame]: 'well-control-inventory',
+  [NODETYPE.NodeType_TypicalCurveWattenbarger]: 'well-control-inventory',
+  [NODETYPE.NodeType_TypicalCurveAG]: 'well-control-inventory',
   [NODETYPE.NodeType_VerticalWellTypicalCurveWb]: 'well-control-inventory',
   [NODETYPE.NodeType_ProductionDeclineAnalysis]: 'data-management',
   [NODETYPE.NodeType_ProductivityInstabilityAnalysis]: 'data-management',
@@ -51,16 +56,18 @@ const NODE_LABEL_BY_TYPE = {
   [NODETYPE.NodeType_WaterInvasionAnalysis]: '水侵分析',
   [NODETYPE.NodeType_AnalysisMethods]: '解析法',
   [NODETYPE.NodeType_DynamicOriginalGasInplace]: '物质平衡',
-  [NODETYPE.NodeType_FlowingBalanceMethodBasedOnTopPressure]: '流动平衡-井口流压',
+[NODETYPE.NodeType_FlowingBalanceMethodBasedOnTopPressure]: '流动平衡-井口流压',
   [NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure]: '流动平衡-井底流压',
+  [NODETYPE.NodeType_DynamicMaterialBalanceMethodBlasingame]: '动态平衡',
   [NODETYPE.NodeType_TypicalCurve]: '诊断曲线',
   [NODETYPE.NodeType_TypicalCurveBlasingame]: 'Blasingame',
-  [NODETYPE.NodeType_VerticalWellTypicalCurveWb]: 'Wattenbarger',
+  [NODETYPE.NodeType_TypicalCurveWattenbarger]: 'Wattenbarger',
   [NODETYPE.NodeType_ProductionDeclineAnalysis]: '产量递减分析',
   [NODETYPE.NodeType_ProductivityInstabilityAnalysis]: '产量不稳定分析',
   [NODETYPE.NodeType_ProductionAnalysis]: '生产分析',
-  [NODETYPE.NodeType_ProductivityEvaluation]: '产能评价',
-  [NODETYPE.NodeType_DynamicPrediction]: '动态预测'
+  [NODETYPE.NodeType_ProductivityEvaluation]: '产能评AG价',
+  [NODETYPE.NodeType_DynamicPrediction]: '动态预测',
+  [NODETYPE.NodeType_TypicalCurveAG]: 'AG'
 }
 
 const treeData = ref([
@@ -73,15 +80,28 @@ const activeNodeId = ref('')  // 当前左侧树选中的节点 ID. 用于高亮
 const activeNode = ref(null)  // 当前选中的完整节点对象
 const currentView = ref(null)  // currentView.value = 'water-invasion'，即确定右侧部分区域所显示的界面
 const currentViewNode = ref(null)  // 传给右侧内容组件的节点对象
-const wellKeyword = ref('')  // 左侧搜索框输入的井名关键字
+const wellKeyword = ref('')
+const sideTreeCollapsed = ref(false)
 const waterInvasionRunning = ref(false)  //用于判断水侵分析是否正在运行
 const analyticMethodRunning = ref(false)
 const materialBalanceRunning = ref(false)
 const flowBalanceRunning = ref(false)
+const dynamicBalanceRunning = ref(false)
 const typicalCurveRunning = ref(false)
 const WATER_INVASION_ANALYSIS_ERROR = '水侵分析计算失败，未生成分析结果节点'
 const BLASINGAME_FITTING_REGRESSION_ERROR = '计算动态储量错误:参与回归分析的数据点数必须大于0'
-const selectedWellName = ref('')  //当前选中的井名
+const AG_FITTING_REGRESSION_ERROR = '计算AG节点错误:参与回归分析的数据点数必须大于0'
+const selectedWellName = ref('')
+const treeContextMenu = ref({
+  visible: false,
+  x: 0,
+  y: 0,
+  node: null
+})
+
+const toggleSideTree = () => {
+  sideTreeCollapsed.value = !sideTreeCollapsed.value
+}  //当前选中的井名
 
 const filteredTreeData = computed(() => {   //搜索井名，控制左侧树搜索
   const keyword = wellKeyword.value.trim().toLowerCase()
@@ -93,7 +113,7 @@ const filteredTreeData = computed(() => {   //搜索井名，控制左侧树搜�
     return {
       ...node,
       children: node.children.filter(well =>
-          String(well.label || '').toLowerCase().includes(keyword)
+        String(well.label || '').toLowerCase().includes(keyword)
       )
     }
   })
@@ -107,7 +127,7 @@ const toArray = (value) => { // 把数据统一变成数组
 }
 
 const getNodeName = (item) =>
-    item?.wellName || item?.nodeTitle || item?.name || item?.title || item?.label || item?.well_name || ''
+  item?.wellName || item?.nodeTitle || item?.name || item?.title || item?.label || item?.well_name || ''
 
 const getChildren = (item) => [
   ...toArray(item?.children),
@@ -122,7 +142,15 @@ const BLASINGAME_NODE_TYPES = new Set([
   NODETYPE.NodeType_VerticalWellTypicalCurveBlasingame,
   NODETYPE.NodeType_HorizontalWellTypicalCurveBlasingame,
   NODETYPE.NodeType_FracturedVerticalWellTypicalCurveBlasingame,
-  NODETYPE.NodeType_FracturedHorizontalWellTypicalCurveBlasingame
+  NODETYPE.NodeType_FracturedHorizontalWellTypicalCurveBlasingame,
+])
+
+const AG_NODE_TYPES = new Set([
+  NODETYPE.NodeType_TypicalCurveAG,
+  NODETYPE.NodeType_VerticalWellTypicalCurveAG,
+  NODETYPE.NodeType_HorizontalWellTypicalCurveAG,
+  NODETYPE.NodeType_FracturedVerticalWellTypicalCurveAG,
+  NODETYPE.NodeType_FracturedHorizontalWellTypicalCurveAG,
 ])
 
 const NPI_NODE_TYPES = new Set([
@@ -131,6 +159,14 @@ const NPI_NODE_TYPES = new Set([
   NODETYPE.NodeType_HorizontalWellTypicalCurveNPI,
   NODETYPE.NodeType_FracturedVerticalWellTypicalCurveNPI,
   NODETYPE.NodeType_FracturedHorizontalWellTypicalCurveNPI
+])
+
+const WATTENBARGER_NODE_TYPES = new Set([
+  NODETYPE.NodeType_TypicalCurveWattenbarger,
+  NODETYPE.NodeType_VerticalWellTypicalCurveWattenbarger,
+  NODETYPE.NodeType_HorizontalWellTypicalCurveWattenbarger,
+  NODETYPE.NodeType_FracturedVerticalWellTypicalCurveWattenbarger,
+  NODETYPE.NodeType_FracturedHorizontalWellTypicalCurveWattenbarger
 ])
 
 const isBlasingameNode = (item) => {
@@ -144,6 +180,27 @@ const isNpiNode = (item) => {
   return NPI_NODE_TYPES.has(nodeType) || nodeName === 'Normalized Pressure Integral' || nodeName === 'NPI'
 }
 
+const isWattenbargerNode = (item) => {
+  const nodeType = item?.nodeType ?? item?.type
+  return WATTENBARGER_NODE_TYPES.has(nodeType) || getNodeName(item) === 'Wattenbarger'
+}
+const isAGNode = (item) => {
+  const nodeType = item?.nodeType ?? item?.type
+  return AG_NODE_TYPES.has(nodeType) || getNodeName(item) === 'Agarwal-Gardner'
+}
+
+const isWaterInvasionNode = (item) => {
+  const nodeType = item?.nodeType ?? item?.type
+  return nodeType === NODETYPE.NodeType_WaterInvasionAnalysis || getNodeName(item) === '水侵分析'
+}
+
+const isTreeContextMenuNode = (item) => isWaterInvasionNode(item) || isBlasingameNode(item)
+
+const treeContextMenuLabel = computed(() => {
+  if (isBlasingameNode(treeContextMenu.value.node)) return '删除Blasingame分析结果'
+  return '删除水侵动态分析结果'
+})
+
 const findBlasingameNodeByWell = (root, wellName) => {
   if (!root || !wellName) return null
 
@@ -153,8 +210,8 @@ const findBlasingameNodeByWell = (root, wellName) => {
     const nodeName = getNodeName(item)
     const nodeType = item?.nodeType ?? item?.type
     const nextWellName = nodeType === NODETYPE.NodeType_Well || nodeName === wellName
-        ? nodeName
-        : currentWellName
+      ? nodeName
+      : currentWellName
 
     if (nextWellName === wellName && isBlasingameNode(item)) {
       return item
@@ -176,11 +233,12 @@ const findNpiNodeByWell = (root, wellName) => {
 
   const visit = (item, currentWellName = '') => {
     if (!item) return null
+
     const nodeName = getNodeName(item)
     const nodeType = item?.nodeType ?? item?.type
     const nextWellName = nodeType === NODETYPE.NodeType_Well || nodeName === wellName
-        ? nodeName
-        : currentWellName
+      ? nodeName
+      : currentWellName
     if (nextWellName === wellName && isNpiNode(item)) return item
     for (const child of getChildren(item)) {
       const found = visit(child, nextWellName)
@@ -189,6 +247,50 @@ const findNpiNodeByWell = (root, wellName) => {
     return null
   }
 
+  return visit(root)
+}
+const findAGNodeByWell = (root, wellName) => {
+  if (!root || !wellName) return null
+
+  const visit = (item, currentWellName = '') => {
+    if (!item) return null
+
+    const nodeName = getNodeName(item)
+    const nodeType = item?.nodeType ?? item?.type
+    const nextWellName = nodeType === NODETYPE.NodeType_Well || nodeName === wellName
+      ? nodeName
+      : currentWellName
+    if (nextWellName === wellName && isAGNode(item)) return item
+    for (const child of getChildren(item)) {
+      const found = visit(child, nextWellName)
+      if (found) return found
+    }
+    return null
+  }
+
+  return visit(root)
+}
+
+const findWattenbargerNodeByWell = (root, wellName) => {
+  if (!root || !wellName) return null
+
+  const visit = (item, currentWellName = '') => {
+    if (!item) return null
+    const nodeName = getNodeName(item)
+    const nodeType = item?.nodeType ?? item?.type
+    const nextWellName = nodeType === NODETYPE.NodeType_Well || nodeName === wellName
+      ? nodeName
+      : currentWellName
+    if (nextWellName === wellName && isWattenbargerNode(item)) {
+      return item
+    }
+
+    for (const child of getChildren(item)) {
+      const found = visit(child, nextWellName)
+      if (found) return found
+    }
+    return null
+  }
   return visit(root)
 }
 
@@ -209,7 +311,7 @@ const createEmptyWell = (wellName, wellId) => ({ //创建一口空井
 
 const getWellGroup = () => treeData.value.find(node => node.id === 'g-well')
 const getAllWellNames = () =>
-    getWellGroup()?.children.map(item => item.wellName || item.label).filter(Boolean) || []
+  getWellGroup()?.children.map(item => item.wellName || item.label).filter(Boolean) || []
 
 const getSelectedAnalyticWellNames = () => {
   if (!selectedWellName.value) return []
@@ -292,7 +394,7 @@ const addBlasingameNode = (wellName, rawNode = {}) => {
 
   const parentId = `${wellItem.id}-diagnostic-curve`
   let diagnosticNode = inventoryGroup.children.find(item =>
-      item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve || item.label === '诊断曲线'
+    item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve || item.label === '诊断曲线'
   )
 
   if (!diagnosticNode) {
@@ -320,7 +422,7 @@ const addBlasingameNode = (wellName, rawNode = {}) => {
   }
 
   const existedIndex = diagnosticNode.children.findIndex(item =>
-      item.id === id || item.type === NODETYPE.NodeType_TypicalCurveBlasingame || item.label === 'Blasingame'
+    item.id === id || item.type === NODETYPE.NodeType_TypicalCurveBlasingame || item.label === 'Blasingame'
   )
   if (existedIndex >= 0) {
     diagnosticNode.children[existedIndex] = blasingameNode
@@ -338,7 +440,7 @@ const addNpiNode = (wellName, rawNode = {}) => {
 
   const parentId = `${wellItem.id}-diagnostic-curve`
   let diagnosticNode = inventoryGroup.children.find(item =>
-      item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve || item.label === '诊断曲线'
+    item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve || item.label === '诊断曲线'
   )
   if (!diagnosticNode) {
     diagnosticNode = {
@@ -363,11 +465,102 @@ const addNpiNode = (wellName, rawNode = {}) => {
     raw: rawNode
   }
   const existedIndex = diagnosticNode.children.findIndex(item =>
-      item.id === id || NPI_NODE_TYPES.has(item.type) || item.label === 'Normalized Pressure Integral' || item.label === 'NPI'
+    item.id === id || NPI_NODE_TYPES.has(item.type) || item.label === 'Normalized Pressure Integral' || item.label === 'NPI'
   )
   if (existedIndex >= 0) diagnosticNode.children[existedIndex] = npiNode
   else diagnosticNode.children.push(npiNode)
   return npiNode
+}
+
+const addWattenbargerNode = (wellName, rawNode = {}) => {
+  const wellItem = ensureWell(wellName, rawNode?.wellId || rawNode?.parentId)
+  const inventoryGroup = wellItem?.children.find(item => item.type === 'well-control-inventory')
+  if (!inventoryGroup) return null
+
+  const parentId = `${wellItem.id}-diagnostic-curve`
+  let diagnosticNode = inventoryGroup.children.find(item =>
+    item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve || item.label === '诊断曲线'
+  )
+
+  if (!diagnosticNode) {
+    diagnosticNode = {
+      id: parentId,
+      label: '诊断曲线',
+      type: NODETYPE.NodeType_TypicalCurve,
+      wellName,
+      defaultExpanded: true,
+      children: []
+    }
+    inventoryGroup.children.push(diagnosticNode)
+  } else {
+    diagnosticNode.defaultExpanded = true
+    diagnosticNode.children = diagnosticNode.children || []
+  }
+
+  const id = rawNode?.nodeId || rawNode?.id || `${parentId}-wattenbarger`
+  const wattenbargerNode = {
+    id,
+    label: 'Wattenbarger',
+    type: NODETYPE.NodeType_TypicalCurveWattenbarger,
+    wellName,
+    raw: rawNode
+  }
+
+  const existedIndex = diagnosticNode.children.findIndex(item =>
+    item.id === id || item.type === NODETYPE.NodeType_TypicalCurveWattenbarger || item.label === 'Wattenbarger'
+  )
+  if (existedIndex >= 0) {
+    diagnosticNode.children[existedIndex] = wattenbargerNode
+  } else {
+    diagnosticNode.children.push(wattenbargerNode)
+  }
+
+  return wattenbargerNode
+}
+
+const addAGNode = (wellName, rawNode = {}) => {
+  const wellItem = ensureWell(wellName, rawNode?.wellId || rawNode?.parentId)
+  const inventoryGroup = wellItem?.children.find(item => item.type === 'well-control-inventory')
+  if (!inventoryGroup) return null
+
+  const parentId = `${wellItem.id}-diagnostic-curve`
+  let diagnosticNode = inventoryGroup.children.find(item =>
+    item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve || item.label === '诊断曲线'
+  )
+
+  if (!diagnosticNode) {
+    diagnosticNode = {
+      id: parentId,
+      label: '诊断曲线',
+      type: NODETYPE.NodeType_TypicalCurve,
+      wellName,
+      defaultExpanded: true,
+      children: []
+    }
+    inventoryGroup.children.push(diagnosticNode)
+  } else {
+    diagnosticNode.defaultExpanded = true
+    diagnosticNode.children = diagnosticNode.children || []
+  }
+  const id = rawNode?.nodeId || rawNode?.id || `${parentId}-ag`
+  const agNode = {
+    id,
+    label: 'Agarwal-Gardner',
+    type: NODETYPE.NodeType_TypicalCurveAG,
+    wellName,
+    raw: rawNode
+  }
+
+  const existedIndex = diagnosticNode.children.findIndex(item =>
+    item.id === id || item.type === NODETYPE.NodeType_TypicalCurveAG || item.label === 'AG'
+  )
+  if (existedIndex >= 0) {
+    diagnosticNode.children[existedIndex] = agNode
+  } else {
+    diagnosticNode.children.push(agNode)
+  }
+
+  return agNode
 }
 
 const collectWellsFromProject = (payload) => {
@@ -477,6 +670,18 @@ const applyMaterialBalanceNodes = (node) => {
       nodeType: NODETYPE.NodeType_DynamicOriginalGasInplace,
       nodeTitle: '物质平衡'
     })
+
+    const dynamicNode = (wellNode.subNodes || []).find(item =>
+      (item.nodeType ?? item.type) === NODETYPE.NodeType_DynamicMaterialBalanceMethodBlasingame
+    )
+    if (dynamicNode?.nodeId) {
+      addAnalysisNode(wellName, {
+        ...dynamicNode,
+        nodeType: NODETYPE.NodeType_DynamicMaterialBalanceMethodBlasingame,
+        nodeTitle: '动态平衡',
+        wellName
+      })
+    }
   })
 }
 
@@ -534,6 +739,15 @@ const findFlowingBalanceNode = (node, wellName) => {
   return found
 }
 
+const findDynamicBalanceNode = (rootNode, wellName) => {
+  const wellNode = (rootNode?.subNodes || []).find(item =>
+    item.nodeTitle === wellName || item.wellName === wellName
+  )
+  return (wellNode?.subNodes || []).find(item =>
+    (item.nodeType ?? item.type) === NODETYPE.NodeType_DynamicMaterialBalanceMethodBlasingame
+  )
+}
+
 const ensureMaterialBalanceNodeForWell = (wellName, rawNode = {}) => {
   if (!wellName) return null
 
@@ -547,8 +761,8 @@ const ensureMaterialBalanceNodeForWell = (wellName, rawNode = {}) => {
 
   const targetGroup = wellItem?.children.find(item => item.type === 'well-control-inventory')
   return targetGroup?.children.find(item =>
-      item.type === NODETYPE.NodeType_DynamicOriginalGasInplace &&
-      item.wellName === wellName
+    item.type === NODETYPE.NodeType_DynamicOriginalGasInplace &&
+    item.wellName === wellName
   )
 }
 
@@ -560,7 +774,7 @@ const clearTypicalCurveNodes = () => {
     if (!inventoryGroup?.children?.length) return
 
     inventoryGroup.children = inventoryGroup.children.filter(item =>
-        item.type !== NODETYPE.NodeType_TypicalCurve
+      item.type !== NODETYPE.NodeType_TypicalCurve
     )
   })
 }
@@ -578,9 +792,9 @@ const applyTypicalCurveNodes = (node) => {
     const children = item?.subNodes ?? item?.children ?? []
     const nodeType = item?.nodeType ?? item?.type
     const nextInTypicalCurve = inTypicalCurve ||
-        nodeType === NODETYPE.NodeType_TypicalCurve ||
-        nodeName === '典型曲线' ||
-        nodeName === '诊断曲线'
+      nodeType === NODETYPE.NodeType_TypicalCurve ||
+      nodeName === '典型曲线' ||
+      nodeName === '诊断曲线'
 
     if (wellName && nextInTypicalCurve && isBlasingameNode(item)) {
       addBlasingameNode(wellName, {
@@ -594,6 +808,21 @@ const applyTypicalCurveNodes = (node) => {
       addNpiNode(wellName, {
         ...item,
         nodeTitle: 'Normalized Pressure Integral'
+      })
+    }
+
+    if (wellName && nextInTypicalCurve && isWattenbargerNode(item)) {
+      addWattenbargerNode(wellName, {
+        ...item,
+        nodeType: NODETYPE.NodeType_TypicalCurveWattenbarger,
+        nodeTitle: 'Wattenbarger'
+      })
+    }
+    if (wellName && nextInTypicalCurve && isAGNode(item)) {
+      addAGNode(wellName, {
+        ...item,
+        nodeType: NODETYPE.NodeType_TypicalCurveAG,
+        nodeTitle: 'AG'
       })
     }
 
@@ -707,22 +936,28 @@ const fetchMaterialBalanceNode = async () => {
   return res?.data?.node
 }
 
-const pollMaterialBalanceNode = async ( maxRetries = 20, intervalMs = 1500) => {
-  for (let i = 0; i < maxRetries; i++) {
-    await new Promise(resolve => setTimeout(resolve, intervalMs))
+const getDynamicBalanceNodeOnce = async (wellName, delayMs = 1200) => {
+  if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs))
+  const rootNode = await fetchMaterialBalanceNode()
+  return { rootNode, resultNode: findDynamicBalanceNode(rootNode, wellName) }
+}
 
-    // const res = await nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, NODETYPE.NodeType_DynamicOriginalGasInplace)
-    // const node = res?.data?.node
-    // const subNodes = node?.subNodes ?? []
-    // if (!wellName || subNodes.some(sub => sub.nodeTitle === wellName || sub.wellName === wellName)) {
-    const node = await fetchMaterialBalanceNode()
-    // const subNodes = node?.subNodes ?? []
-    if (node) {
-      return node
-    }
-  }
-
-  throw new Error('物质平衡计算超时，请稍后刷新查看结果')
+const getMaterialBalanceNodeOnce = async (wellName, delayMs = 1200) => {
+  if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs))
+  const rootNode = await fetchMaterialBalanceNode()
+  const wellNode = (rootNode?.subNodes || []).find(item =>
+    item.nodeTitle === wellName || item.wellName === wellName
+  )
+  const resultNode = (wellNode?.subNodes || []).find(item => {
+    const type = item.nodeType ?? item.type
+    return [
+      NODETYPE.NodeType_ConfinedGasReservoirMaterialBalanceMethodForActualStaticPressure,
+      NODETYPE.NodeType_ConfinedGasReservoirMaterialBalanceMethodForCalculatedStaticPressure,
+      NODETYPE.NodeType_ConstantVolumeGasReservoirMaterialBalanceMethodForActualStaticPressure,
+      NODETYPE.NodeType_ConstantVolumeReservoirMaterialBalanceMethodForCalculatedStaticPressure
+    ].includes(type)
+  })
+  return { rootNode, resultNode }
 }
 
 const pollFlowingBalanceNode = async (wellName, maxRetries = 20, intervalMs = 1500) => {
@@ -766,6 +1001,24 @@ const getNpiNodeOnce = async (wellName, delayMs = 1200) => {
   const res = await nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, NODETYPE.NodeType_ProductivityInstabilityAnalysis)
   const rootNode = res?.data?.node
   return { rootNode, npiNode: findNpiNodeByWell(rootNode, wellName) }
+}
+
+const getWattenbargerNodeOnce = async (wellName, delayMs = 1200) => {
+  if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs))
+  const res = await nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, NODETYPE.NodeType_ProductivityInstabilityAnalysis)
+  const rootNode = res?.data?.node
+  return { rootNode, wattenbargerNode: findWattenbargerNodeByWell(rootNode, wellName) }
+}
+
+const getAGNodeOnce = async (wellName, delayMs = 1200) => {
+  if (delayMs > 0) {
+    await new Promise(resolve => setTimeout(resolve, delayMs))
+  }
+
+  const res = await nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, NODETYPE.NodeType_ProductivityInstabilityAnalysis)
+  const rootNode = res?.data?.node
+  const agNode = findAGNodeByWell(rootNode, wellName)
+  return { rootNode, agNode }
 }
 
 const runWaterInvasionForSelectedWell = async () => { //点击水侵分析的操作
@@ -867,7 +1120,7 @@ const runAnalyticMethodForSelectedWell = async () => {
 const runMaterialBalanceForSelectedWell = async () => {
   const targetWellName = selectedWellName.value
   // 接口需要批量计算全部井，但页面仍只展示当前选中井的计算状态。
-  const allWellNames = getAllWellNames()
+  // const allWellNames = getAllWellNames()
 
   if (!targetWellName) {
     ElMessage.warning('请先在左侧选择一口井')
@@ -878,7 +1131,7 @@ const runMaterialBalanceForSelectedWell = async () => {
   materialBalanceRunning.value = true
   try {
     await materialBalanceApi.calc({
-      wellNames: allWellNames,
+      wellNames: [targetWellName],
       gasReservoirType: 1,
       gasReservoirId: Number(GAS_RESERVOIR_ID),
       projectId: Number(PROJECT_ID),
@@ -886,26 +1139,29 @@ const runMaterialBalanceForSelectedWell = async () => {
     })
 
     ElMessage.info(`${targetWellName} 物质平衡计算中，请稍候...`)
-    const node = await pollMaterialBalanceNode()
-    applyMaterialBalanceNodes(node)
 
-    const subNodes = node?.subNodes ?? []
-    const resultNode = subNodes.find(sub => sub.nodeTitle === targetWellName || sub.wellName === targetWellName)
-    // node 返回的列表只包含具有物质平衡结果的井。
-    // 当前井不在列表中时，不再创建虚假的物质平衡节点。
+    // 计算完成后读取后端保存的节点。
+    const { rootNode, resultNode } =
+        await getMaterialBalanceNodeOnce(targetWellName)
+
     if (!resultNode) {
       ElMessage.warning(`${targetWellName}井物质平衡结果不存在`)
       return
     }
+
+// node 接口现在只包含曾经计算过物质平衡的井，
+// 因此可以恢复全部历史节点。
+    applyMaterialBalanceNodes(rootNode)
+
     const materialBalanceRawNode = {
       ...resultNode,
-      parentNode: node,
-      rootNode: node,
+      parentNode: rootNode,
+      rootNode,
       nodeType: NODETYPE.NodeType_DynamicOriginalGasInplace,
       nodeTitle: '物质平衡'
     }
     const treeNode = ensureMaterialBalanceNodeForWell(targetWellName, materialBalanceRawNode)
-    const viewNode = treeNode||{
+    const viewNode = treeNode || {
       id: materialBalanceRawNode?.nodeId || materialBalanceRawNode?.resultId || `mb-${targetWellName}`,
       label: '物质平衡',
       type: NODETYPE.NodeType_DynamicOriginalGasInplace,
@@ -922,6 +1178,37 @@ const runMaterialBalanceForSelectedWell = async () => {
     console.error('物质平衡计算失败', error)
   } finally {
     materialBalanceRunning.value = false
+  }
+}
+
+const openDynamicBalanceNode = async (node) => {
+  const targetWellName = node?.wellName || selectedWellName.value
+  const resultId = node?.raw?.nodeId || node?.nodeId || node?.id
+
+  if (!targetWellName || !resultId || String(resultId).startsWith('db-')) {
+    ElMessage.error('没有找到该井的动态平衡结果 ID')
+    return
+  }
+
+  currentView.value = 'dynamic-balance'
+  currentViewNode.value = { ...node, loading: true }
+  try {
+    const resultRes = await dynamicBalanceApi.getResult(PROJECT_ID, GAS_RESERVOIR_ID, resultId)
+    const resultPayload = resultRes.data?.result ? resultRes.data : (resultRes.data?.data ?? resultRes.data)
+    activeNodeId.value = resultId
+    currentViewNode.value = {
+      ...node,
+      id: resultId,
+      label: '动态平衡',
+      type: NODETYPE.NodeType_DynamicMaterialBalanceMethodBlasingame,
+      wellName: targetWellName,
+      raw: resultPayload,
+      resultId
+    }
+  } catch (error) {
+    currentViewNode.value = { ...node, loading: false }
+    ElMessage.error(error.response?.data?.msg || error.message || '动态平衡结果加载失败')
+    console.error('动态平衡结果加载失败', error)
   }
 }
 
@@ -988,6 +1275,50 @@ const runFlowBalanceForSelectedWell = async () => {
     console.error('流动平衡计算失败', error)
   } finally {
     flowBalanceRunning.value = false
+  }
+}
+
+const runDynamicBalanceForSelectedWell = async () => {
+  const targetWellName = selectedWellName.value
+  if (!targetWellName) {
+    ElMessage.warning('请先在左侧选择一口井')
+    return
+  }
+  if (dynamicBalanceRunning.value) return
+
+  dynamicBalanceRunning.value = true
+  try {
+    await dynamicBalanceApi.calc({
+      gasReservoirId: Number(GAS_RESERVOIR_ID),
+      projectId: Number(PROJECT_ID),
+      wellNames: [targetWellName],
+      unstableFlowPeriodLength: 180,
+      minimumWaterGasRatio: 0.0602,
+      dataSize: 300
+    })
+
+    ElMessage.info(`${targetWellName} 动态平衡计算中，请稍候...`)
+    const { rootNode, resultNode } = await getDynamicBalanceNodeOnce(targetWellName)
+    if (!resultNode?.nodeId) {
+      throw new Error('动态平衡计算失败，未生成分析结果节点')
+    }
+
+    applyMaterialBalanceNodes(rootNode)
+    const treeNode = {
+      id: resultNode.nodeId,
+      label: '动态平衡',
+      type: NODETYPE.NodeType_DynamicMaterialBalanceMethodBlasingame,
+      wellName: targetWellName,
+      raw: resultNode
+    }
+    await openDynamicBalanceNode(treeNode)
+    ElMessage.success(`${targetWellName} 动态平衡计算完成`)
+  } catch (error) {
+    const message = error.response?.data?.msg || error.response?.data?.message || error.message
+    ElMessage.error(message || '动态平衡计算失败')
+    console.error('动态平衡计算失败', error)
+  } finally {
+    dynamicBalanceRunning.value = false
   }
 }
 
@@ -1119,6 +1450,146 @@ const runNpiForSelectedWell = async () => {
   }
 }
 
+const runWattenbargerForSelectedWell = async () => {
+  const targetWellName = selectedWellName.value
+  if (!targetWellName) {
+    ElMessage.warning('请先在左侧选择一口井')
+    return
+  }
+  if (typicalCurveRunning.value) return
+  typicalCurveRunning.value = true
+  try {
+    await typicalCurveApi.fitting({
+      gasReservoirId: Number(GAS_RESERVOIR_ID),
+      projectId: Number(PROJECT_ID),
+      wellNames: [targetWellName],
+      fittingType: 5,
+      isSkipFitting: false,
+      dataSize: 300,
+      fineScanDataSize: 30,
+      initScanDataSize: 10,
+      minimumWaterGasRatio: 0.0602
+    })
+    ElMessage.info(`${targetWellName} Wattenbarger计算中，请稍候...`)
+    let rootNode = null
+    let resultNode = null
+    const result = await getWattenbargerNodeOnce(targetWellName, 1500)
+    rootNode = result.rootNode
+    resultNode = result.wattenbargerNode
+    //关掉接口轮询，一旦没有结果返回 直接报错
+    // for (let i = 0; i < 20; i++) {
+    //   const result = await getWattenbargerNodeOnce(targetWellName, 1500)
+    //   rootNode = result.rootNode
+    //   resultNode = result.wattenbargerNode
+    //   if (resultNode) break
+    // }
+    if (!resultNode) {ElMessage.warning(`${targetWellName}井Wattenbarger结果不存在`)
+      return
+    }
+
+    applyTypicalCurveNodes(rootNode)
+
+    const treeNode = addWattenbargerNode(targetWellName, {
+      ...resultNode,
+      nodeType: NODETYPE.NodeType_TypicalCurveWattenbarger,
+      nodeTitle: 'Wattenbarger'
+    })
+    const nodeId = resultNode.nodeId || resultNode.id
+    const resultRes = await typicalCurveApi.getResult(PROJECT_ID, GAS_RESERVOIR_ID, nodeId)
+
+    const viewNode = {
+      id: nodeId,
+      label: 'Wattenbarger',
+      type: resultNode?.nodeType || resultNode?.type || NODETYPE.NodeType_TypicalCurveWattenbarger,
+      wellName: targetWellName,
+      raw: normalizePayload(resultRes),
+      treeNode: resultNode
+    }
+
+    activeNodeId.value = viewNode.id
+    currentView.value = 'wattenbarger'
+    currentViewNode.value = viewNode
+    activeNode.value = treeNode || viewNode
+    ElMessage.success(`${targetWellName} Wattenbarger计算完成`)
+  } catch (error) {
+    ElMessage.error(error.message || 'Wattenbarger计算失败')
+    console.error('Wattenbarger计算失败', error)
+  } finally {
+    typicalCurveRunning.value = false
+  }
+}
+
+const runAGForSelectedWell = async () => {
+  const targetWellName = selectedWellName.value
+
+  if (!targetWellName) {
+    ElMessage.warning('请先在左侧选择一口井')
+    return
+  }
+
+  if (typicalCurveRunning.value) return
+
+  typicalCurveRunning.value = true
+  try {
+    await typicalCurveApi.fitting({
+      gasReservoirId: Number(GAS_RESERVOIR_ID),
+      projectId: Number(PROJECT_ID),
+      wellNames: [targetWellName],
+      fittingType: 2,
+      isSkipFitting: false,
+      dataSize: 300,
+      fineScanDataSize: 30,
+      initScanDataSize: 10,
+      minimumWaterGasRatio: 0.0602
+    })
+
+        ElMessage.info(`${targetWellName} AG计算中，请稍候...`)
+
+    let rootNode = null
+    let agNode = null
+    for (let i = 0; i < 20; i++) {
+      const result = await getAGNodeOnce(targetWellName, 1500)
+      rootNode = result.rootNode
+      agNode = result.agNode
+      if (agNode) break
+    }
+
+    if (!agNode) {
+      throw new Error(AG_FITTING_REGRESSION_ERROR)
+    }
+
+    applyTypicalCurveNodes(rootNode)
+
+    const nodeId = agNode?.nodeId || agNode?.id
+    addAGNode(targetWellName, {
+      ...agNode,
+      nodeType: NODETYPE.NodeType_TypicalCurveAG,
+      nodeTitle: 'AG'
+    })
+
+    const resultRes = await typicalCurveApi.getResult(PROJECT_ID, GAS_RESERVOIR_ID, nodeId)
+    const result = normalizePayload(resultRes)
+
+    const viewNode = {
+      id: nodeId || `ag-${targetWellName}`,
+      label: 'AG',
+      type: NODETYPE.NodeType_TypicalCurveAG,
+      wellName: targetWellName,
+      raw: result
+    }
+
+    activeNodeId.value = viewNode.id
+    currentView.value = 'Agarwal-Gardner'
+    currentViewNode.value = viewNode
+    ElMessage.success(`${targetWellName} AG计算完成`)
+  } catch (error) {
+    ElMessage.error(error.message || 'AG计算失败')
+    console.error('AG计算失败', error)
+  } finally {
+    typicalCurveRunning.value = false
+  }
+}
+
 
 const openBlasingameNode = async (node) => {
   const targetWellName = node?.wellName || selectedWellName.value
@@ -1240,6 +1711,87 @@ const refreshFlowBalanceNodes = async () => {
   }
 }
 
+const openWattenbargerNode = async (node) => {
+  const targetWellName = node?.wellName || selectedWellName.value
+
+  if (!targetWellName) {
+    ElMessage.warning('请先在左侧选择一口井')
+    return
+  }
+
+  currentView.value = 'wattenbarger'
+  currentViewNode.value = node
+
+  try {
+    const nodeRes = await nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, NODETYPE.NodeType_ProductivityInstabilityAnalysis)
+    const rootNode = nodeRes?.data?.node
+    applyTypicalCurveNodes(rootNode)
+
+    const wattenbargerNode = findWattenbargerNodeByWell(rootNode, targetWellName) || node?.raw || node
+    const nodeId = wattenbargerNode?.nodeId || wattenbargerNode?.id
+
+    if (!nodeId) {
+      throw new Error('没有找到 Wattenbarger 对应的 nodeId')
+    }
+
+    const resultRes = await typicalCurveApi.getResult(PROJECT_ID, GAS_RESERVOIR_ID, nodeId)
+    const result = normalizePayload(resultRes)
+
+    activeNodeId.value = nodeId
+    currentViewNode.value = {
+      ...node,
+      id: nodeId,
+      label: 'Wattenbarger',
+      type: NODETYPE.NodeType_TypicalCurveWattenbarger,
+      wellName: targetWellName,
+      raw: result,
+      treeNode: wattenbargerNode
+    }
+  } catch (error) {
+    ElMessage.error(error.message || 'Wattenbarger结果加载失败')
+    console.error('Wattenbarger结果加载失败', error)
+  }
+}
+
+const openAGNode = async (node) => {
+  const targetWellName = node?.wellName || selectedWellName.value
+  if (!targetWellName) {
+    ElMessage.warning('请先在左侧选择一口井')
+    return
+  }
+  currentView.value = 'Agarwal-Gardner'
+  currentViewNode.value = node
+  try {
+    const nodeRes = await nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, NODETYPE.NodeType_ProductivityInstabilityAnalysis)
+    const rootNode = nodeRes?.data?.node
+    applyTypicalCurveNodes(rootNode)
+
+    const agNode = findAGNodeByWell(rootNode, targetWellName) || node?.raw || node
+    const nodeId = agNode?.nodeId || agNode?.id
+
+    if (!nodeId) {
+      throw new Error('没有找到 AG 对应的 nodeId')
+    }
+
+    const resultRes = await typicalCurveApi.getResult(PROJECT_ID, GAS_RESERVOIR_ID, nodeId)
+    const result = normalizePayload(resultRes)
+
+    activeNodeId.value = nodeId
+    currentViewNode.value = {
+      ...node,
+      id: nodeId,
+      label: 'AG',
+      type: NODETYPE.NodeType_TypicalCurveAG,
+      wellName: targetWellName,
+      raw: result,
+      treeNode: agNode
+    }
+  } catch (error) {
+    ElMessage.error(error.message || 'AG结果加载失败')
+    console.error('AG结果加载失败', error)
+  }
+}
+
 const initTree = async () => {
   await refreshProjectTree()
   await refreshWaterInvasionNodes()
@@ -1249,7 +1801,40 @@ const initTree = async () => {
   await refreshFlowBalanceNodes()
 }
 
+const closeTreeContextMenu = () => {
+  treeContextMenu.value.visible = false
+}
+
+const handleNodeContextMenu = (node, event) => {
+  if (!isTreeContextMenuNode(node)) {
+    closeTreeContextMenu()
+    return
+  }
+
+  const menuWidth = 190
+  const menuHeight = 42
+  const x = Math.min(event.clientX, window.innerWidth - menuWidth - 8)
+  const y = Math.min(event.clientY, window.innerHeight - menuHeight - 8)
+
+  treeContextMenu.value = {
+    visible: true,
+    x: Math.max(8, x),
+    y: Math.max(8, y),
+    node
+  }
+}
+
+const handleDeleteContextNode = () => {
+  const node = treeContextMenu.value.node
+  closeTreeContextMenu()
+
+  if (!node) return
+
+  ElMessage.info(`${treeContextMenuLabel.value}：删除接口待确认`)
+}
+
 const handleSelect = (node) => { // 点击左侧树节点
+  closeTreeContextMenu()
   const isWellMenuGroup = WELL_GROUPS.some(group => group.id === node.type)
   const nodeWellName = node.wellName || (node.type === NODETYPE.NodeType_Well ? node.label : '')
 
@@ -1277,9 +1862,14 @@ const handleSelect = (node) => { // 点击左侧树节点
     return
   }
 
-  if (FLOW_BALANCE_NODE_TYPES.has(Number(node.type))) {
+if (FLOW_BALANCE_NODE_TYPES.has(Number(node.type))) {
     currentView.value = 'flow-balance'
     currentViewNode.value = node
+    return
+  }
+
+  if (node.type === NODETYPE.NodeType_DynamicMaterialBalanceMethodBlasingame) {
+    openDynamicBalanceNode(node)
     return
   }
 
@@ -1293,9 +1883,12 @@ const handleSelect = (node) => { // 点击左侧树节点
     return
   }
 
-  if (node.type === NODETYPE.NodeType_VerticalWellTypicalCurveWb) {
-    currentView.value = 'wattenbarger'
-    currentViewNode.value = node
+  if (node.type === NODETYPE.NodeType_TypicalCurveWattenbarger) {
+    openWattenbargerNode(node)
+    return
+  }
+  if (node.type === NODETYPE.NodeType_TypicalCurveAG) {
+    openAGNode(node)
     return
   }
 
@@ -1323,47 +1916,13 @@ const handleCommand = ({ group, name }) => { // 接收顶部菜单栏的点击�
       runNpiForSelectedWell()
       break
     case 'Wattenbarger':
-      if (!selectedWellName.value) {
-        ElMessage.warning('请先在左侧选择一口井')
-        return
-      }
-      currentView.value = 'wattenbarger'
-      currentViewNode.value = {
-        id: `wb-${selectedWellName.value}`,
-        label: 'Wattenbarger',
-        type: NODETYPE.NodeType_VerticalWellTypicalCurveWb,
-        wellName: selectedWellName.value,
-        raw: {}
-      }
-      activeNodeId.value = currentViewNode.value.id
+      runWattenbargerForSelectedWell()
+      break
+    case 'AG':
+      runAGForSelectedWell()
       break
     case '动态平衡':
-      if (!selectedWellName.value) {
-        ElMessage.warning('请先在左侧选择一口井')
-        return
-      }
-      currentView.value = 'dynamic-balance'
-      currentViewNode.value = {
-        id: `db-${selectedWellName.value}`,
-        label: '动态平衡',
-        wellName: selectedWellName.value,
-        raw: {}
-      }
-      activeNodeId.value = currentViewNode.value.id
-      break
-    case '动态平衡':
-      if (!selectedWellName.value) {
-        ElMessage.warning('请先在左侧选择一口井')
-        return
-      }
-      currentView.value = 'dynamic-balance'
-      currentViewNode.value = {
-        id: `db-${selectedWellName.value}`,
-        label: '动态平衡',
-        wellName: selectedWellName.value,
-        raw: {}
-      }
-      activeNodeId.value = currentViewNode.value.id
+      runDynamicBalanceForSelectedWell()
       break
     default:
       ElMessage.success(`[${group}] ${name}`)
@@ -1378,7 +1937,16 @@ const handleRefreshTree = () => {
   refreshFlowBalanceNodes()
 }
 
-onMounted(initTree)
+onMounted(() => {
+  initTree()
+  window.addEventListener('click', closeTreeContextMenu)
+  window.addEventListener('resize', closeTreeContextMenu)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('click', closeTreeContextMenu)
+  window.removeEventListener('resize', closeTreeContextMenu)
+})
 </script>
 
 <template>
@@ -1389,24 +1957,24 @@ onMounted(initTree)
 
     <div class="ipr-main">
       <!--      左侧菜单栏-->
-      <aside class="side-panel">
-        <div class="side-search">
-          <el-input
-              v-model="wellKeyword"
-              size="small"
-              clearable
-              placeholder="搜索井名"
-          />
+      <aside class="side-panel" :class="{ collapsed: sideTreeCollapsed }">
+        <button v-if="sideTreeCollapsed" class="side-collapsed-tab" type="button"
+          title="&#x5C55;&#x5F00;&#x76EE;&#x5F55;" @click="toggleSideTree">
+          &#x76EE;&#x5F55;
+        </button>
+
+        <div v-show="!sideTreeCollapsed" class="side-search">
+          <el-input v-model="wellKeyword" size="small" clearable placeholder="&#x641C;&#x7D22;&#x4E95;&#x540D;" />
+          <button class="side-toggle" type="button" title="&#x6536;&#x8D77;&#x76EE;&#x5F55;" @click="toggleSideTree">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="#777">
+              <path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z" />
+            </svg>
+          </button>
         </div>
 
-        <div class="side-tree">
-          <TreeNode
-              v-for="node in filteredTreeData"
-              :key="node.id"
-              :node="node"
-              :active-id="activeNodeId"
-              @select="handleSelect"
-          />
+        <div v-show="!sideTreeCollapsed" class="side-tree">
+          <TreeNode v-for="node in filteredTreeData" :key="node.id" :node="node" :active-id="activeNodeId"
+            @select="handleSelect" />
         </div>
       </aside>
 
@@ -1462,8 +2030,29 @@ onMounted(initTree)
             :project-id="PROJECT_ID"
             :gas-reservoir-id="GAS_RESERVOIR_ID"
         />
+        <AGContent
+            v-if="currentView === 'Agarwal-Gardner'"
+            :node="currentViewNode"
+            :project-id="PROJECT_ID"
+            :gas-reservoir-id="GAS_RESERVOIR_ID"
+        />
       </main>
     </div>
+
+    <Teleport to="body">
+      <div
+          v-if="treeContextMenu.visible"
+          class="tree-context-menu"
+          :style="{ left: `${treeContextMenu.x}px`, top: `${treeContextMenu.y}px` }"
+          @click.stop
+          @contextmenu.prevent
+      >
+        <button class="tree-context-menu-item" type="button" @click="handleDeleteContextNode">
+          <el-icon class="tree-context-menu-icon"><Delete /></el-icon>
+          <span>{{ treeContextMenuLabel }}</span>
+        </button>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -1488,21 +2077,73 @@ $border: #e0e0e0;
 
 .side-panel {
   width: 210px;
+  min-width: 210px;
   display: flex;
   flex-direction: column;
   border-right: 1px solid $border;
   background-color: #fff;
+  position: relative;
+  transition: width 0.16s ease, min-width 0.16s ease;
+
+  &.collapsed {
+    width: 22px;
+    min-width: 22px;
+    border-right: 0;
+  }
 
   .side-search {
     padding: 6px 6px 4px;
     border-bottom: 1px solid $border;
     flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 4px;
   }
 
   .side-tree {
     flex: 1;
     overflow-y: auto;
     padding: 6px 4px;
+  }
+}
+
+.side-toggle {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: 2px;
+  flex-shrink: 0;
+
+  &:hover {
+    background: #eef4ff;
+  }
+}
+
+.side-collapsed-tab {
+  width: 22px;
+  height: 54px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #333;
+  cursor: pointer;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  font-size: 13px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  &:hover {
+    background: #eef4ff;
+    color: #1677ff;
   }
 }
 
@@ -1513,5 +2154,41 @@ $border: #e0e0e0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+:global(.tree-context-menu) {
+  position: fixed;
+  z-index: 4000;
+  min-width: 178px;
+  padding: 6px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.18);
+}
+
+:global(.tree-context-menu-item) {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #333;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 32px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+:global(.tree-context-menu-item:hover) {
+  background: #f5f7fa;
+}
+
+:global(.tree-context-menu-icon) {
+  color: #d93025;
+  font-size: 16px;
 }
 </style>

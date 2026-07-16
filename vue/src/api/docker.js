@@ -137,6 +137,18 @@ export const flowBalanceApi = {
   getNodeResult: (nodeId) => flowBalanceRequest.get(`/results/${nodeId}`)
 }
 
+/* ===== 动态储量 - 动态物质平衡 ===== */
+export const dynamicBalanceApi = {
+  calc: (data) =>
+    dockerRequest.post('/projectanalysis/dynamicoriginalgasInplace/dmb/calc', data),
+
+  getResult: (projectId, gasReservoirId, resultId, options = {}) =>
+    dockerRequest.get(
+      `/projectanalysis/dynamicoriginalgasInplace/result/${projectId}/${gasReservoirId}/${encodeURIComponent(resultId)}`,
+      options
+    )
+}
+
 /* ===== 产量不稳定分析 - 典型曲线 ===== */
 export const typicalCurveApi = {
   fitting: (data) =>

@@ -1,11 +1,8 @@
-﻿<script setup>
+<script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import agGraph from '@/constants/typeCurves/agarwalGardner.json'
+import fissureagGraph from '@/constants/typeCurves/fissureAgarwalGardner.json'
 import * as echarts from 'echarts'
-import { typicalCurveApi } from '@/api/docker'
-import blasingameGraph from '@/constants/typeCurves/blasingamegraph.json'
-import fissureBlasingameGraph from '@/constants/typeCurves/fissureBlasingamegraph.json'
-import horizontalBlasingameGraph from '@/constants/typeCurves/HorizontalBlasingamegraph.json'
-import horizontalFracturedBlasingameGraph from '@/constants/typeCurves/HorizontalFracturedBlasingamegraph.json'
 
 const props = defineProps({
   node: Object,
@@ -51,7 +48,7 @@ const currentWellName = computed(() =>
     props.node?.wellName || raw.value?.wellName || input.value?.wellName || input.value?.wellNames?.[0] || ''
 )
 const chartTabTitle = computed(() =>
-    `诊断曲线-Blasingame-${currentWellName.value || '当前井'}-分析结果`
+    `诊断曲线-ag-${currentWellName.value || '当前井'}-分析结果`
 )
 
 const PRODUCTION_TEMPLATE_COLUMNS = [
@@ -64,14 +61,10 @@ const PRODUCTION_TEMPLATE_COLUMNS = [
 
 const asArray = (value) => Array.isArray(value) ? value : []
 
-const BLASINGAME_BASELINE_FILES = {
+const AG_BASELINE_FILES = {
   vertical: {
-    normal: blasingameGraph,
-    fractured: fissureBlasingameGraph
-  },
-  horizontal: {
-    normal: horizontalBlasingameGraph,
-    fractured: horizontalFracturedBlasingameGraph
+    normal: agGraph,
+    fractured: fissureagGraph
   }
 }
 
@@ -137,7 +130,7 @@ const collectCandidateArrays = (source, keys) => {
 }
 
 const records = computed(() => {
-  const arrays = collectCandidateArrays(raw.value, ['data', 'items', 'productionData', 'rows', 'records'])
+    const arrays = collectCandidateArrays(raw.value, ['data', 'items', 'productionData', 'rows', 'records', 'inputItems'])
   return arrays.find(item => item.length && !item[0]?.data && !item[0]?.items) || []
 })
 
@@ -167,13 +160,13 @@ const getMethodValue = (methods, key) => {
 
 const gasType = computed(() => methodLabel(inputValue(['gasType'], 2), ['', '', '干气'], '干气'))
 const modificationMethod = computed(() =>
-    getMethodValue(MODIFICATION_METHODS, 'modificationMethod') || 'Wichert-Aziz 修正方法'
+    methodLabel(inputValue(['modificationMethod'], 0), ['Wichert-Aziz 修正方法', 'Carr-Kobayashi-Burrous 修正方法'], 'Wichert-Aziz 修正方法')
 )
 const deviationMethod = computed(() =>
-    getMethodValue(DEVIATION_METHODS, 'deviationFactorMethod') || 'Dranchuk-Abu-Kassem 方法'
+    methodLabel(inputValue(['deviationFactorMethod'], 0), ['Dranchuk-Abu-Kassem 方法', 'Dranchuk-Purvis-Robinson 方法', 'Hall-Yarborough 方法'], 'Dranchuk-Abu-Kassem 方法')
 )
 const viscosityMethod = computed(() =>
-    getMethodValue(VISCOSITY_METHODS, 'viscosityMethod') || 'Lee-Gonzalez-Eakin 方法'
+    methodLabel(inputValue(['viscosityMethod'], 0), ['Lee-Gonzalez-Eakin 方法', 'Carr-Kobayashi-Burrous 方法', 'Sutton 方法'], 'Lee-Gonzalez-Eakin 方法')
 )
 const fittingMode = computed(() => {
   const isSkip = inputValue(['isSkipFitting'], false)
@@ -217,7 +210,7 @@ const inputFields = computed(() => ({
 
 const outputFields = computed(() => [
   { label: '渗透率(mD)', value: resultValue(['permeability'], '') },
-  { label: '裂缝半长(m)', value: resultValue(['effectiveFractureHalfLength'], '') },
+   { label: '裂缝半长(m)', value: resultValue(['effectiveFractureHalfLength'], '') },
   { label: '表皮系数(dless)', value: resultValue(['skinFactor'], '') },
   { label: '动态地质储量(10⁸m³)', value: resultValue(['originalGasVolume'], '') },
   { label: '井控面积(km²)', value: resultValue(['wellControlArea'], '') },
@@ -226,9 +219,9 @@ const outputFields = computed(() => [
 const hasOutputResults = computed(() => outputFields.value.length > 0)
 
 const legendItems = computed(() => [
-  { name: 'qDd-实际数据', color: '#7ee000' },
-  { name: 'qDdi-实际数据', color: '#00a020' },
-  { name: 'qDdid-实际数据', color: '#e60000' }
+  { name: 'qD-实际数据', color: '#7ee000' },
+  { name: '1/DER-实际数据', color: '#00a020' },
+  { name: '1/DERI-实际数据', color: '#e60000' }
 ])
 
 const legendStyle = computed(() => {
@@ -271,13 +264,30 @@ const tableRows = computed(() => {
       : extractOutputItems(raw.value)
 
   return rows.map((item, index) => ({
-    index: index + 1,
-    pseudotime: item.pseudotime ?? '',
-    regularizedProduction: item.regularizedProduction ?? '',
-    regularizedProductionIntegral: item.regularizedProductionIntegral ?? '',
-    regularizedProductionIntegralDerivative: item.regularizedProductionIntegralDerivative ?? ''
+   index: index + 1,
+      pseudotime: item.pseudotime ?? item.tcaDd ?? item.tCaDd ?? item.xValue ?? '',
+      regularizedProduction: item.regularizedProduction ?? item.qDd ?? item.qdd ?? '',
+      regularizedPressureDerivativeReciprocal: item.regularizedPressureDerivativeReciprocal ?? item.DER ?? '',
+      regularizedPressureIntegralDerivativeReciprocal: item.regularizedPressureIntegralDerivativeReciprocal ?? item.DERd ?? ''
   }))
 })
+
+//   return [
+//     ['2004-04-21', 27.5262, 0.0013, 0.0004],
+//     ['2004-04-22', 31.1019, 0.0054, 0.0013],
+//     ['2004-04-23', 32.6322, 0.0093, 0.0013],
+//     ['2004-04-24', 30.2160, 0.0098, 0.0014],
+//     ['2004-04-25', 29.4892, 0.0110, 0.0016],
+//     ['2004-04-26', 31.1989, 0.0143, 0.0019],
+//     ['2004-04-27', 31.6176, 0.0178, 0.0024]
+//   ].map(([date, formationPressure, gasProduction, waterProduction], index) => ({
+//     index: index + 1,
+//     date,
+//     formationPressure,
+//     gasProduction,
+//     waterProduction
+//   }))
+// })
 
 const getPoint = (item, xKeys, yKeys) => {
   const x = getValue(item, xKeys, null)
@@ -304,17 +314,10 @@ const normalizeBoolean = (value) => {
   return ['true', '1', 'yes', 'y', '是', '裂压', '压裂'].includes(text)
 }
 
-const isHorizontalWellType = (value) => {
-  const text = String(value ?? '').trim().toLowerCase()
-  return ['3', 'horizontal', 'horizontalwell', '水平井'].includes(text) || text.includes('水平')
-}
-
 const selectedBaselinePayload = computed(() => {
-  const wellType = analysis.value?.wellType ?? input.value?.wellType
   const isFractured = analysis.value?.isFractured ?? input.value?.isFractured
-  const wellGroup = isHorizontalWellType(wellType) ? 'horizontal' : 'vertical'
   const fractureGroup = normalizeBoolean(isFractured) ? 'fractured' : 'normal'
-  return BLASINGAME_BASELINE_FILES[wellGroup][fractureGroup]
+  return AG_BASELINE_FILES.vertical[fractureGroup]
 })
 
 const normalizeBaselineGroup = (group, groupName = '') => {
@@ -376,14 +379,17 @@ const actualSeries = computed(() => {
   const qDd = []
   const qDdi = []
   const qDdid = []
+  console.log('AG chartSeriesItems:', chartSeriesItems.value.length, 'items')
+  console.log('AG records:', records.value.length, 'records')
 
   chartSeriesItems.value.forEach((item, index) => {
     const name = getSeriesName(item, index)
     const field = String(item?.yAxisField || item?.field || '').toLowerCase()
     const points = toSeriesPoints(item)
-    if (/qddid/i.test(name) || field === 'qddid') qDdid.push(...points)
-    else if (/qddi/i.test(name) || field === 'qddi') qDdi.push(...points)
-    else if (/qdd/i.test(name) || field === 'qdd') qDd.push(...points)
+        console.log(`AG item[${index}]: name="${name}", field="${field}", points=${points.length}`)
+        if (/qddid|1\/DERI/i.test(name) || field === 'qddid') qDdid.push(...points)
+    else if (/qddi|1\/DER[^I]?$/i.test(name) || field === 'qddi') qDdi.push(...points)
+    else if (/qdd|^qD$/i.test(name) || field === 'qdd') qDd.push(...points)
   })
 
   records.value.forEach(item => {
@@ -396,7 +402,9 @@ const actualSeries = computed(() => {
     if (qDdidPoint) qDdid.push(qDdidPoint)
   })
 
+  console.log('AG actualSeries result: qDd=' + qDd.length + ', qDdi=' + qDdi.length + ', qDdid=' + qDdid.length)
   return { qDd, qDdi, qDdid }
+  
 })
 
 const typeCurves = computed(() => {
@@ -425,8 +433,7 @@ const parsedTypeCurves = computed(() =>
         .map((item, index) => {
           const name = getSeriesName(item, index)
           const field = String(item?.yAxisField || item?.field || '').toLowerCase()
-          const isActual = /实际|actual|qdd/i.test(name) || ['qdd', 'qddi', 'qddid'].includes(field)
-          if (isActual) return null
+                    const isActual = /实际|actual|qdd|^qD$|1\/DER/i.test(name) || ['qdd', 'qddi', 'qddid'].includes(field)
           return {
             name,
             data: toSeriesPoints(item)
@@ -439,7 +446,7 @@ function renderChart() {
   if (!chart) return
 
   const series = [
-    ...baselineTypeCurves.value.map((item, index) => ({
+     ...baselineTypeCurves.value.map((item, index) => ({
       name: item.name,
       type: 'line',
       data: item.data,
@@ -452,31 +459,22 @@ function renderChart() {
         color: BASELINE_COLORS[index % BASELINE_COLORS.length]
       }
     })),
-    ...parsedTypeCurves.value.map((item, index) => ({
-      name: item.name,
-      type: 'line',
-      data: item.data,
-      showSymbol: false,
-      smooth: true,
-      z: 2,
-      lineStyle: { width: 1, color: BASELINE_COLORS[(index + baselineTypeCurves.value.length) % BASELINE_COLORS.length] }
-    })),
     {
-      name: 'qDd-实际数据',
+      name: 'qD-实际数据',
       type: 'scatter',
       data: actualSeries.value.qDd,
       symbolSize: 6,
       itemStyle: { color: '#7ee000' }
     },
     {
-      name: 'qDdi-实际数据',
+      name: '1/DER-实际数据',
       type: 'scatter',
       data: actualSeries.value.qDdi,
       symbolSize: 6,
       itemStyle: { color: '#00a020' }
     },
     {
-      name: 'qDdid-实际数据',
+      name: '1/DERI-实际数据',
       type: 'scatter',
       data: actualSeries.value.qDdid,
       symbolSize: 6,
@@ -495,7 +493,7 @@ function renderChart() {
   chart.setOption({
     animation: false,
     title: {
-      text: 'Blasingame',
+      text: 'Agarwal-Gardner',
       left: 'center',
       top: 8,
       textStyle: { color: '#333', fontSize: 14, fontWeight: 600 }
@@ -516,14 +514,14 @@ function renderChart() {
       top: 42,
       itemWidth: 10,
       itemHeight: 10,
-      data: ['qDd-实际数据', 'qDdi-实际数据', 'qDdid-实际数据']
+      data: ['qD-实际数据', '1/DER-实际数据', '1/DERI-实际数据']
     },
     grid: { left: 72, right: 52, top: 60, bottom: 58 },
     xAxis: {
       type: 'log',
-      min: 0.001,
+      min: 0.00001,
       max: 100,
-      name: 'tcaDd',
+      name: 'tcaDA',
       nameLocation: 'middle',
       nameGap: 34,
       axisPointer: {
@@ -538,9 +536,9 @@ function renderChart() {
     },
     yAxis: {
       type: 'log',
-      min: 0.01,
-      max: 10,
-      name: 'qDd,qDdi,qDdid',
+      min: 0.001,
+      max: 100,
+      name: 'qD,1/DER,1/DERI',
       nameLocation: 'middle',
       nameGap: 48,
       splitLine: { show: true, lineStyle: { color: '#dfe7f2' } },
@@ -669,7 +667,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="blasingame-wrap">
+  <div class="ag-wrap">
     <aside
         ref="paramsPanelEl"
         class="params-panel"
@@ -842,8 +840,8 @@ onBeforeUnmount(() => {
           <el-table-column prop="index" label="序号" width="76" sortable />
           <el-table-column prop="pseudotime" label="物质平衡拟时间" min-width="170" sortable />
           <el-table-column prop="regularizedProduction" label="重整产量(qDd)" min-width="170" sortable />
-          <el-table-column prop="regularizedProductionIntegral" label="重整产量积分(qDdi)" min-width="190" sortable />
-          <el-table-column prop="regularizedProductionIntegralDerivative" label="重整产量积分导数(qDdid)" min-width="220" sortable />
+          <el-table-column prop="regularizedPressureDerivativeReciprocal" label="重整压力导数的倒数(1/DER)" min-width="190" sortable />
+          <el-table-column prop="regularizedPressureIntegralDerivativeReciprocal" label="重整压力积分导数的倒数(1/DERI)" min-width="220" sortable />
         </el-table>
       </div>
 
@@ -860,7 +858,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style lang="scss" scoped>
-.blasingame-wrap {
+.ag-wrap {
   display: flex;
   height: 100%;
   background: #fff;
