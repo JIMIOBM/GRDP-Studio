@@ -75,9 +75,6 @@ const currentView = ref(null)  // currentView.value = 'water-invasion'，即确�
 const currentViewNode = ref(null)  // 传给右侧内容组件的节点对象
 const wellKeyword = ref('')
 const sideTreeCollapsed = ref(false)
-const sidePanelEl = ref(null)          // 侧边栏容器引用
-const sideTreeWidth = ref(230)         // 侧边栏默认宽度
-const resizingSideTree = ref(false)    // 是否正在拖拽
 const waterInvasionRunning = ref(false)  //用于判断水侵分析是否正在运行
 const analyticMethodRunning = ref(false)
 const materialBalanceRunning = ref(false)
@@ -98,33 +95,6 @@ const toggleSideTree = () => {
   sideTreeCollapsed.value = !sideTreeCollapsed.value
 }  //当前选中的井名
 
-function onSideTreeResize(event) {
-  if (!resizingSideTree.value) return
-  const left = sidePanelEl.value?.getBoundingClientRect().left || 0
-  sideTreeWidth.value = Math.max(230, Math.min(230, event.clientX - left))
-  // 拖拽过程中触发一次 window resize，让右侧内容区里的 ECharts 图表同步跟着重新布局
-  window.dispatchEvent(new Event('resize'))
-}
-
-function stopSideTreeResize() {
-  if (!resizingSideTree.value) return
-  resizingSideTree.value = false
-  document.body.style.cursor = ''
-  document.body.style.userSelect = ''
-  window.removeEventListener('mousemove', onSideTreeResize)
-  window.removeEventListener('mouseup', stopSideTreeResize)
-}
-
-function startSideTreeResize(event) {
-  if (sideTreeCollapsed.value) return
-  event.preventDefault()
-  resizingSideTree.value = true
-  document.body.style.cursor = 'col-resize'
-  document.body.style.userSelect = 'none'
-  window.addEventListener('mousemove', onSideTreeResize)
-  window.addEventListener('mouseup', stopSideTreeResize)
-}
-
 const filteredTreeData = computed(() => {   //搜索井名，控制左侧树搜索
   const keyword = wellKeyword.value.trim().toLowerCase()
   if (!keyword) return treeData.value
@@ -135,7 +105,7 @@ const filteredTreeData = computed(() => {   //搜索井名，控制左侧树搜�
     return {
       ...node,
       children: node.children.filter(well =>
-          String(well.label || '').toLowerCase().includes(keyword)
+        String(well.label || '').toLowerCase().includes(keyword)
       )
     }
   })
@@ -149,7 +119,7 @@ const toArray = (value) => { // 把数据统一变成数组
 }
 
 const getNodeName = (item) =>
-    item?.wellName || item?.nodeTitle || item?.name || item?.title || item?.label || item?.well_name || ''
+  item?.wellName || item?.nodeTitle || item?.name || item?.title || item?.label || item?.well_name || ''
 
 const getChildren = (item) => [
   ...toArray(item?.children),
@@ -232,8 +202,8 @@ const findBlasingameNodeByWell = (root, wellName) => {
     const nodeName = getNodeName(item)
     const nodeType = item?.nodeType ?? item?.type
     const nextWellName = nodeType === NODETYPE.NodeType_Well || nodeName === wellName
-        ? nodeName
-        : currentWellName
+      ? nodeName
+      : currentWellName
 
     if (nextWellName === wellName && isBlasingameNode(item)) {
       return item
@@ -259,8 +229,8 @@ const findNpiNodeByWell = (root, wellName) => {
     const nodeName = getNodeName(item)
     const nodeType = item?.nodeType ?? item?.type
     const nextWellName = nodeType === NODETYPE.NodeType_Well || nodeName === wellName
-        ? nodeName
-        : currentWellName
+      ? nodeName
+      : currentWellName
     if (nextWellName === wellName && isNpiNode(item)) return item
     for (const child of getChildren(item)) {
       const found = visit(child, nextWellName)
@@ -280,8 +250,8 @@ const findAGNodeByWell = (root, wellName) => {
     const nodeName = getNodeName(item)
     const nodeType = item?.nodeType ?? item?.type
     const nextWellName = nodeType === NODETYPE.NodeType_Well || nodeName === wellName
-        ? nodeName
-        : currentWellName
+      ? nodeName
+      : currentWellName
     if (nextWellName === wellName && isAGNode(item)) return item
     for (const child of getChildren(item)) {
       const found = visit(child, nextWellName)
@@ -301,8 +271,8 @@ const findWattenbargerNodeByWell = (root, wellName) => {
     const nodeName = getNodeName(item)
     const nodeType = item?.nodeType ?? item?.type
     const nextWellName = nodeType === NODETYPE.NodeType_Well || nodeName === wellName
-        ? nodeName
-        : currentWellName
+      ? nodeName
+      : currentWellName
     if (nextWellName === wellName && isWattenbargerNode(item)) {
       return item
     }
@@ -333,7 +303,7 @@ const createEmptyWell = (wellName, wellId) => ({ //创建一口空井
 
 const getWellGroup = () => treeData.value.find(node => node.id === 'g-well')
 const getAllWellNames = () =>
-    getWellGroup()?.children.map(item => item.wellName || item.label).filter(Boolean) || []
+  getWellGroup()?.children.map(item => item.wellName || item.label).filter(Boolean) || []
 
 const getSelectedAnalyticWellNames = () => {
   if (!selectedWellName.value) return []
@@ -404,7 +374,7 @@ const addBlasingameNode = (wellName, rawNode = {}) => {
 
   const parentId = `${wellItem.id}-diagnostic-curve`
   let diagnosticNode = inventoryGroup.children.find(item =>
-      item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve || item.label === '诊断曲线'
+    item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve || item.label === '诊断曲线'
   )
 
   if (!diagnosticNode) {
@@ -432,7 +402,7 @@ const addBlasingameNode = (wellName, rawNode = {}) => {
   }
 
   const existedIndex = diagnosticNode.children.findIndex(item =>
-      item.id === id || item.type === NODETYPE.NodeType_TypicalCurveBlasingame || item.label === 'Blasingame'
+    item.id === id || item.type === NODETYPE.NodeType_TypicalCurveBlasingame || item.label === 'Blasingame'
   )
   if (existedIndex >= 0) {
     diagnosticNode.children[existedIndex] = blasingameNode
@@ -450,7 +420,7 @@ const addNpiNode = (wellName, rawNode = {}) => {
 
   const parentId = `${wellItem.id}-diagnostic-curve`
   let diagnosticNode = inventoryGroup.children.find(item =>
-      item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve || item.label === '诊断曲线'
+    item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve || item.label === '诊断曲线'
   )
   if (!diagnosticNode) {
     diagnosticNode = {
@@ -475,7 +445,7 @@ const addNpiNode = (wellName, rawNode = {}) => {
     raw: rawNode
   }
   const existedIndex = diagnosticNode.children.findIndex(item =>
-      item.id === id || NPI_NODE_TYPES.has(item.type) || item.label === 'Normalized Pressure Integral' || item.label === 'NPI'
+    item.id === id || NPI_NODE_TYPES.has(item.type) || item.label === 'Normalized Pressure Integral' || item.label === 'NPI'
   )
   if (existedIndex >= 0) diagnosticNode.children[existedIndex] = npiNode
   else diagnosticNode.children.push(npiNode)
@@ -489,7 +459,7 @@ const addWattenbargerNode = (wellName, rawNode = {}) => {
 
   const parentId = `${wellItem.id}-diagnostic-curve`
   let diagnosticNode = inventoryGroup.children.find(item =>
-      item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve || item.label === '诊断曲线'
+    item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve || item.label === '诊断曲线'
   )
 
   if (!diagnosticNode) {
@@ -517,7 +487,7 @@ const addWattenbargerNode = (wellName, rawNode = {}) => {
   }
 
   const existedIndex = diagnosticNode.children.findIndex(item =>
-      item.id === id || item.type === NODETYPE.NodeType_TypicalCurveWattenbarger || item.label === 'Wattenbarger'
+    item.id === id || item.type === NODETYPE.NodeType_TypicalCurveWattenbarger || item.label === 'Wattenbarger'
   )
   if (existedIndex >= 0) {
     diagnosticNode.children[existedIndex] = wattenbargerNode
@@ -535,7 +505,7 @@ const addAGNode = (wellName, rawNode = {}) => {
 
   const parentId = `${wellItem.id}-diagnostic-curve`
   let diagnosticNode = inventoryGroup.children.find(item =>
-      item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve || item.label === '诊断曲线'
+    item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve || item.label === '诊断曲线'
   )
 
   if (!diagnosticNode) {
@@ -562,7 +532,7 @@ const addAGNode = (wellName, rawNode = {}) => {
   }
 
   const existedIndex = diagnosticNode.children.findIndex(item =>
-      item.id === id || item.type === NODETYPE.NodeType_TypicalCurveAG || item.label === 'AG'
+    item.id === id || item.type === NODETYPE.NodeType_TypicalCurveAG || item.label === 'AG'
   )
   if (existedIndex >= 0) {
     diagnosticNode.children[existedIndex] = agNode
@@ -682,7 +652,7 @@ const applyMaterialBalanceNodes = (node) => {
     })
 
     const dynamicNode = (wellNode.subNodes || []).find(item =>
-        (item.nodeType ?? item.type) === NODETYPE.NodeType_DynamicMaterialBalanceMethodBlasingame
+      (item.nodeType ?? item.type) === NODETYPE.NodeType_DynamicMaterialBalanceMethodBlasingame
     )
     if (dynamicNode?.nodeId) {
       addAnalysisNode(wellName, {
@@ -697,10 +667,10 @@ const applyMaterialBalanceNodes = (node) => {
 
 const findDynamicBalanceNode = (rootNode, wellName) => {
   const wellNode = (rootNode?.subNodes || []).find(item =>
-      item.nodeTitle === wellName || item.wellName === wellName
+    item.nodeTitle === wellName || item.wellName === wellName
   )
   return (wellNode?.subNodes || []).find(item =>
-      (item.nodeType ?? item.type) === NODETYPE.NodeType_DynamicMaterialBalanceMethodBlasingame
+    (item.nodeType ?? item.type) === NODETYPE.NodeType_DynamicMaterialBalanceMethodBlasingame
   )
 }
 
@@ -717,8 +687,8 @@ const ensureMaterialBalanceNodeForWell = (wellName, rawNode = {}) => {
 
   const targetGroup = wellItem?.children.find(item => item.type === 'well-control-inventory')
   return targetGroup?.children.find(item =>
-      item.type === NODETYPE.NodeType_DynamicOriginalGasInplace &&
-      item.wellName === wellName
+    item.type === NODETYPE.NodeType_DynamicOriginalGasInplace &&
+    item.wellName === wellName
   )
 }
 
@@ -730,7 +700,7 @@ const clearTypicalCurveNodes = () => {
     if (!inventoryGroup?.children?.length) return
 
     inventoryGroup.children = inventoryGroup.children.filter(item =>
-        item.type !== NODETYPE.NodeType_TypicalCurve
+      item.type !== NODETYPE.NodeType_TypicalCurve
     )
   })
 }
@@ -748,9 +718,9 @@ const applyTypicalCurveNodes = (node) => {
     const children = item?.subNodes ?? item?.children ?? []
     const nodeType = item?.nodeType ?? item?.type
     const nextInTypicalCurve = inTypicalCurve ||
-        nodeType === NODETYPE.NodeType_TypicalCurve ||
-        nodeName === '典型曲线' ||
-        nodeName === '诊断曲线'
+      nodeType === NODETYPE.NodeType_TypicalCurve ||
+      nodeName === '典型曲线' ||
+      nodeName === '诊断曲线'
 
     if (wellName && nextInTypicalCurve && isBlasingameNode(item)) {
       addBlasingameNode(wellName, {
@@ -902,7 +872,7 @@ const getMaterialBalanceNodeOnce = async (wellName, delayMs = 1200) => {
   if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs))
   const rootNode = await fetchMaterialBalanceNode()
   const wellNode = (rootNode?.subNodes || []).find(item =>
-      item.nodeTitle === wellName || item.wellName === wellName
+    item.nodeTitle === wellName || item.wellName === wellName
   )
   const resultNode = (wellNode?.subNodes || []).find(item => {
     const type = item.nodeType ?? item.type
@@ -1423,7 +1393,7 @@ const runAGForSelectedWell = async () => {
       minimumWaterGasRatio: 0.0602
     })
 
-    ElMessage.info(`${targetWellName} AG计算中，请稍候...`)
+        ElMessage.info(`${targetWellName} AG计算中，请稍候...`)
 
     let rootNode = null
     let agNode = null
@@ -1770,7 +1740,6 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('click', closeTreeContextMenu)
   window.removeEventListener('resize', closeTreeContextMenu)
-  stopSideTreeResize()
 })
 </script>
 
@@ -1782,14 +1751,9 @@ onBeforeUnmount(() => {
 
     <div class="ipr-main">
       <!--      左侧菜单栏-->
-      <aside
-          ref="sidePanelEl"
-          class="side-panel"
-          :class="{ collapsed: sideTreeCollapsed, resizing: resizingSideTree }"
-          :style="{ width: sideTreeCollapsed ? '22px' : `${sideTreeWidth}px`, minWidth: sideTreeCollapsed ? '22px' : `${sideTreeWidth}px` }"
-      >
+      <aside class="side-panel" :class="{ collapsed: sideTreeCollapsed }">
         <button v-if="sideTreeCollapsed" class="side-collapsed-tab" type="button"
-                title="&#x5C55;&#x5F00;&#x76EE;&#x5F55;" @click="toggleSideTree">
+          title="&#x5C55;&#x5F00;&#x76EE;&#x5F55;" @click="toggleSideTree">
           &#x76EE;&#x5F55;
         </button>
 
@@ -1804,30 +1768,30 @@ onBeforeUnmount(() => {
 
         <div v-show="!sideTreeCollapsed" class="side-tree">
           <TreeNode v-for="node in filteredTreeData" :key="node.id" :node="node" :active-id="activeNodeId"
-                    @select="handleSelect" />
+            @select="handleSelect" />
         </div>
-
-        <div v-if="!sideTreeCollapsed" class="side-panel-resizer" @mousedown="startSideTreeResize"></div>
       </aside>
 
       <!--     右侧的主要内容区域-->
       <main class="content-area">
         <WaterInvasionContent v-if="currentView === 'water-invasion'" :node="currentViewNode" :project-id="PROJECT_ID"
-                              :gas-reservoir-id="GAS_RESERVOIR_ID" @refresh-tree="handleRefreshTree" />
+          :gas-reservoir-id="GAS_RESERVOIR_ID" @refresh-tree="handleRefreshTree" />
         <AnalyticMethodContent v-if="currentView === 'analytic-method'" :node="currentViewNode" :project-id="PROJECT_ID"
-                               :gas-reservoir-id="GAS_RESERVOIR_ID" />
+          :gas-reservoir-id="GAS_RESERVOIR_ID" />
         <MaterialBalanceContent v-if="currentView === 'material-balance'" :node="currentViewNode"
-                                :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" @refresh-tree="handleRefreshTree" />
+          :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" @refresh-tree="handleRefreshTree" />
+        <FlowBalanceContent v-if="currentView === 'flow-balance'" :node="currentViewNode"
+          :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID"/>
         <BlasingameContent v-if="currentView === 'blasingame'" :node="currentViewNode" :project-id="PROJECT_ID"
-                           :gas-reservoir-id="GAS_RESERVOIR_ID" />
+          :gas-reservoir-id="GAS_RESERVOIR_ID" />
         <NpiContent v-if="currentView === 'npi'" :node="currentViewNode" :project-id="PROJECT_ID"
-                    :gas-reservoir-id="GAS_RESERVOIR_ID" />
+          :gas-reservoir-id="GAS_RESERVOIR_ID" />
         <WattenbargerContent v-if="currentView === 'wattenbarger'" :node="currentViewNode" :project-id="PROJECT_ID"
-                             :gas-reservoir-id="GAS_RESERVOIR_ID" />
+          :gas-reservoir-id="GAS_RESERVOIR_ID" />
         <DynamicBalanceContent v-if="currentView === 'dynamic-balance'" :node="currentViewNode" :project-id="PROJECT_ID"
-                               :gas-reservoir-id="GAS_RESERVOIR_ID" />
+          :gas-reservoir-id="GAS_RESERVOIR_ID" />
         <AGContent v-if="currentView === 'Agarwal-Gardner'" :node="currentViewNode" :project-id="PROJECT_ID"
-                   :gas-reservoir-id="GAS_RESERVOIR_ID" />
+          :gas-reservoir-id="GAS_RESERVOIR_ID" />
       </main>
     </div>
 
@@ -1882,10 +1846,6 @@ $border: #e0e0e0;
     border-right: 0;
   }
 
-  &.resizing {
-    transition: none;
-  }
-
   .side-search {
     padding: 6px 6px 4px;
     border-bottom: 1px solid $border;
@@ -1899,20 +1859,6 @@ $border: #e0e0e0;
     flex: 1;
     overflow-y: auto;
     padding: 6px 4px;
-  }
-}
-
-.side-panel-resizer {
-  position: absolute;
-  top: 0;
-  right: -3px;
-  width: 6px;
-  height: 100%;
-  cursor: col-resize;
-  z-index: 4;
-
-  &:hover {
-    background: rgba(64, 132, 217, 0.18);
   }
 }
 
