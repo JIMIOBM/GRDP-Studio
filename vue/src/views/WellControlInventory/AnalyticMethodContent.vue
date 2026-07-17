@@ -36,6 +36,7 @@ const normalizePayload = (res) => res?.data?.data ?? res?.data ?? res
 
 const rawNode = computed(() => props.node?.raw || {})
 const wellName = computed(() => props.node?.wellName || rawNode.value?.wellName || rawNode.value?.nodeTitle || '')
+const chartTabTitle = computed(() => `解析法-${wellName.value || '当前井'}-分析结果`)
 const fields = computed(() => Array.isArray(resultData.value?.fields) ? resultData.value.fields : [])
 const input = computed(() =>
     resultData.value?.input ||
@@ -621,13 +622,10 @@ onBeforeUnmount(() => {
     </aside>
 
     <main ref="chartAreaEl" class="chart-area">
-      <div class="chart-tabs">
-        <div class="chart-tab" :class="{ active: activeChartTab === 'chart' }" @click="activeChartTab = 'chart'">
-          曲线图
-        </div>
-        <div class="chart-tab" :class="{ active: activeChartTab === 'table' }" @click="activeChartTab = 'table'">
-          数据列表
-        </div>
+      <div class="dynamic-result-tabs">
+        <button type="button" class="dynamic-result-tab active" :title="chartTabTitle">
+          <span class="dynamic-result-tab-text">{{ chartTabTitle }}</span>
+        </button>
       </div>
 
       <div v-show="activeChartTab === 'chart'" ref="chartEl" class="chart"></div>
@@ -668,6 +666,15 @@ onBeforeUnmount(() => {
               :formatter="column.formatter"
           />
         </el-table>
+      </div>
+
+      <div class="bottom-chart-tabs">
+        <button type="button" class="bottom-chart-tab" :class="{ active: activeChartTab === 'table' }" @click="activeChartTab = 'table'">
+          数据列表
+        </button>
+        <button type="button" class="bottom-chart-tab" :class="{ active: activeChartTab === 'chart' }" :title="chartTabTitle" @click="activeChartTab = 'chart'">
+          结果分析图
+        </button>
       </div>
     </main>
   </div>
@@ -866,24 +873,71 @@ onBeforeUnmount(() => {
   position: relative;
 }
 
-.chart-tabs {
-  display: flex;
-  height: 26px;
-  border-bottom: 1px solid #e4e7ed;
+.dynamic-result-tabs {
+  height: 34px;
   flex-shrink: 0;
-  background: #fafafa;
-}
-
-.chart-tab {
-  padding: 0 18px;
   display: flex;
   align-items: center;
-  font-size: 12px;
-  color: #666;
-  cursor: pointer;
+  border-bottom: 1px solid #e4e7ed;
+  background: #fafafa;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.dynamic-result-tab {
+  height: 34px;
+  max-width: 320px;
+  border: 0;
   border-right: 1px solid #e4e7ed;
   border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
+  background: transparent;
+  color: #409eff;
+  font-size: 14px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  cursor: default;
+  white-space: nowrap;
+
+  &.active {
+    border-bottom-color: #409eff;
+    background: #fff;
+  }
+}
+
+.dynamic-result-tab-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chart {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+.bottom-chart-tabs {
+  display: flex;
+  align-items: flex-end;
+  height: 30px;
+  flex-shrink: 0;
+  background: #fff;
+  border-top: 1px solid #e4e7ed;
+}
+
+.bottom-chart-tab {
+  min-width: 88px;
+  height: 30px;
+  border: 0;
+  border-right: 1px solid #e4e7ed;
+  border-top: 2px solid transparent;
+  background: #fff;
+  color: #333;
+  font-size: 13px;
+  cursor: pointer;
   white-space: nowrap;
 
   &:hover {
@@ -892,16 +946,9 @@ onBeforeUnmount(() => {
 
   &.active {
     color: #409eff;
-    border-bottom-color: #409eff;
-    background: #fff;
-    font-weight: 500;
+    border-top-color: #409eff;
+    font-weight: 600;
   }
-}
-
-.chart {
-  flex: 1;
-  min-height: 0;
-  width: 100%;
 }
 
 .floating-chart-legend {

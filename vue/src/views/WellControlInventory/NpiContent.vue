@@ -1,7 +1,8 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
-import { fissureNpiTypeCurves, npiTypeCurves } from '@/constants/npiTypeCurves'
+import fissureNpiTypeCurves from '@/constants/typeCurves/fissureNormalizedPressureInteral.json'
+import npiTypeCurves from '@/constants/typeCurves/normalizedPressureInteral.json'
 import { NODETYPE } from '@/constants/nodeType'
 
 const props = defineProps({
@@ -25,6 +26,8 @@ const hiddenLegendNames = ref(new Set())
 let chart = null
 
 const raw = computed(() => props.node?.raw || {})
+const wellName = computed(() => props.node?.wellName || raw.value?.wellName || raw.value?.input?.wellName || raw.value?.input?.wellNames?.[0] || '')
+const chartTabTitle = computed(() => `诊断曲线-NPI-${wellName.value || '当前井'}-分析结果`)
 const nodeType = computed(() => props.node?.type ?? props.node?.treeNode?.nodeType ?? props.node?.raw?.nodeType)
 const isFracturedNpi = computed(() => [
   NODETYPE.NodeType_FracturedVerticalWellTypicalCurveNPI,
@@ -361,9 +364,10 @@ onBeforeUnmount(() => {
     </aside>
 
     <main ref="chartAreaEl" class="chart-area">
-      <div class="chart-tabs">
-        <button class="chart-tab" :class="{ active: activeChartTab === 'chart' }" @click="activeChartTab = 'chart'">结果分析图</button>
-        <button class="chart-tab" :class="{ active: activeChartTab === 'table' }" @click="activeChartTab = 'table'">数据列表</button>
+      <div class="dynamic-result-tabs">
+        <button type="button" class="dynamic-result-tab active" :title="chartTabTitle">
+          <span class="dynamic-result-tab-text">{{ chartTabTitle }}</span>
+        </button>
       </div>
       <div v-show="activeChartTab === 'chart'" ref="chartEl" class="chart-instance"></div>
       <div v-if="activeChartTab === 'chart' && legendItems.length" class="floating-chart-legend" :style="legendStyle" @mousedown="startLegendDrag">
@@ -381,6 +385,10 @@ onBeforeUnmount(() => {
           <el-table-column prop="regularizedPressureIntegral" label="规整化压力积分(pDi)" min-width="190" />
           <el-table-column prop="regularizedPressureIntegralDerivative" label="规整化压力积分导数(pDid)" min-width="220" />
         </el-table>
+      </div>
+      <div class="bottom-chart-tabs">
+        <button type="button" class="bottom-chart-tab" :class="{ active: activeChartTab === 'table' }" @click="activeChartTab = 'table'">数据列表</button>
+        <button type="button" class="bottom-chart-tab" :class="{ active: activeChartTab === 'chart' }" :title="chartTabTitle" @click="activeChartTab = 'chart'">结果分析图</button>
       </div>
     </main>
   </div>
@@ -405,10 +413,14 @@ onBeforeUnmount(() => {
 .param-tab.active { background:#f4d000; color:#1a1a1a; font-weight:600; }
 .params-resizer { position:absolute; top:0; right:-3px; width:6px; height:100%; cursor:col-resize; z-index:4; }
 .chart-area { flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; position:relative; overflow:hidden; }
-.chart-tabs { display:flex; height:34px; border-bottom:1px solid #e4e7ed; background:#fafafa; }
-.chart-tab { padding:0 16px; border:0; border-right:1px solid #e4e7ed; border-bottom:2px solid transparent; background:transparent; color:#555; cursor:pointer; }
-.chart-tab.active { color:#409eff; border-bottom-color:#409eff; background:#fff; font-weight:600; }
+.dynamic-result-tabs { height:34px; flex-shrink:0; display:flex; align-items:center; border-bottom:1px solid #e4e7ed; background:#fafafa; overflow-x:auto; overflow-y:hidden; }
+.dynamic-result-tab { height:34px; max-width:320px; padding:0 12px; border:0; border-right:1px solid #e4e7ed; border-bottom:2px solid #409eff; background:#fff; color:#409eff; font-size:14px; font-weight:600; display:flex; align-items:center; cursor:default; white-space:nowrap; }
+.dynamic-result-tab-text { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .chart-instance,.data-list-panel { flex:1; min-height:0; width:100%; }
+.bottom-chart-tabs { display:flex; align-items:flex-end; height:30px; flex-shrink:0; background:#fff; border-top:1px solid #e4e7ed; }
+.bottom-chart-tab { min-width:88px; height:30px; border:0; border-right:1px solid #e4e7ed; border-top:2px solid transparent; background:#fff; color:#333; font-size:13px; cursor:pointer; white-space:nowrap; }
+.bottom-chart-tab:hover { color:#409eff; }
+.bottom-chart-tab.active { color:#409eff; border-top-color:#409eff; font-weight:600; }
 .floating-chart-legend { position:absolute; z-index:6; display:flex; flex-direction:column; gap:4px; padding:6px 10px; border:1px solid #e4e7ed; background:rgba(255,255,255,.92); font-size:12px; cursor:move; user-select:none; }
 .floating-legend-item { display:flex; align-items:center; gap:6px; line-height:18px; cursor:pointer; white-space:nowrap; }
 .floating-legend-item.hidden { color:#999; opacity:.55; }
