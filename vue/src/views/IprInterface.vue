@@ -81,6 +81,12 @@ const materialBalanceRunning = ref(false)
 const dynamicBalanceRunning = ref(false)
 const typicalCurveRunning = ref(false)
 const WATER_INVASION_ANALYSIS_ERROR = '水侵分析计算失败，未生成分析结果节点'
+const WATER_INVASION_NOTIFY_MODULE = 'projectanalysis.waterinvasionanalysis'
+const WATER_INVASION_LOG_TIMEOUT = 120000
+const WATER_INVASION_ERROR_PATTERN = /\u5931\u8d25|\u9519\u8bef|\u5f02\u5e38|\u62a5\u9519|error|fail|exception/i
+const WATER_INVASION_COMPLETE_PATTERN = /\u5b8c\u6210|\u5206\u6790\u7ed3\u675f|\u7ed3\u675f/i
+const TYPICAL_CURVE_NOTIFY_MODULE = 'projectanalysis.typicalcurvefitting'
+const TYPICAL_CURVE_LOG_TIMEOUT = 120000
 const BLASINGAME_FITTING_REGRESSION_ERROR = '计算动态储量错误:参与回归分析的数据点数必须大于0'
 const AG_FITTING_REGRESSION_ERROR = '计算AG节点错误:参与回归分析的数据点数必须大于0'
 const selectedWellName = ref('')
@@ -112,6 +118,15 @@ const filteredTreeData = computed(() => {   //搜索井名，控制左侧树搜�
 })
 
 const normalizePayload = (res) => res?.data?.data ?? res?.data ?? res
+
+const getResponseMessage = (res) =>
+  res?.data?.message || res?.data?.msg || res?.message || res?.msg || ''
+
+const isFailureResponse = (res) => {
+  const code = res?.data?.code ?? res?.code
+  const success = res?.data?.success ?? res?.success
+  return success === false || (code !== undefined && Number(code) !== 0 && Number(code) !== 200)
+}
 
 const toArray = (value) => { // 把数据统一变成数组
   if (!value) return []
@@ -1068,6 +1083,91 @@ const getWaterInvasionNodeOnce = async (wellName, delayMs = 1200) => {
   return { rootNode, resultNode }
 }
 
+const createWaterInvasionLogWaiter = (wellName, timeoutMs = WATER_INVASION_LOG_TIMEOUT) => {
+  return createAnalysisLogWaiter({
+    module: WATER_INVASION_NOTIFY_MODULE,
+    wellName,
+    timeoutMs,
+    timeoutMessage: `${wellName}水侵分析日志超时，未收到完成消息`,
+    fallbackErrorMessage: `${wellName}水侵分析失败`
+  })
+}
+
+const createAnalysisLogWaiter = ({
+  module,
+  wellName,
+  timeoutMs,
+  timeoutMessage,
+  fallbackErrorMessage,
+  allowGlobalComplete = false,
+  isComplete = (payload, logText) => WATER_INVASION_COMPLETE_PATTERN.test(logText)
+}) => {
+  let settled = false
+  let cleanup = () => {}
+
+  const promise = new Promise((resolve, reject) => {
+    const finish = (callback, value) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      callback(value)
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      finish(reject, new Error(timeoutMessage))
+    }, timeoutMs)
+
+    const onNotifyMessage = (event) => {
+      const message = event.detail
+      const payload = message?.payload
+      if (message?.type !== 'user' || payload?.module !== module) return
+
+      const logText = String(payload.message || '')
+      const errorText = String(payload.error || '')
+      const logLevel = String(payload.level || '').toLowerCase()
+      const complete = isComplete(payload, logText)
+      const matchesWell = !wellName || logText.includes(wellName)
+      if (!matchesWell && !(allowGlobalComplete && complete)) return
+
+      if (logLevel === 'error' || WATER_INVASION_ERROR_PATTERN.test(logText) || WATER_INVASION_ERROR_PATTERN.test(errorText)) {
+        finish(reject, new Error(errorText || logText || fallbackErrorMessage))
+        return
+      }
+
+      if (complete) {
+        finish(resolve, payload)
+      }
+    }
+
+    cleanup = () => {
+      window.clearTimeout(timeoutId)
+      window.removeEventListener('notify-message', onNotifyMessage)
+    }
+
+    window.addEventListener('notify-message', onNotifyMessage)
+  })
+
+  return {
+    promise,
+    cancel: () => {
+      if (settled) return
+      settled = true
+      cleanup()
+    }
+  }
+}
+
+const createBlasingameLogWaiter = (wellName, timeoutMs = TYPICAL_CURVE_LOG_TIMEOUT) =>
+  createAnalysisLogWaiter({
+    module: TYPICAL_CURVE_NOTIFY_MODULE,
+    wellName,
+    timeoutMs,
+    timeoutMessage: `${wellName} Blasingame日志超时，未收到完成消息`,
+    fallbackErrorMessage: `${wellName} Blasingame计算失败`,
+    allowGlobalComplete: true,
+    isComplete: (payload, logText) => logText.includes('\u5b8c\u6210') && !logText.includes('\u5206\u6790\u7ed3\u675f')
+  })
+
 const pollAnalyticMethodNodes = async (wellNames, maxRetries = 20, intervalMs = 1500) => {
   const targets = wellNames.filter(Boolean)
   for (let i = 0; i < maxRetries; i++) {
@@ -1136,6 +1236,66 @@ const getBlasingameNodeOnce = async (wellName, delayMs = 1200) => {
   return { rootNode, blasingameNode }
 }
 
+const finalizeBlasingameResult = async (wellName, logPayload, maxRetries = 8, intervalMs = 1000) => {
+  const logNodeId = logPayload?.node ?? logPayload?.nodeId
+  let lastError = null
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const { rootNode, blasingameNode } = await getBlasingameNodeOnce(
+        wellName,
+        attempt === 0 ? 1 : intervalMs
+      )
+
+      if (rootNode) {
+        applyTypicalCurveNodes(rootNode)
+      }
+
+      const resultNode = blasingameNode || (logNodeId ? {
+        nodeId: logNodeId,
+        nodeTitle: 'Blasingame',
+        nodeType: NODETYPE.NodeType_TypicalCurveBlasingame,
+        wellName
+      } : null)
+      const nodeId = resultNode?.nodeId || resultNode?.id
+
+      if (!nodeId) {
+        lastError = new Error('\u6ca1\u6709\u627e\u5230 Blasingame \u5bf9\u5e94\u7684 nodeId')
+        continue
+      }
+
+      const resultRes = await typicalCurveApi.getResult(PROJECT_ID, GAS_RESERVOIR_ID, nodeId)
+      const result = normalizePayload(resultRes)
+
+      const treeNode = addBlasingameNode(wellName, {
+        ...resultNode,
+        nodeType: NODETYPE.NodeType_TypicalCurveBlasingame,
+        nodeTitle: 'Blasingame'
+      })
+
+      const viewNode = {
+        id: nodeId,
+        label: 'Blasingame',
+        type: NODETYPE.NodeType_TypicalCurveBlasingame,
+        wellName,
+        raw: result,
+        treeNode: resultNode
+      }
+
+      activeNodeId.value = viewNode.id
+      currentView.value = 'blasingame'
+      currentViewNode.value = viewNode
+      activeNode.value = treeNode || viewNode
+      ElMessage.success(`${wellName} Blasingame\u8ba1\u7b97\u5b8c\u6210`)
+      return
+    } catch (error) {
+      lastError = error
+    }
+  }
+
+  throw lastError || new Error(`${wellName} Blasingame\u7ed3\u679c\u5df2\u5b8c\u6210\uff0c\u4f46\u6682\u65f6\u6ca1\u6709\u62ff\u5230\u7ed3\u679c`)
+}
+
 const getNpiNodeOnce = async (wellName, delayMs = 1200) => {
   if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs))
   const res = await nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, NODETYPE.NodeType_ProductivityInstabilityAnalysis)
@@ -1172,6 +1332,7 @@ const runWaterInvasionForSelectedWell = async () => { //点击水侵分析的操
   if (waterInvasionRunning.value) return
 
   waterInvasionRunning.value = true
+  const logWaiter = createWaterInvasionLogWaiter(targetWellName)
   try {
     await waterInvasionApi.analyze({
       gasReservoirId: Number(GAS_RESERVOIR_ID),
@@ -1183,7 +1344,8 @@ const runWaterInvasionForSelectedWell = async () => { //点击水侵分析的操
     })
 
     ElMessage.info(`${targetWellName} 水侵分析计算中，请稍候...`)
-    const { rootNode, resultNode } = await getWaterInvasionNodeOnce(targetWellName)
+    await logWaiter.promise
+    const { rootNode, resultNode } = await getWaterInvasionNodeOnce(targetWellName, 0)
 
     if (!resultNode) {
       throw new Error(WATER_INVASION_ANALYSIS_ERROR)
@@ -1204,6 +1366,7 @@ const runWaterInvasionForSelectedWell = async () => { //点击水侵分析的操
     currentViewNode.value = viewNode
     ElMessage.success(`${targetWellName} 水侵分析完成`)
   } catch (error) {
+    logWaiter.cancel()
     ElMessage.error(error.message || '水侵分析失败')
     console.error('水侵分析失败', error)
   } finally {
@@ -1420,8 +1583,9 @@ const runBlasingameForSelectedWell = async () => {
   if (typicalCurveRunning.value) return
 
   typicalCurveRunning.value = true
+  const logWaiter = createBlasingameLogWaiter(targetWellName)
   try {
-    await typicalCurveApi.fitting({
+    const fittingRes = await typicalCurveApi.fitting({
       gasReservoirId: Number(GAS_RESERVOIR_ID),
       projectId: Number(PROJECT_ID),
       wellNames: [targetWellName],
@@ -1433,46 +1597,20 @@ const runBlasingameForSelectedWell = async () => {
       minimumWaterGasRatio: 0.0602
     })
 
+    const fittingMessage = getResponseMessage(fittingRes)
+    if (isFailureResponse(fittingRes) && !fittingMessage.includes('\u5927\u4e8e0')) {
+      throw new Error(fittingMessage || BLASINGAME_FITTING_REGRESSION_ERROR)
+    }
+
     ElMessage.info(`${targetWellName} Blasingame计算中，请稍候...`)
-    const { rootNode, blasingameNode } = await getBlasingameNodeOnce(targetWellName)
-
-    if (!blasingameNode) {
-      throw new Error(BLASINGAME_FITTING_REGRESSION_ERROR)
-    }
-
-    applyTypicalCurveNodes(rootNode)
-
-    const resultNode = blasingameNode
-    const nodeId = resultNode?.nodeId || resultNode?.id
-
-    if (!nodeId) {
-      throw new Error('没有找到 Blasingame 对应的 nodeId')
-    }
-
-    const resultRes = await typicalCurveApi.getResult(PROJECT_ID, GAS_RESERVOIR_ID, nodeId)
-    const result = normalizePayload(resultRes)
-
-    const treeNode = addBlasingameNode(targetWellName, {
-      ...resultNode,
-      nodeType: NODETYPE.NodeType_TypicalCurveBlasingame,
-      nodeTitle: 'Blasingame'
-    })
-
-    const viewNode = {
-      id: nodeId,
-      label: 'Blasingame',
-      type: NODETYPE.NodeType_TypicalCurveBlasingame,
-      wellName: targetWellName,
-      raw: result,
-      treeNode: resultNode
-    }
-
-    activeNodeId.value = viewNode.id
-    currentView.value = 'blasingame'
-    currentViewNode.value = viewNode
-    activeNode.value = treeNode || viewNode
-    ElMessage.success(`${targetWellName} Blasingame计算完成`)
+    logWaiter.promise
+      .then((logPayload) => finalizeBlasingameResult(targetWellName, logPayload))
+      .catch((error) => {
+        ElMessage.error(error.message || 'Blasingame计算失败')
+        console.error('Blasingame计算失败', error)
+      })
   } catch (error) {
+    logWaiter.cancel()
     ElMessage.error(error.message || 'Blasingame计算失败')
     console.error('Blasingame计算失败', error)
   } finally {

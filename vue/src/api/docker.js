@@ -14,6 +14,8 @@ const dockerRequest = axios.create({
   withCredentials: true
 })
 
+let lastDockerUnauthorizedTipAt = 0
+
 const flowBalanceRequest = axios.create({
   baseURL: '/flowbalance',
   timeout: 120000
@@ -30,6 +32,8 @@ flowBalanceRequest.interceptors.response.use(
 
 dockerRequest.interceptors.request.use(
   (config) => {
+    config.headers['Process-Env'] = 'prod'
+
     const accountStr = localStorage.getItem('account')
     if (accountStr) {
       const account = JSON.parse(accountStr)
@@ -48,7 +52,15 @@ dockerRequest.interceptors.response.use(
   (err) => {
     const msg = err.response?.data?.message || err.message || '请求失败'
     if (!err.config?.silentError) {
-      ElMessage.error(`Docker 服务错误：${msg}`)
+      if (err.response?.status === 401) {
+        const now = Date.now()
+        if (now - lastDockerUnauthorizedTipAt > 3000) {
+          lastDockerUnauthorizedTipAt = now
+          ElMessage.error('Docker 登录状态已失效，请重新获取登录 Cookie 后重启前端服务')
+        }
+      } else {
+        ElMessage.error(`Docker 服务错误：${msg}`)
+      }
     }
     return Promise.reject(err)
   }
