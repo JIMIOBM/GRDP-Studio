@@ -3,12 +3,18 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
 import fissureNpiTypeCurves from '@/constants/typeCurves/fissureNormalizedPressureInteral.json'
 import npiTypeCurves from '@/constants/typeCurves/normalizedPressureInteral.json'
+import fissureTransientTypeCurves from '@/constants/typeCurves/fissureTransient.json'
+import transientTypeCurves from '@/constants/typeCurves/transient.json'
 import { NODETYPE } from '@/constants/nodeType'
 
 const props = defineProps({
   node: Object,
   projectId: [Number, String],
-  gasReservoirId: [Number, String]
+  gasReservoirId: [Number, String],
+  method: {
+    type: String,
+    default: 'npi'
+  }
 })
 
 const activePanelTab = ref('input')
@@ -26,14 +32,19 @@ const hiddenLegendNames = ref(new Set())
 let chart = null
 
 const raw = computed(() => props.node?.raw || {})
+const isTransient = computed(() => props.method === 'transient')
 const wellName = computed(() => props.node?.wellName || raw.value?.wellName || raw.value?.input?.wellName || raw.value?.input?.wellNames?.[0] || '')
-const chartTabTitle = computed(() => `诊断曲线-NPI-${wellName.value || '当前井'}-分析结果`)
+const methodName = computed(() => isTransient.value ? 'Transient' : 'NPI')
+const chartTabTitle = computed(() => `诊断曲线-${methodName.value}-${wellName.value || '当前井'}-分析结果`)
 const nodeType = computed(() => props.node?.type ?? props.node?.treeNode?.nodeType ?? props.node?.raw?.nodeType)
-const isFracturedNpi = computed(() => [
-  NODETYPE.NodeType_FracturedVerticalWellTypicalCurveNPI,
-  NODETYPE.NodeType_FracturedHorizontalWellTypicalCurveNPI
-].includes(Number(nodeType.value)))
-const activeTypeCurves = computed(() => isFracturedNpi.value ? fissureNpiTypeCurves : npiTypeCurves)
+const isFractured = computed(() => (isTransient.value
+    ? [NODETYPE.NodeType_FracturedVerticalWellTypicalCurveTransient, NODETYPE.NodeType_FracturedHorizontalWellTypicalCurveTransient]
+    : [NODETYPE.NodeType_FracturedVerticalWellTypicalCurveNPI, NODETYPE.NodeType_FracturedHorizontalWellTypicalCurveNPI]
+).includes(Number(nodeType.value)))
+const activeTypeCurves = computed(() => {
+  if (isTransient.value) return isFractured.value ? fissureTransientTypeCurves : transientTypeCurves
+  return isFractured.value ? fissureNpiTypeCurves : npiTypeCurves
+})
 const input = computed(() => raw.value?.input || raw.value?.inputs || raw.value?.parameter || {})
 const result = computed(() => ({
   ...(raw.value?.output || {}),
@@ -116,19 +127,26 @@ const outputFields = computed(() => [
   { label: '井控半径(m)', value: resultValue(['wellControlRadius']) }
 ])
 
-const SERIES_CONFIG = {
-  pD: { name: 'pD-实际数据', color: '#7ee000' },
-  regularizedPressure: { name: 'pD-实际数据', color: '#7ee000' },
-  pDi: { name: 'pDi-实际数据', color: '#00a020' },
-  regularizedPressureIntegral: { name: 'pDi-实际数据', color: '#00a020' },
-  pDid: { name: 'pDid-实际数据', color: '#e60000' },
-  regularizedPressureIntegralDerivative: { name: 'pDid-实际数据', color: '#e60000' }
-}
+const seriesConfig = computed(() => isTransient.value ? {
+  qD: { name: 'qD-实际数据', color: '#7ee000', tableField: 'primaryValue' },
+  regularizedProduction: { name: 'qD-实际数据', color: '#7ee000', tableField: 'primaryValue' },
+  pDi: { name: '1/pDi-实际数据', color: '#00a020', tableField: 'integralValue' },
+  regularizedPressureIntegralReciprocal: { name: '1/pDi-实际数据', color: '#00a020', tableField: 'integralValue' },
+  pDid: { name: '1/pDid-实际数据', color: '#e60000', tableField: 'derivativeValue' },
+  regularizedPressureIntegralDerivativeReciprocal: { name: '1/pDid-实际数据', color: '#e60000', tableField: 'derivativeValue' }
+} : {
+  pD: { name: 'pD-实际数据', color: '#7ee000', tableField: 'primaryValue' },
+  regularizedPressure: { name: 'pD-实际数据', color: '#7ee000', tableField: 'primaryValue' },
+  pDi: { name: 'pDi-实际数据', color: '#00a020', tableField: 'integralValue' },
+  regularizedPressureIntegral: { name: 'pDi-实际数据', color: '#00a020', tableField: 'integralValue' },
+  pDid: { name: 'pDid-实际数据', color: '#e60000', tableField: 'derivativeValue' },
+  regularizedPressureIntegralDerivative: { name: 'pDid-实际数据', color: '#e60000', tableField: 'derivativeValue' }
+})
 const normalizedSeries = computed(() => {
   const series = new Map()
   chartItems.value.forEach(item => {
     const field = item.yAxisField || item.yField || item.field || ''
-    const config = SERIES_CONFIG[field]
+    const config = seriesConfig.value[field]
     if (!config) return
     const data = (item.data || item.items || []).map(point => {
       const x = Number(point.xValue ?? point.pseudotime ?? point.tcaDd ?? point.x)
@@ -140,7 +158,7 @@ const normalizedSeries = computed(() => {
   records.value.forEach(row => {
     const x = Number(row.pseudotime ?? row.tcaDd ?? row.xValue)
     if (!(x > 0)) return
-    Object.entries(SERIES_CONFIG).forEach(([field, config]) => {
+    Object.entries(seriesConfig.value).forEach(([field, config]) => {
       const y = Number(row[field])
       if (!(y > 0)) return
       if (!series.has(config.name)) series.set(config.name, { ...config, data: [] })
@@ -150,20 +168,42 @@ const normalizedSeries = computed(() => {
   return [...series.values()]
 })
 const legendItems = computed(() => normalizedSeries.value.map(({ name, color }) => ({ name, color })))
+const typeCurveColors = [
+  '#333', '#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de', '#3ba272', '#fc8452',
+  '#9a60b4', '#ea7ccc', '#2ec7c9', '#b6a2de', '#5ab1ef', '#ffb980', '#d87a80', '#8d98b3',
+  '#e5cf0d', '#97b552', '#95706d', '#dc69aa', '#07a2a4', '#9a7fd1', '#588dd5', '#f5994e',
+  '#c05050', '#59678c', '#c9ab00', '#7eb00a', '#6f5553', '#c14089', '#a5e7f0'
+]
 const theoreticalSeries = computed(() => {
   const colors = ['#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de', '#3ba272', '#fc8452', '#9a60b4', '#ea7ccc']
   const typeCurves = activeTypeCurves.value
+  const familyIndexes = { qD: 0, pDi: 0, pDid: 0 }
+  const transientColorOffsets = isFractured.value
+    ? { qD: 2, pDi: 11, pDid: 20 }
+    : { qD: 2, pDi: 12, pDid: 22 }
   return Object.entries(typeCurves)
-      .filter(([key, values]) => !['pD', 'pDi', 'pDid', 'tcaDd'].includes(key) && Array.isArray(values))
-      .map(([name, values], index) => ({
-        name,
-        family: name.startsWith('pDid') ? 'pDid-实际数据' : name.startsWith('pDi') ? 'pDi-实际数据' : 'pD-实际数据',
-        type: 'line',
-        data: values.map((value, pointIndex) => [typeCurves.tcaDd[pointIndex], value]),
-        showSymbol: false,
-        silent: true,
-        lineStyle: { width: 1, color: colors[index % colors.length], opacity: 0.8 }
-      }))
+      .filter(([key, values]) => !['pD', 'qD', 'pDi', 'pDid', 'tcaDd'].includes(key) && Array.isArray(values))
+      .map(([name, values], index) => {
+        const familyKey = name.startsWith('pDid') ? 'pDid' : name.startsWith('pDi') ? 'pDi' : 'qD'
+        const family = familyKey === 'pDid'
+          ? (isTransient.value ? '1/pDid-实际数据' : 'pDid-实际数据')
+          : familyKey === 'pDi'
+            ? (isTransient.value ? '1/pDi-实际数据' : 'pDi-实际数据')
+            : (isTransient.value ? 'qD-实际数据' : 'pD-实际数据')
+        const color = isTransient.value
+          ? typeCurveColors[transientColorOffsets[familyKey] + familyIndexes[familyKey]++]
+          : colors[index % colors.length]
+
+        return {
+          name,
+          family,
+          type: 'line',
+          data: values.map((value, pointIndex) => [typeCurves.tcaDd[pointIndex], value]),
+          showSymbol: false,
+          silent: true,
+          lineStyle: { width: 1, color, opacity: isTransient.value ? 1 : 0.8 }
+        }
+      })
 })
 const legendStyle = computed(() => legendPosition.value.x === null
     ? { top: '42px', right: '18px' }
@@ -181,19 +221,16 @@ const tableRows = computed(() => {
     return records.value.map((row, index) => ({
       index: index + 1,
       pseudotime: row.pseudotime ?? row.tcaDd ?? row.xValue,
-      regularizedPressure: row.regularizedPressure ?? row.pD,
-      regularizedPressureIntegral: row.regularizedPressureIntegral ?? row.pDi,
-      regularizedPressureIntegralDerivative: row.regularizedPressureIntegralDerivative ?? row.pDid
+      primaryValue: isTransient.value ? (row.regularizedProduction ?? row.qD) : (row.regularizedPressure ?? row.pD),
+      integralValue: isTransient.value ? (row.regularizedPressureIntegralReciprocal ?? row.pDi) : (row.regularizedPressureIntegral ?? row.pDi),
+      derivativeValue: isTransient.value ? (row.regularizedPressureIntegralDerivativeReciprocal ?? row.pDid) : (row.regularizedPressureIntegralDerivative ?? row.pDid)
     }))
   }
 
   const rows = new Map()
   normalizedSeries.value.forEach(series => {
-    const field = series.name === 'pD-实际数据'
-        ? 'regularizedPressure'
-        : series.name === 'pDi-实际数据'
-          ? 'regularizedPressureIntegral'
-          : 'regularizedPressureIntegralDerivative'
+    const field = [...Object.values(seriesConfig.value)].find(config => config.name === series.name)?.tableField
+    if (!field) return
     series.data.forEach(([x, y]) => {
       const key = String(x)
       if (!rows.has(key)) rows.set(key, { pseudotime: x })
@@ -204,6 +241,16 @@ const tableRows = computed(() => {
       .sort((a, b) => Number(a.pseudotime) - Number(b.pseudotime))
       .map((row, index) => ({ index: index + 1, ...row }))
 })
+
+const tableColumns = computed(() => isTransient.value ? [
+  { prop: 'primaryValue', label: '重整产量(qD)', minWidth: 160 },
+  { prop: 'integralValue', label: '规整化压力积分倒数(1/pDi)', minWidth: 210 },
+  { prop: 'derivativeValue', label: '规整化压力积分导数倒数(1/pDid)', minWidth: 250 }
+] : [
+  { prop: 'primaryValue', label: '重整压力(pD)', minWidth: 160 },
+  { prop: 'integralValue', label: '规整化压力积分(pDi)', minWidth: 190 },
+  { prop: 'derivativeValue', label: '规整化压力积分导数(pDid)', minWidth: 220 }
+])
 
 function renderChart() {
   if (!chart) return
@@ -220,17 +267,19 @@ function renderChart() {
   const series = [...visibleTheoreticalSeries, ...actualSeries]
   chart.setOption({
     animation: false,
-    title: { text: 'Normalized Pressure Integral', left: 'center', top: 8, textStyle: { fontSize: 14, fontWeight: 600 } },
-    tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
+    title: { text: isTransient.value ? 'Transient' : 'Normalized Pressure Integral', left: 'center', top: 8, textStyle: { fontSize: 14, fontWeight: 600 } },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'cross', lineStyle: { color: '#de39cd' } } },
     legend: { show: false },
     grid: { left: 72, right: 52, top: 60, bottom: 58 },
     xAxis: {
-      type: 'log', min: 0.0001, max: 100, name: 'tcaDA', nameLocation: 'middle', nameGap: 34,
+      type: 'log', min: isTransient.value ? 0.1 : 0.0001, max: isTransient.value ? 1000000 : 100,
+      name: isTransient.value ? '{main|t}{sub|caDd}' : 'tcaDA', nameLocation: 'middle', nameGap: 34,
+      nameTextStyle: isTransient.value ? { rich: { main: { fontSize: 14 }, sub: { fontSize: 10, padding: [7, 0, 0, 0] } } } : undefined,
       splitLine: { show: true, lineStyle: { color: '#dfe7f2' } },
       minorSplitLine: { show: true, lineStyle: { color: '#f0f4fa' } }
     },
     yAxis: {
-      type: 'log', min: 0.01, max: 1000, name: 'pD,pDi,pDid', nameLocation: 'middle', nameGap: 48,
+      type: 'log', min: isTransient.value ? 0.001 : 0.01, max: isTransient.value ? 100 : 1000, name: isTransient.value ? 'qD,1/pDi,1/pDid' : 'pD,pDi,pDid', nameLocation: 'middle', nameGap: 48,
       splitLine: { show: true, lineStyle: { color: '#dfe7f2' } },
       minorSplitLine: { show: true, lineStyle: { color: '#f0f4fa' } }
     },
@@ -381,9 +430,13 @@ onBeforeUnmount(() => {
         <el-table :data="tableRows" size="small" height="100%" border>
           <el-table-column prop="index" label="序号" width="70" />
           <el-table-column prop="pseudotime" label="物质平衡拟时间" min-width="160" />
-          <el-table-column prop="regularizedPressure" label="重整压力(pD)" min-width="160" />
-          <el-table-column prop="regularizedPressureIntegral" label="规整化压力积分(pDi)" min-width="190" />
-          <el-table-column prop="regularizedPressureIntegralDerivative" label="规整化压力积分导数(pDid)" min-width="220" />
+          <el-table-column
+              v-for="column in tableColumns"
+              :key="column.prop"
+              :prop="column.prop"
+              :label="column.label"
+              :min-width="column.minWidth"
+          />
         </el-table>
       </div>
       <div class="bottom-chart-tabs">

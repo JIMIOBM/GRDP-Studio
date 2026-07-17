@@ -10,6 +10,7 @@ import AnalyticMethodContent from '@/views/WellControlInventory/AnalyticMethodCo
 import WattenbargerContent from '@/views/WellControlInventory/WattenbargerContent.vue'
 import BlasingameContent from '@/views/WellControlInventory/BlasingameContent.vue'
 import NpiContent from '@/views/WellControlInventory/NpiContent.vue'
+import TransientContent from '@/views/WellControlInventory/TransientContent.vue'
 import DynamicBalanceContent from '@/views/WellControlInventory/DynamicBalanceContent.vue'
 import AGContent from '@/views/WellControlInventory/AGContent.vue'
 import { NODETYPE } from '@/constants/nodeType'
@@ -35,6 +36,7 @@ const NODE_GROUP_BY_TYPE = {
   [NODETYPE.NodeType_TypicalCurveBlasingame]: 'well-control-inventory',
   [NODETYPE.NodeType_TypicalCurveWattenbarger]: 'well-control-inventory',
   [NODETYPE.NodeType_TypicalCurveAG]: 'well-control-inventory',
+  [NODETYPE.NodeType_TypicalCurveTransient]: 'well-control-inventory',
   [NODETYPE.NodeType_VerticalWellTypicalCurveWb]: 'well-control-inventory',
   [NODETYPE.NodeType_ProductionDeclineAnalysis]: 'data-management',
   [NODETYPE.NodeType_ProductivityInstabilityAnalysis]: 'data-management',
@@ -55,6 +57,7 @@ const NODE_LABEL_BY_TYPE = {
   [NODETYPE.NodeType_TypicalCurve]: '诊断曲线',
   [NODETYPE.NodeType_TypicalCurveBlasingame]: 'Blasingame',
   [NODETYPE.NodeType_TypicalCurveWattenbarger]: 'Wattenbarger',
+  [NODETYPE.NodeType_TypicalCurveTransient]: 'Transient',
   [NODETYPE.NodeType_ProductionDeclineAnalysis]: '产量递减分析',
   [NODETYPE.NodeType_ProductivityInstabilityAnalysis]: '产量不稳定分析',
   [NODETYPE.NodeType_ProductionAnalysis]: '生产分析',
@@ -153,6 +156,14 @@ const NPI_NODE_TYPES = new Set([
   NODETYPE.NodeType_FracturedHorizontalWellTypicalCurveNPI
 ])
 
+const TRANSIENT_NODE_TYPES = new Set([
+  NODETYPE.NodeType_TypicalCurveTransient,
+  NODETYPE.NodeType_VerticalWellTypicalCurveTransient,
+  NODETYPE.NodeType_HorizontalWellTypicalCurveTransient,
+  NODETYPE.NodeType_FracturedVerticalWellTypicalCurveTransient,
+  NODETYPE.NodeType_FracturedHorizontalWellTypicalCurveTransient
+])
+
 const WATTENBARGER_NODE_TYPES = new Set([
   NODETYPE.NodeType_TypicalCurveWattenbarger,
   NODETYPE.NodeType_VerticalWellTypicalCurveWattenbarger,
@@ -170,6 +181,11 @@ const isNpiNode = (item) => {
   const nodeType = item?.nodeType ?? item?.type
   const nodeName = getNodeName(item)
   return NPI_NODE_TYPES.has(nodeType) || nodeName === 'Normalized Pressure Integral' || nodeName === 'NPI'
+}
+
+const isTransientNode = (item) => {
+  const nodeType = item?.nodeType ?? item?.type
+  return TRANSIENT_NODE_TYPES.has(nodeType) || getNodeName(item) === 'Transient'
 }
 
 const isWattenbargerNode = (item) => {
@@ -206,6 +222,7 @@ const getTypicalCurveResultName = (item) => {
   if (isBlasingameNode(item)) return 'Blasingame'
   if (isAGNode(item)) return 'Agarwal-Gardner'
   if (isNpiNode(item)) return 'NPI'
+  if (isTransientNode(item)) return 'Transient'
   if (isWattenbargerNode(item)) return 'Wattenbarger'
   return ''
 }
@@ -389,6 +406,27 @@ const findNpiNodeByWell = (root, wellName) => {
 
   return visit(root)
 }
+
+const findTransientNodeByWell = (root, wellName) => {
+  if (!root || !wellName) return null
+
+  const visit = (item, currentWellName = '') => {
+    if (!item) return null
+    const nodeName = getNodeName(item)
+    const nodeType = item?.nodeType ?? item?.type
+    const nextWellName = nodeType === NODETYPE.NodeType_Well || nodeName === wellName
+      ? nodeName
+      : currentWellName
+    if (nextWellName === wellName && isTransientNode(item)) return item
+    for (const child of getChildren(item)) {
+      const found = visit(child, nextWellName)
+      if (found) return found
+    }
+    return null
+  }
+
+  return visit(root)
+}
 const findAGNodeByWell = (root, wellName) => {
   if (!root || !wellName) return null
 
@@ -497,7 +535,8 @@ const TYPICAL_CURVE_NODE_ORDER = new Map([
   [NODETYPE.NodeType_TypicalCurveBlasingame, 10],
   [NODETYPE.NodeType_TypicalCurveAG, 20],
   [NODETYPE.NodeType_TypicalCurveNPI, 30],
-  [NODETYPE.NodeType_TypicalCurveWattenbarger, 40]
+  [NODETYPE.NodeType_TypicalCurveTransient, 40],
+  [NODETYPE.NodeType_TypicalCurveWattenbarger, 50]
 ])
 
 const sortNodesByFixedOrder = (nodes, orderMap) => {
@@ -630,6 +669,47 @@ const addNpiNode = (wellName, rawNode = {}) => {
   sortNodesByFixedOrder(diagnosticNode.children, TYPICAL_CURVE_NODE_ORDER)
   sortNodesByFixedOrder(inventoryGroup.children, WELL_CONTROL_NODE_ORDER)
   return npiNode
+}
+
+const addTransientNode = (wellName, rawNode = {}) => {
+  const wellItem = ensureWell(wellName, rawNode?.wellId || rawNode?.parentId)
+  const inventoryGroup = wellItem?.children.find(item => item.type === 'well-control-inventory')
+  if (!inventoryGroup) return null
+
+  const parentId = `${wellItem.id}-diagnostic-curve`
+  let diagnosticNode = inventoryGroup.children.find(item =>
+    item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve || item.label === '诊断曲线'
+  )
+  if (!diagnosticNode) {
+    diagnosticNode = {
+      id: parentId,
+      label: '诊断曲线',
+      type: NODETYPE.NodeType_TypicalCurve,
+      wellName,
+      defaultExpanded: true,
+      children: []
+    }
+    inventoryGroup.children.push(diagnosticNode)
+  }
+  diagnosticNode.defaultExpanded = true
+  diagnosticNode.children = diagnosticNode.children || []
+
+  const id = rawNode?.nodeId || rawNode?.id || `${parentId}-transient`
+  const transientNode = {
+    id,
+    label: 'Transient',
+    type: rawNode?.nodeType || rawNode?.type || NODETYPE.NodeType_TypicalCurveTransient,
+    wellName,
+    raw: rawNode
+  }
+  const existedIndex = diagnosticNode.children.findIndex(item =>
+    item.id === id || TRANSIENT_NODE_TYPES.has(item.type) || item.label === 'Transient'
+  )
+  if (existedIndex >= 0) diagnosticNode.children[existedIndex] = transientNode
+  else diagnosticNode.children.push(transientNode)
+  sortNodesByFixedOrder(diagnosticNode.children, TYPICAL_CURVE_NODE_ORDER)
+  sortNodesByFixedOrder(inventoryGroup.children, WELL_CONTROL_NODE_ORDER)
+  return transientNode
 }
 
 const addWattenbargerNode = (wellName, rawNode = {}) => {
@@ -961,6 +1041,13 @@ const applyTypicalCurveNodes = (node) => {
       })
     }
 
+    if (wellName && nextInTypicalCurve && isTransientNode(item)) {
+      addTransientNode(wellName, {
+        ...item,
+        nodeTitle: 'Transient'
+      })
+    }
+
     if (wellName && nextInTypicalCurve && isWattenbargerNode(item)) {
       addWattenbargerNode(wellName, {
         ...item,
@@ -1141,6 +1228,13 @@ const getNpiNodeOnce = async (wellName, delayMs = 1200) => {
   const res = await nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, NODETYPE.NodeType_ProductivityInstabilityAnalysis)
   const rootNode = res?.data?.node
   return { rootNode, npiNode: findNpiNodeByWell(rootNode, wellName) }
+}
+
+const getTransientNodeOnce = async (wellName, delayMs = 1200) => {
+  if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs))
+  const res = await nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, NODETYPE.NodeType_ProductivityInstabilityAnalysis)
+  const rootNode = res?.data?.node
+  return { rootNode, transientNode: findTransientNodeByWell(rootNode, wellName) }
 }
 
 const getWattenbargerNodeOnce = async (wellName, delayMs = 1200) => {
@@ -1537,6 +1631,63 @@ const runNpiForSelectedWell = async () => {
   }
 }
 
+const runTransientForSelectedWell = async () => {
+  const targetWellName = selectedWellName.value
+  if (!targetWellName) {
+    ElMessage.warning('请先在左侧选择一口井')
+    return
+  }
+  if (typicalCurveRunning.value) return
+
+  typicalCurveRunning.value = true
+  try {
+    await typicalCurveApi.fitting({
+      gasReservoirId: Number(GAS_RESERVOIR_ID),
+      projectId: Number(PROJECT_ID),
+      wellNames: [targetWellName],
+      fittingType: 4,
+      isSkipFitting: false,
+      dataSize: 300,
+      initScanDataSize: 10,
+      fineScanDataSize: 30,
+      minimumWaterGasRatio: 0.0602
+    })
+
+    ElMessage.info(`${targetWellName} Transient计算中，请稍候...`)
+    let resultNode = null
+    let rootNode = null
+    for (let i = 0; i < 20; i++) {
+      const result = await getTransientNodeOnce(targetWellName, 1500)
+      rootNode = result.rootNode
+      resultNode = result.transientNode
+      if (resultNode) break
+    }
+    if (!resultNode) throw new Error('Transient计算超时，请稍后刷新查看结果')
+
+    applyTypicalCurveNodes(rootNode)
+    const nodeId = resultNode.nodeId || resultNode.id
+    const resultRes = await typicalCurveApi.getResult(PROJECT_ID, GAS_RESERVOIR_ID, nodeId)
+    const viewNode = {
+      id: nodeId,
+      label: 'Transient',
+      type: resultNode?.nodeType || resultNode?.type || NODETYPE.NodeType_TypicalCurveTransient,
+      wellName: targetWellName,
+      raw: normalizePayload(resultRes),
+      treeNode: resultNode
+    }
+    activeNodeId.value = nodeId
+    currentView.value = 'transient'
+    currentViewNode.value = viewNode
+    ElMessage.success(`${targetWellName} Transient计算完成`)
+  } catch (error) {
+    const msg = error.response?.data?.msg || error.response?.data?.message || error.message
+    ElMessage.error(msg || 'Transient计算失败')
+    console.error('Transient计算失败', error)
+  } finally {
+    typicalCurveRunning.value = false
+  }
+}
+
 const runWattenbargerForSelectedWell = async () => {
   const targetWellName = selectedWellName.value
   if (!targetWellName) {
@@ -1749,6 +1900,38 @@ const openNpiNode = async (node) => {
   } catch (error) {
     ElMessage.error(error.message || 'NPI结果加载失败')
     console.error('NPI结果加载失败', error)
+  }
+}
+
+const openTransientNode = async (node) => {
+  const targetWellName = node?.wellName || selectedWellName.value
+  if (!targetWellName) {
+    ElMessage.warning('请先在左侧选择一口井')
+    return
+  }
+  currentView.value = 'transient'
+  currentViewNode.value = node
+  try {
+    const nodeRes = await nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, NODETYPE.NodeType_ProductivityInstabilityAnalysis)
+    const rootNode = nodeRes?.data?.node
+    applyTypicalCurveNodes(rootNode)
+    const transientNode = findTransientNodeByWell(rootNode, targetWellName) || node?.raw || node
+    const nodeId = transientNode?.nodeId || transientNode?.id
+    if (!nodeId) throw new Error('没有找到 Transient 对应的 nodeId')
+    const resultRes = await typicalCurveApi.getResult(PROJECT_ID, GAS_RESERVOIR_ID, nodeId)
+    activeNodeId.value = nodeId
+    currentViewNode.value = {
+      ...node,
+      id: nodeId,
+      label: 'Transient',
+      type: transientNode?.nodeType || transientNode?.type || node?.type || NODETYPE.NodeType_TypicalCurveTransient,
+      wellName: targetWellName,
+      raw: normalizePayload(resultRes),
+      treeNode: transientNode
+    }
+  } catch (error) {
+    ElMessage.error(error.message || 'Transient结果加载失败')
+    console.error('Transient结果加载失败', error)
   }
 }
 
@@ -1999,6 +2182,11 @@ const handleSelect = (node) => { // 点击左侧树节点
     return
   }
 
+  if (TRANSIENT_NODE_TYPES.has(node.type)) {
+    openTransientNode(node)
+    return
+  }
+
   if (node.type === NODETYPE.NodeType_TypicalCurveWattenbarger) {
     openWattenbargerNode(node)
     return
@@ -2027,6 +2215,9 @@ const handleCommand = ({ group, name }) => { // 接收顶部菜单栏的点击�
       break
     case 'NPI':
       runNpiForSelectedWell()
+      break
+    case 'Transient':
+      runTransientForSelectedWell()
       break
     case 'Wattenbarger':
       runWattenbargerForSelectedWell()
@@ -2103,6 +2294,8 @@ onBeforeUnmount(() => {
         <BlasingameContent v-if="currentView === 'blasingame'" :node="currentViewNode" :project-id="PROJECT_ID"
           :gas-reservoir-id="GAS_RESERVOIR_ID" />
         <NpiContent v-if="currentView === 'npi'" :node="currentViewNode" :project-id="PROJECT_ID"
+          :gas-reservoir-id="GAS_RESERVOIR_ID" />
+        <TransientContent v-if="currentView === 'transient'" :node="currentViewNode" :project-id="PROJECT_ID"
           :gas-reservoir-id="GAS_RESERVOIR_ID" />
         <WattenbargerContent v-if="currentView === 'wattenbarger'" :node="currentViewNode" :project-id="PROJECT_ID"
           :gas-reservoir-id="GAS_RESERVOIR_ID" />
