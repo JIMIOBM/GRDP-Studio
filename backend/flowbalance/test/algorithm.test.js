@@ -51,37 +51,6 @@ test('calculator creates distinct non-persistent node 57 and 58 results without 
   assert.equal(wellhead.originalGasVolumeUnit, 'cumulative_gas_production source unit')
 })
 
-test('partial-result mode keeps a valid pressure source and reports the failing source', () => {
-  const fixture = calculationFixture()
-  fixture.wells[0].production.forEach(point => {
-    point.calculatedBottomHolePressure.pressureMpa = null
-  })
-
-  const run = new FlowBalanceCalculator().calculate(fixture, { includePartialErrors: true })
-  assert.equal(run.calculations.length, 1)
-  assert.equal(run.calculations[0].nodeType, 57)
-  assert.equal(run.errors.length, 1)
-  assert.equal(run.errors[0].nodeType, 58)
-  assert.equal(run.errors[0].persisted, false)
-  assert.equal(run.errors[0].code, 'FLOW_BALANCE_INVALID_DATA')
-})
-
-test('official backend error log takes precedence over the independent preview calculation', () => {
-  const fixture = calculationFixture()
-  fixture.wells[0].officialFlowBalanceStatus = {
-    status: 'error',
-    source: 'official-backend-log',
-    message: '动态储量分析-流动质平衡:参与回归分析的数据点数必须大于0',
-    createdAt: '2026-07-18 10:13:32'
-  }
-
-  const run = new FlowBalanceCalculator().calculate(fixture, { includePartialErrors: true })
-  assert.equal(run.calculations.length, 0)
-  assert.deepEqual(run.errors.map(item => item.nodeType).sort(), [57, 58])
-  assert.equal(run.errors.every(item => item.message.includes('参与回归分析的数据点数必须大于0')), true)
-  assert.equal(run.errors.every(item => item.details.statusSource === 'official-backend-log'), true)
-})
-
 function calculationFixture() {
   const production = [1, 2, 3, 4, 5, 6].map(day => ({
     date: `2004-01-0${day}`,

@@ -16,15 +16,6 @@ class FlowBalanceService {
     return mapFlowBalanceCalculationToDynamicResult(calculation)
   }
 
-  async getOfficialStatuses(request) {
-    return {
-      persisted: false,
-      projectId: request.projectId,
-      gasReservoirId: request.gasReservoirId,
-      statuses: await this.repository.loadOfficialFlowBalanceStatuses(request)
-    }
-  }
-
   async calculate(request) {
     if (!this.calculator || typeof this.calculator.calculate !== 'function') {
       throw new TypeError('FlowBalanceService requires an in-memory calculator')
@@ -40,8 +31,7 @@ class FlowBalanceService {
       persistedResultId: null,
       projectId: run.projectId,
       gasReservoirId: run.gasReservoirId,
-      nodes: mappedNodes,
-      errors: Array.isArray(run.errors) ? run.errors : []
+      nodes: mappedNodes
     }
   }
 }
