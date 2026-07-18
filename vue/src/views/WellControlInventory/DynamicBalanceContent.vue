@@ -1,4 +1,4 @@
-﻿<script setup>
+﻿﻿<script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
 import { dynamicBalanceApi } from '@/api/docker'
@@ -16,6 +16,9 @@ const paramsPanelEl = ref(null)
 const resultData = ref(null)
 const noData = ref(false)
 const activeTab = ref('input')
+const activeChartTab = ref('chart')
+const tableLoading = ref(false)
+const tableOutputItems = ref([])
 const panelCollapsed = ref(false)
 const legendPosition = ref({ x: null, y: null })
 const draggingLegend = ref(false)
@@ -168,41 +171,51 @@ const otherData = computed(() => [
   { key: 'waterCompressionCoefficient', label: fieldLabels.waterCompressibility, value: getInputValue(['waterCompressionCoefficient', 'waterCompressibility']), type: 'number' }
 ])
 
+const findChartItem = (fields) => {
+  const fieldSet = new Set(fields)
+  return resultData.value?.chartItems?.find(item => fieldSet.has(item.yAxisField))
+}
+
+const getPointYValue = (item) =>
+  item?.yValue ??
+  item?.pressure ??
+  item?.normalizedPressure ??
+  item?.normalisedPressure ??
+  item?.regularizedPressure
+
+const mapChartPoint = (item) => {
+  const x = Number(item?.xValue ?? item?.pseudotime)
+  const y = Number(getPointYValue(item))
+  return [x, y]
+}
+
 const chartPoints = computed(() => {
-  const chartItem = resultData.value?.chartItems?.find(item => item.yAxisField === 'pressure')
+  const chartItem = findChartItem(['pressure', 'normalizedPressure', 'normalisedPressure', 'regularizedPressure'])
   if (chartItem?.data?.length) {
     return chartItem.data
         .filter(item => item.isDeleted !== true)
-        .map(item => [Number(item.xValue), Number(item.yValue)])
+        .map(mapChartPoint)
         .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y))
   }
   if (!Array.isArray(resultData.value?.data)) return []
   return resultData.value.data
       .filter(item => item.isDeleted !== true)
-      .map(item => {
-        const x = Number(item.pseudotime)
-        const y = Number(item.pressure)
-        return [x, y]
-      })
+      .map(mapChartPoint)
       .filter(([x, y]) => x > 0 && y > 0)
 })
 
 const allPoints = computed(() => {
-  const chartItem = resultData.value?.chartItems?.find(item => item.yAxisField === 'pressure')
+  const chartItem = findChartItem(['pressure', 'normalizedPressure', 'normalisedPressure', 'regularizedPressure'])
   if (chartItem?.data?.length) {
     return chartItem.data
         .filter(item => item.isDeleted === true)
-        .map(item => [Number(item.xValue), Number(item.yValue)])
+        .map(mapChartPoint)
         .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y))
   }
   if (!Array.isArray(resultData.value?.data)) return []
   return resultData.value.data
       .filter(item => item.isDeleted === true)
-      .map(item => {
-        const x = Number(item.pseudotime)
-        const y = Number(item.pressure)
-        return [x, y]
-      })
+      .map(mapChartPoint)
       .filter(([x, y]) => x > 0 && y > 0)
 })
 
@@ -215,10 +228,10 @@ const regression = computed(() => {
 })
 
 const regressionPoints = computed(() => {
-  const chartItem = resultData.value?.chartItems?.find(item => item.yAxisField === 'linearRegressionPressure')
+  const chartItem = findChartItem(['linearRegressionPressure', 'linearRegressionNormalizedPressure', 'linearRegressionRegularizedPressure'])
   if (chartItem?.data?.length) {
     return chartItem.data
-        .map(item => [Number(item.xValue), Number(item.yValue)])
+        .map(mapChartPoint)
         .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y))
   }
   const { slope, intercept } = regression.value
@@ -517,6 +530,101 @@ const fetchData = async () => {
   }
 }
 
+const unwrapResponseData = (response) => response?.data?.data ?? response?.data ?? response
+
+const extractTableDataFromResult = (payload) => {
+  const chartItems = payload?.chartItems
+  if (Array.isArray(chartItems) && chartItems.length > 0) {
+    const pressureItem = chartItems.find(item => item.yAxisField === 'pressure' || item.yAxisField === 'normalizedPressure')
+    const normalizedPressureItem = chartItems.find(item => item.yAxisField === 'normalizedPressure' || item.yAxisField === 'normalisedPressure')
+    const cumulativeGasProductionItem = chartItems.find(item =>
+      item.yAxisField === 'cumulativeGasProduction' ||
+      item.yAxisField === 'cumulativeProduction' ||
+      item.name?.includes('累产') ||
+      item.title?.includes('累产')
+    )
+
+    if (pressureItem?.data?.length) {
+      return pressureItem.data.filter(item => item && typeof item === 'object').map((item, index) => ({
+        index: index + 1,
+        cumulativeGasProduction:
+          item.cumulativeGasProduction ??
+          cumulativeGasProductionItem?.data?.[index]?.yValue ??
+          cumulativeGasProductionItem?.data?.[index]?.value ??
+          payload?.data?.[index]?.cumulativeGasProduction ??
+          '',
+        normalizedPressure: normalizedPressureItem?.data?.[index]?.yValue ?? item.normalizedPressure ?? item.normalisedPressure ?? item.regularizedPressure ?? item.yValue ?? '',
+        isParticipateAnalysis: item.isDeleted !== true,
+        pseudotime: item.pseudotime ?? item.xValue ?? ''
+      })).filter(item => item.pseudotime !== '' || item.normalizedPressure !== '')
+    }
+  }
+
+  const data = payload?.data
+  if (!Array.isArray(data)) return []
+
+  return data.filter(item => item && typeof item === 'object')
+      .map((item, index) => ({
+        index: index + 1,
+        cumulativeGasProduction: item.cumulativeGasProduction ?? '',
+        normalizedPressure: item.normalizedPressure ?? item.normalisedPressure ?? item.regularizedPressure ?? item.yValue ?? '',
+        isParticipateAnalysis: item.isDeleted !== true,
+        pseudotime: item.pseudotime ?? item.xValue ?? ''
+      }))
+      .filter(item => item.pseudotime !== '' || item.normalizedPressure !== '')
+}
+
+const tableRows = computed(() => {
+  if (tableOutputItems.value.length) {
+    return tableOutputItems.value.map((item, index) => ({
+      index: index + 1,
+      cumulativeGasProduction: item.cumulativeGasProduction ?? '',
+      normalizedPressure: item.normalizedPressure ?? '',
+      isParticipateAnalysis: item.isDeleted !== true,
+      pseudotime: item.pseudotime ?? ''
+    }))
+  }
+
+  return extractTableDataFromResult(resultData.value).map((item, index) => ({
+    ...item,
+    index: index + 1
+  }))
+})
+
+async function fetchTableData() {
+  const currentResultId = resultId.value
+  if (!currentResultId || !props.projectId || !props.gasReservoirId) return
+
+  tableLoading.value = true
+  try {
+    const response = await dynamicBalanceApi.getResult(props.projectId, props.gasReservoirId, currentResultId, { silentError: true })
+    const result = unwrapResponseData(response)
+    tableOutputItems.value = extractTableDataFromResult(result)
+  } catch (error) {
+    console.error('动态平衡数据列表加载失败', error)
+  } finally {
+    tableLoading.value = false
+  }
+}
+
+function showTableTab() {
+  activeChartTab.value = 'table'
+  fetchTableData()
+}
+
+watch(() => props.node, () => {
+  tableOutputItems.value = []
+  if (activeChartTab.value === 'table') fetchTableData()
+}, { deep: true })
+watch(activeChartTab, () => {
+  if (activeChartTab.value === 'chart') {
+    nextTick(() => {
+      ensureChart()
+      renderChart()
+    })
+  }
+})
+
 watch(
     () => [props.node?.wellName, resultId.value, props.node?.raw],
     fetchData,
@@ -650,11 +758,12 @@ onBeforeUnmount(() => {
     </div>
 
     <div ref="chartAreaEl" class="chart-area">
-      <div v-if="noData" class="no-data">
+      <div v-if="noData && activeChartTab === 'chart'" class="no-data">
         <p>暂无数据</p>
       </div>
-      <div v-show="!noData" ref="chartEl" class="chart-instance" />
+      <div v-show="!noData && activeChartTab === 'chart'" ref="chartEl" class="chart-instance" />
       <div
+          v-if="activeChartTab === 'chart'"
           class="floating-chart-legend"
           :class="{ dragging: draggingLegend }"
           :style="legendStyle"
@@ -668,6 +777,29 @@ onBeforeUnmount(() => {
           <span class="legend-line" style="backgroundColor: #333; borderColor: #333"></span>
           <span>回归线(MPa/(10⁴m³/d))</span>
         </div>
+      </div>
+
+      <div v-if="activeChartTab === 'table'" class="data-list-panel">
+        <el-table :data="tableRows" :loading="tableLoading" size="small" height="100%" border stripe>
+          <el-table-column prop="index" label="序号" width="76" sortable />
+          <el-table-column prop="cumulativeGasProduction" label="累产气量(10^8m³)" min-width="170" sortable />
+          <el-table-column prop="normalizedPressure" label="重整压力(MPa/(10^4m³/d))" min-width="220" sortable />
+          <el-table-column prop="isParticipateAnalysis" label="是否参与分析" width="130">
+            <template #default="{ row }">
+              {{ row.isParticipateAnalysis ? '是' : '否' }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="pseudotime" label="物质平衡拟时间(d)" min-width="170" sortable />
+        </el-table>
+      </div>
+
+      <div class="bottom-chart-tabs">
+        <button type="button" class="bottom-chart-tab" :class="{ active: activeChartTab === 'table' }" @click="showTableTab">
+          数据列表
+        </button>
+        <button type="button" class="bottom-chart-tab" :class="{ active: activeChartTab === 'chart' }" @click="activeChartTab = 'chart'">
+          结果分析图
+        </button>
       </div>
     </div>
   </div>
@@ -902,5 +1034,44 @@ onBeforeUnmount(() => {
     flex-shrink: 0;
   }
 }
-</style>
 
+.data-list-panel {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  overflow: hidden;
+  background: #fff;
+}
+
+.bottom-chart-tabs {
+  display: flex;
+  align-items: flex-end;
+  height: 30px;
+  flex-shrink: 0;
+  background: #fff;
+  border-top: 1px solid #e4e7ed;
+}
+
+.bottom-chart-tab {
+  min-width: 88px;
+  height: 30px;
+  border: 0;
+  border-right: 1px solid #e4e7ed;
+  border-top: 2px solid transparent;
+  background: #fff;
+  color: #333;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+
+  &:hover {
+    color: #409eff;
+  }
+
+  &.active {
+    color: #409eff;
+    border-top-color: #409eff;
+    font-weight: 600;
+  }
+}
+</style>

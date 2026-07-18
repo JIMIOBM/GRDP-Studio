@@ -4,6 +4,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { projectName } from '../../config/config.default'
 import { HomeFilled, User, Avatar, Lock, SwitchButton } from '@element-plus/icons-vue'
+import { disconnectNotifySocket } from '@/utils/notifySocket'
 
 const router = useRouter()
 const route = useRoute()
@@ -13,6 +14,7 @@ const account = ref(
 const activeMenu = computed(() => route.path)
 
 const logout = () => {
+  disconnectNotifySocket()
   localStorage.removeItem('account')
   ElMessage.success('退出成功')
   router.push('/login')

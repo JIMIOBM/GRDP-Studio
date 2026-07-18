@@ -2,6 +2,7 @@ import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import router from '@/router'
 import { baseApi } from '../../config/config.default'
+import { disconnectNotifySocket } from '@/utils/notifySocket'
 
 const request = axios.create({
   baseURL: baseApi,
@@ -34,6 +35,7 @@ request.interceptors.response.use(
       }
       // 未登录 / token 失效
       if (res.code === 401) {
+        disconnectNotifySocket()
         localStorage.removeItem('account')
         router.push('/login')
       }

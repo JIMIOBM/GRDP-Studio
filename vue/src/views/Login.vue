@@ -5,6 +5,7 @@ import { ElMessage } from 'element-plus'
 import { User, Lock } from '@element-plus/icons-vue'
 import { projectName } from '../../config/config.default'
 import { userApi } from '@/api'
+import { connectNotifySocket } from '@/utils/notifySocket'
 
 const router = useRouter()
 const loading = ref(false)
@@ -22,6 +23,36 @@ const rules = {
   password: [{ required: true, message: '请输入密码', trigger: 'blur' }]
 }
 
+const loginDockerPlatform = async () => {
+  const response = await fetch('/docker-auth/login', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      username: form.value.username,
+      password: form.value.password
+    })
+  })
+  const result = await response.json().catch(() => ({}))
+
+  if (!response.ok || result.success === false) {
+    throw new Error(result.message || '原平台登录失败')
+  }
+}
+
+const enterIpr = async (account) => {
+  localStorage.setItem('account', JSON.stringify(account))
+  connectNotifySocket()
+  ElMessage.success('登录成功')
+  await router.replace('/ipr')
+
+  loginDockerPlatform().catch((error) => {
+    console.error('原平台登录同步失败', error)
+    ElMessage.warning(error.message || '原平台登录同步失败，Docker 接口可能需要重新登录')
+  })
+}
+
 const onLogin = async () => {
   await formRef.value.validate(async (valid) => {
     if (!valid) return
@@ -29,14 +60,14 @@ const onLogin = async () => {
     try {
       const res = await userApi.login(form.value)
       const account = res?.data || { ...form.value }
-      localStorage.setItem('account', JSON.stringify(account))
-      ElMessage.success('登录成功')
-      router.push('/ipr')
+      await enterIpr(account)
     } catch (e) {
-      // 后端未就绪时的兜底：本地放行，便于联调前端
-      localStorage.setItem('account', JSON.stringify({ id: 1, username: form.value.username, nickname: form.value.username }))
-      ElMessage.success('登录成功')
-      router.push('/ipr')
+      try {
+        // 后端未就绪时的兜底：本地放行，便于联调前端。
+        await enterIpr({ id: 1, username: form.value.username, nickname: form.value.username })
+      } catch (dockerError) {
+        ElMessage.error(dockerError.message || e.message || '登录失败')
+      }
     } finally {
       loading.value = false
     }
@@ -50,7 +81,7 @@ const onLogin = async () => {
       <div class="login-title">{{ projectName }}</div>
       <div class="login-subtitle">解析融合一体化工作平台</div>
 
-      <el-form ref="formRef" :model="form" :rules="rules" @keyup.enter="onLogin">
+      <el-form ref="formRef" :model="form" :rules="rules" @submit.prevent @keyup.enter="onLogin">
         <el-form-item prop="username">
           <el-input v-model="form.username" placeholder="用户名" size="large" :prefix-icon="User" />
         </el-form-item>
@@ -58,7 +89,7 @@ const onLogin = async () => {
           <el-input v-model="form.password" type="password" placeholder="密码" size="large" show-password :prefix-icon="Lock" />
         </el-form-item>
         <el-form-item>
-          <el-button class="login-btn" type="primary" size="large" :loading="loading" @click="onLogin">登 录</el-button>
+          <el-button class="login-btn" type="primary" size="large" native-type="button" :loading="loading" @click="onLogin">登 录</el-button>
         </el-form-item>
       </el-form>
 
