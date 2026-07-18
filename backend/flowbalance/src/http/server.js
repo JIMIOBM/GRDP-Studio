@@ -13,6 +13,16 @@ function createHttpServer(runtime, options = {}) {
     if (request.method === 'GET' && url.pathname === '/flowbalance/health') {
       return sendJson(response, 200, { status: 'ok', service: 'grdp-flowbalance', persistence: false })
     }
+    if (request.method === 'POST' && url.pathname === '/flowbalance/status') {
+      try {
+        const body = await readJson(request)
+        const statusRequest = normalizeRequest(body)
+        const result = await runtime.service.getOfficialStatuses(statusRequest)
+        return sendJson(response, 200, result)
+      } catch (error) {
+        return sendFlowBalanceError(response, error)
+      }
+    }
     if (request.method === 'POST' && url.pathname === '/flowbalance/calc') {
       try {
         const body = await readJson(request)
@@ -20,15 +30,19 @@ function createHttpServer(runtime, options = {}) {
         const result = await runtime.service.calculate(calculationRequest)
         return sendJson(response, 200, result)
       } catch (error) {
-        const status = error instanceof FlowBalanceDomainError ? 422 : error instanceof SyntaxError || error instanceof TypeError || error instanceof RangeError ? 400 : 500
-        return sendJson(response, status, {
-          code: error.code || (status === 500 ? 'FLOW_BALANCE_INTERNAL_ERROR' : 'FLOW_BALANCE_INVALID_REQUEST'),
-          message: status === 500 ? 'FlowBalance calculation failed.' : error.message,
-          details: error.details || {}
-        })
+        return sendFlowBalanceError(response, error)
       }
     }
     sendJson(response, 404, { code: 'NOT_FOUND', message: 'Route not found' })
+  })
+}
+
+function sendFlowBalanceError(response, error) {
+  const status = error instanceof FlowBalanceDomainError ? 422 : error instanceof SyntaxError || error instanceof TypeError || error instanceof RangeError ? 400 : 500
+  return sendJson(response, status, {
+    code: error.code || (status === 500 ? 'FLOW_BALANCE_INTERNAL_ERROR' : 'FLOW_BALANCE_INVALID_REQUEST'),
+    message: status === 500 ? 'FlowBalance request failed.' : error.message,
+    details: error.details || {}
   })
 }
 
