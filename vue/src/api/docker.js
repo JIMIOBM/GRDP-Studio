@@ -152,6 +152,7 @@ export const materialBalanceApi = {
 /* ===== 独立 FlowBalance 开发服务（只读数据库 + 内存计算） ===== */
 export const flowBalanceApi = {
   calc: (data) => flowBalanceRequest.post('/calc', data),
+  getStatus: (data) => flowBalanceRequest.post('/status', data),
   getNodes: (projectId, gasReservoirId, wellNames = []) => {
     const params = { projectId, gasReservoirId }
     if (wellNames.length) params.wellNames = wellNames.join(',')
