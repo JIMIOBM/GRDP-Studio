@@ -12,9 +12,32 @@ class FlowBalanceCalculator {
   calculate(preparedInput, request = {}) {
     const waterGasRatioLimit = optionalNonNegative(request.waterGasRatioLimit, 'waterGasRatioLimit')
     const calculations = []
+    const errors = []
     for (const well of preparedInput.wells) {
       for (const source of well.nodeSources) {
-        calculations.push(calculateWellSource(well, source, waterGasRatioLimit))
+        try {
+          assertOfficialBackendStatus(well, source)
+          calculations.push(calculateWellSource(well, source, waterGasRatioLimit))
+        } catch (error) {
+          if (!request.includePartialErrors) throw error
+          errors.push({
+            status: 'error',
+            persisted: false,
+            idKind: 'runtime',
+            wellName: well.wellName,
+            nodeType: source.nodeType,
+            pressureSource: source.pressureSource,
+            pressureKind: source.pressureKind,
+            code: error.code || 'FLOW_BALANCE_CALCULATION_ERROR',
+            message: error.message || 'FlowBalance calculation failed.',
+            details: {
+              wellName: well.wellName,
+              nodeType: source.nodeType,
+              pressureSource: source.pressureSource,
+              ...(error.details || {})
+            }
+          })
+        }
       }
     }
     return {
@@ -23,9 +46,22 @@ class FlowBalanceCalculator {
       idKind: 'runtime',
       projectId: preparedInput.projectId,
       gasReservoirId: preparedInput.gasReservoirId,
-      calculations
+      calculations,
+      errors
     }
   }
+}
+
+function assertOfficialBackendStatus(well, source) {
+  const status = well.officialFlowBalanceStatus
+  if (status?.status !== 'error') return
+  throw new InvalidDataError(status.message, {
+    wellName: well.wellName,
+    nodeType: source.nodeType,
+    pressureSource: source.pressureSource,
+    statusSource: status.source,
+    loggedAt: status.createdAt
+  })
 }
 
 function calculateWellSource(well, source, waterGasRatioLimit) {
