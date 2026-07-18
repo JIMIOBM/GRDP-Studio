@@ -87,6 +87,8 @@ const WATER_INVASION_ERROR_PATTERN = /\u5931\u8d25|\u9519\u8bef|\u5f02\u5e38|\u6
 const WATER_INVASION_COMPLETE_PATTERN = /\u5b8c\u6210|\u5206\u6790\u7ed3\u675f|\u7ed3\u675f/i
 const TYPICAL_CURVE_NOTIFY_MODULE = 'projectanalysis.typicalcurvefitting'
 const TYPICAL_CURVE_LOG_TIMEOUT = 120000
+const DYNAMIC_BALANCE_NOTIFY_MODULE_PATTERN = /projectanalysis\.(dynamicoriginalgas(in)?place|dynamicoriginalgasInplace|dynamicbalance|dmb)/i
+const DYNAMIC_BALANCE_LOG_TIMEOUT = 120000
 const BLASINGAME_FITTING_REGRESSION_ERROR = '计算动态储量错误:参与回归分析的数据点数必须大于0'
 const AG_FITTING_REGRESSION_ERROR = '计算AG节点错误:参与回归分析的数据点数必须大于0'
 const selectedWellName = ref('')
@@ -1100,10 +1102,20 @@ const createAnalysisLogWaiter = ({
   timeoutMessage,
   fallbackErrorMessage,
   allowGlobalComplete = false,
+  allowGlobalFailure = false,
+  isFailure = (payload, logText, errorText, logLevel) =>
+    logLevel === 'error' || WATER_INVASION_ERROR_PATTERN.test(logText) || WATER_INVASION_ERROR_PATTERN.test(errorText),
   isComplete = (payload, logText) => WATER_INVASION_COMPLETE_PATTERN.test(logText)
 }) => {
   let settled = false
   let cleanup = () => {}
+  const isTargetModule = (payloadModule, payload, message, logText) => {
+    if (!module) return true
+    if (typeof module === 'function') return module(payloadModule, payload, message, logText)
+    if (module instanceof RegExp) return module.test(String(payloadModule || ''))
+    if (Array.isArray(module)) return module.includes(payloadModule)
+    return payloadModule === module
+  }
 
   const promise = new Promise((resolve, reject) => {
     const finish = (callback, value) => {
@@ -1119,17 +1131,20 @@ const createAnalysisLogWaiter = ({
 
     const onNotifyMessage = (event) => {
       const message = event.detail
-      const payload = message?.payload
-      if (message?.type !== 'user' || payload?.module !== module) return
+      if (message?.type && message.type !== 'user') return
 
-      const logText = String(payload.message || '')
-      const errorText = String(payload.error || '')
+      const payload = message?.payload || message?.data || message || {}
+      const logText = String(payload.message || payload.msg || payload.content || payload.log || '')
+      const errorText = String(payload.error || payload.err || '')
       const logLevel = String(payload.level || '').toLowerCase()
-      const complete = isComplete(payload, logText)
-      const matchesWell = !wellName || logText.includes(wellName)
-      if (!matchesWell && !(allowGlobalComplete && complete)) return
+      if (!isTargetModule(payload?.module || message?.module, payload, message, logText)) return
 
-      if (logLevel === 'error' || WATER_INVASION_ERROR_PATTERN.test(logText) || WATER_INVASION_ERROR_PATTERN.test(errorText)) {
+      const complete = isComplete(payload, logText)
+      const failed = isFailure(payload, logText, errorText, logLevel)
+      const matchesWell = !wellName || logText.includes(wellName)
+      if (!matchesWell && !(allowGlobalComplete && complete) && !(allowGlobalFailure && failed)) return
+
+      if (failed) {
         finish(reject, new Error(errorText || logText || fallbackErrorMessage))
         return
       }
@@ -1168,6 +1183,23 @@ const createBlasingameLogWaiter = (wellName, timeoutMs = TYPICAL_CURVE_LOG_TIMEO
     isComplete: (payload, logText) => logText.includes('\u5b8c\u6210') && !logText.includes('\u5206\u6790\u7ed3\u675f')
   })
 
+const createDynamicBalanceLogWaiter = (wellName, timeoutMs = DYNAMIC_BALANCE_LOG_TIMEOUT) =>
+  createAnalysisLogWaiter({
+    module: (payloadModule, payload, message, logText) => {
+      const moduleText = String(payloadModule || '')
+      if (DYNAMIC_BALANCE_NOTIFY_MODULE_PATTERN.test(moduleText)) return true
+      // 部分 /notify 日志没有 module 字段，只能通过日志文本识别动态平衡任务。
+      return !moduleText && /动态平衡|dynamic\s*balance|dmb|dynamicoriginalgas/i.test(logText)
+    },
+    wellName,
+    timeoutMs,
+    timeoutMessage: `${wellName} 动态平衡日志超时，未收到完成消息`,
+    fallbackErrorMessage: `${wellName} 动态平衡计算失败`,
+    allowGlobalComplete: true,
+    allowGlobalFailure: true,
+    isComplete: (payload, logText) => WATER_INVASION_COMPLETE_PATTERN.test(logText) || /\u6210\u529f|success/i.test(logText)
+  })
+
 const pollAnalyticMethodNodes = async (wellNames, maxRetries = 20, intervalMs = 1500) => {
   const targets = wellNames.filter(Boolean)
   for (let i = 0; i < maxRetries; i++) {
@@ -1190,6 +1222,18 @@ const getDynamicBalanceNodeOnce = async (wellName, delayMs = 1200) => {
   if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs))
   const rootNode = await fetchMaterialBalanceNode()
   return { rootNode, resultNode: findDynamicBalanceNode(rootNode, wellName) }
+}
+
+const pollDynamicBalanceNode = async (wellName, maxRetries = 20, intervalMs = 1500) => {
+  let latestRootNode = null
+
+  for (let i = 0; i < maxRetries; i++) {
+    const { rootNode, resultNode } = await getDynamicBalanceNodeOnce(wellName, i === 0 ? 1200 : intervalMs)
+    latestRootNode = rootNode
+    if (resultNode?.nodeId) return { rootNode, resultNode }
+  }
+
+  return { rootNode: latestRootNode, resultNode: null }
 }
 
 const getMaterialBalanceNodeOnce = async (wellName, delayMs = 1200) => {
@@ -1532,6 +1576,7 @@ const runDynamicBalanceForSelectedWell = async () => {
   if (dynamicBalanceRunning.value) return
 
   dynamicBalanceRunning.value = true
+  const logWaiter = createDynamicBalanceLogWaiter(targetWellName)
   try {
     await dynamicBalanceApi.calc({
       gasReservoirId: Number(GAS_RESERVOIR_ID),
@@ -1543,9 +1588,46 @@ const runDynamicBalanceForSelectedWell = async () => {
     })
 
     ElMessage.info(`${targetWellName} 动态平衡计算中，请稍候...`)
-    const { rootNode, resultNode } = await getDynamicBalanceNodeOnce(targetWellName)
+    // 动态平衡计算成败以 /notify 日志为准；后续节点接口只用于展示结果。
+    const logPayload = await logWaiter.promise
+    let resultNode = null
+    try {
+      ;({ resultNode } = await pollDynamicBalanceNode(targetWellName))
+    } catch (resultError) {
+      ElMessage.success(`${targetWellName} 动态平衡计算完成`)
+      ElMessage.warning('日志显示动态平衡计算完成，但结果节点读取失败，请稍后刷新结果')
+      console.error('动态平衡结果节点读取失败', resultError)
+      return
+    }
+
     if (!resultNode?.nodeId) {
-      throw new Error('动态平衡计算失败，未生成分析结果节点')
+      // 若完成日志携带结果 ID，则用日志里的 ID 打开结果，避免节点树刷新滞后造成误判失败。
+      const logNodeId = logPayload?.nodeId || logPayload?.node || logPayload?.resultId
+      if (!logNodeId) {
+        ElMessage.success(`${targetWellName} 动态平衡计算完成`)
+        ElMessage.warning('日志显示动态平衡计算完成，但暂时未读取到分析结果节点，请稍后刷新结果')
+        return
+      }
+
+      const fallbackNode = {
+        nodeId: logNodeId,
+        nodeTitle: '动态平衡',
+        wellName: targetWellName
+      }
+      const treeNode = {
+        id: logNodeId,
+        label: '动态平衡',
+        type: NODETYPE.NodeType_DynamicMaterialBalanceMethodBlasingame,
+        wellName: targetWellName,
+        raw: fallbackNode
+      }
+      addAnalysisNode(targetWellName, {
+        ...fallbackNode,
+        nodeType: NODETYPE.NodeType_DynamicMaterialBalanceMethodBlasingame
+      })
+      await openDynamicBalanceNode(treeNode)
+      ElMessage.success(`${targetWellName} 动态平衡计算完成`)
+      return
     }
 
     const treeNode = {
@@ -1564,6 +1646,7 @@ const runDynamicBalanceForSelectedWell = async () => {
     await openDynamicBalanceNode(treeNode)
     ElMessage.success(`${targetWellName} 动态平衡计算完成`)
   } catch (error) {
+    logWaiter.cancel()
     const message = error.response?.data?.msg || error.response?.data?.message || error.message
     ElMessage.error(message || '动态平衡计算失败')
     console.error('动态平衡计算失败', error)

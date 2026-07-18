@@ -171,41 +171,51 @@ const otherData = computed(() => [
   { key: 'waterCompressionCoefficient', label: fieldLabels.waterCompressibility, value: getInputValue(['waterCompressionCoefficient', 'waterCompressibility']), type: 'number' }
 ])
 
+const findChartItem = (fields) => {
+  const fieldSet = new Set(fields)
+  return resultData.value?.chartItems?.find(item => fieldSet.has(item.yAxisField))
+}
+
+const getPointYValue = (item) =>
+  item?.yValue ??
+  item?.pressure ??
+  item?.normalizedPressure ??
+  item?.normalisedPressure ??
+  item?.regularizedPressure
+
+const mapChartPoint = (item) => {
+  const x = Number(item?.xValue ?? item?.pseudotime)
+  const y = Number(getPointYValue(item))
+  return [x, y]
+}
+
 const chartPoints = computed(() => {
-  const chartItem = resultData.value?.chartItems?.find(item => item.yAxisField === 'pressure')
+  const chartItem = findChartItem(['pressure', 'normalizedPressure', 'normalisedPressure', 'regularizedPressure'])
   if (chartItem?.data?.length) {
     return chartItem.data
         .filter(item => item.isDeleted !== true)
-        .map(item => [Number(item.xValue), Number(item.yValue)])
+        .map(mapChartPoint)
         .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y))
   }
   if (!Array.isArray(resultData.value?.data)) return []
   return resultData.value.data
       .filter(item => item.isDeleted !== true)
-      .map(item => {
-        const x = Number(item.pseudotime)
-        const y = Number(item.pressure)
-        return [x, y]
-      })
+      .map(mapChartPoint)
       .filter(([x, y]) => x > 0 && y > 0)
 })
 
 const allPoints = computed(() => {
-  const chartItem = resultData.value?.chartItems?.find(item => item.yAxisField === 'pressure')
+  const chartItem = findChartItem(['pressure', 'normalizedPressure', 'normalisedPressure', 'regularizedPressure'])
   if (chartItem?.data?.length) {
     return chartItem.data
         .filter(item => item.isDeleted === true)
-        .map(item => [Number(item.xValue), Number(item.yValue)])
+        .map(mapChartPoint)
         .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y))
   }
   if (!Array.isArray(resultData.value?.data)) return []
   return resultData.value.data
       .filter(item => item.isDeleted === true)
-      .map(item => {
-        const x = Number(item.pseudotime)
-        const y = Number(item.pressure)
-        return [x, y]
-      })
+      .map(mapChartPoint)
       .filter(([x, y]) => x > 0 && y > 0)
 })
 
@@ -218,10 +228,10 @@ const regression = computed(() => {
 })
 
 const regressionPoints = computed(() => {
-  const chartItem = resultData.value?.chartItems?.find(item => item.yAxisField === 'linearRegressionPressure')
+  const chartItem = findChartItem(['linearRegressionPressure', 'linearRegressionNormalizedPressure', 'linearRegressionRegularizedPressure'])
   if (chartItem?.data?.length) {
     return chartItem.data
-        .map(item => [Number(item.xValue), Number(item.yValue)])
+        .map(mapChartPoint)
         .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y))
   }
   const { slope, intercept } = regression.value
