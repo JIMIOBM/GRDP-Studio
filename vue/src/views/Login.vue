@@ -26,6 +26,7 @@ const rules = {
 const loginDockerPlatform = async () => {
   const response = await fetch('/docker-auth/login', {
     method: 'POST',
+    credentials: 'same-origin',
     headers: {
       'Content-Type': 'application/json'
     },
@@ -46,11 +47,6 @@ const enterIpr = async (account) => {
   connectNotifySocket()
   ElMessage.success('登录成功')
   await router.replace('/ipr')
-
-  loginDockerPlatform().catch((error) => {
-    console.error('原平台登录同步失败', error)
-    ElMessage.warning(error.message || '原平台登录同步失败，Docker 接口可能需要重新登录')
-  })
 }
 
 const onLogin = async () => {
@@ -58,16 +54,21 @@ const onLogin = async () => {
     if (!valid) return
     loading.value = true
     try {
-      const res = await userApi.login(form.value)
-      const account = res?.data || { ...form.value }
-      await enterIpr(account)
-    } catch (e) {
+      let account
       try {
-        // 后端未就绪时的兜底：本地放行，便于联调前端。
-        await enterIpr({ id: 1, username: form.value.username, nickname: form.value.username })
-      } catch (dockerError) {
-        ElMessage.error(dockerError.message || e.message || '登录失败')
+        const res = await userApi.login(form.value)
+        account = res?.data || { id: 1, username: form.value.username, nickname: form.value.username }
+      } catch (error) {
+        // 本地业务后端未就绪时仍允许联调，但原平台必须真实登录成功。
+        console.warn('本地业务登录不可用，使用联调账号信息', error)
+        account = { id: 1, username: form.value.username, nickname: form.value.username }
       }
+
+      // 必须先拿到并校验原平台会话，再进入会发起原平台请求的主页面。
+      await loginDockerPlatform()
+      await enterIpr(account)
+    } catch (error) {
+      ElMessage.error(error.message || '登录失败')
     } finally {
       loading.value = false
     }

@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
@@ -33,27 +33,11 @@ const getLocalEnvValue = (key) => {
   return parseEnvValue(envLine.slice(envLine.indexOf('=') + 1))
 }
 
-const getDockerCookie = () => {
-  return getLocalEnvValue('VITE_DOCKER_COOKIE')
-}
-
-const serializeEnvValue = (value) => `"${String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
-
-const writeLocalEnvValue = (key, value) => {
-  const path = envPath()
-  const envText = readLocalEnv()
-  const lines = envText ? envText.split(/\r?\n/) : []
-  const nextLine = `${key}=${serializeEnvValue(value)}`
-  const index = lines.findIndex(line => line.trim().startsWith(`${key}=`))
-
-  if (index >= 0) {
-    lines[index] = nextLine
-  } else {
-    if (lines.length && lines[lines.length - 1] !== '') lines.push('')
-    lines.push(nextLine)
-  }
-
-  writeFileSync(path, lines.join('\n'), 'utf8')
+const getCookiePair = (cookieHeader, name) => {
+  return String(cookieHeader || '')
+    .split(';')
+    .map(item => item.trim())
+    .find(item => item.startsWith(`${name}=`)) || ''
 }
 
 const parseJsonBody = (req) => new Promise((resolveBody, rejectBody) => {
@@ -93,6 +77,31 @@ const getCsrfToken = (flow) => {
     if (attrs.name === 'csrf_token' && attrs.value) return attrs.value
   }
   return ''
+}
+
+const verifyDockerSession = async (cookie, baseUrl) => {
+  const sessionPath = getLocalEnvValue('DOCKER_SESSION_CHECK_PATH') || '/services/ory/kratos/sessions/whoami'
+  const response = await fetch(new URL(sessionPath, baseUrl), {
+    headers: {
+      Accept: 'application/json',
+      Cookie: cookie
+    },
+    redirect: 'manual'
+  })
+
+  if (!response.ok) {
+    const error = new Error(`原平台会话校验失败：${response.status}`)
+    error.status = response.status
+    throw error
+  }
+
+  const session = await response.json()
+  if (session?.active === false) {
+    const error = new Error('原平台会话未激活')
+    error.status = 401
+    throw error
+  }
+  return session
 }
 
 const initDockerLoginFlow = async () => {
@@ -177,8 +186,12 @@ const loginDockerPlatform = async ({ username, password }) => {
     throw new Error('原平台登录成功但没有拿到 ahksoil_identity_session')
   }
 
-  writeLocalEnvValue('VITE_DOCKER_COOKIE', cookie)
-  return cookie
+  const session = await verifyDockerSession(cookie, baseUrl)
+  return {
+    cookie,
+    identityCookie: getCookiePair(cookie, 'ahksoil_identity_session'),
+    expiresAt: session?.expires_at || null
+  }
 }
 
 export default defineConfig(() => {
@@ -197,18 +210,29 @@ export default defineConfig(() => {
   const alignDockerOrigin = (proxyReq) => {
     proxyReq.setHeader('Origin', 'http://127.0.0.1:9920')
   }
-  const applyDockerHeaders = (proxyReq) => {
+  const applyDockerHeaders = (proxyReq, req) => {
     alignDockerOrigin(proxyReq)
 
-    const dockerCookie = getDockerCookie()
-    if (dockerCookie) {
-      proxyReq.setHeader('Cookie', dockerCookie)
+    const browserCookie = req.headers.cookie || ''
+    if (browserCookie) {
+      proxyReq.setHeader('Cookie', browserCookie)
     }
   }
   const sendJson = (res, statusCode, data) => {
     res.statusCode = statusCode
     res.setHeader('Content-Type', 'application/json; charset=utf-8')
     res.end(JSON.stringify(data))
+  }
+  const setBrowserIdentityCookie = (res, identityCookie, expiresAt) => {
+    if (!identityCookie) return
+    const expiresDate = expiresAt ? new Date(expiresAt) : null
+    const expires = expiresDate && !Number.isNaN(expiresDate.getTime())
+      ? `; Expires=${expiresDate.toUTCString()}`
+      : ''
+    res.setHeader(
+      'Set-Cookie',
+      `${identityCookie}; Path=/; HttpOnly; SameSite=Lax${expires}`
+    )
   }
   return {
     plugins: [
@@ -224,8 +248,9 @@ export default defineConfig(() => {
 
             try {
               const body = await parseJsonBody(req)
-              await loginDockerPlatform(body)
-              sendJson(res, 200, { success: true })
+              const session = await loginDockerPlatform(body)
+              setBrowserIdentityCookie(res, session.identityCookie, session.expiresAt)
+              sendJson(res, 200, { success: true, expiresAt: session.expiresAt })
             } catch (error) {
               sendJson(res, 500, { success: false, message: error.message || '原平台登录失败' })
             }
@@ -243,11 +268,6 @@ export default defineConfig(() => {
       port: 5173,
       open: 'http://127.0.0.1:5173/login',
       proxy: {
-        // Independent read-only FlowBalance development backend.
-        '/flowbalance': {
-          target: 'http://127.0.0.1:8891',
-          changeOrigin: true
-        },
         // SpringBoot backend
         '/api': {
           target: 'http://localhost:8080',
@@ -262,7 +282,7 @@ export default defineConfig(() => {
           ws: true,
           configure: (proxy) => {
             proxy.on('proxyReqWs', (proxyReq, req) => {
-              applyDockerHeaders(proxyReq)
+              applyDockerHeaders(proxyReq, req)
               logDockerProxyRequest(proxyReq, req)
             })
           },
@@ -275,7 +295,7 @@ export default defineConfig(() => {
           changeOrigin: true,
           configure: (proxy) => {
             proxy.on('proxyReq', (proxyReq, req) => {
-              applyDockerHeaders(proxyReq)
+              applyDockerHeaders(proxyReq, req)
               logDockerProxyRequest(proxyReq, req)
             })
           },
