@@ -192,6 +192,7 @@ export const typicalCurveApi = {
 }
 
 /* ===== 井列表 ===== */
+
 export const wellApi = {
     /**
      * GET /projectanalysis/{projectId}/{gasReservoirId}/wells
