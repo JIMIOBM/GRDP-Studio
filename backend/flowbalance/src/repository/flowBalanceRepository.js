@@ -13,19 +13,14 @@ class FlowBalanceRepository {
     this.db = db
   }
 
-  async loadOfficialFlowBalanceStatuses({ projectId, gasReservoirId, wellNames }) {
-    return this.findOfficialFlowBalanceLogStatuses(normalizeScope(projectId, gasReservoirId, wellNames))
-  }
-
   async loadInput({ projectId, gasReservoirId, wellNames }) {
     const scope = normalizeScope(projectId, gasReservoirId, wellNames)
-    const [productionBaseRows, wellHeadTubingPressureRows, calculatedBottomHolePressureRows, gasProperties, otherData, officialLogStatuses] = await Promise.all([
+    const [productionBaseRows, wellHeadTubingPressureRows, calculatedBottomHolePressureRows, gasProperties, otherData] = await Promise.all([
       this.findProductionBaseSeries(scope),
       this.findWellHeadTubingPressureSeries(scope),
       this.findCalculatedBottomHolePressureSeries(scope),
       this.findGasProperties(scope),
-      this.findOtherData(scope),
-      this.findOfficialFlowBalanceLogStatuses(scope)
+      this.findOtherData(scope)
     ])
     const productionRows = mergePressureSeries(productionBaseRows, wellHeadTubingPressureRows, calculatedBottomHolePressureRows)
 
@@ -77,8 +72,7 @@ class FlowBalanceRepository {
           gasProperty
         }),
         production,
-        nodeSources: this.buildNodeSources(scope, wellName, production),
-        officialFlowBalanceStatus: officialLogStatuses[wellName] || null
+        nodeSources: this.buildNodeSources(scope, wellName, production)
       }
     })
 
@@ -214,49 +208,6 @@ class FlowBalanceRepository {
       [scope.projectId, scope.gasReservoirId, ...scope.wellNames]
     )
     return rows.map(row => mapNumericFields(row, ['id', 'projectId', 'gasReservoirId', 'originalFormationPressure', 'formationTemperature']))
-  }
-
-  async findOfficialFlowBalanceLogStatuses(scope) {
-    const wellFilters = scope.wellNames.map(() => 'message LIKE ?').join(' OR ')
-    const rows = await this.db.query(
-      `SELECT
-        message,
-        level,
-        created_at AS createdAt
-      FROM common_notify_logs
-      WHERE module = ?
-        AND type = 'LOG'
-        AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
-        AND (message LIKE ? OR message LIKE ?)
-        AND (${wellFilters})
-      ORDER BY created_at DESC
-      LIMIT 500`,
-      [
-        'projectanalysis.dynamicoriginalgasinplace',
-        '%调用分析算法错误%',
-        '%保存分析结果%',
-        ...scope.wellNames.map(wellName => `%]-[${wellName}]:%`)
-      ]
-    )
-
-    const statuses = {}
-    for (const row of rows) {
-      const message = String(row.message || '')
-      const wellName = scope.wellNames.find(name => message.includes(`]-[${name}]:`))
-      if (!wellName || statuses[wellName]) continue
-
-      const failed = message.includes('调用分析算法错误') || String(row.level || '').toLowerCase() === 'error'
-      const errorMatch = message.match(/调用分析算法错误\((.+)\)\s*$/)
-      statuses[wellName] = {
-        status: failed ? 'error' : 'success',
-        source: 'official-backend-log',
-        message: failed
-          ? (errorMatch?.[1] || '动态储量分析-流动质平衡:参与回归分析的数据点数必须大于0')
-          : message,
-        createdAt: row.createdAt || null
-      }
-    }
-    return statuses
   }
 
   buildNodeSources(scope, wellName, production) {
