@@ -1,5 +1,3 @@
-import { existsSync, readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { fileURLToPath, URL } from 'node:url'
@@ -15,22 +13,9 @@ const parseEnvValue = (value) => {
   return trimmed
 }
 
-const envPath = () => resolve(process.cwd(), '.env.local')
-
-const readLocalEnv = () => {
-  const path = envPath()
-  if (!existsSync(path)) return ''
-  return readFileSync(path, 'utf8')
-}
-
 const getLocalEnvValue = (key) => {
-  const envText = readLocalEnv()
-  const envLine = envText
-    .split(/\r?\n/)
-    .find(line => line.trim().startsWith(`${key}=`))
-
-  if (!envLine) return ''
-  return parseEnvValue(envLine.slice(envLine.indexOf('=') + 1))
+  const value = process.env[key]
+  return value ? parseEnvValue(value) : ''
 }
 
 const getCookiePair = (cookieHeader, name) => {
@@ -195,6 +180,8 @@ const loginDockerPlatform = async ({ username, password }) => {
 }
 
 export default defineConfig(() => {
+  let dockerSessionCookie = ''
+
   const logDockerProxyRequest = (proxyReq, req) => {
     if (!/waterinvasionanalysis|common\/notify/.test(req.url || '')) return
 
@@ -213,9 +200,8 @@ export default defineConfig(() => {
   const applyDockerHeaders = (proxyReq, req) => {
     alignDockerOrigin(proxyReq)
 
-    const browserCookie = req.headers.cookie || ''
-    if (browserCookie) {
-      proxyReq.setHeader('Cookie', browserCookie)
+    if (dockerSessionCookie) {
+      proxyReq.setHeader('Cookie', dockerSessionCookie)
     }
   }
   const sendJson = (res, statusCode, data) => {
@@ -249,6 +235,7 @@ export default defineConfig(() => {
             try {
               const body = await parseJsonBody(req)
               const session = await loginDockerPlatform(body)
+              dockerSessionCookie = session.cookie
               setBrowserIdentityCookie(res, session.identityCookie, session.expiresAt)
               sendJson(res, 200, { success: true, expiresAt: session.expiresAt })
             } catch (error) {
