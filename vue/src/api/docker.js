@@ -99,7 +99,11 @@ export const analyticMethodApi = {
     dockerRequest.get(`/projectanalysis/analysismethods/${projectId}/${gasReservoirId}/${resultId}`),
 
   getSummaryChart: (projectId, gasReservoirId) =>
-    dockerRequest.get(`/projectanalysis/analysismethods/summary/chart/${projectId}/${gasReservoirId}`)
+    dockerRequest.get(`/projectanalysis/analysismethods/summary/chart/${projectId}/${gasReservoirId}`),
+  deleteResult: (projectId, gasReservoirId, wellName) =>
+    dockerRequest.delete(`/projectanalysis/analysismethods/${projectId}/${gasReservoirId}/${wellName}`,{
+      data: { wellName }
+})
 }
 
 /* ===== 动态储量 - 物质平衡 ===== */
@@ -156,6 +160,7 @@ export const materialBalanceApi = {
             `/projectanalysis/dynamicoriginalgasInplace/result/${projectId}/${gasReservoirId}/${encodeURIComponent(dynamicOriginalGasInPlaceId)}`,
             options
         ),
+        
 }
 
 /* ===== 动态储量 - 动态物质平衡 ===== */

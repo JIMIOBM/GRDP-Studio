@@ -2831,6 +2831,25 @@ const handleDeleteContextNode = async () => {
     return
   }
 
+   if (node.type === NODETYPE.NodeType_AnalysisMethods) {
+       const resultId = getAnalysisId(node)
+    if (!resultId || Number.isNaN(Number(resultId))) {
+      ElMessage.error('没有找到动态平衡结果 ID')
+      return
+    }
+
+    try {
+      await analyticMethodApi.deleteResult(PROJECT_ID, GAS_RESERVOIR_ID, resultId)
+      removeTreeNode(node)
+      clearCurrentViewAfterDelete(node)
+      ElMessage.success(`${deleteLabel}成功`)
+    } catch (error) {
+      ElMessage.error(error.response?.data?.message || error.message || `${deleteLabel}失败`)
+      console.error(`${deleteLabel}失败`, error)
+    }
+    return
+  }
+
   if (!isTypicalCurveResultNode(node)) {
     ElMessage.info(`${deleteLabel}：删除接口待确认`)
     return
