@@ -17,8 +17,8 @@ import AGContent from '@/views/WellControlInventory/AGContent.vue'
 import { NODETYPE } from '@/constants/nodeType'
 import { analyticMethodApi, dynamicBalanceApi, materialBalanceApi, nodeApi, projectApi, typicalCurveApi, waterInvasionApi } from '@/api/docker'
 
-const PROJECT_ID = 6
-const GAS_RESERVOIR_ID = 1
+const PROJECT_ID = 4
+const GAS_RESERVOIR_ID = 3
 const FLOW_BALANCE_NODE_TYPE = NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure
 
 const WELL_GROUPS = [
@@ -1365,16 +1365,57 @@ const createFlowBalanceLogWaiter = (wellName, timeoutMs = FLOW_BALANCE_LOG_TIMEO
       isComplete: (payload, logText) => WATER_INVASION_COMPLETE_PATTERN.test(logText)
     })
 
-//物质平衡日志等待器
-// 物质平衡日志等待器
-const createMaterialBalanceLogWaiter = (wellName, timeoutMs = MATERIAL_BALANCE_LOG_TIMEOUT) =>
-    createAnalysisLogWaiter({
-      module: MATERIAL_BALANCE_NOTIFY_MODULE,
-      wellName: '',
-      timeoutMs,
-      timeoutMessage: `${wellName}物质平衡日志超时，未收到完成消息`,
-      fallbackErrorMessage: `${wellName}物质平衡计算失败`
-    })
+// 物质平衡日志的 level 可能仍是 info；只要 payload.error 非空就立即失败。
+const createMaterialBalanceLogWaiter = (wellName, timeoutMs = MATERIAL_BALANCE_LOG_TIMEOUT) => {
+  let settled = false
+  let cleanup = () => { }
+
+  const promise = new Promise((resolve, reject) => {
+    const finish = (callback, value) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      callback(value)
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      finish(reject, new Error(`${wellName}物质平衡日志超时，未收到完成消息`))
+    }, timeoutMs)
+
+    const onNotifyMessage = (event) => {
+      const message = event.detail
+      const payload = message?.payload
+      if (message?.type !== 'user' || payload?.module !== MATERIAL_BALANCE_NOTIFY_MODULE) return
+
+      const errorText = String(payload.error || '').trim()
+      if (errorText) {
+        finish(reject, new Error(errorText))
+        return
+      }
+
+      const logText = String(payload.message || '')
+      if (WATER_INVASION_COMPLETE_PATTERN.test(logText)) {
+        finish(resolve, payload)
+      }
+    }
+
+    cleanup = () => {
+      window.clearTimeout(timeoutId)
+      window.removeEventListener('notify-message', onNotifyMessage)
+    }
+
+    window.addEventListener('notify-message', onNotifyMessage)
+  })
+
+  return {
+    promise,
+    cancel: () => {
+      if (settled) return
+      settled = true
+      cleanup()
+    }
+  }
+}
 
 //wattenbarger日志等待器
 const createWattenbargerLogWaiter = (wellName, timeoutMs = TYPICAL_CURVE_LOG_TIMEOUT) =>
@@ -1889,8 +1930,9 @@ const runMaterialBalanceForSelectedWell = async () => {
   materialBalanceRunning.value = true
   //调计算接口之前创建日志监听器
   const logWaiter = createMaterialBalanceLogWaiter(targetWellName)
+  let logPayload = null
   try {
-    await materialBalanceApi.calc({
+    const calcPromise = materialBalanceApi.calc({
       wellNames: [targetWellName],
       gasReservoirType: 1,
       gasReservoirId: Number(GAS_RESERVOIR_ID),
@@ -1899,8 +1941,13 @@ const runMaterialBalanceForSelectedWell = async () => {
     })
 
     ElMessage.info(`${targetWellName} 物质平衡计算中，请稍候...`)
-    //等待日志完成后再读取节点
-    await logWaiter.promise
+    const firstFinished = await Promise.race([
+      calcPromise.then(() => ({ source: 'request' })),
+      logWaiter.promise.then(payload => ({ source: 'log', payload }))
+    ])
+    logPayload = firstFinished.source === 'log'
+        ? firstFinished.payload
+        : await logWaiter.promise
     // // 从日志确认，读取结果节点
     // const { rootNode, resultNode } =
     //     await getMaterialBalanceNodeOnce(targetWellName,0)
@@ -1950,7 +1997,9 @@ const runMaterialBalanceForSelectedWell = async () => {
     activeNodeId.value = viewNode.id
     currentView.value = 'material-balance'
     currentViewNode.value = viewNode
-    ElMessage.success(`${targetWellName} 物质平衡计算完成`)
+    // ElMessage.success(logPayload?.message || logPayload?.error)
+    ElMessage.success("物质平衡计算完成")
+
   } catch (error) {
     logWaiter.cancel()
     ElMessage.error(error.message || '物质平衡计算失败')
