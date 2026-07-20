@@ -1,58 +1,92 @@
+const RECONNECT_DELAY = 3000
+
 let socket = null
 let reconnectTimer = null
-let reconnectEnabled = false
+let manuallyClosed = false
 
-const socketUrl = () => {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${protocol}//${window.location.host}/docker-api/common/notify`
+const getAccount = () => {
+    try {
+        const accountText = localStorage.getItem('account')
+        return accountText ? JSON.parse(accountText) : null
+    } catch {
+        return null
+    }
+}
+
+const buildNotifyUrl = () => {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    return new URL('/docker-api/common/notify', `${protocol}//${window.location.host}`).toString()
+}
+
+const clearReconnectTimer = () => {
+    if (!reconnectTimer) return
+    window.clearTimeout(reconnectTimer)
+    reconnectTimer = null
 }
 
 const scheduleReconnect = () => {
-  if (!reconnectEnabled || reconnectTimer) return
-  reconnectTimer = window.setTimeout(() => {
-    reconnectTimer = null
-    connectNotifySocket()
-  }, 3000)
+    clearReconnectTimer()
+    if (manuallyClosed || !getAccount()) return
+
+    reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = null
+        connectNotifySocket()
+    }, RECONNECT_DELAY)
 }
 
-export function connectNotifySocket() {
-  if (typeof window === 'undefined') return null
-  reconnectEnabled = true
-
-  if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
-    return socket
-  }
-
-  socket = new WebSocket(socketUrl())
-  socket.addEventListener('message', (event) => {
-    let message = event.data
+const parseMessage = (data) => {
+    if (typeof data !== 'string') return data
     try {
-      message = JSON.parse(event.data)
+        return JSON.parse(data)
     } catch {
-      // Plain-text notifications are forwarded unchanged.
+        return data
     }
-    window.dispatchEvent(new CustomEvent('notify-message', { detail: message }))
-  })
-  socket.addEventListener('close', () => {
+}
+
+export const disconnectNotifySocket = () => {
+    manuallyClosed = true
+    clearReconnectTimer()
+
+    if (!socket) return
+    const currentSocket = socket
     socket = null
-    scheduleReconnect()
-  })
-  socket.addEventListener('error', () => socket?.close())
-  return socket
+    currentSocket.close()
 }
 
-export function disconnectNotifySocket() {
-  reconnectEnabled = false
-  if (reconnectTimer) {
-    window.clearTimeout(reconnectTimer)
-    reconnectTimer = null
-  }
-  socket?.close()
-  socket = null
+export const connectNotifySocket = () => {
+    if (!getAccount()) return null
+    if (socket && [WebSocket.OPEN, WebSocket.CONNECTING].includes(socket.readyState)) return socket
+
+    manuallyClosed = false
+    clearReconnectTimer()
+
+    socket = new WebSocket(buildNotifyUrl())
+
+    socket.addEventListener('message', (event) => {
+        const message = parseMessage(event.data)
+
+        if (message?.type === 'ping' && socket?.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ type: 'pong', payload: null }))
+            return
+        }
+
+        window.dispatchEvent(new CustomEvent('notify-message', { detail: message }))
+    })
+
+    socket.addEventListener('close', () => {
+        socket = null
+        scheduleReconnect()
+    })
+
+    socket.addEventListener('error', () => {
+        socket?.close()
+    })
+
+    return socket
 }
 
-export function initNotifySocket() {
-  if (typeof window !== 'undefined' && window.localStorage.getItem('account')) {
-    connectNotifySocket()
-  }
+export const initNotifySocket = () => {
+    if (getAccount()) connectNotifySocket()
+
+    window.addEventListener('beforeunload', disconnectNotifySocket)
 }

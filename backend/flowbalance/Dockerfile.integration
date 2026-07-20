@@ -1,9 +1,0 @@
-FROM node:20-bookworm-slim
-
-WORKDIR /app
-
-COPY package.json package-lock.json ./
-COPY src ./src
-COPY test ./test
-
-CMD ["sh", "-lc", "npm ci && npm run test:integration"]

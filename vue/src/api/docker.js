@@ -1,6 +1,6 @@
 /**
  * docker.js
- * 专门用于调用 Docker 服务（http://127.0.0.1:9919）的 axios 实例。
+ * 专门用于调用原 GRDP 平台（http://127.0.0.1:9920/api）的 axios 实例。
  * 开发时通过 vite.config.js 中的 /docker-api 代理转发，避免跨域。
  *
  * 路径：src/api/docker.js
@@ -15,20 +15,6 @@ const dockerRequest = axios.create({
 })
 
 let lastDockerUnauthorizedTipAt = 0
-
-const flowBalanceRequest = axios.create({
-  baseURL: '/flowbalance',
-  timeout: 120000
-})
-
-flowBalanceRequest.interceptors.response.use(
-  (res) => res,
-  (err) => {
-    const msg = err.response?.data?.message || err.message || '请求失败'
-    ElMessage.error(`FlowBalance 服务错误：${msg}`)
-    return Promise.reject(err)
-  }
-)
 
 dockerRequest.interceptors.request.use(
   (config) => {
@@ -56,10 +42,10 @@ dockerRequest.interceptors.response.use(
         const now = Date.now()
         if (now - lastDockerUnauthorizedTipAt > 3000) {
           lastDockerUnauthorizedTipAt = now
-          ElMessage.error('Docker 登录状态已失效，请重新获取登录 Cookie 后重启前端服务')
+          ElMessage.error('原平台登录状态已失效，请重新登录后再试')
         }
       } else {
-        ElMessage.error(`Docker 服务错误：${msg}`)
+        ElMessage.error(`原平台服务错误：${msg}`)
       }
     }
     return Promise.reject(err)
@@ -121,8 +107,24 @@ export const materialBalanceApi = {
   calc: (data) =>
     dockerRequest.post('/projectanalysis/dynamicoriginalgasInplace/mb/calc', data),
 
-  calcFMB: (data) =>
-    dockerRequest.post('/projectanalysis/dynamicoriginalgasInplace/fmb/calc', data),
+  calcFMB: (data, options = {}) =>
+    dockerRequest.post('/projectanalysis/dynamicoriginalgasInplace/fmb/calc', data, {
+      timeout: 180000,
+      ...options,
+      headers: {
+        'X-Project-Id': String(data.projectId),
+        ...options.headers
+      }
+    }),
+
+  getUnstableFlowPeriodLength: (projectId, options = {}) =>
+    dockerRequest.get('/projectanalysis/dynamicoriginalgasInplace/parameters/unstableFlowPeriodLength', {
+      ...options,
+      headers: {
+        'X-Project-Id': String(projectId),
+        ...options.headers
+      }
+    }),
 
 // /projectanalysis/dynamicoriginalgasInplace/averageFormationPressure/2/1/X-1
     getAverageFormationPressure: (projectId, gasReservoirId, wellName, options = {}) => {
@@ -138,7 +140,14 @@ export const materialBalanceApi = {
         if (size !== null && size !== undefined) params.size = size
         return dockerRequest.get(
             `/projectanalysis/dynamicoriginalgasInplace/result/${projectId}/${gasReservoirId}/${encodeURIComponent(dynamicOriginalGasInPlaceId)}`,
-            { ...(Object.keys(params).length ? { params } : {}), ...options }
+            {
+              ...(Object.keys(params).length ? { params } : {}),
+              ...options,
+              headers: {
+                'X-Project-Id': String(projectId),
+                ...options.headers
+              }
+            }
         )
     },
 
@@ -147,17 +156,6 @@ export const materialBalanceApi = {
             `/projectanalysis/dynamicoriginalgasInplace/result/${projectId}/${gasReservoirId}/${encodeURIComponent(dynamicOriginalGasInPlaceId)}`,
             options
         ),
-}
-
-/* ===== 独立 FlowBalance 开发服务（只读数据库 + 内存计算） ===== */
-export const flowBalanceApi = {
-  calc: (data) => flowBalanceRequest.post('/calc', data),
-  getNodes: (projectId, gasReservoirId, wellNames = []) => {
-    const params = { projectId, gasReservoirId }
-    if (wellNames.length) params.wellNames = wellNames.join(',')
-    return flowBalanceRequest.get('/nodes', { params })
-  },
-  getNodeResult: (nodeId) => flowBalanceRequest.get(`/results/${nodeId}`)
 }
 
 /* ===== 动态储量 - 动态物质平衡 ===== */
@@ -194,6 +192,7 @@ export const typicalCurveApi = {
 }
 
 /* ===== 井列表 ===== */
+
 export const wellApi = {
     /**
      * GET /projectanalysis/{projectId}/{gasReservoirId}/wells
@@ -213,9 +212,16 @@ export const parametersApi = {
      * @param {number|string} projectId
      * @param {number|string} gasReservoirId
      */
-    getMinWaterGasRatio: (projectId, gasReservoirId) =>
+    getMinWaterGasRatio: (projectId, gasReservoirId, options = {}) =>
         dockerRequest.get(
-            `/projectanalysis/${projectId}/${gasReservoirId}/parameters/minmumWaterGasRatio`
+            `/projectanalysis/${projectId}/${gasReservoirId}/parameters/minmumWaterGasRatio`,
+            {
+              ...options,
+              headers: {
+                'X-Project-Id': String(projectId),
+                ...options.headers
+              }
+            }
         )
 }
 
@@ -224,8 +230,14 @@ export const nodeApi = {
     /**
      * GET /projectanalysis/node/{projectId}/{gasReservoirId}/{nodeType}
      */
-    getNode: (projectId, gasReservoirId, nodeType) =>
-        dockerRequest.get(`/projectanalysis/node/${projectId}/${gasReservoirId}/${nodeType}`)
+    getNode: (projectId, gasReservoirId, nodeType, options = {}) =>
+        dockerRequest.get(`/projectanalysis/node/${projectId}/${gasReservoirId}/${nodeType}`, {
+          ...options,
+          headers: {
+            'X-Project-Id': String(projectId),
+            ...options.headers
+          }
+        })
 }
 
 

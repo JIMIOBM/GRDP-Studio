@@ -8,13 +8,15 @@ const props = defineProps({
   defaultExpanded: { type: Boolean, default: true }
 })
 
-const emit = defineEmits(['select', 'node-contextmenu'])
+const emit = defineEmits(['select', 'node-contextmenu', 'expand'])
 
 const expanded = ref(props.node.defaultExpanded ?? props.defaultExpanded)
 const hasChildren = () => props.node.children && props.node.children.length > 0
 
 const toggle = () => {
-  if (hasChildren()) expanded.value = !expanded.value
+  if (!hasChildren()) return
+  expanded.value = !expanded.value
+  if (expanded.value) emit('expand', props.node)
 }
 
 const handleClick = () => {
@@ -25,6 +27,7 @@ const handleClick = () => {
 }
 
 const onChildSelect = (n) => emit('select', n)
+const onChildExpand = (n) => emit('expand', n)
 const handleContextMenu = (event) => {
   emit('node-contextmenu', props.node, event)
 }
@@ -61,6 +64,7 @@ const onChildContextMenu = (node, event) => emit('node-contextmenu', node, event
         :active-id="activeId"
         :default-expanded="defaultExpanded"
         @select="onChildSelect"
+        @expand="onChildExpand"
         @node-contextmenu="onChildContextMenu"
       />
     </div>
