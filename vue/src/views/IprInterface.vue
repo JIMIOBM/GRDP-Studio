@@ -85,6 +85,8 @@ const sideTreeCollapsed = ref(false)
 const waterInvasionRunning = ref(false)  //用于判断水侵分析是否正在运行
 const analyticMethodRunning = ref(false)
 const materialBalanceRunning = ref(false)
+const MATERIAL_BALANCE_NOTIFY_MODULE = 'projectanalysis.dynamicoriginalgasinplace'//物质平衡日志配置
+const MATERIAL_BALANCE_LOG_TIMEOUT = 120000
 const flowBalanceRunning = ref(false)
 const dynamicBalanceRunning = ref(false)
 const typicalCurveRunning = ref(false)
@@ -1363,6 +1365,30 @@ const createFlowBalanceLogWaiter = (wellName, timeoutMs = FLOW_BALANCE_LOG_TIMEO
       isComplete: (payload, logText) => WATER_INVASION_COMPLETE_PATTERN.test(logText)
     })
 
+//物质平衡日志等待器
+// 物质平衡日志等待器
+const createMaterialBalanceLogWaiter = (wellName, timeoutMs = MATERIAL_BALANCE_LOG_TIMEOUT) =>
+    createAnalysisLogWaiter({
+      module: MATERIAL_BALANCE_NOTIFY_MODULE,
+      wellName: '',
+      timeoutMs,
+      timeoutMessage: `${wellName}物质平衡日志超时，未收到完成消息`,
+      fallbackErrorMessage: `${wellName}物质平衡计算失败`
+    })
+
+//wattenbarger日志等待器
+const createWattenbargerLogWaiter = (wellName, timeoutMs = TYPICAL_CURVE_LOG_TIMEOUT) =>
+    createAnalysisLogWaiter({
+      module: TYPICAL_CURVE_NOTIFY_MODULE,
+      wellName,
+      timeoutMs,
+      timeoutMessage: `${wellName} Wattenbarger日志超时，未收到完成消息`,
+      fallbackErrorMessage: `${wellName} Wattenbarger计算失败`,
+      allowGlobalComplete: true,
+      isComplete: (_payload, logText) =>
+          WATER_INVASION_COMPLETE_PATTERN.test(logText)
+    })
+
 const pollAnalyticMethodNodes = async (wellNames, maxRetries = 20, intervalMs = 1500) => {
   const targets = wellNames.filter(Boolean)
   for (let i = 0; i < maxRetries; i++) {
@@ -1403,6 +1429,48 @@ const getMaterialBalanceNodeOnce = async (wellName, delayMs = 1200) => {
     ].includes(type)
   })
   return { rootNode, resultNode }
+}
+
+//物质平衡结果等待函数
+const waitForMaterialBalanceResult = async (wellName, maxRetries = 20, intervalMs = 500) => {
+  let latestResult = {
+    rootNode: null,
+    resultNode: null,
+    materialBalanceRows: []
+  }
+
+  // 首次计算需要新建节点，完成日志可能略早于节点和结果数据落库。
+  // 这里的重试只等待数据可读取，不用于判断计算成功或失败。
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    if (attempt > 0) {
+      await new Promise(resolve => setTimeout(resolve, intervalMs))
+    }
+
+    try {
+      const { rootNode, resultNode } =
+          await getMaterialBalanceNodeOnce(wellName, 0)
+
+      const materialBalanceRows = resultNode
+          ? await getMaterialBalanceRowsForWell(wellName, {
+            silentError: true
+          })
+          : []
+
+      latestResult = {
+        rootNode,
+        resultNode,
+        materialBalanceRows
+      }
+
+      // 节点和输出数据均可读取后，才进入页面展示流程。
+      if (resultNode && materialBalanceRows.length) {
+        return latestResult
+      }
+    } catch {
+      // 首次创建期间查询接口可能短暂不可用，继续下一次查询。
+    }
+  }
+  return latestResult
 }
 
 const pollTypicalCurveNode = async (wellName, maxRetries = 20, intervalMs = 1500) => {
@@ -1616,6 +1684,38 @@ const getWattenbargerNodeOnce = async (wellName, delayMs = 1200) => {
   return { rootNode, wattenbargerNode: findWattenbargerNodeByWell(rootNode, wellName) }
 }
 
+//wattenbarger节点结果等待
+const waitForWattenbargerNode = async (
+    wellName,
+    maxRetries = 20,
+    intervalMs = 500
+) => {
+  let latestResult = {
+    rootNode: null,
+    wattenbargerNode: null
+  }
+
+  // 首次计算需要创建新节点，完成日志可能略早于节点查询接口。
+  // 此处只等待节点落库，成功或失败仍由日志判断。
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    if (attempt > 0) {
+      await new Promise(resolve => setTimeout(resolve, intervalMs))
+    }
+
+    try {
+      latestResult = await getWattenbargerNodeOnce(wellName, 0)
+
+      if (latestResult.wattenbargerNode) {
+        return latestResult
+      }
+    } catch {
+      // 新节点落库期间查询可能暂时失败，继续下一次读取。
+    }
+  }
+
+  return latestResult
+}
+
 const getAGNodeOnce = async (wellName, delayMs = 1200) => {
   if (delayMs > 0) {
     await new Promise(resolve => setTimeout(resolve, delayMs))
@@ -1787,6 +1887,8 @@ const runMaterialBalanceForSelectedWell = async () => {
 
   if (materialBalanceRunning.value) return
   materialBalanceRunning.value = true
+  //调计算接口之前创建日志监听器
+  const logWaiter = createMaterialBalanceLogWaiter(targetWellName)
   try {
     await materialBalanceApi.calc({
       wellNames: [targetWellName],
@@ -1797,20 +1899,30 @@ const runMaterialBalanceForSelectedWell = async () => {
     })
 
     ElMessage.info(`${targetWellName} 物质平衡计算中，请稍候...`)
-
-    // 计算完成后读取后端保存的节点。
-    const { rootNode, resultNode } =
-      await getMaterialBalanceNodeOnce(targetWellName)
+    //等待日志完成后再读取节点
+    await logWaiter.promise
+    // // 从日志确认，读取结果节点
+    // const { rootNode, resultNode } =
+    //     await getMaterialBalanceNodeOnce(targetWellName,0)
+    //
+    // if (!resultNode) {throw new Error(`${targetWellName}井物质平衡日志已完成，但未生成结果节点`)}
+    //
+    // const materialBalanceRows = await getMaterialBalanceRowsForWell(targetWellName, { silentError: true })
+    //
+    // 日志确认成功后，等待首次创建的节点和结果数据完成落库。
+    const {rootNode, resultNode, materialBalanceRows} = await waitForMaterialBalanceResult(targetWellName)
 
     if (!resultNode) {
-      ElMessage.warning(`${targetWellName}井物质平衡结果不存在`)
-      return
+      throw new Error(
+          `${targetWellName}井物质平衡日志已完成，但未生成结果节点`
+      )
     }
 
-    // node 接口现在只包含曾经计算过物质平衡的井，
-    // 因此可以恢复全部历史节点。
-
-    const materialBalanceRows = await getMaterialBalanceRowsForWell(targetWellName, { silentError: true })
+    if (!materialBalanceRows.length) {
+      throw new Error(
+          `${targetWellName}井物质平衡日志已完成，但未生成结果数据`
+      )
+    }
     const materialBalanceRawNode = {
       ...resultNode,
       parentNode: rootNode,
@@ -1840,6 +1952,7 @@ const runMaterialBalanceForSelectedWell = async () => {
     currentViewNode.value = viewNode
     ElMessage.success(`${targetWellName} 物质平衡计算完成`)
   } catch (error) {
+    logWaiter.cancel()
     ElMessage.error(error.message || '物质平衡计算失败')
     console.error('物质平衡计算失败', error)
   } finally {
@@ -2234,6 +2347,8 @@ const runWattenbargerForSelectedWell = async () => {
   }
   if (typicalCurveRunning.value) return
   typicalCurveRunning.value = true
+  //监听器创建
+  const logWaiter = createWattenbargerLogWaiter(targetWellName)
   try {
     await typicalCurveApi.fitting({
       gasReservoirId: Number(GAS_RESERVOIR_ID),
@@ -2247,22 +2362,21 @@ const runWattenbargerForSelectedWell = async () => {
       minimumWaterGasRatio: 0.0602
     })
     ElMessage.info(`${targetWellName} Wattenbarger计算中，请稍候...`)
-    let rootNode = null
-    let resultNode = null
-    const result = await getWattenbargerNodeOnce(targetWellName, 1500)
-    rootNode = result.rootNode
-    resultNode = result.wattenbargerNode
-    //关掉接口轮询，一旦没有结果返回 直接报错
-    // for (let i = 0; i < 20; i++) {
-    //   const result = await getWattenbargerNodeOnce(targetWellName, 1500)
-    //   rootNode = result.rootNode
-    //   resultNode = result.wattenbargerNode
-    //   if (resultNode) break
-    // }
-    if (!resultNode) {
-      ElMessage.warning(`${targetWellName}井Wattenbarger结果不存在`)
-      return
-    }
+    await logWaiter.promise
+    //原轮询逻辑
+    // let rootNode = null
+    // let resultNode = null
+    // const result = await getWattenbargerNodeOnce(targetWellName, 1500)
+    // rootNode = result.rootNode
+    // resultNode = result.wattenbargerNode
+
+    // 日志确认完成后读取结果。
+    const {
+      rootNode,
+      wattenbargerNode: resultNode
+    } = await waitForWattenbargerNode(targetWellName)
+
+    if (!resultNode) {throw new Error(`${targetWellName}井Wattenbarger日志已完成，但未生成结果节点`)}
 
     applyTypicalCurveNodes(rootNode)
 
@@ -2289,6 +2403,7 @@ const runWattenbargerForSelectedWell = async () => {
     activeNode.value = treeNode || viewNode
     ElMessage.success(`${targetWellName} Wattenbarger计算完成`)
   } catch (error) {
+    logWaiter.cancel()
     ElMessage.error(error.message || 'Wattenbarger计算失败')
     console.error('Wattenbarger计算失败', error)
   } finally {
