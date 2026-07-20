@@ -6,6 +6,7 @@ import RibbonMenu from '@/components/RibbonMenu.vue'
 import TreeNode from '@/views/TreeNode.vue'
 import WaterInvasionContent from '@/views/WellControlInventory/WaterInvasionContent.vue'
 import MaterialBalanceContent from '@/views/WellControlInventory/MaterialBalanceContent.vue'
+import FlowBalanceContent from '@/views/WellControlInventory/FlowBalanceContent.vue'
 import AnalyticMethodContent from '@/views/WellControlInventory/AnalyticMethodContent.vue'
 import WattenbargerContent from '@/views/WellControlInventory/WattenbargerContent.vue'
 import BlasingameContent from '@/views/WellControlInventory/BlasingameContent.vue'
@@ -17,6 +18,7 @@ import { analyticMethodApi, dynamicBalanceApi, materialBalanceApi, nodeApi, proj
 
 const PROJECT_ID = 6
 const GAS_RESERVOIR_ID = 3
+const FLOW_BALANCE_NODE_TYPE = NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure
 
 const WELL_GROUPS = [
   { id: 'data-management', label: '数据管理' },
@@ -32,6 +34,7 @@ const NODE_GROUP_BY_TYPE = {
   [NODETYPE.NodeType_AnalysisMethods]: 'well-control-inventory',
   [NODETYPE.NodeType_DynamicOriginalGasInplace]: 'well-control-inventory',
   [NODETYPE.NodeType_DynamicMaterialBalanceMethodBlasingame]: 'well-control-inventory',
+  [FLOW_BALANCE_NODE_TYPE]: 'well-control-inventory',
   [NODETYPE.NodeType_TypicalCurveBlasingame]: 'well-control-inventory',
   [NODETYPE.NodeType_TypicalCurveWattenbarger]: 'well-control-inventory',
   [NODETYPE.NodeType_TypicalCurveAG]: 'well-control-inventory',
@@ -53,6 +56,7 @@ const NODE_LABEL_BY_TYPE = {
   [NODETYPE.NodeType_DynamicOriginalGasInplace]: '物质平衡',
   [NODETYPE.NodeType_DynamicMaterialBalanceMethodBlasingame]: '动态平衡',
   [NODETYPE.NodeType_TypicalCurve]: '诊断曲线',
+  [FLOW_BALANCE_NODE_TYPE]: '流动平衡',
   [NODETYPE.NodeType_TypicalCurveBlasingame]: 'Blasingame',
   [NODETYPE.NodeType_TypicalCurveWattenbarger]: 'Wattenbarger',
   [NODETYPE.NodeType_ProductionDeclineAnalysis]: '产量递减分析',
@@ -78,6 +82,7 @@ const sideTreeCollapsed = ref(false)
 const waterInvasionRunning = ref(false)  //用于判断水侵分析是否正在运行
 const analyticMethodRunning = ref(false)
 const materialBalanceRunning = ref(false)
+const flowBalanceRunning = ref(false)
 const dynamicBalanceRunning = ref(false)
 const typicalCurveRunning = ref(false)
 const WATER_INVASION_ANALYSIS_ERROR = '水侵分析计算失败，未生成分析结果节点'
@@ -87,6 +92,8 @@ const WATER_INVASION_ERROR_PATTERN = /\u5931\u8d25|\u9519\u8bef|\u5f02\u5e38|\u6
 const WATER_INVASION_COMPLETE_PATTERN = /\u5b8c\u6210|\u5206\u6790\u7ed3\u675f|\u7ed3\u675f/i
 const TYPICAL_CURVE_NOTIFY_MODULE = 'projectanalysis.typicalcurvefitting'
 const TYPICAL_CURVE_LOG_TIMEOUT = 120000
+const FLOW_BALANCE_LOG_TIMEOUT = 120000
+const FLOW_BALANCE_LOG_PATTERN = /\u6d41\u52a8\u7269\u8d28\u5e73\u8861|\u6d41\u52a8\u5e73\u8861|\u4e95\u5e95\u6d41\u538b/i
 const BLASINGAME_FITTING_REGRESSION_ERROR = '计算动态储量错误:参与回归分析的数据点数必须大于0'
 const AG_FITTING_REGRESSION_ERROR = '计算AG节点错误:参与回归分析的数据点数必须大于0'
 const selectedWellName = ref('')
@@ -96,6 +103,7 @@ const treeContextMenu = ref({
   y: 0,
   node: null
 })
+const loadingWellChildren = new Set()
 
 const toggleSideTree = () => {
   sideTreeCollapsed.value = !sideTreeCollapsed.value
@@ -208,12 +216,14 @@ const getInventoryResultName = (item) => {
   if (nodeType === NODETYPE.NodeType_AnalysisMethods) return '解析法'
   if (nodeType === NODETYPE.NodeType_DynamicOriginalGasInplace) return '物质平衡'
   if (nodeType === NODETYPE.NodeType_DynamicMaterialBalanceMethodBlasingame) return '动态平衡'
+  if (nodeType === FLOW_BALANCE_NODE_TYPE) return '流动平衡'
 
   const nodeName = getNodeName(item)
   if (nodeName === '水侵分析') return '水侵分析'
   if (nodeName === '解析法') return '解析法'
   if (nodeName === '物质平衡') return '物质平衡'
   if (nodeName === '动态平衡') return '动态平衡'
+  if (nodeName === '流动平衡') return '流动平衡'
   return ''
 }
 
@@ -581,74 +591,6 @@ const addAnalysisNode = (wellName, rawNode) => {  // 添加分析节点
   }
 }
 
-const addFlowBalanceNode = (wellName, rawNode = {}) => {
-  return null
-  const wellItem = ensureWell(wellName)
-  const inventoryGroup = wellItem?.children.find(item => item.type === 'well-control-inventory')
-  if (!inventoryGroup) return null
-
-  // Remove the earlier flat runtime nodes before building the grouped menu.
-  inventoryGroup.children = inventoryGroup.children.filter(item => !(
-      item.runtimeOnly && [
-        NODETYPE.NodeType_FlowingBalanceMethodBasedOnTopPressure,
-        NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure,
-        FLOW_BALANCE_ERROR_TYPE
-      ].includes(item.type)
-  ))
-
-  const groupId = `${wellItem.id}-flow-balance`
-  let flowBalanceGroup = inventoryGroup.children.find(item =>
-      item.id === groupId || item.type === FLOW_BALANCE_GROUP_TYPE
-  )
-  if (!flowBalanceGroup) {
-    flowBalanceGroup = {
-      id: groupId,
-      label: '流动平衡',
-      type: FLOW_BALANCE_GROUP_TYPE,
-      wellName,
-      runtimeOnly: true,
-      defaultExpanded: true,
-      children: []
-    }
-    inventoryGroup.children.push(flowBalanceGroup)
-  }
-  flowBalanceGroup.defaultExpanded = true
-  flowBalanceGroup.children = flowBalanceGroup.children || []
-
-  const nodeType = rawNode?.nodeType ?? FLOW_BALANCE_ERROR_TYPE
-  const baseLabel = NODE_LABEL_BY_TYPE[nodeType] || '流动平衡'
-  const label = rawNode?.status === 'error' ? `${baseLabel}（错误）` : baseLabel
-  const stableKey = `${groupId}-${nodeType}`
-  const viewNode = {
-    id: stableKey,
-    label,
-    type: nodeType,
-    wellName,
-    runtimeOnly: true,
-    raw: {
-      ...rawNode,
-      projectId: Number(PROJECT_ID),
-      gasReservoirId: Number(GAS_RESERVOIR_ID),
-      wellName,
-      persisted: false,
-      idKind: 'runtime',
-      officialLogStatusChecked: true
-    }
-  }
-
-  const existedIndex = flowBalanceGroup.children.findIndex(item =>
-      item.id === stableKey || (item.runtimeOnly && item.type === nodeType)
-  )
-  if (existedIndex >= 0) flowBalanceGroup.children[existedIndex] = viewNode
-  else flowBalanceGroup.children.push(viewNode)
-
-  wellItem.defaultExpanded = true
-  inventoryGroup.defaultExpanded = true
-  sortNodesByFixedOrder(flowBalanceGroup.children, FLOW_BALANCE_NODE_ORDER)
-  sortNodesByFixedOrder(inventoryGroup.children, WELL_CONTROL_NODE_ORDER)
-  return viewNode
-}
-
 const addBlasingameNode = (wellName, rawNode = {}) => {
   const wellItem = ensureWell(wellName, rawNode?.wellId || rawNode?.parentId)
   const inventoryGroup = wellItem?.children.find(item => item.type === 'well-control-inventory')
@@ -889,14 +831,14 @@ const rebuildProjectTree = (payload) => {
 
   wellGroup.children = []
   wells.forEach(well => ensureWell(well.name, well.id))
-  wells.forEach(well => getChildren(well.raw).forEach(child => addAnalysisNode(well.name, child)))
 }
 
-const applyWaterInvasionNodes = (node) => {
+const applyWaterInvasionNodes = (node, targetWellName = '') => {
   if (!node?.subNodes?.length) return
 
   node.subNodes.forEach(wellNode => {
     const wellName = wellNode.nodeTitle || wellNode.wellName
+    if (targetWellName && wellName !== targetWellName) return
     if (!wellName) return
 
     ensureWell(wellName, wellNode.nodeId || `well-${wellName}`)
@@ -908,12 +850,13 @@ const applyWaterInvasionNodes = (node) => {
   })
 }
 
-const applyAnalyticMethodNodes = (node) => {
+const applyAnalyticMethodNodes = (node, targetWellName = '') => {
   const analyticRoot = (node?.subNodes || []).find(sub => sub.nodeType === NODETYPE.NodeType_AnalysisMethods)
   if (!analyticRoot?.subNodes?.length) return
 
   analyticRoot.subNodes.forEach(wellNode => {
     const wellName = wellNode.nodeTitle || wellNode.wellName
+    if (targetWellName && wellName !== targetWellName) return
     if (!wellName || !wellNode.nodeId) return
 
     ensureWell(wellName, wellNode.nodeId || `well-${wellName}`)
@@ -927,11 +870,12 @@ const applyAnalyticMethodNodes = (node) => {
   })
 }
 
-const applyMaterialBalanceNodes = async (node) => {
+const applyMaterialBalanceNodes = async (node, targetWellName = '') => {
   if (!node?.subNodes?.length) return
 
   for (const wellNode of node.subNodes) {
     const wellName = wellNode.nodeTitle || wellNode.wellName
+    if (targetWellName && wellName !== targetWellName) continue
     if (!wellName) continue
 
     let materialBalanceRows = []
@@ -1035,8 +979,21 @@ const clearTypicalCurveNodes = () => {
   })
 }
 
-const applyTypicalCurveNodes = (node) => {
-  clearTypicalCurveNodes()
+const clearTypicalCurveNodesForWell = (wellName) => {
+  if (!wellName) return
+
+  const well = getWellGroup()?.children.find(item => item.wellName === wellName || item.label === wellName)
+  const inventoryGroup = well?.children?.find(item => item.type === 'well-control-inventory')
+  if (!inventoryGroup?.children?.length) return
+
+  inventoryGroup.children = inventoryGroup.children.filter(item =>
+      item.type !== NODETYPE.NodeType_TypicalCurve
+  )
+}
+
+const applyTypicalCurveNodes = (node, targetWellName = '') => {
+  if (targetWellName) clearTypicalCurveNodesForWell(targetWellName)
+  else clearTypicalCurveNodes()
 
   const subNodes = node?.subNodes ?? []
   if (!subNodes.length) return
@@ -1051,6 +1008,8 @@ const applyTypicalCurveNodes = (node) => {
         nodeType === NODETYPE.NodeType_TypicalCurve ||
         nodeName === '典型曲线' ||
         nodeName === '诊断曲线'
+
+    if (targetWellName && wellName && wellName !== targetWellName) return
 
     if (wellName && nextInTypicalCurve && isBlasingameNode(item)) {
       addBlasingameNode(wellName, {
@@ -1106,19 +1065,19 @@ const refreshProjectTree = async () => { //加在项目树
   }
 }
 
-const refreshWaterInvasionNodes = async () => {  //加载已有水侵分析节点
+const refreshWaterInvasionNodes = async (wellName = '') => {  //加载已有水侵分析节点
   try {
     const res = await nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, NODETYPE.NodeType_WaterInvasionAnalysis)
-    applyWaterInvasionNodes(res?.data?.node)
+    applyWaterInvasionNodes(res?.data?.node, wellName)
   } catch {
     // 没有已有水侵分析结果时，保持项目树不变。
   }
 }
 
-const refreshAnalyticMethodNodes = async () => {
+const refreshAnalyticMethodNodes = async (wellName = '') => {
   try {
     const res = await nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, NODETYPE.NodeType_ProductivityInstabilityAnalysis)
-    applyAnalyticMethodNodes(res?.data?.node)
+    applyAnalyticMethodNodes(res?.data?.node, wellName)
   } catch {
     // 没有已有解析法结果时保持项目树不变。
   }
@@ -1130,19 +1089,19 @@ const findAnalyticMethodNode = (wellName) => {
   return group?.children.find(item => item.type === NODETYPE.NodeType_AnalysisMethods)
 }
 
-const refreshMaterialBalanceNodes = async () => {
+const refreshMaterialBalanceNodes = async (wellName = '') => {
   try {
     const res = await nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, NODETYPE.NodeType_DynamicOriginalGasInplace)
-    await applyMaterialBalanceNodes(res?.data?.node)
+    await applyMaterialBalanceNodes(res?.data?.node, wellName)
   } catch {
     // 没有已有物质平衡结果时保持项目树不变。
   }
 }
 
-const refreshTypicalCurveNodes = async () => {
+const refreshTypicalCurveNodes = async (wellName = '') => {
   try {
     const res = await nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, NODETYPE.NodeType_ProductivityInstabilityAnalysis)
-    applyTypicalCurveNodes(res?.data?.node)
+    applyTypicalCurveNodes(res?.data?.node, wellName)
   } catch {
     // 没有已有典型曲线结果时保持项目树不变。
   }
@@ -1191,7 +1150,8 @@ const createAnalysisLogWaiter = ({
                                    timeoutMessage,
                                    fallbackErrorMessage,
                                    allowGlobalComplete = false,
-                                   isComplete = (payload, logText) => WATER_INVASION_COMPLETE_PATTERN.test(logText)
+                                   isComplete = (payload, logText) => WATER_INVASION_COMPLETE_PATTERN.test(logText),
+                                   isRelevant = null
                                  }) => {
   let settled = false
   let cleanup = () => {}
@@ -1211,10 +1171,15 @@ const createAnalysisLogWaiter = ({
     const onNotifyMessage = (event) => {
       const message = event.detail
       const payload = message?.payload
-      if (message?.type !== 'user' || payload?.module !== module) return
+      if (message?.type !== 'user') return
+
+      const modules = Array.isArray(module) ? module : (module ? [module] : [])
+      if (modules.length && !modules.includes(payload?.module)) return
 
       const logText = String(payload.message || '')
       const errorText = String(payload.error || '')
+      if (isRelevant && !isRelevant(payload, logText, errorText)) return
+
       const logLevel = String(payload.level || '').toLowerCase()
       const complete = isComplete(payload, logText)
       const matchesWell = !wellName || logText.includes(wellName)
@@ -1257,6 +1222,21 @@ const createBlasingameLogWaiter = (wellName, timeoutMs = TYPICAL_CURVE_LOG_TIMEO
       fallbackErrorMessage: `${wellName} Blasingame计算失败`,
       allowGlobalComplete: true,
       isComplete: (payload, logText) => logText.includes('\u5b8c\u6210') && !logText.includes('\u5206\u6790\u7ed3\u675f')
+    })
+
+const createFlowBalanceLogWaiter = (wellName, timeoutMs = FLOW_BALANCE_LOG_TIMEOUT) =>
+    createAnalysisLogWaiter({
+      module: null,
+      wellName,
+      timeoutMs,
+      timeoutMessage: `${wellName} 流动平衡日志超时，未收到完成消息`,
+      fallbackErrorMessage: `${wellName} 流动平衡计算失败`,
+      allowGlobalComplete: true,
+      isRelevant: (payload, logText, errorText) => {
+        const text = `${payload?.module || ''} ${logText} ${errorText}`
+        return FLOW_BALANCE_LOG_PATTERN.test(text)
+      },
+      isComplete: (payload, logText) => WATER_INVASION_COMPLETE_PATTERN.test(logText)
     })
 
 const pollAnalyticMethodNodes = async (wellNames, maxRetries = 20, intervalMs = 1500) => {
@@ -1583,59 +1563,130 @@ const runMaterialBalanceForSelectedWell = async () => {
   }
 }
 
-const refreshFlowBalanceStatusNodes = async () => {
-  const wellNames = (getWellGroup()?.children || [])
-      .map(item => item.wellName || item.label)
-      .filter(Boolean)
-  if (!wellNames.length) return
-
-  try {
-    const response = await flowBalanceApi.getStatus({
-      projectId: Number(PROJECT_ID),
-      gasReservoirId: Number(GAS_RESERVOIR_ID),
-      wellNames
-    })
-    const statuses = normalizePayload(response)?.statuses || {}
-    Object.entries(statuses).forEach(([wellName, status]) => {
-      if (status?.status !== 'error') return
-      clearFlowBalanceNodesForWell(wellName)
-      ;[
-        NODETYPE.NodeType_FlowingBalanceMethodBasedOnTopPressure,
-        NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure
-      ].forEach(nodeType => addFlowBalanceNode(wellName, {
-        nodeType,
-        status: 'error',
-        error: {
-          code: 'FLOW_BALANCE_INVALID_DATA',
-          message: status.message,
-          details: {
-            wellName,
-            nodeType,
-            statusSource: status.source,
-            loggedAt: status.createdAt
-          }
-        },
-        input: {
-          projectId: Number(PROJECT_ID),
-          gasReservoirId: Number(GAS_RESERVOIR_ID),
-          wellName,
-          waterGasRatioLimit: 0.0602
-        }
-      }))
-    })
-  } catch (error) {
-    console.warn('流动平衡后端状态加载失败', error)
-  }
+const isFlowBalanceAverageRow = (row) => {
+  const type = Number(row?.dynamicOriginalGasInplaceType ?? row?.dynamicOriginalGasInPlaceType)
+  const description = String(row?.dynamicOriginalGasInplaceMethodDescription || row?.dynamicOriginalGasInPlaceMethodDescription || '')
+  return type === 6 || description.includes('流动物质平衡-基于井底流压')
 }
 
-const normalizeFlowBalanceError = (error) => {
-  const payload = error?.response?.data || {}
-  return {
-    code: payload.code || 'FLOW_BALANCE_REQUEST_FAILED',
-    message: payload.message || error?.message || '流动平衡计算失败',
-    details: payload.details || {},
-    httpStatus: error?.response?.status || null
+const getFlowBalanceRowsForWell = async (wellName, options = {}) => {
+  if (!wellName) return []
+
+  const pressureRes = await materialBalanceApi.getAverageFormationPressure(
+      PROJECT_ID,
+      GAS_RESERVOIR_ID,
+      wellName,
+      options
+  )
+
+  return getAverageFormationPressureRows(pressureRes.data)
+      .filter(isFlowBalanceAverageRow)
+}
+
+const ensureFlowBalanceNodeForWell = (wellName, rawNode = {}) => {
+  if (!wellName) return null
+  if (Array.isArray(rawNode.flowBalanceRows) && !rawNode.flowBalanceRows.length) return null
+
+  const wellItem = ensureWell(wellName, rawNode?.nodeId || rawNode?.wellId || `well-${wellName}`)
+  addAnalysisNode(wellName, {
+    ...rawNode,
+    nodeType: FLOW_BALANCE_NODE_TYPE,
+    nodeTitle: '流动平衡',
+    wellName
+  })
+
+  const targetGroup = wellItem?.children.find(item => item.type === 'well-control-inventory')
+  return targetGroup?.children.find(item =>
+      item.type === FLOW_BALANCE_NODE_TYPE &&
+      item.wellName === wellName
+  )
+}
+
+const removeFlowBalanceNodeForWell = (wellName) => {
+  if (!wellName) return
+
+  const well = getWellGroup()?.children.find(item => item.wellName === wellName || item.label === wellName)
+  const inventoryGroup = well?.children?.find(item => item.type === 'well-control-inventory')
+  if (!inventoryGroup?.children?.length) return
+
+  inventoryGroup.children = inventoryGroup.children.filter(item =>
+      item.type !== FLOW_BALANCE_NODE_TYPE
+  )
+}
+
+const refreshFlowBalanceNodes = async (targetWellName = '') => {
+  const wells = targetWellName
+      ? (getWellGroup()?.children ?? []).filter(well =>
+          (well.wellName || well.label) === targetWellName
+      )
+      : getWellGroup()?.children ?? []
+
+  await Promise.all(wells.map(async (well) => {
+    const wellName = well.wellName || well.label
+    if (!wellName) return
+
+    try {
+      const flowBalanceRows = await getFlowBalanceRowsForWell(wellName, { silentError: true })
+      if (!flowBalanceRows.length) {
+        removeFlowBalanceNodeForWell(wellName)
+        return
+      }
+
+      const resultId = getMaterialBalanceAverageRowId(flowBalanceRows[0])
+      ensureFlowBalanceNodeForWell(wellName, {
+        ...flowBalanceRows[0],
+        nodeId: resultId,
+        resultId,
+        analysisId: resultId,
+        flowBalanceRows
+      })
+    } catch {
+      // 没有已有流动平衡结果时保持项目树不变。
+    }
+  }))
+}
+
+const finalizeFlowBalanceResult = async (wellName, maxRetries = 8, intervalMs = 1000) => {
+  let lastError = null
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      await new Promise(resolve => setTimeout(resolve, attempt === 0 ? 800 : intervalMs))
+      const flowBalanceRows = await getFlowBalanceRowsForWell(wellName, { silentError: true })
+      if (!flowBalanceRows.length) {
+        lastError = new Error(`${wellName}井没有可展示的流动平衡曲线`)
+        continue
+      }
+
+      const resultId = getMaterialBalanceAverageRowId(flowBalanceRows[0])
+      const flowBalanceRawNode = {
+        ...flowBalanceRows[0],
+        nodeId: resultId,
+        resultId,
+        analysisId: resultId,
+        nodeType: FLOW_BALANCE_NODE_TYPE,
+        flowBalanceRows,
+        nodeTitle: '流动平衡'
+      }
+      const treeNode = ensureFlowBalanceNodeForWell(wellName, flowBalanceRawNode)
+      if (!treeNode) {
+        lastError = new Error(`${wellName}井没有可展示的流动平衡曲线`)
+        continue
+      }
+
+      activeNodeId.value = treeNode.id
+      activeNode.value = treeNode
+      currentView.value = 'flow-balance'
+      currentViewNode.value = treeNode
+      ElMessage.success(`${wellName} 流动平衡计算完成`)
+      return
+    } catch (error) {
+      lastError = error
+    }
   }
+
+  removeFlowBalanceNodeForWell(wellName)
+  throw lastError || new Error(`${wellName} 流动平衡结果已完成，但暂时没有拿到结果`)
 }
 
 const runFlowBalanceForSelectedWell = async () => {
@@ -1647,75 +1698,28 @@ const runFlowBalanceForSelectedWell = async () => {
   if (flowBalanceRunning.value) return
 
   flowBalanceRunning.value = true
+  const logWaiter = createFlowBalanceLogWaiter(targetWellName)
   try {
-    const response = await flowBalanceApi.calc({
+    await materialBalanceApi.calcFMB({
       projectId: Number(PROJECT_ID),
       gasReservoirId: Number(GAS_RESERVOIR_ID),
       wellNames: [targetWellName],
-      waterGasRatioLimit: 0.0602,
-      includePartialErrors: true
+      pressurePosition: 2,
+      unstableFlowPeriodLength: 180,
+      minimumWaterGasRatio: 0.0602
     })
-    const payload = normalizePayload(response)
-    const runtimeNodes = Array.isArray(payload?.nodes) ? payload.nodes : []
-    const runtimeErrors = Array.isArray(payload?.errors) ? payload.errors : []
-    if (!runtimeNodes.length && !runtimeErrors.length) throw new Error('后端未返回可显示的流动平衡结果')
 
-    clearFlowBalanceNodesForWell(targetWellName)
-    const resultViewNodes = runtimeNodes.map(node => addFlowBalanceNode(targetWellName, node)).filter(Boolean)
-    const errorViewNodes = runtimeErrors.map(item => addFlowBalanceNode(targetWellName, {
-      nodeType: item.nodeType || FLOW_BALANCE_ERROR_TYPE,
-      status: 'error',
-      error: {
-        code: item.code,
-        message: item.message,
-        details: item.details || {}
-      },
-      input: {
-        projectId: Number(PROJECT_ID),
-        gasReservoirId: Number(GAS_RESERVOIR_ID),
-        wellName: targetWellName,
-        waterGasRatioLimit: 0.0602
-      }
-    })).filter(Boolean)
-    const viewNodes = [...resultViewNodes, ...errorViewNodes]
-    const firstNode = resultViewNodes.find(node =>
-        node.type === NODETYPE.NodeType_FlowingBalanceMethodBasedOnTopPressure
-    ) || resultViewNodes[0] || errorViewNodes[0]
-
-    activeNodeId.value = firstNode.id
-    activeNode.value = firstNode
-    currentView.value = 'flow-balance'
-    currentViewNode.value = firstNode
-    if (runtimeErrors.length) {
-      ElMessage.warning(`${targetWellName} 流动平衡：${runtimeNodes.length} 项成功，${runtimeErrors.length} 项数据错误`)
-    } else {
-      ElMessage.success(`${targetWellName} 流动平衡计算完成（只读临时结果）`)
-    }
+    ElMessage.info(`${targetWellName} 流动平衡计算中，请稍候...`)
+    logWaiter.promise
+        .then(() => finalizeFlowBalanceResult(targetWellName))
+        .catch((error) => {
+          ElMessage.error(error.message || '流动平衡计算失败')
+          console.error('流动平衡计算失败', error)
+        })
   } catch (error) {
-    const errorInfo = normalizeFlowBalanceError(error)
-    const failedNodeType = Number(errorInfo.details?.nodeType)
-    const nodeType = [
-      NODETYPE.NodeType_FlowingBalanceMethodBasedOnTopPressure,
-      NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure
-    ].includes(failedNodeType) ? failedNodeType : FLOW_BALANCE_ERROR_TYPE
-    clearFlowBalanceNodesForWell(targetWellName)
-    const errorNode = addFlowBalanceNode(targetWellName, {
-      nodeType,
-      status: 'error',
-      error: errorInfo,
-      input: {
-        projectId: Number(PROJECT_ID),
-        gasReservoirId: Number(GAS_RESERVOIR_ID),
-        wellName: targetWellName,
-        waterGasRatioLimit: 0.0602
-      }
-    })
-
-    activeNodeId.value = errorNode.id
-    activeNode.value = errorNode
-    currentView.value = 'flow-balance'
-    currentViewNode.value = errorNode
-    ElMessage.error(errorInfo.message)
+    logWaiter.cancel()
+    const message = error.response?.data?.msg || error.response?.data?.message || error.message
+    ElMessage.error(message || '流动平衡计算失败')
     console.error('流动平衡计算失败', error)
   } finally {
     flowBalanceRunning.value = false
@@ -2204,10 +2208,29 @@ const openAGNode = async (node) => {
 
 const initTree = async () => {
   await refreshProjectTree()
-  await refreshWaterInvasionNodes()
-  await refreshAnalyticMethodNodes()
-  await refreshMaterialBalanceNodes()
-  await refreshTypicalCurveNodes()
+}
+
+const loadWellChildren = async (node, force = false) => {
+  const wellName = node?.wellName || (node?.type === NODETYPE.NodeType_Well ? node.label : '')
+  if (!wellName || node?.type !== NODETYPE.NodeType_Well) return
+  if (!force && node.childrenLoaded) return
+  if (loadingWellChildren.has(wellName)) return
+
+  loadingWellChildren.add(wellName)
+  node.childrenLoading = true
+  try {
+    await Promise.all([
+      refreshWaterInvasionNodes(wellName),
+      refreshAnalyticMethodNodes(wellName),
+      refreshMaterialBalanceNodes(wellName),
+      refreshFlowBalanceNodes(wellName),
+      refreshTypicalCurveNodes(wellName)
+    ])
+    node.childrenLoaded = true
+  } finally {
+    node.childrenLoading = false
+    loadingWellChildren.delete(wellName)
+  }
 }
 
 const closeTreeContextMenu = () => {
@@ -2301,6 +2324,25 @@ const handleDeleteContextNode = async () => {
     return
   }
 
+  if (node.type === FLOW_BALANCE_NODE_TYPE) {
+    const resultId = getAnalysisId(node)
+    if (!resultId || Number.isNaN(Number(resultId))) {
+      ElMessage.error('没有找到流动平衡结果 ID')
+      return
+    }
+
+    try {
+      await materialBalanceApi.deleteResult(PROJECT_ID, GAS_RESERVOIR_ID, resultId)
+      removeTreeNode(node)
+      clearCurrentViewAfterDelete(node)
+      ElMessage.success(`${deleteLabel}成功`)
+    } catch (error) {
+      ElMessage.error(error.response?.data?.message || error.message || `${deleteLabel}失败`)
+      console.error(`${deleteLabel}失败`, error)
+    }
+    return
+  }
+
   if (!isTypicalCurveResultNode(node)) {
     ElMessage.info(`${deleteLabel}：删除接口待确认`)
     return
@@ -2352,6 +2394,12 @@ const handleSelect = async (node) => { // 点击左侧树节点
     return
   }
 
+  if (node.type === FLOW_BALANCE_NODE_TYPE) {
+    currentView.value = 'flow-balance'
+    currentViewNode.value = node
+    return
+  }
+
   if (node.type === NODETYPE.NodeType_DynamicMaterialBalanceMethodBlasingame) {
     openDynamicBalanceNode(node)
     return
@@ -2391,7 +2439,7 @@ const handleCommand = ({ group, name }) => { // 接收顶部菜单栏的点击�
       runMaterialBalanceForSelectedWell()
       break
     case '流动平衡':
-      ElMessage.success(`[${group}] ${name}`)
+      runFlowBalanceForSelectedWell()
       break
     case 'Blasingame':
       runBlasingameForSelectedWell()
@@ -2413,11 +2461,19 @@ const handleCommand = ({ group, name }) => { // 接收顶部菜单栏的点击�
   }
 }
 
+const handleNodeExpand = (node) => {
+  loadWellChildren(node)
+}
+
 const handleRefreshTree = () => {
-  refreshWaterInvasionNodes()
-  refreshAnalyticMethodNodes()
-  refreshMaterialBalanceNodes()
-  refreshTypicalCurveNodes()
+  const wellName = currentViewNode.value?.wellName || selectedWellName.value
+  const wellNode = getWellGroup()?.children.find(item => item.wellName === wellName || item.label === wellName)
+  if (wellNode) {
+    loadWellChildren(wellNode, true)
+    return
+  }
+
+  refreshProjectTree()
 }
 
 onMounted(() => {
@@ -2457,7 +2513,7 @@ onBeforeUnmount(() => {
 
         <div v-show="!sideTreeCollapsed" class="side-tree">
           <TreeNode v-for="node in filteredTreeData" :key="node.id" :node="node" :active-id="activeNodeId"
-                    @select="handleSelect" @node-contextmenu="handleNodeContextMenu" />
+                    @select="handleSelect" @expand="handleNodeExpand" @node-contextmenu="handleNodeContextMenu" />
         </div>
       </aside>
 
@@ -2468,7 +2524,9 @@ onBeforeUnmount(() => {
         <AnalyticMethodContent v-if="currentView === 'analytic-method'" :node="currentViewNode" :project-id="PROJECT_ID"
                                :gas-reservoir-id="GAS_RESERVOIR_ID" />
         <MaterialBalanceContent v-if="currentView === 'material-balance'" :node="currentViewNode"
-                                :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" @refresh-tree="handleRefreshTree" />
+                                 :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" @refresh-tree="handleRefreshTree" />
+        <FlowBalanceContent v-if="currentView === 'flow-balance'" :node="currentViewNode"
+                            :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" @refresh-tree="handleRefreshTree" />
         <BlasingameContent v-if="currentView === 'blasingame'" :node="currentViewNode" :project-id="PROJECT_ID"
                            :gas-reservoir-id="GAS_RESERVOIR_ID" />
         <NpiContent v-if="currentView === 'npi'" :node="currentViewNode" :project-id="PROJECT_ID"
