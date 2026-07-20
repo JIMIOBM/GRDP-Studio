@@ -272,22 +272,6 @@ const tableRows = computed(() => {
   }))
 })
 
-//   return [
-//     ['2004-04-21', 27.5262, 0.0013, 0.0004],
-//     ['2004-04-22', 31.1019, 0.0054, 0.0013],
-//     ['2004-04-23', 32.6322, 0.0093, 0.0013],
-//     ['2004-04-24', 30.2160, 0.0098, 0.0014],
-//     ['2004-04-25', 29.4892, 0.0110, 0.0016],
-//     ['2004-04-26', 31.1989, 0.0143, 0.0019],
-//     ['2004-04-27', 31.6176, 0.0178, 0.0024]
-//   ].map(([date, formationPressure, gasProduction, waterProduction], index) => ({
-//     index: index + 1,
-//     date,
-//     formationPressure,
-//     gasProduction,
-//     waterProduction
-//   }))
-// })
 
 const getPoint = (item, xKeys, yKeys) => {
   const x = getValue(item, xKeys, null)

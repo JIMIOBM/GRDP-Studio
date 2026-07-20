@@ -18,7 +18,7 @@ import { NODETYPE } from '@/constants/nodeType'
 import { analyticMethodApi, dynamicBalanceApi, materialBalanceApi, nodeApi, projectApi, typicalCurveApi, waterInvasionApi } from '@/api/docker'
 
 const PROJECT_ID = 6
-const GAS_RESERVOIR_ID = 3
+const GAS_RESERVOIR_ID = 1
 const FLOW_BALANCE_NODE_TYPE = NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure
 
 const WELL_GROUPS = [
@@ -124,7 +124,7 @@ const filteredTreeData = computed(() => {   //搜索井名，控制左侧树搜�
     return {
       ...node,
       children: node.children.filter(well =>
-          String(well.label || '').toLowerCase().includes(keyword)
+        String(well.label || '').toLowerCase().includes(keyword)
       )
     }
   })
@@ -133,7 +133,7 @@ const filteredTreeData = computed(() => {   //搜索井名，控制左侧树搜�
 const normalizePayload = (res) => res?.data?.data ?? res?.data ?? res
 
 const getResponseMessage = (res) =>
-    res?.data?.message || res?.data?.msg || res?.message || res?.msg || ''
+  res?.data?.message || res?.data?.msg || res?.message || res?.msg || ''
 
 const isFailureResponse = (res) => {
   const code = res?.data?.code ?? res?.code
@@ -147,7 +147,7 @@ const toArray = (value) => { // 把数据统一变成数组
 }
 
 const getNodeName = (item) =>
-    item?.wellName || item?.nodeTitle || item?.name || item?.title || item?.label || item?.well_name || ''
+  item?.wellName || item?.nodeTitle || item?.name || item?.title || item?.label || item?.well_name || ''
 
 const getChildren = (item) => [
   ...toArray(item?.children),
@@ -266,32 +266,32 @@ const treeContextMenuLabel = computed(() => {
 })
 
 const getAnalysisId = (node) =>
-    node?.raw?.analysisId ?? node?.raw?.analysisID ?? node?.raw?.analysis_id ??
-    node?.raw?.DynamicOriginalGasInPlaceId ?? node?.raw?.dynamicOriginalGasInPlaceId ??
-    node?.raw?.dynamicOriginalGasInplaceId ?? node?.raw?.dynamicOriginalGasInplaceID ??
-    node?.raw?.nodeId ?? node?.raw?.id ?? node?.analysisId ?? node?.analysisID ??
-    node?.DynamicOriginalGasInPlaceId ?? node?.dynamicOriginalGasInPlaceId ??
-    node?.dynamicOriginalGasInplaceId ?? node?.dynamicOriginalGasInplaceID ??
-    node?.analysis_id ?? node?.nodeId ?? node?.id
+  node?.raw?.analysisId ?? node?.raw?.analysisID ?? node?.raw?.analysis_id ??
+  node?.raw?.DynamicOriginalGasInPlaceId ?? node?.raw?.dynamicOriginalGasInPlaceId ??
+  node?.raw?.dynamicOriginalGasInplaceId ?? node?.raw?.dynamicOriginalGasInplaceID ??
+  node?.raw?.nodeId ?? node?.raw?.id ?? node?.analysisId ?? node?.analysisID ??
+  node?.DynamicOriginalGasInPlaceId ?? node?.dynamicOriginalGasInPlaceId ??
+  node?.dynamicOriginalGasInplaceId ?? node?.dynamicOriginalGasInplaceID ??
+  node?.analysis_id ?? node?.nodeId ?? node?.id
 
 const getAverageFormationPressureRows = (payload) => {
   const rows =
-      payload?.data?.data ??
-      payload?.data ??
-      payload?.items ??
-      payload?.rows ??
-      payload
+    payload?.data?.data ??
+    payload?.data ??
+    payload?.items ??
+    payload?.rows ??
+    payload
 
   if (Array.isArray(rows)) return rows
   return rows ? [rows] : []
 }
 
 const getMaterialBalanceAverageRowId = (row) =>
-    row?.DynamicOriginalGasInPlaceId ??
-    row?.dynamicOriginalGasInPlaceId ??
-    row?.dynamicOriginalGasInplaceId ??
-    row?.dynamicOriginalGasInplaceID ??
-    row?.id
+  row?.DynamicOriginalGasInPlaceId ??
+  row?.dynamicOriginalGasInPlaceId ??
+  row?.dynamicOriginalGasInplaceId ??
+  row?.dynamicOriginalGasInplaceID ??
+  row?.id
 
 const isMaterialBalanceAverageRow = (row) => {
   const type = Number(row?.dynamicOriginalGasInplaceType ?? row?.dynamicOriginalGasInPlaceType)
@@ -303,14 +303,14 @@ const getMaterialBalanceRowsForWell = async (wellName, options = {}) => {
   if (!wellName) return []
 
   const pressureRes = await materialBalanceApi.getAverageFormationPressure(
-      PROJECT_ID,
-      GAS_RESERVOIR_ID,
-      wellName,
-      options
+    PROJECT_ID,
+    GAS_RESERVOIR_ID,
+    wellName,
+    options
   )
 
   return getAverageFormationPressureRows(pressureRes.data)
-      .filter(isMaterialBalanceAverageRow)
+    .filter(isMaterialBalanceAverageRow)
 }
 
 const getMaterialBalanceDeleteIds = async (node) => {
@@ -331,8 +331,8 @@ const getMaterialBalanceDeleteIds = async (node) => {
   const materialBalanceRows = await getMaterialBalanceRowsForWell(wellName, { silentError: true })
 
   materialBalanceRows
-      .map(getMaterialBalanceAverageRowId)
-      .forEach(addId)
+    .map(getMaterialBalanceAverageRowId)
+    .forEach(addId)
 
   addId(nodeId)
   return ids
@@ -368,14 +368,14 @@ const removeTreeNode = (targetNode) => {
 
   const visit = (nodes = []) => {
     const index = nodes.findIndex(item =>
-        item === targetNode ||
-        (targetId !== undefined && String(item.id) === String(targetId)) ||
-        (
-            targetType !== undefined &&
-            targetWellName &&
-            item.type === targetType &&
-            item.wellName === targetWellName
-        )
+      item === targetNode ||
+      (targetId !== undefined && String(item.id) === String(targetId)) ||
+      (
+        targetType !== undefined &&
+        targetWellName &&
+        item.type === targetType &&
+        item.wellName === targetWellName
+      )
     )
 
     if (index >= 0) {
@@ -397,8 +397,8 @@ const clearCurrentViewAfterDelete = (deletedNode) => {
   const deletedId = deletedNode.id
   const sameId = deletedId !== undefined && String(currentViewNode.value?.id) === String(deletedId)
   const sameResult =
-      currentViewNode.value?.type === deletedNode.type &&
-      currentViewNode.value?.wellName === deletedNode.wellName
+    currentViewNode.value?.type === deletedNode.type &&
+    currentViewNode.value?.wellName === deletedNode.wellName
 
   if (sameId || sameResult) {
     currentView.value = null
@@ -417,8 +417,8 @@ const findBlasingameNodeByWell = (root, wellName) => {
     const nodeName = getNodeName(item)
     const nodeType = item?.nodeType ?? item?.type
     const nextWellName = nodeType === NODETYPE.NodeType_Well || nodeName === wellName
-        ? nodeName
-        : currentWellName
+      ? nodeName
+      : currentWellName
 
     if (nextWellName === wellName && isBlasingameNode(item)) {
       return item
@@ -444,8 +444,8 @@ const findNpiNodeByWell = (root, wellName) => {
     const nodeName = getNodeName(item)
     const nodeType = item?.nodeType ?? item?.type
     const nextWellName = nodeType === NODETYPE.NodeType_Well || nodeName === wellName
-        ? nodeName
-        : currentWellName
+      ? nodeName
+      : currentWellName
     if (nextWellName === wellName && isNpiNode(item)) return item
     for (const child of getChildren(item)) {
       const found = visit(child, nextWellName)
@@ -486,8 +486,8 @@ const findAGNodeByWell = (root, wellName) => {
     const nodeName = getNodeName(item)
     const nodeType = item?.nodeType ?? item?.type
     const nextWellName = nodeType === NODETYPE.NodeType_Well || nodeName === wellName
-        ? nodeName
-        : currentWellName
+      ? nodeName
+      : currentWellName
     if (nextWellName === wellName && isAGNode(item)) return item
     for (const child of getChildren(item)) {
       const found = visit(child, nextWellName)
@@ -507,8 +507,8 @@ const findWattenbargerNodeByWell = (root, wellName) => {
     const nodeName = getNodeName(item)
     const nodeType = item?.nodeType ?? item?.type
     const nextWellName = nodeType === NODETYPE.NodeType_Well || nodeName === wellName
-        ? nodeName
-        : currentWellName
+      ? nodeName
+      : currentWellName
     if (nextWellName === wellName && isWattenbargerNode(item)) {
       return item
     }
@@ -539,7 +539,7 @@ const createEmptyWell = (wellName, wellId) => ({ //创建一口空井
 
 const getWellGroup = () => treeData.value.find(node => node.id === 'g-well')
 const getAllWellNames = () =>
-    getWellGroup()?.children.map(item => item.wellName || item.label).filter(Boolean) || []
+  getWellGroup()?.children.map(item => item.wellName || item.label).filter(Boolean) || []
 
 const getSelectedAnalyticWellNames = () => {
   if (!selectedWellName.value) return []
@@ -639,7 +639,7 @@ const addBlasingameNode = (wellName, rawNode = {}) => {
 
   const parentId = `${wellItem.id}-diagnostic-curve`
   let diagnosticNode = inventoryGroup.children.find(item =>
-      item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve || item.label === '诊断曲线'
+    item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve || item.label === '诊断曲线'
   )
 
   if (!diagnosticNode) {
@@ -667,7 +667,7 @@ const addBlasingameNode = (wellName, rawNode = {}) => {
   }
 
   const existedIndex = diagnosticNode.children.findIndex(item =>
-      item.id === id || item.type === NODETYPE.NodeType_TypicalCurveBlasingame || item.label === 'Blasingame'
+    item.id === id || item.type === NODETYPE.NodeType_TypicalCurveBlasingame || item.label === 'Blasingame'
   )
   if (existedIndex >= 0) {
     diagnosticNode.children[existedIndex] = blasingameNode
@@ -687,7 +687,7 @@ const addNpiNode = (wellName, rawNode = {}) => {
 
   const parentId = `${wellItem.id}-diagnostic-curve`
   let diagnosticNode = inventoryGroup.children.find(item =>
-      item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve || item.label === '诊断曲线'
+    item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve || item.label === '诊断曲线'
   )
   if (!diagnosticNode) {
     diagnosticNode = {
@@ -712,7 +712,7 @@ const addNpiNode = (wellName, rawNode = {}) => {
     raw: rawNode
   }
   const existedIndex = diagnosticNode.children.findIndex(item =>
-      item.id === id || NPI_NODE_TYPES.has(item.type) || item.label === 'Normalized Pressure Integral' || item.label === 'NPI'
+    item.id === id || NPI_NODE_TYPES.has(item.type) || item.label === 'Normalized Pressure Integral' || item.label === 'NPI'
   )
   if (existedIndex >= 0) diagnosticNode.children[existedIndex] = npiNode
   else diagnosticNode.children.push(npiNode)
@@ -769,7 +769,7 @@ const addWattenbargerNode = (wellName, rawNode = {}) => {
 
   const parentId = `${wellItem.id}-diagnostic-curve`
   let diagnosticNode = inventoryGroup.children.find(item =>
-      item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve || item.label === '诊断曲线'
+    item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve || item.label === '诊断曲线'
   )
 
   if (!diagnosticNode) {
@@ -797,7 +797,7 @@ const addWattenbargerNode = (wellName, rawNode = {}) => {
   }
 
   const existedIndex = diagnosticNode.children.findIndex(item =>
-      item.id === id || item.type === NODETYPE.NodeType_TypicalCurveWattenbarger || item.label === 'Wattenbarger'
+    item.id === id || item.type === NODETYPE.NodeType_TypicalCurveWattenbarger || item.label === 'Wattenbarger'
   )
   if (existedIndex >= 0) {
     diagnosticNode.children[existedIndex] = wattenbargerNode
@@ -817,7 +817,7 @@ const addAGNode = (wellName, rawNode = {}) => {
 
   const parentId = `${wellItem.id}-diagnostic-curve`
   let diagnosticNode = inventoryGroup.children.find(item =>
-      item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve || item.label === '诊断曲线'
+    item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve || item.label === '诊断曲线'
   )
 
   if (!diagnosticNode) {
@@ -844,7 +844,7 @@ const addAGNode = (wellName, rawNode = {}) => {
   }
 
   const existedIndex = diagnosticNode.children.findIndex(item =>
-      item.id === id || item.type === NODETYPE.NodeType_TypicalCurveAG || item.label === 'AG'
+    item.id === id || item.type === NODETYPE.NodeType_TypicalCurveAG || item.label === 'AG'
   )
   if (existedIndex >= 0) {
     diagnosticNode.children[existedIndex] = agNode
@@ -982,7 +982,7 @@ const applyMaterialBalanceNodes = async (node, targetWellName = '') => {
     }
 
     const dynamicNode = (wellNode.subNodes || []).find(item =>
-        (item.nodeType ?? item.type) === NODETYPE.NodeType_DynamicMaterialBalanceMethodBlasingame
+      (item.nodeType ?? item.type) === NODETYPE.NodeType_DynamicMaterialBalanceMethodBlasingame
     )
     if (dynamicNode?.nodeId) {
       addAnalysisNode(wellName, {
@@ -997,10 +997,10 @@ const applyMaterialBalanceNodes = async (node, targetWellName = '') => {
 
 const findDynamicBalanceNode = (rootNode, wellName) => {
   const wellNode = (rootNode?.subNodes || []).find(item =>
-      item.nodeTitle === wellName || item.wellName === wellName
+    item.nodeTitle === wellName || item.wellName === wellName
   )
   return (wellNode?.subNodes || []).find(item =>
-      (item.nodeType ?? item.type) === NODETYPE.NodeType_DynamicMaterialBalanceMethodBlasingame
+    (item.nodeType ?? item.type) === NODETYPE.NodeType_DynamicMaterialBalanceMethodBlasingame
   )
 }
 
@@ -1018,8 +1018,8 @@ const ensureMaterialBalanceNodeForWell = (wellName, rawNode = {}) => {
 
   const targetGroup = wellItem?.children.find(item => item.type === 'well-control-inventory')
   return targetGroup?.children.find(item =>
-      item.type === NODETYPE.NodeType_DynamicOriginalGasInplace &&
-      item.wellName === wellName
+    item.type === NODETYPE.NodeType_DynamicOriginalGasInplace &&
+    item.wellName === wellName
   )
 }
 
@@ -1031,7 +1031,7 @@ const clearMaterialBalanceNodes = () => {
     if (!inventoryGroup?.children?.length) return
 
     inventoryGroup.children = inventoryGroup.children.filter(item =>
-        item.type !== NODETYPE.NodeType_DynamicOriginalGasInplace
+      item.type !== NODETYPE.NodeType_DynamicOriginalGasInplace
     )
   })
 }
@@ -1044,7 +1044,7 @@ const removeMaterialBalanceNodeForWell = (wellName) => {
   if (!inventoryGroup?.children?.length) return
 
   inventoryGroup.children = inventoryGroup.children.filter(item =>
-      item.type !== NODETYPE.NodeType_DynamicOriginalGasInplace
+    item.type !== NODETYPE.NodeType_DynamicOriginalGasInplace
   )
 }
 
@@ -1056,7 +1056,7 @@ const clearTypicalCurveNodes = () => {
     if (!inventoryGroup?.children?.length) return
 
     inventoryGroup.children = inventoryGroup.children.filter(item =>
-        item.type !== NODETYPE.NodeType_TypicalCurve
+      item.type !== NODETYPE.NodeType_TypicalCurve
     )
   })
 }
@@ -1087,9 +1087,9 @@ const applyTypicalCurveNodes = (node, targetWellName = '') => {
     const children = item?.subNodes ?? item?.children ?? []
     const nodeType = item?.nodeType ?? item?.type
     const nextInTypicalCurve = inTypicalCurve ||
-        nodeType === NODETYPE.NodeType_TypicalCurve ||
-        nodeName === '典型曲线' ||
-        nodeName === '诊断曲线'
+      nodeType === NODETYPE.NodeType_TypicalCurve ||
+      nodeName === '典型曲线' ||
+      nodeName === '诊断曲线'
 
     if (targetWellName && wellName && wellName !== targetWellName) return
 
@@ -1243,7 +1243,7 @@ const createAnalysisLogWaiter = ({
                                    isRelevant = null
                                  }) => {
   let settled = false
-  let cleanup = () => {}
+  let cleanup = () => { }
 
   const promise = new Promise((resolve, reject) => {
     const finish = (callback, value) => {
@@ -1303,15 +1303,27 @@ const createAnalysisLogWaiter = ({
 }
 
 const createBlasingameLogWaiter = (wellName, timeoutMs = TYPICAL_CURVE_LOG_TIMEOUT) =>
-    createAnalysisLogWaiter({
-      module: TYPICAL_CURVE_NOTIFY_MODULE,
-      wellName,
-      timeoutMs,
-      timeoutMessage: `${wellName} Blasingame日志超时，未收到完成消息`,
-      fallbackErrorMessage: `${wellName} Blasingame计算失败`,
-      allowGlobalComplete: true,
-      isComplete: (payload, logText) => logText.includes('\u5b8c\u6210') && !logText.includes('\u5206\u6790\u7ed3\u675f')
-    })
+  createAnalysisLogWaiter({
+    module: TYPICAL_CURVE_NOTIFY_MODULE,
+    wellName,
+    timeoutMs,
+    timeoutMessage: `${wellName} Blasingame日志超时，未收到完成消息`,
+    fallbackErrorMessage: `${wellName} Blasingame计算失败`,
+    allowGlobalComplete: true,
+    isComplete: (payload, logText) => logText.includes('\u5b8c\u6210') && !logText.includes('\u5206\u6790\u7ed3\u675f')
+  })
+
+const createAGLogWaiter = (wellName, timeoutMs = TYPICAL_CURVE_LOG_TIMEOUT) =>
+  createAnalysisLogWaiter({
+    module: TYPICAL_CURVE_NOTIFY_MODULE,
+    wellName,
+    timeoutMs,
+    timeoutMessage: `${wellName} AG日志超时，未收到完成消息`,
+    fallbackErrorMessage: `${wellName} AG计算失败`,
+    allowGlobalComplete: true,
+    isComplete: (payload, logText) => logText.includes('\u5b8c\u6210') && !logText.includes('\u5206\u6790\u7ed3\u675f')
+  })
+
 
 const createTypicalCurveLogWaiter = (wellName, methodName, timeoutMs = TYPICAL_CURVE_LOG_TIMEOUT) =>
   createAnalysisLogWaiter({
@@ -1379,7 +1391,7 @@ const getMaterialBalanceNodeOnce = async (wellName, delayMs = 1200) => {
   if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs))
   const rootNode = await fetchMaterialBalanceNode()
   const wellNode = (rootNode?.subNodes || []).find(item =>
-      item.nodeTitle === wellName || item.wellName === wellName
+    item.nodeTitle === wellName || item.wellName === wellName
   )
   const resultNode = (wellNode?.subNodes || []).find(item => {
     const type = item.nodeType ?? item.type
@@ -1426,8 +1438,8 @@ const finalizeBlasingameResult = async (wellName, logPayload, maxRetries = 8, in
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
       const { rootNode, blasingameNode } = await getBlasingameNodeOnce(
-          wellName,
-          attempt === 0 ? 1 : intervalMs
+        wellName,
+        attempt === 0 ? 1 : intervalMs
       )
 
       if (rootNode) {
@@ -1615,6 +1627,66 @@ const getAGNodeOnce = async (wellName, delayMs = 1200) => {
   return { rootNode, agNode }
 }
 
+  const finalizeAgResult = async (wellName, logPayload, maxRetries = 8, intervalMs = 1000) => {
+    const logNodeId = logPayload?.node ?? logPayload?.nodeId
+    let lastError = null
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        const { rootNode, agNode } = await getAGNodeOnce(
+          wellName,
+          attempt === 0 ? 1 : intervalMs
+        )
+
+        if (rootNode) {
+          applyTypicalCurveNodes(rootNode)
+        }
+
+        const resultNode = agNode || (logNodeId ? {
+          nodeId: logNodeId,
+          nodeTitle: 'AG',
+          nodeType: NODETYPE.NodeType_TypicalCurveAG,
+          wellName
+        } : null)
+        const nodeId = resultNode?.nodeId || resultNode?.id
+
+        if (!nodeId) {
+          lastError = new Error('\u6ca1\u6709\u627e\u5230 AG \u5bf9\u5e94\u7684 nodeId')
+          continue
+        }
+
+        const resultRes = await typicalCurveApi.getResult(PROJECT_ID, GAS_RESERVOIR_ID, nodeId)
+        const result = normalizePayload(resultRes)
+
+        const treeNode = addAGNode(wellName, {
+          ...resultNode,
+          nodeType: NODETYPE.NodeType_TypicalCurveAG,
+          nodeTitle: 'AG'
+        })
+
+        const viewNode = {
+          id: nodeId,
+          label: 'AG',
+          type: NODETYPE.NodeType_TypicalCurveAG,
+          wellName,
+          raw: result,
+          treeNode: resultNode
+        }
+
+        activeNodeId.value = viewNode.id
+        currentView.value = 'Agarwal-Gardner'
+        currentViewNode.value = viewNode
+        activeNode.value = treeNode || viewNode
+        ElMessage.success(`${wellName} AG\u8ba1\u7b97\u5b8c\u6210`)
+        return
+      } catch (error) {
+        lastError = error
+      }
+    }
+
+    throw lastError || new Error(`${wellName} AG\u7ed3\u679c\u5df2\u5b8c\u6210\uff0c\u4f46\u6682\u65f6\u6ca1\u6709\u62ff\u5230\u7ed3\u679c`)
+  }
+
 const runWaterInvasionForSelectedWell = async () => { //点击水侵分析的操作
   const targetWellName = selectedWellName.value
 
@@ -1728,15 +1800,15 @@ const runMaterialBalanceForSelectedWell = async () => {
 
     // 计算完成后读取后端保存的节点。
     const { rootNode, resultNode } =
-        await getMaterialBalanceNodeOnce(targetWellName)
+      await getMaterialBalanceNodeOnce(targetWellName)
 
     if (!resultNode) {
       ElMessage.warning(`${targetWellName}井物质平衡结果不存在`)
       return
     }
 
-// node 接口现在只包含曾经计算过物质平衡的井，
-// 因此可以恢复全部历史节点。
+    // node 接口现在只包含曾经计算过物质平衡的井，
+    // 因此可以恢复全部历史节点。
 
     const materialBalanceRows = await getMaterialBalanceRowsForWell(targetWellName, { silentError: true })
     const materialBalanceRawNode = {
@@ -2050,11 +2122,11 @@ const runBlasingameForSelectedWell = async () => {
 
     ElMessage.info(`${targetWellName} Blasingame计算中，请稍候...`)
     logWaiter.promise
-        .then((logPayload) => finalizeBlasingameResult(targetWellName, logPayload))
-        .catch((error) => {
-          ElMessage.error(error.message || 'Blasingame计算失败')
-          console.error('Blasingame计算失败', error)
-        })
+      .then((logPayload) => finalizeBlasingameResult(targetWellName, logPayload))
+      .catch((error) => {
+        ElMessage.error(error.message || 'Blasingame计算失败')
+        console.error('Blasingame计算失败', error)
+      })
   } catch (error) {
     logWaiter.cancel()
     ElMessage.error(error.message || 'Blasingame计算失败')
@@ -2187,7 +2259,8 @@ const runWattenbargerForSelectedWell = async () => {
     //   resultNode = result.wattenbargerNode
     //   if (resultNode) break
     // }
-    if (!resultNode) {ElMessage.warning(`${targetWellName}井Wattenbarger结果不存在`)
+    if (!resultNode) {
+      ElMessage.warning(`${targetWellName}井Wattenbarger结果不存在`)
       return
     }
 
@@ -2234,8 +2307,9 @@ const runAGForSelectedWell = async () => {
   if (typicalCurveRunning.value) return
 
   typicalCurveRunning.value = true
+  const logWaiter = createAGLogWaiter(targetWellName)
   try {
-    await typicalCurveApi.fitting({
+    const fittingRes = await typicalCurveApi.fitting({
       gasReservoirId: Number(GAS_RESERVOIR_ID),
       projectId: Number(PROJECT_ID),
       wellNames: [targetWellName],
@@ -2247,53 +2321,27 @@ const runAGForSelectedWell = async () => {
       minimumWaterGasRatio: 0.0602
     })
 
+    const fittingMessage = getResponseMessage(fittingRes)
+    if (isFailureResponse(fittingRes || fittingMessage.includes('\u5927\u4e8e0'))) {
+      throw new Error(fittingMessage || AG_FITTING_REGRESSION_ERROR)
+    }
+
     ElMessage.info(`${targetWellName} AG计算中，请稍候...`)
 
-    let rootNode = null
-    let agNode = null
-    for (let i = 0; i < 20; i++) {
-      const result = await getAGNodeOnce(targetWellName, 1500)
-      rootNode = result.rootNode
-      agNode = result.agNode
-      if (agNode) break
+    logWaiter.promise
+      .then((logPayload) => finalizeAgResult(targetWellName, logPayload))
+      .catch((error) => {
+        ElMessage.error(error.message || 'AG计算失败')
+        console.error('AG计算失败', error)
+      })
+    } catch (error) {
+      logWaiter.cancel()
+      ElMessage.error(error.message || 'AG计算失败')
+      console.error('AG计算失败', error)
+    } finally {
+      typicalCurveRunning.value = false
     }
-
-    if (!agNode) {
-      throw new Error(AG_FITTING_REGRESSION_ERROR)
-    }
-
-    applyTypicalCurveNodes(rootNode)
-
-    const nodeId = agNode?.nodeId || agNode?.id
-    addAGNode(targetWellName, {
-      ...agNode,
-      nodeType: NODETYPE.NodeType_TypicalCurveAG,
-      nodeTitle: 'AG'
-    })
-
-    const resultRes = await typicalCurveApi.getResult(PROJECT_ID, GAS_RESERVOIR_ID, nodeId)
-    const result = normalizePayload(resultRes)
-
-    const viewNode = {
-      id: nodeId || `ag-${targetWellName}`,
-      label: 'AG',
-      type: NODETYPE.NodeType_TypicalCurveAG,
-      wellName: targetWellName,
-      raw: result
-    }
-
-    activeNodeId.value = viewNode.id
-    currentView.value = 'Agarwal-Gardner'
-    currentViewNode.value = viewNode
-    ElMessage.success(`${targetWellName} AG计算完成`)
-  } catch (error) {
-    ElMessage.error(error.message || 'AG计算失败')
-    console.error('AG计算失败', error)
-  } finally {
-    typicalCurveRunning.value = false
   }
-}
-
 
 const openBlasingameNode = async (node) => {
   const targetWellName = node?.wellName || selectedWellName.value
@@ -2455,7 +2503,6 @@ const openAGNode = async (node) => {
     const nodeRes = await nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, NODETYPE.NodeType_ProductivityInstabilityAnalysis)
     const rootNode = nodeRes?.data?.node
     applyTypicalCurveNodes(rootNode)
-    //applyTypicalCurveNodes(rootNode)
 
     const agNode = findAGNodeByWell(rootNode, targetWellName) || node?.raw || node
     const nodeId = agNode?.nodeId || agNode?.id
@@ -2568,9 +2615,9 @@ const handleDeleteContextNode = async () => {
       }
 
       await Promise.all(
-          deleteIds.map(id =>
-              materialBalanceApi.deleteResult(PROJECT_ID, GAS_RESERVOIR_ID, id, { silentError: true })
-          )
+        deleteIds.map(id =>
+          materialBalanceApi.deleteResult(PROJECT_ID, GAS_RESERVOIR_ID, id, { silentError: true })
+        )
       )
       removeTreeNode(node)
       clearCurrentViewAfterDelete(node)
@@ -2783,7 +2830,7 @@ onBeforeUnmount(() => {
       <!--      左侧菜单栏-->
       <aside class="side-panel" :class="{ collapsed: sideTreeCollapsed }">
         <button v-if="sideTreeCollapsed" class="side-collapsed-tab" type="button"
-                title="&#x5C55;&#x5F00;&#x76EE;&#x5F55;" @click="toggleSideTree">
+          title="&#x5C55;&#x5F00;&#x76EE;&#x5F55;" @click="toggleSideTree">
           &#x76EE;&#x5F55;
         </button>
 
@@ -2805,38 +2852,35 @@ onBeforeUnmount(() => {
       <!--     右侧的主要内容区域-->
       <main class="content-area">
         <WaterInvasionContent v-if="currentView === 'water-invasion'" :node="currentViewNode" :project-id="PROJECT_ID"
-                              :gas-reservoir-id="GAS_RESERVOIR_ID" @refresh-tree="handleRefreshTree" />
+          :gas-reservoir-id="GAS_RESERVOIR_ID" @refresh-tree="handleRefreshTree" />
         <AnalyticMethodContent v-if="currentView === 'analytic-method'" :node="currentViewNode" :project-id="PROJECT_ID"
-                               :gas-reservoir-id="GAS_RESERVOIR_ID" />
+          :gas-reservoir-id="GAS_RESERVOIR_ID" />
         <MaterialBalanceContent v-if="currentView === 'material-balance'" :node="currentViewNode"
                                  :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" @refresh-tree="handleRefreshTree" />
         <FlowBalanceContent v-if="currentView === 'flow-balance'" :node="currentViewNode"
                             :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" @refresh-tree="handleRefreshTree" />
         <BlasingameContent v-if="currentView === 'blasingame'" :node="currentViewNode" :project-id="PROJECT_ID"
-                           :gas-reservoir-id="GAS_RESERVOIR_ID" />
+          :gas-reservoir-id="GAS_RESERVOIR_ID" />
         <NpiContent v-if="currentView === 'npi'" :node="currentViewNode" :project-id="PROJECT_ID"
                     :gas-reservoir-id="GAS_RESERVOIR_ID" />
         <TransientContent v-if="currentView === 'transient'" :node="currentViewNode" :project-id="PROJECT_ID"
           :gas-reservoir-id="GAS_RESERVOIR_ID" />
         <WattenbargerContent v-if="currentView === 'wattenbarger'" :node="currentViewNode" :project-id="PROJECT_ID"
-                             :gas-reservoir-id="GAS_RESERVOIR_ID" />
+          :gas-reservoir-id="GAS_RESERVOIR_ID" />
         <DynamicBalanceContent v-if="currentView === 'dynamic-balance'" :node="currentViewNode" :project-id="PROJECT_ID"
-                               :gas-reservoir-id="GAS_RESERVOIR_ID" />
+          :gas-reservoir-id="GAS_RESERVOIR_ID" />
         <AGContent v-if="currentView === 'Agarwal-Gardner'" :node="currentViewNode" :project-id="PROJECT_ID"
-                   :gas-reservoir-id="GAS_RESERVOIR_ID" />
+          :gas-reservoir-id="GAS_RESERVOIR_ID" />
       </main>
     </div>
 
     <Teleport to="body">
-      <div
-          v-if="treeContextMenu.visible"
-          class="tree-context-menu"
-          :style="{ left: `${treeContextMenu.x}px`, top: `${treeContextMenu.y}px` }"
-          @click.stop
-          @contextmenu.prevent
-      >
+      <div v-if="treeContextMenu.visible" class="tree-context-menu"
+        :style="{ left: `${treeContextMenu.x}px`, top: `${treeContextMenu.y}px` }" @click.stop @contextmenu.prevent>
         <button class="tree-context-menu-item" type="button" @click="handleDeleteContextNode">
-          <el-icon class="tree-context-menu-icon"><Delete /></el-icon>
+          <el-icon class="tree-context-menu-icon">
+            <Delete />
+          </el-icon>
           <span>{{ treeContextMenuLabel }}</span>
         </button>
       </div>
