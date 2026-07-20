@@ -108,10 +108,18 @@ const getMaterialBalanceResultId = (row) => {
   )
 }
 
-const isMaterialBalanceAverageRow = (row) => {
-  const type = Number(row?.dynamicOriginalGasInplaceType ?? row?.dynamicOriginalGasInPlaceType)
-  const description = String(row?.dynamicOriginalGasInplaceMethodDescription || row?.dynamicOriginalGasInPlaceMethodDescription || '')
-  return type === 1 || type === 2 || /物质平衡.*(实测静压|计算静压)/.test(description)
+const MATERIAL_BALANCE_TYPES = new Set([1, 2])
+
+const isMaterialBalanceRow = (row) => {
+  const type = Number(row?.dynamicOriginalGasInplaceType)
+
+  // averageFormationPressure 接口会返回同一井的多种动态储量分析结果。
+  // 物质平衡页面只接收 1（实测静压）和 2（计算静压），排除流动/动态物质平衡结果。
+  if (Number.isFinite(type)) return MATERIAL_BALANCE_TYPES.has(type)
+
+  // 兼容缺少类型字段的旧数据，避免历史物质平衡结果无法展示。
+  const description = row?.dynamicOriginalGasInplaceMethodDescription || row?.dynamicOriginalGasInPlaceMethodDescription || ''
+  return /物质平衡方程-根据(?:实测|计算)静压/.test(description)
 }
 
 const getMaterialBalanceTabLabel = (row, index) => {
@@ -122,11 +130,10 @@ const getMaterialBalanceTabLabel = (row, index) => {
 }
 
 const mergeResultWithAverageRow = (result, averageRow, index) => {
-  const output = {
-    ...(result?.output || result?.result || {}),
-    ...averageRow
-  }
-  const label = getMaterialBalanceTabLabel(output, index)
+  // 输出值必须以 result 接口为准；平均地层压力接口只用于确定结果页签及结果 ID，
+  // 不能整行合并到 output，否则同名字段会覆盖 result 接口返回的真实计算结果。
+  const output = result?.output || result?.result || {}
+  const label = getMaterialBalanceTabLabel(averageRow || output, index)
 
   return {
     ...result,
@@ -189,36 +196,39 @@ const formatSci = (value) => {
   return `${sign}${coefficient}E${exponent >= 0 ? '+' : ''}${exponent}`
 }
 
-const getFieldLabel = (field) => {
-  const label = field?.name_cn || field?.name || ''
-  return field?.unit_label ? `${label}(${field.unit_label})` : label
-}
-
-const formatFieldValue = (value, field = {}) => {
-  if (value === undefined || value === null || value === '') return ''
-  const number = Number(value)
-  if (!Number.isFinite(number)) return value
-  if (field.isScientificNotation) return formatSci(number)
-  if (typeof field.displayDecimal === 'number') return number.toFixed(field.displayDecimal)
-  return value
-}
-
 const displayedOutputFields = computed(() => {
   const value = output.value || {}
-  const fields = Array.isArray(resultData.value?.resultFields) ? resultData.value.resultFields : []
-  const rows = fields
-      .filter(field => field?.name && value[field.name] !== undefined && value[field.name] !== null && value[field.name] !== '')
-      .map(field => ({
-        key: field.name,
-        label: getFieldLabel(field),
-        value: formatFieldValue(value[field.name], field)
-      }))
 
-  if (rows.length) return rows
-
-  return Object.entries(value)
-      .filter(([, fieldValue]) => fieldValue !== undefined && fieldValue !== null && fieldValue !== '')
-      .map(([key, fieldValue]) => ({ key, label: key, value: fieldValue }))
+  // 输出区不再依赖 resultFields 动态生成，始终按产品要求展示这五项结果。
+  // gradient/rsquared 是当前接口字段，slope/r2 用于兼容旧结果数据。
+  return [
+    {
+      key: 'originalGasVolume',
+      label: '动态储量(10⁸m³)',
+      value: value.originalGasVolume ?? ''
+    },
+    {
+      key: 'intercept',
+      label: '回归分析截距(MPa)',
+      value: formatSci(toNumber(value.intercept))
+    },
+    {
+      key: 'gradient',
+      label: '回归分析斜率(MPa/10⁸m³)',
+      value: formatSci(toNumber(value.gradient ?? value.slope))
+    },
+    {
+      key: 'rsquared',
+      label: 'R²(dless)',
+      value: value.rsquared ?? value.r2 ?? ''
+    },
+    {
+      key: 'reliability',
+      label: '结果可靠性',
+      // 接口的可靠性文字字段为 reliabilityDescription；其余字段用于兼容旧数据。
+      value: value.reliabilityDescription ?? value.reliability ?? value.reliablity ?? ''
+    }
+  ]
 })
 
 const MODIFICATION_METHODS = {
@@ -782,7 +792,7 @@ async function fetchData() {
             { silentError: true }
         )
         const averageRows = getAverageFormationPressureRows(pressureRes.data)
-            .filter(isMaterialBalanceAverageRow)
+            .filter(isMaterialBalanceRow)
         const resultRequests = averageRows
             .map((row, index) => ({
               row,
@@ -846,6 +856,8 @@ async function fetchData() {
     activePanelTab.value = 'input'
     await nextTick()
     renderChart()
+    // 物质平衡是批量计算，但本次页面只刷新当前井对应的左侧节点。
+    emit('refresh-tree', wellName)
   } catch (error) {
     if (requestId !== requestSeq) return
     console.error('[MaterialBalanceContent] load failed', error)
@@ -948,7 +960,6 @@ onBeforeUnmount(() => {
 
         <div v-show="activePanelTab === 'output'" class="panel-body">
           <div class="section-title">输出结果</div>
-          <div v-if="!displayedOutputFields.length" class="empty">暂无接口输出结果</div>
           <div class="field-grid">
             <div v-for="item in displayedOutputFields" :key="item.key" class="field">
               <label>{{ item.label }}</label>
