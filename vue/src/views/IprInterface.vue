@@ -90,6 +90,8 @@ const WATER_INVASION_ERROR_PATTERN = /\u5931\u8d25|\u9519\u8bef|\u5f02\u5e38|\u6
 const WATER_INVASION_COMPLETE_PATTERN = /\u5b8c\u6210|\u5206\u6790\u7ed3\u675f|\u7ed3\u675f/i
 const TYPICAL_CURVE_NOTIFY_MODULE = 'projectanalysis.typicalcurvefitting'
 const TYPICAL_CURVE_LOG_TIMEOUT = 120000
+const ANALYTIC_METHOD_NOTIFY_MODULE_PATTERN = /projectanalysis\.analysismethods(?:history)?fitting/i
+const ANALYTIC_METHOD_LOG_TIMEOUT = 120000
 const DYNAMIC_BALANCE_NOTIFY_MODULE_PATTERN = /projectanalysis\.(dynamicoriginalgas(in)?place|dynamicoriginalgasInplace|dynamicbalance|dmb)/i
 const DYNAMIC_BALANCE_LOG_TIMEOUT = 120000
 const BLASINGAME_FITTING_REGRESSION_ERROR = '计算动态储量错误:参与回归分析的数据点数必须大于0'
@@ -1270,6 +1272,29 @@ const createBlasingameLogWaiter = (wellName, timeoutMs = TYPICAL_CURVE_LOG_TIMEO
     isComplete: (payload, logText) => logText.includes('\u5b8c\u6210') && !logText.includes('\u5206\u6790\u7ed3\u675f')
   })
 
+const createTypicalCurveLogWaiter = (wellName, methodName, timeoutMs = TYPICAL_CURVE_LOG_TIMEOUT) =>
+  createAnalysisLogWaiter({
+    module: TYPICAL_CURVE_NOTIFY_MODULE,
+    wellName,
+    timeoutMs,
+    timeoutMessage: `${wellName} ${methodName}日志超时，未收到完成消息`,
+    fallbackErrorMessage: `${wellName} ${methodName}计算失败`,
+    allowGlobalComplete: true,
+    allowGlobalFailure: true,
+    isComplete: (payload, logText) => logText.includes('\u5b8c\u6210') && !logText.includes('\u5206\u6790\u7ed3\u675f')
+  })
+
+const createAnalyticMethodLogWaiter = (wellName, timeoutMs = ANALYTIC_METHOD_LOG_TIMEOUT) =>
+  createAnalysisLogWaiter({
+    module: ANALYTIC_METHOD_NOTIFY_MODULE_PATTERN,
+    wellName,
+    timeoutMs,
+    timeoutMessage: `${wellName} 解析法日志超时，未收到完成消息`,
+    fallbackErrorMessage: `${wellName} 解析法计算失败`,
+    allowGlobalComplete: true,
+    allowGlobalFailure: true
+  })
+
 const createDynamicBalanceLogWaiter = (wellName, timeoutMs = DYNAMIC_BALANCE_LOG_TIMEOUT) =>
   createAnalysisLogWaiter({
     module: (payloadModule, payload, message, logText) => {
@@ -1441,6 +1466,110 @@ const getTransientNodeOnce = async (wellName, delayMs = 1200) => {
   return { rootNode, transientNode: findTransientNodeByWell(rootNode, wellName) }
 }
 
+const finalizeTypicalCurveResult = async ({
+  wellName,
+  logPayload,
+  methodName,
+  viewName,
+  defaultNodeType,
+  getNodeOnce,
+  selectNode,
+  addNode
+}, maxRetries = 8, intervalMs = 1000) => {
+  const logNodeId = logPayload?.node ?? logPayload?.nodeId ?? logPayload?.resultId
+  let lastError = null
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const lookup = await getNodeOnce(wellName, attempt === 0 ? 1 : intervalMs)
+      if (lookup.rootNode) applyTypicalCurveNodes(lookup.rootNode)
+
+      const resultNode = selectNode(lookup) || (logNodeId ? {
+        nodeId: logNodeId,
+        nodeTitle: methodName,
+        nodeType: logPayload?.nodeType || defaultNodeType,
+        wellName
+      } : null)
+      const nodeId = resultNode?.nodeId || resultNode?.id
+      if (!nodeId) {
+        lastError = new Error(`没有找到 ${methodName} 对应的 nodeId`)
+        continue
+      }
+
+      const resultRes = await typicalCurveApi.getResult(PROJECT_ID, GAS_RESERVOIR_ID, nodeId)
+      const treeNode = addNode(wellName, resultNode)
+      const viewNode = {
+        id: nodeId,
+        label: methodName,
+        type: resultNode?.nodeType || resultNode?.type || defaultNodeType,
+        wellName,
+        raw: normalizePayload(resultRes),
+        treeNode: resultNode
+      }
+
+      activeNodeId.value = nodeId
+      currentView.value = viewName
+      currentViewNode.value = viewNode
+      activeNode.value = treeNode || viewNode
+      ElMessage.success(`${wellName} ${methodName}计算完成`)
+      return
+    } catch (error) {
+      lastError = error
+    }
+  }
+
+  throw lastError || new Error(`${wellName} ${methodName}结果已完成，但暂时没有读取到结果`)
+}
+
+const finalizeAnalyticMethodResult = async (wellName, logPayload, maxRetries = 8, intervalMs = 1000) => {
+  const logResultId = logPayload?.node ?? logPayload?.nodeId ?? logPayload?.resultId ?? logPayload?.analysisId
+  let lastError = null
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      if (attempt > 0) await new Promise(resolve => setTimeout(resolve, intervalMs))
+      await refreshAnalyticMethodNodes()
+      const treeNode = findAnalyticMethodNode(wellName)
+      const treeRaw = treeNode?.raw || {}
+      const resultId = treeRaw.resultId || treeRaw.analysisId || treeRaw.AnalysisMethodsId ||
+        treeRaw.analysisMethodsId || treeRaw.nodeId || logResultId
+
+      if (!resultId) {
+        lastError = new Error('没有找到该井的解析法结果 ID')
+        continue
+      }
+
+      const resultRes = await analyticMethodApi.getResult(PROJECT_ID, GAS_RESERVOIR_ID, resultId)
+      const result = normalizePayload(resultRes)
+      const rawResult = {
+        ...(result && typeof result === 'object' ? result : {}),
+        ...treeRaw,
+        resultId,
+        analysisId: resultId,
+        wellName
+      }
+      const viewNode = {
+        id: treeNode?.id || resultId,
+        label: '解析法',
+        type: NODETYPE.NodeType_AnalysisMethods,
+        wellName,
+        raw: rawResult
+      }
+
+      activeNodeId.value = viewNode.id
+      currentView.value = 'analytic-method'
+      currentViewNode.value = viewNode
+      activeNode.value = treeNode || viewNode
+      ElMessage.success(`${wellName} 解析法计算完成`)
+      return
+    } catch (error) {
+      lastError = error
+    }
+  }
+
+  throw lastError || new Error(`${wellName} 解析法结果已完成，但暂时没有读取到结果`)
+}
+
 const getWattenbargerNodeOnce = async (wellName, delayMs = 1200) => {
   if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs))
   const res = await nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, NODETYPE.NodeType_ProductivityInstabilityAnalysis)
@@ -1522,6 +1651,7 @@ const runAnalyticMethodForSelectedWell = async () => {
   if (analyticMethodRunning.value) return
 
   analyticMethodRunning.value = true
+  const logWaiters = wellNames.map(wellName => createAnalyticMethodLogWaiter(wellName))
   try {
     await analyticMethodApi.historyFitting({
       gasReservoirId: Number(GAS_RESERVOIR_ID),
@@ -1532,24 +1662,12 @@ const runAnalyticMethodForSelectedWell = async () => {
     })
 
     ElMessage.info('解析法计算中，请稍候...')
-    const resultNodes = await pollAnalyticMethodNodes(wellNames)
-    if (wellNames.length === 1 && resultNodes[0]?.raw) {
-      const resultNode = resultNodes[0].raw
-      const viewNode = {
-        id: resultNode?.nodeId || resultNode?.resultId || `am-${wellNames[0]}`,
-        label: '解析法',
-        type: NODETYPE.NodeType_AnalysisMethods,
-        wellName: wellNames[0],
-        raw: resultNode
-      }
-
-      activeNodeId.value = viewNode.id
-      currentView.value = 'analytic-method'
-      currentViewNode.value = viewNode
-    }
-
-    ElMessage.success('解析法结果已更新')
+    const logPayloads = await Promise.all(logWaiters.map(waiter => waiter.promise))
+    await Promise.all(wellNames.map((wellName, index) =>
+      finalizeAnalyticMethodResult(wellName, logPayloads[index])
+    ))
   } catch (error) {
+    logWaiters.forEach(waiter => waiter.cancel())
     const msg = error.response?.data?.msg || error.response?.data?.message || ''
     ElMessage.error(msg || error.message || '解析法计算失败')
     console.error('解析法计算失败', error)
@@ -1804,6 +1922,7 @@ const runNpiForSelectedWell = async () => {
   if (typicalCurveRunning.value) return
 
   typicalCurveRunning.value = true
+  const logWaiter = createTypicalCurveLogWaiter(targetWellName, 'NPI')
   try {
     await typicalCurveApi.fitting({
       gasReservoirId: Number(GAS_RESERVOIR_ID),
@@ -1818,32 +1937,19 @@ const runNpiForSelectedWell = async () => {
     })
 
     ElMessage.info(`${targetWellName} NPI计算中，请稍候...`)
-    let resultNode = null
-    let rootNode = null
-    for (let i = 0; i < 20; i++) {
-      const result = await getNpiNodeOnce(targetWellName, 1500)
-      rootNode = result.rootNode
-      resultNode = result.npiNode
-      if (resultNode) break
-    }
-    if (!resultNode) throw new Error('NPI计算超时，请稍后刷新查看结果')
-
-    applyTypicalCurveNodes(rootNode)
-    const nodeId = resultNode.nodeId || resultNode.id
-    const resultRes = await typicalCurveApi.getResult(PROJECT_ID, GAS_RESERVOIR_ID, nodeId)
-    const viewNode = {
-      id: nodeId,
-      label: 'NPI',
-      type: resultNode?.nodeType || resultNode?.type || NODETYPE.NodeType_TypicalCurveNPI,
+    const logPayload = await logWaiter.promise
+    await finalizeTypicalCurveResult({
       wellName: targetWellName,
-      raw: normalizePayload(resultRes),
-      treeNode: resultNode
-    }
-    activeNodeId.value = nodeId
-    currentView.value = 'npi'
-    currentViewNode.value = viewNode
-    ElMessage.success(`${targetWellName} NPI计算完成`)
+      logPayload,
+      methodName: 'NPI',
+      viewName: 'npi',
+      defaultNodeType: NODETYPE.NodeType_TypicalCurveNPI,
+      getNodeOnce: getNpiNodeOnce,
+      selectNode: result => result.npiNode,
+      addNode: addNpiNode
+    })
   } catch (error) {
+    logWaiter.cancel()
     const msg = error.response?.data?.msg || error.response?.data?.message || error.message
     ElMessage.error(msg || 'NPI计算失败')
     console.error('NPI计算失败', error)
@@ -1861,6 +1967,7 @@ const runTransientForSelectedWell = async () => {
   if (typicalCurveRunning.value) return
 
   typicalCurveRunning.value = true
+  const logWaiter = createTypicalCurveLogWaiter(targetWellName, 'Transient')
   try {
     await typicalCurveApi.fitting({
       gasReservoirId: Number(GAS_RESERVOIR_ID),
@@ -1875,32 +1982,19 @@ const runTransientForSelectedWell = async () => {
     })
 
     ElMessage.info(`${targetWellName} Transient计算中，请稍候...`)
-    let resultNode = null
-    let rootNode = null
-    for (let i = 0; i < 20; i++) {
-      const result = await getTransientNodeOnce(targetWellName, 1500)
-      rootNode = result.rootNode
-      resultNode = result.transientNode
-      if (resultNode) break
-    }
-    if (!resultNode) throw new Error('Transient计算超时，请稍后刷新查看结果')
-
-    applyTypicalCurveNodes(rootNode)
-    const nodeId = resultNode.nodeId || resultNode.id
-    const resultRes = await typicalCurveApi.getResult(PROJECT_ID, GAS_RESERVOIR_ID, nodeId)
-    const viewNode = {
-      id: nodeId,
-      label: 'Transient',
-      type: resultNode?.nodeType || resultNode?.type || NODETYPE.NodeType_TypicalCurveTransient,
+    const logPayload = await logWaiter.promise
+    await finalizeTypicalCurveResult({
       wellName: targetWellName,
-      raw: normalizePayload(resultRes),
-      treeNode: resultNode
-    }
-    activeNodeId.value = nodeId
-    currentView.value = 'transient'
-    currentViewNode.value = viewNode
-    ElMessage.success(`${targetWellName} Transient计算完成`)
+      logPayload,
+      methodName: 'Transient',
+      viewName: 'transient',
+      defaultNodeType: NODETYPE.NodeType_TypicalCurveTransient,
+      getNodeOnce: getTransientNodeOnce,
+      selectNode: result => result.transientNode,
+      addNode: addTransientNode
+    })
   } catch (error) {
+    logWaiter.cancel()
     const msg = error.response?.data?.msg || error.response?.data?.message || error.message
     ElMessage.error(msg || 'Transient计算失败')
     console.error('Transient计算失败', error)
