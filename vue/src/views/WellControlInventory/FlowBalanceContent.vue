@@ -128,11 +128,29 @@ const lineItems = computed(() =>
     chartItems.value.filter((item, index) => Array.isArray(item?.data) && item.data.length && isLineItem(item, index))
 )
 
-const chartPoints = computed(() =>
-    (Array.isArray(pointItem.value?.data) ? pointItem.value.data : [])
+const primaryPointRows = computed(() =>
+    Array.isArray(pointItem.value?.data) ? pointItem.value.data : []
+)
+
+const allChartPoints = computed(() =>
+    primaryPointRows.value
         .map(getPointFromRow)
         .filter(Boolean)
 )
+
+const hasAnalysisSelectionFlag = computed(() =>
+    primaryPointRows.value.some(row => row && typeof row === 'object' && Object.prototype.hasOwnProperty.call(row, 'isDeleted'))
+)
+
+const selectedChartPoints = computed(() => {
+  const rows = hasAnalysisSelectionFlag.value
+      ? primaryPointRows.value.filter(row => row?.isDeleted !== true)
+      : primaryPointRows.value
+
+  return rows
+      .map(getPointFromRow)
+      .filter(Boolean)
+})
 
 const regression = computed(() => {
   const slope = toNumber(output.value?.gradient ?? output.value?.slope)
@@ -143,8 +161,8 @@ const regression = computed(() => {
 })
 
 const xRange = computed(() => {
-  if (!chartPoints.value.length) return { min: 0, max: 1 }
-  const max = Math.max(...chartPoints.value.map(([x]) => x))
+  if (!allChartPoints.value.length) return { min: 0, max: 1 }
+  const max = Math.max(...allChartPoints.value.map(([x]) => x))
   return { min: 0, max: Math.ceil(max + Math.max(max * 0.05, 1)) }
 })
 
@@ -152,15 +170,24 @@ const regressionLinePoints = computed(() => {
   const line = lineItems.value[0]
   if (line?.data?.length) return line.data.map(getPointFromRow).filter(Boolean)
 
-  if (!regression.value || !chartPoints.value.length) return []
+  if (!regression.value || !selectedChartPoints.value.length) return []
+  const xs = selectedChartPoints.value.map(([x]) => x)
+  const min = Math.min(...xs)
+  const max = Math.max(...xs)
   return [
-    [xRange.value.min, regression.value.slope * xRange.value.min + regression.value.intercept],
-    [xRange.value.max, regression.value.slope * xRange.value.max + regression.value.intercept]
+    [min, regression.value.slope * min + regression.value.intercept],
+    [max, regression.value.slope * max + regression.value.intercept]
   ]
 })
 
+const shiftLinePoints = computed(() => {
+  const line = lineItems.value[1]
+  if (line?.data?.length) return line.data.map(getPointFromRow).filter(Boolean)
+  return []
+})
+
 const chartBounds = computed(() => {
-  const points = [...chartPoints.value, ...regressionLinePoints.value]
+  const points = [...allChartPoints.value, ...regressionLinePoints.value, ...shiftLinePoints.value]
   if (!points.length) return { xMin: 0, xMax: 1, yMin: 0, yMax: 1 }
   const ys = points.map(([, y]) => y)
   const yMin = Math.min(...ys)
@@ -175,7 +202,7 @@ const chartBounds = computed(() => {
 })
 
 const tableRows = computed(() =>
-    (Array.isArray(pointItem.value?.data) ? pointItem.value.data : [])
+    primaryPointRows.value
         .map((row, index) => {
           const point = getPointFromRow(row)
           if (!point) return null
@@ -189,28 +216,6 @@ const tableRows = computed(() =>
         .filter(Boolean)
 )
 
-const fieldLabels = {
-  originalGasVolume: '动态储量(10⁸m³)',
-  intercept: '回归分析截距(MPa)',
-  gradient: '回归分析斜率(MPa/10⁸m³)',
-  rsquared: 'R²(dless)',
-  reliabilityDescription: '结果可靠性',
-  dynamicOriginalGasInplaceMethodDescription: '计算方法'
-}
-
-const outputFields = computed(() => {
-  const value = output.value || {}
-  return Object.entries(fieldLabels)
-      .filter(([key]) => value[key] !== undefined && value[key] !== null && value[key] !== '')
-      .map(([key, label]) => ({ key, label, value: value[key] }))
-})
-
-const inputFields = computed(() =>
-    Object.entries(input.value || {})
-        .filter(([, value]) => value !== undefined && value !== null && value !== '')
-        .map(([key, value]) => ({ key, label: key, value }))
-)
-
 const formatSci = (value) => {
   if (!Number.isFinite(value)) return ''
   if (value === 0) return '0'
@@ -221,6 +226,99 @@ const formatSci = (value) => {
   return `${sign}${coefficient}E${exponent >= 0 ? '+' : ''}${exponent}`
 }
 
+const GAS_TYPES = {
+  0: '干气',
+  1: '湿气'
+}
+
+const MODIFICATION_METHODS = {
+  0: 'Wichert-Aziz 修正方法',
+  1: 'Carr-Kobayashi-Burrows 修正方法'
+}
+
+const DEVIATION_FACTOR_METHODS = {
+  0: 'Dranchuk-Abu-Kassem 方法',
+  1: 'Dranchuk-Purvis-Robinson 方法',
+  2: 'Hall-Yarborough 方法'
+}
+
+const toSelectOptions = (map) => Object.values(map).map(value => ({ label: value, value }))
+
+const getInputValue = (keys, fallback = '') => {
+  for (const key of keys) {
+    const value = input.value?.[key]
+    if (value !== undefined && value !== null && value !== '') return value
+  }
+  return fallback
+}
+
+const getMappedInputValue = (keys, map, fallback = '') => {
+  const value = getInputValue(keys, fallback)
+  if (value === '') return ''
+  return map?.[value] ?? map?.[Number(value)] ?? value
+}
+
+const flowBalanceInputSections = computed(() => [
+  {
+    title: '气体性质',
+    fields: [
+      {
+        key: 'gasType',
+        label: '天然气类型',
+        value: getMappedInputValue(['gasType'], GAS_TYPES),
+        options: toSelectOptions(GAS_TYPES)
+      },
+      { key: 'specificGravity', label: '天然气比重(dless)', value: getInputValue(['specificGravity']) },
+      { key: 'hydrogenSulfide', label: 'H₂S摩尔百分含量(%)', value: getInputValue(['hydrogenSulfide', 'h2s', 'H2S']) },
+      { key: 'carbonDioxide', label: 'CO₂摩尔百分含量(%)', value: getInputValue(['carbonDioxide', 'co2', 'CO2']) },
+      { key: 'nitrogen', label: 'N₂摩尔百分含量(%)', value: getInputValue(['nitrogen', 'n2', 'N2']) }
+    ]
+  },
+  {
+    title: '计算方法',
+    fields: [
+      {
+        key: 'modificationMethod',
+        label: '非烃气体修正方法',
+        value: getMappedInputValue(['modificationMethod'], MODIFICATION_METHODS),
+        options: toSelectOptions(MODIFICATION_METHODS)
+      },
+      {
+        key: 'deviationFactorMethod',
+        label: '天然气偏差系数计算方法',
+        value: getMappedInputValue(['deviationFactorMethod'], DEVIATION_FACTOR_METHODS),
+        options: toSelectOptions(DEVIATION_FACTOR_METHODS)
+      }
+    ]
+  },
+  {
+    title: '其它数据',
+    fields: [
+      { key: 'originalPressure', label: '原始地层压力(MPa)', value: getInputValue(['originalPressure']) },
+      { key: 'temperature', label: '地层温度(℃)', value: getInputValue(['temperature', 'formationTemperature']) },
+      { key: 'unstableFlowPeriodLength', label: '不稳定流动段时间(d)', value: getInputValue(['unstableFlowPeriodLength']) },
+      { key: 'minimumWaterGasRatio', label: '生产水气比上限(m³/10⁴m³)', value: getInputValue(['minimumWaterGasRatio', 'waterGasRatioLimit']) }
+    ]
+  }
+])
+
+const hasFlowBalanceInputFields = computed(() =>
+    flowBalanceInputSections.value.some(section =>
+        section.fields.some(field => field.value !== undefined && field.value !== null && field.value !== '')
+    )
+)
+
+const outputFields = computed(() => {
+  const value = output.value || {}
+  return [
+    { key: 'originalGasVolume', label: '动态储量(10⁸m³)', value: value.originalGasVolume ?? '' },
+    { key: 'intercept', label: '回归分析截距(MPa)', value: formatSci(toNumber(value.intercept)) },
+    { key: 'gradient', label: '回归分析斜率(MPa/10⁸m³)', value: formatSci(toNumber(value.gradient ?? value.slope)) },
+    { key: 'rsquared', label: 'R²(dless)', value: value.rsquared ?? value.r2 ?? '' },
+    { key: 'reliabilityDescription', label: '结果可靠性', value: value.reliabilityDescription ?? value.reliability ?? value.reliablity ?? '' }
+  ]
+})
+
 const equationText = computed(() => {
   if (!regression.value) return ''
   return `Y = ${formatSci(regression.value.slope)} * X + ${formatSci(regression.value.intercept)}\nR² = ${Number(regression.value.r2 || 0).toFixed(4)}`
@@ -230,27 +328,51 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms))
 
 const createChartSeries = () => [
   {
+    name: '全部数据点(MPa)',
+    type: 'scatter',
+    data: allChartPoints.value,
+    symbolSize: 9,
+    itemStyle: { color: '#a8a8a8', opacity: 0.72 },
+    emphasis: { itemStyle: { opacity: 0.9 } },
+    legend: false,
+    silent: true,
+    z: 1
+  },
+  {
     name: '数据点(MPa)',
     type: 'scatter',
-    data: chartPoints.value,
+    data: selectedChartPoints.value,
     symbolSize: 9,
-    itemStyle: { color: '#2f65c8', opacity: 0.8 }
+    itemStyle: { color: '#416fc9', opacity: 0.82 },
+    emphasis: { itemStyle: { opacity: 0.95 } },
+    z: 3
   },
   {
     name: '回归线(MPa)',
     type: 'line',
     data: regressionLinePoints.value,
     symbol: 'none',
-    lineStyle: { color: '#333', width: 2 }
+    lineStyle: { color: '#333', width: 2 },
+    z: 4
+  },
+  {
+    name: '平移线(MPa)',
+    type: 'line',
+    data: shiftLinePoints.value,
+    symbol: 'none',
+    lineStyle: { color: '#f4c430', width: 2 },
+    z: 2
   }
 ].filter(item => item.data.length)
 
 const legendItems = computed(() =>
-    createChartSeries().map(item => ({
-      name: item.name,
-      type: item.type,
-      color: item.type === 'line' ? '#333' : '#2f65c8'
-    }))
+    createChartSeries()
+        .filter(item => item.legend !== false)
+        .map(item => ({
+          name: item.name,
+          type: item.type,
+          color: item.lineStyle?.color || item.itemStyle?.color || '#416fc9'
+        }))
 )
 
 const legendStyle = computed(() => {
@@ -557,7 +679,7 @@ onBeforeUnmount(() => {
     <aside
         ref="paramsPanelEl"
         class="params-panel"
-        :class="{ collapsed: paramsCollapsed, resizing: resizingParamsPanel }"
+        :class="{ collapsed: paramsCollapsed }"
         :style="{
         width: paramsCollapsed ? '22px' : `${paramsPanelWidth}px`,
         minWidth: paramsCollapsed ? '22px' : `${paramsPanelWidth}px`
@@ -577,20 +699,42 @@ onBeforeUnmount(() => {
           </button>
         </div>
 
-        <div class="panel-body" v-show="activeParamTab === 'input'">
-          <div class="sec-label">输入参数</div>
-          <div v-if="!inputFields.length" class="empty">暂无接口输入参数</div>
-          <div v-for="item in inputFields" :key="item.key" class="field">
-            <label>{{ item.label }}</label>
-            <el-input size="small" readonly :model-value="item.value" />
-          </div>
+        <div v-if="activeParamTab === 'input'" class="panel-body">
+          <div v-if="!hasFlowBalanceInputFields" class="empty">暂无接口输入参数</div>
+          <template v-else>
+            <template v-for="section in flowBalanceInputSections" :key="section.title">
+              <div class="sec-label">{{ section.title }}</div>
+              <div class="field-grid">
+                <div
+                    v-for="item in section.fields"
+                    v-show="item.value !== undefined && item.value !== null && item.value !== ''"
+                    :key="item.key"
+                    class="field"
+                >
+                  <label>{{ item.label }}</label>
+                  <el-select v-if="item.options" size="small" disabled :model-value="item.value" style="width: 100%">
+                    <el-option
+                        v-for="option in item.options"
+                        :key="option.value"
+                        :label="option.label"
+                        :value="option.value"
+                    />
+                  </el-select>
+                  <el-input v-else size="small" readonly :model-value="item.value" />
+                </div>
+              </div>
+            </template>
+          </template>
         </div>
-        <div class="panel-body" v-show="activeParamTab === 'output'">
+
+        <div v-else class="panel-body">
           <div class="sec-label">输出结果</div>
           <div v-if="!outputFields.length" class="empty">暂无接口输出结果</div>
-          <div v-for="item in outputFields" :key="item.key" class="field">
-            <label>{{ item.label }}</label>
-            <el-input size="small" readonly :model-value="item.value" />
+          <div v-else class="field-grid">
+            <div v-for="item in outputFields" :key="item.key" class="field">
+              <label>{{ item.label }}</label>
+              <el-input size="small" readonly :model-value="item.value" />
+            </div>
           </div>
         </div>
 
@@ -686,10 +830,6 @@ onBeforeUnmount(() => {
     background: transparent;
     border-right: 0;
   }
-
-  &.resizing {
-    transition: none;
-  }
 }
 
 .panel-head {
@@ -763,35 +903,6 @@ onBeforeUnmount(() => {
   padding: 4px 12px 14px;
 }
 
-.sec-label {
-  font-weight: 500;
-  color: #333;
-  font-size: 13px;
-  margin: 10px 0 7px;
-
-  &:first-child {
-    margin-top: 4px;
-  }
-}
-
-.field {
-  margin-bottom: 9px;
-
-  label {
-    display: block;
-    margin-bottom: 3px;
-    color: #555;
-    font-size: 12px;
-  }
-}
-
-.empty {
-  color: #888;
-  font-size: 13px;
-  line-height: 1.5;
-  padding: 4px 0 10px;
-}
-
 .param-tabs {
   display: flex;
   height: 30px;
@@ -818,6 +929,41 @@ onBeforeUnmount(() => {
     color: #1a1a1a;
     font-weight: 600;
   }
+}
+
+.sec-label {
+  font-weight: 500;
+  color: #333;
+  font-size: 13px;
+  margin: 10px 0 7px;
+
+  &:first-child {
+    margin-top: 4px;
+  }
+}
+
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  column-gap: 24px;
+}
+
+.field {
+  margin-bottom: 9px;
+
+  label {
+    display: block;
+    color: #555;
+    font-size: 12px;
+    margin-bottom: 3px;
+  }
+}
+
+.empty {
+  color: #888;
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 4px 0 10px;
 }
 
 .chart-area {

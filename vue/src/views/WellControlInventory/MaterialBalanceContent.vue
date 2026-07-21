@@ -15,6 +15,7 @@ const loading = ref(false)
 const resultData = ref(null)
 const activePanelTab = ref('input')
 const activeChartTab = ref(0)
+const activeContentTab = ref('chart')
 const chartEl = ref(null)
 const chartAreaEl = ref(null)
 const equationGraphicPosition = ref(null)
@@ -771,6 +772,7 @@ async function fetchData() {
   const wellName = currentWellName.value
   resultData.value = null
   activeChartTab.value = 0
+  activeContentTab.value = 'chart'
   equationGraphicPosition.value = null
   await nextTick()
   renderChart()
@@ -853,6 +855,7 @@ async function fetchData() {
 
     resultData.value = nextResultData
     activeChartTab.value = 0
+    activeContentTab.value = 'chart'
     activePanelTab.value = 'input'
     await nextTick()
     renderChart()
@@ -876,6 +879,9 @@ watch(() => [
   props.gasReservoirId
 ], fetchData, { immediate: true })
 watch(activeChartTab, () => nextTick(renderChart))
+watch(activeContentTab, (tab) => {
+  if (tab === 'chart') nextTick(renderChart)
+})
 watch([chartPoints, regressionLinePoints], () => nextTick(renderChart), { deep: true })
 
 onMounted(() => {
@@ -981,7 +987,7 @@ onBeforeUnmount(() => {
     </aside>
 
     <main ref="chartAreaEl" class="chart-area">
-      <div class="chart-tabs">
+      <div class="result-tabs">
         <button
             v-for="(tab, index) in chartTabs"
             :key="tab.label"
@@ -991,9 +997,9 @@ onBeforeUnmount(() => {
           {{ tab.label }}
         </button>
       </div>
-      <div ref="chartEl" class="chart"></div>
+      <div v-show="activeContentTab === 'chart'" ref="chartEl" class="chart"></div>
       <div
-          v-if="legendItems.length"
+          v-if="activeContentTab === 'chart' && legendItems.length"
           class="floating-chart-legend"
           :class="{ dragging: draggingLegend }"
           :style="legendStyle"
@@ -1014,13 +1020,22 @@ onBeforeUnmount(() => {
           <span>{{ item.name }}</span>
         </div>
       </div>
-      <div class="table-wrap">
-        <el-table :data="tableRows" size="small" height="150" border>
+      <div v-if="activeContentTab === 'table'" class="data-list-panel">
+        <el-table :data="tableRows" size="small" height="100%" border stripe>
           <el-table-column prop="index" label="序号" width="70" />
           <el-table-column prop="gp" label="Gp(10⁸m³)" min-width="150" />
           <el-table-column prop="pressure" label="Pp(MPa)" min-width="130" />
           <el-table-column prop="selected" label="回归点" min-width="90" />
         </el-table>
+      </div>
+
+      <div class="chart-tabs">
+        <button type="button" class="chart-tab" :class="{ active: activeContentTab === 'table' }" @click="activeContentTab = 'table'">
+          数据列表
+        </button>
+        <button type="button" class="chart-tab" :class="{ active: activeContentTab === 'chart' }" @click="activeContentTab = 'chart'">
+          结果分析图
+        </button>
       </div>
     </main>
   </div>
@@ -1195,7 +1210,7 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
-.chart-tabs {
+.result-tabs {
   height: 34px;
   display: flex;
   border-bottom: 1px solid #e4e7ed;
@@ -1219,6 +1234,36 @@ onBeforeUnmount(() => {
       font-weight: 600;
       border-bottom: 2px solid #409eff;
     }
+  }
+}
+
+.chart-tabs {
+  display: flex;
+  height: 34px;
+  border-top: 1px solid #e4e7ed;
+  flex-shrink: 0;
+  background: #fafafa;
+}
+
+.chart-tab {
+  border: 0;
+  border-right: 1px solid #e4e7ed;
+  background: transparent;
+  padding: 0 16px;
+  color: #555;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+
+  &:hover {
+    color: #409eff;
+  }
+
+  &.active {
+    color: #409eff;
+    border-bottom-color: #409eff;
+    background: #fff;
+    font-weight: 600;
   }
 }
 
@@ -1271,11 +1316,12 @@ onBeforeUnmount(() => {
   border: 1px solid transparent;
 }
 
-.table-wrap {
-  height: 170px;
-  padding: 10px;
-  border-top: 1px solid #eeeeee;
-  flex-shrink: 0;
+.data-list-panel {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  overflow: hidden;
+  background: #fff;
 }
 
 // 回归线在图例中显示为黑色横线，而不是数据点圆圈。
