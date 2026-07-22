@@ -121,6 +121,16 @@ export const materialBalanceApi = {
       }
     }),
 
+  recalcFMB: (data, options = {}) =>
+    dockerRequest.post('/projectanalysis/dynamicoriginalgasInplace/fmb/recalc', data, {
+      timeout: 180000,
+      ...options,
+      headers: {
+        'X-Project-Id': String(data.projectId),
+        ...options.headers
+      }
+    }),
+
   getUnstableFlowPeriodLength: (projectId, options = {}) =>
     dockerRequest.get('/projectanalysis/dynamicoriginalgasInplace/parameters/unstableFlowPeriodLength', {
       ...options,

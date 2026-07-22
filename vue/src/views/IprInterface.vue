@@ -99,8 +99,6 @@ const TYPICAL_CURVE_NOTIFY_MODULE = 'projectanalysis.typicalcurvefitting'
 const TYPICAL_CURVE_LOG_TIMEOUT = 120000
 const ANALYTIC_METHOD_NOTIFY_MODULE_PATTERN = /projectanalysis\.analysismethods(?:history)?fitting/i
 const ANALYTIC_METHOD_LOG_TIMEOUT = 120000
-const FLOW_BALANCE_LOG_TIMEOUT = 120000
-const FLOW_BALANCE_LOG_PATTERN = /\u6d41\u52a8\u7269\u8d28\u5e73\u8861|\u6d41\u52a8\u5e73\u8861|\u4e95\u5e95\u6d41\u538b/i
 const BLASINGAME_FITTING_REGRESSION_ERROR = '计算动态储量错误:参与回归分析的数据点数必须大于0'
 const AG_FITTING_REGRESSION_ERROR = '计算AG节点错误:参与回归分析的数据点数必须大于0'
 const selectedWellName = ref('')
@@ -1350,21 +1348,6 @@ const createAnalyticMethodLogWaiter = (wellName, timeoutMs = ANALYTIC_METHOD_LOG
     allowGlobalFailure: true
   })
 
-const createFlowBalanceLogWaiter = (wellName, timeoutMs = FLOW_BALANCE_LOG_TIMEOUT) =>
-    createAnalysisLogWaiter({
-      module: null,
-      wellName,
-      timeoutMs,
-      timeoutMessage: `${wellName} 流动平衡日志超时，未收到完成消息`,
-      fallbackErrorMessage: `${wellName} 流动平衡计算失败`,
-      allowGlobalComplete: true,
-      isRelevant: (payload, logText, errorText) => {
-        const text = `${payload?.module || ''} ${logText} ${errorText}`
-        return FLOW_BALANCE_LOG_PATTERN.test(text)
-      },
-      isComplete: (payload, logText) => WATER_INVASION_COMPLETE_PATTERN.test(logText)
-    })
-
 //物质平衡日志等待器
 // 物质平衡日志等待器
 const createMaterialBalanceLogWaiter = (wellName, timeoutMs = MATERIAL_BALANCE_LOG_TIMEOUT) =>
@@ -1963,7 +1946,25 @@ const runMaterialBalanceForSelectedWell = async () => {
 const isFlowBalanceAverageRow = (row) => {
   const type = Number(row?.dynamicOriginalGasInplaceType ?? row?.dynamicOriginalGasInPlaceType)
   const description = String(row?.dynamicOriginalGasInplaceMethodDescription || row?.dynamicOriginalGasInPlaceMethodDescription || '')
-  return type === 6 || description.includes('流动物质平衡-基于井底流压')
+  return type === 5 || type === 6 || /流动(?:物质)?平衡.*(?:井口流压|井底流压)/.test(description)
+}
+
+const getFlowBalancePressurePosition = (row) => {
+  const description = String(row?.dynamicOriginalGasInplaceMethodDescription || row?.dynamicOriginalGasInPlaceMethodDescription || '')
+  if (description.includes('井口流压')) return 1
+  if (description.includes('井底流压')) return 2
+  return null
+}
+
+const selectFlowBalanceRow = (rows, pressurePosition = null) => {
+  if (!Array.isArray(rows) || !rows.length) return null
+  if (![1, 2].includes(Number(pressurePosition))) return rows[0]
+
+  const exactRow = rows.find(row => getFlowBalancePressurePosition(row) === Number(pressurePosition))
+  if (exactRow) return exactRow
+
+  // 已有结果明确标注了压力来源时，不用另一种压力来源的旧结果冒充本次计算结果。
+  return rows.some(row => getFlowBalancePressurePosition(row) !== null) ? null : rows[0]
 }
 
 const getFlowBalanceRowsForWell = async (wellName, options = {}) => {
@@ -2043,7 +2044,7 @@ const refreshFlowBalanceNodes = async (targetWellName = '') => {
   }))
 }
 
-const finalizeFlowBalanceResult = async (wellName, maxRetries = 8, intervalMs = 1000) => {
+const finalizeFlowBalanceResult = async (wellName, pressurePosition = null, maxRetries = 8, intervalMs = 1000) => {
   let lastError = null
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
@@ -2055,9 +2056,16 @@ const finalizeFlowBalanceResult = async (wellName, maxRetries = 8, intervalMs = 
         continue
       }
 
-      const resultId = getMaterialBalanceAverageRowId(flowBalanceRows[0])
+      const flowBalanceRow = selectFlowBalanceRow(flowBalanceRows, pressurePosition)
+      if (!flowBalanceRow) {
+        const pressureLabel = Number(pressurePosition) === 1 ? '井口流压' : '井底流压'
+        lastError = new Error(`${wellName}井暂未生成基于${pressureLabel}的流动平衡结果`)
+        continue
+      }
+
+      const resultId = getMaterialBalanceAverageRowId(flowBalanceRow)
       const flowBalanceRawNode = {
-        ...flowBalanceRows[0],
+        ...flowBalanceRow,
         nodeId: resultId,
         resultId,
         analysisId: resultId,
@@ -2086,42 +2094,80 @@ const finalizeFlowBalanceResult = async (wellName, maxRetries = 8, intervalMs = 
   throw lastError || new Error(`${wellName} 流动平衡结果已完成，但暂时没有拿到结果`)
 }
 
-const runFlowBalanceForSelectedWell = async () => {
-  const targetWellName = selectedWellName.value
+const runFlowBalanceForWell = async ({
+  wellName = selectedWellName.value,
+  resultId = null,
+  pressurePosition = 2,
+  unstableFlowPeriodLength = 180,
+  minimumWaterGasRatioEnabled = true,
+  minimumWaterGasRatio = 0.0602,
+  deletePointIds = []
+} = {}) => {
+  const targetWellName = wellName || selectedWellName.value
   if (!targetWellName) {
     ElMessage.warning('请先在左侧选择一口井')
     return
   }
-  if (flowBalanceRunning.value) return
+  if (flowBalanceRunning.value) {
+    ElMessage.warning('流动平衡正在计算，请勿重复提交')
+    return
+  }
+
+  const normalizedPressurePosition = Number(pressurePosition)
+  const normalizedUnstableLength = Number(unstableFlowPeriodLength)
+  const normalizedMinimumWaterGasRatio = Number(minimumWaterGasRatio)
+  const normalizedResultId = resultId === null || resultId === undefined || resultId === '' ? null : Number(resultId)
+  if (![1, 2].includes(normalizedPressurePosition)) {
+    ElMessage.error('请选择正确的压力来源')
+    return
+  }
+  if (!Number.isFinite(normalizedUnstableLength) || normalizedUnstableLength <= 0) {
+    ElMessage.error('不稳定流动段时间必须大于 0')
+    return
+  }
+  if (minimumWaterGasRatioEnabled && (!Number.isFinite(normalizedMinimumWaterGasRatio) || normalizedMinimumWaterGasRatio < 0)) {
+    ElMessage.error('生产水气比上限不能小于 0')
+    return
+  }
+  if (normalizedResultId !== null && !Number.isFinite(normalizedResultId)) {
+    ElMessage.error('没有找到当前流动平衡结果 ID')
+    return
+  }
 
   flowBalanceRunning.value = true
-  const logWaiter = createFlowBalanceLogWaiter(targetWellName)
   try {
-    await materialBalanceApi.calcFMB({
+    const commonPayload = {
       projectId: Number(PROJECT_ID),
       gasReservoirId: Number(GAS_RESERVOIR_ID),
-      wellNames: [targetWellName],
-      pressurePosition: 2,
-      unstableFlowPeriodLength: 180,
-      minimumWaterGasRatio: 0.0602
-    })
-
-    ElMessage.info(`${targetWellName} 流动平衡计算中，请稍候...`)
-    logWaiter.promise
-        .then(() => finalizeFlowBalanceResult(targetWellName))
-        .catch((error) => {
-          ElMessage.error(error.message || '流动平衡计算失败')
-          console.error('流动平衡计算失败', error)
+      unstableFlowPeriodLength: normalizedUnstableLength,
+      minimumWaterGasRatio: minimumWaterGasRatioEnabled ? normalizedMinimumWaterGasRatio : -1
+    }
+    const calculationRequest = normalizedResultId === null
+        ? materialBalanceApi.calcFMB({
+          ...commonPayload,
+          pressurePosition: normalizedPressurePosition,
+          wellNames: [targetWellName]
         })
+        : materialBalanceApi.recalcFMB({
+          ...commonPayload,
+          resultId: normalizedResultId,
+          deletePointIds: Array.isArray(deletePointIds) ? deletePointIds : []
+        })
+    // 重新计算接口返回后直接刷新结果，不再依赖可能缺失的 WebSocket 完成日志。
+    await calculationRequest
+    await finalizeFlowBalanceResult(targetWellName, normalizedPressurePosition)
   } catch (error) {
-    logWaiter.cancel()
-    const message = error.response?.data?.msg || error.response?.data?.message || error.message
+    const message = error.response?.data?.msg || error.response?.data?.message || error.response?.data || error.message
     ElMessage.error(message || '流动平衡计算失败')
     console.error('流动平衡计算失败', error)
   } finally {
     flowBalanceRunning.value = false
   }
 }
+
+const runFlowBalanceForSelectedWell = () => runFlowBalanceForWell()
+
+const handleFlowBalanceRecalculate = (params) => runFlowBalanceForWell(params)
 
 const openDynamicBalanceNode = async (node) => {
   const targetWellName = node?.wellName || selectedWellName.value
@@ -2992,7 +3038,9 @@ onBeforeUnmount(() => {
         <MaterialBalanceContent v-if="currentView === 'material-balance'" :node="currentViewNode"
                                  :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" @refresh-tree="handleRefreshTree" />
         <FlowBalanceContent v-if="currentView === 'flow-balance'" :node="currentViewNode"
-                            :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" @refresh-tree="handleRefreshTree" />
+                            :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID"
+                            :recalculating="flowBalanceRunning" @recalculate="handleFlowBalanceRecalculate"
+                            @refresh-tree="handleRefreshTree" />
         <BlasingameContent v-if="currentView === 'blasingame'" :node="currentViewNode" :project-id="PROJECT_ID"
           :gas-reservoir-id="GAS_RESERVOIR_ID" />
         <NpiContent v-if="currentView === 'npi'" :node="currentViewNode" :project-id="PROJECT_ID"
