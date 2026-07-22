@@ -16,8 +16,8 @@ const props = defineProps({ // 父组件传进来的数据
   gasReservoirId: [Number, String]
 })
 
-// 通知父组件（IprInterface）刷新左侧树
-const emit = defineEmits(['refresh-tree'])
+// 通知父组件（IprInterface）刷新左侧树 / 重新计算
+const emit = defineEmits(['refresh-tree', 'recalculate'])
 
 // ─── 常量：方法枚举 ───
 const MODIFICATION_METHODS = ['Wichert-Aziz 修正方法', 'Carr-Kobayashi-Burrous 修正方法']
@@ -102,7 +102,7 @@ const PRODUCTION_TEMPLATE_COLUMNS = [
   { label: '累产水量', unit: '10^4m3' }
 ]
 const chartTabTitle = computed(() =>
-    `\u6c34\u4fb5\u5206\u6790-${currentWellName.value || '\u5f53\u524d\u4e95'}-\u5206\u6790\u7ed3\u679c`
+    `水侵分析-${currentWellName.value || '当前井'}-分析结果`
 )
 
 //用于控制右侧浮动图例的位置
@@ -177,7 +177,23 @@ function applyLegendVisibility(series) {
   return series.filter(item => isLegendSeriesVisible(item.name))
 }
 
-const wgrEnabled = computed(() => (input.value.waterGasRatioLimit ?? -1) > 0)
+const preferActualStaticPressure = ref(true)
+const enableWaterGasRatioLimit = ref(false)
+const waterGasRatioLimitValue = ref('0.0602')
+
+watch(input, (value) => {
+  preferActualStaticPressure.value = value?.isUseActualStaticPressure !== false
+  const limit = value?.waterGasRatioLimit
+  enableWaterGasRatioLimit.value = Number(limit) > 0
+  waterGasRatioLimitValue.value = Number(limit) > 0 ? String(limit) : '0.0602'
+}, { immediate: true })
+
+function handleRecalculate() {
+  emit('recalculate', {
+    isUseActualStaticPressure: preferActualStaticPressure.value,
+    waterGasRatioLimit: enableWaterGasRatioLimit.value ? Number(waterGasRatioLimitValue.value) : -1
+  })
+}
 
 //获取输入值
 const getInputValue = (keys, fallback = '') => {
@@ -245,8 +261,8 @@ const formatDecimalValue = (value, digits) => {
 
 const dataListColumns = computed(() => DATA_LIST_COLUMN_CONFIGS[activeChartIdx.value] || [])
 
-const YES_TEXT = '\u662f'
-const NO_TEXT = '\u5426'
+const YES_TEXT = '是'
+const NO_TEXT = '否'
 
 const isTruthyValue = (value) => value === true || value === 'true' || value === 1 || value === '1'
 
@@ -711,7 +727,7 @@ onBeforeUnmount(() => {
     <div
         ref="paramsPanelEl"
         class="params-panel"
-        :class="{ collapsed: paramsCollapsed }"
+        :class="{ collapsed: paramsCollapsed, narrow: !paramsCollapsed && paramsPanelWidth < 380 }"
         :style="{ width: paramsCollapsed ? '22px' : `${paramsPanelWidth}px`, minWidth: paramsCollapsed ? '22px' : `${paramsPanelWidth}px` }"
     >
       <div v-if="paramsCollapsed" class="panel-collapsed-tab" @click="toggleParamsPanel">
@@ -815,22 +831,34 @@ onBeforeUnmount(() => {
             <label>气藏废弃压力(MPa)</label>
             <el-input size="small" readonly :model-value="getInputValue(['reservoirAbandonmentPressure'])" />
           </div>
-          <div class="field field-with-switch">
-            <div class="wgr-label-row">
-              <span>生产水气比上限(m³/10⁴m³)</span>
-              <el-switch
-                  :model-value="wgrEnabled"
-                  disabled
-                  style="--el-switch-on-color:#e8a000;--el-switch-off-color:#ccc"
-                  size="small"
-              />
+        </div>
+
+        <div class="sec-label">计算条件</div>
+        <div class="condition-panel">
+          <div class="condition-row">
+            <el-checkbox
+                v-model="preferActualStaticPressure"
+                class="condition-checkbox"
+                :class="{ 'condition-muted': !preferActualStaticPressure }"
+            >
+              优先使用实测静压
+            </el-checkbox>
+          </div>
+          <div class="condition-row condition-limit-row">
+            <div class="condition-limit-label" :class="{ 'condition-muted': !enableWaterGasRatioLimit }">
+              <el-checkbox v-model="enableWaterGasRatioLimit" class="condition-checkbox" />
+              <span class="condition-text">生产水气比上限(m³/10⁴m³):</span>
             </div>
-            <el-input
-                size="small"
-                readonly
-                :disabled="!wgrEnabled"
-                :model-value="getInputValue(['waterGasRatioLimit'])"
-            />
+            <div class="condition-actions">
+              <el-input
+                  v-model="waterGasRatioLimitValue"
+                  size="small"
+                  :disabled="!enableWaterGasRatioLimit"
+              />
+              <el-button size="small" class="condition-recalculate" @click="handleRecalculate">
+                重新计算
+              </el-button>
+            </div>
           </div>
         </div>
 
@@ -1137,18 +1165,103 @@ onBeforeUnmount(() => {
   column-gap: 24px;
 }
 
-.field-with-switch {
-  .el-input {
-    margin-top: 3px;
+.condition-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  padding: 1px 0 9px;
+  color: #303133;
+
+  :deep(.el-checkbox) {
+    height: 24px;
+    margin-right: 0;
+  }
+
+  :deep(.el-checkbox__label) {
+    font-size: 13px;
+    color: #303133;
+  }
+
+  :deep(.el-checkbox__inner) {
+    border-color: #c0c4cc;
+  }
+
+  :deep(.el-checkbox__input.is-checked .el-checkbox__inner),
+  :deep(.el-checkbox__input.is-indeterminate .el-checkbox__inner) {
+    background-color: #303133;
+    border-color: #303133;
+  }
+
+  :deep(.el-checkbox__input.is-checked + .el-checkbox__label) {
+    color: #303133;
   }
 }
 
-.wgr-label-row {
+.condition-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 3px;
-  span { color: #555; font-size: 12px; }
+  min-height: 24px;
+}
+
+.condition-limit-row {
+  width: 100%;
+  gap: 8px;
+}
+
+.condition-limit-label,
+.condition-actions {
+  display: flex;
+  align-items: center;
+}
+
+.condition-limit-label {
+  gap: 8px;
+  flex-shrink: 0;
+
+  .condition-text {
+    font-size: 13px;
+    color: #303133;
+    white-space: nowrap;
+  }
+}
+
+.condition-actions {
+  gap: 4px;
+  min-width: 0;
+
+  .el-input {
+    width: 135px;
+  }
+}
+
+.condition-muted {
+  :deep(.el-checkbox__label),
+  .condition-text {
+    color: #a8abb2;
+  }
+}
+
+.condition-recalculate {
+  flex-shrink: 0;
+}
+
+.params-panel.narrow {
+  .condition-limit-row {
+    flex-wrap: wrap;
+    row-gap: 5px;
+  }
+
+  .condition-actions {
+    width: 100%;
+    padding-left: 22px;
+
+    .el-input {
+      flex: 1;
+      width: auto;
+      min-width: 0;
+    }
+  }
 }
 
 .btn-row { display: flex; gap: 8px; }
