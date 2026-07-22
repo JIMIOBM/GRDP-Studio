@@ -1,6 +1,7 @@
 ﻿﻿<script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
+import { ElMessage } from 'element-plus'
 import { dynamicBalanceApi } from '@/api/docker'
 
 const props = defineProps({
@@ -26,6 +27,12 @@ const legendDragOffset = ref({ x: 0, y: 0 })
 const paramsPanelWidth = ref(238)
 const resizingParamsPanel = ref(false)
 const equationGraphicPosition = ref(null)
+const recalculationForm = ref({
+  minimumWaterGasRatioEnabled: false,
+  unstableFlowPeriodLength: 180,
+  minimumWaterGasRatio: 0.0602
+})
+const recalculationInitializedKey = ref('')
 
 let chart = null
 
@@ -88,12 +95,13 @@ const gasTypeOptions = [
 
 const nonHydrocarbonCorrectionOptions = [
   { label: 'Wichert-Aziz 修正方法', value: 'Wichert-Aziz修正方法' },
-  { label: '其他方法', value: '其他方法' }
+  { label: 'Carr-Kobayashi-Burrous 修正方法', value: 'Carr-Kobayashi-Burrous修正方法' }
 ]
 
 const zFactorCalculationOptions = [
   { label: 'Dranchuk-Abu-Kassem 方法', value: 'Dranchuk-Abu-Kassem方法' },
-  { label: '其他方法', value: '其他方法' }
+  { label: 'Dranchuk-Purvis-Robinson 方法', value: 'Dranchuk-Purvis-Robinson方法' },
+  { label: 'Hall-Yarborough 方法', value: 'Hall-Yarborough方法' }
 ]
 
 const viscosityCalculationOptions = [
@@ -130,14 +138,6 @@ const getInputValue = (keys, fallback = '') => {
   return formatNumber(fallback)
 }
 
-const gasProperties = computed(() => [
-  { key: 'gasType', label: fieldLabels.gasType, value: getInputValue('gasType'), type: 'select', options: gasTypeOptions },
-  { key: 'specificGravity', label: fieldLabels.relativeDensity, value: getInputValue(['specificGravity', 'relativeDensity']), type: 'number' },
-  { key: 'hydrogenSulfide', label: fieldLabels.h2sContent, value: getInputValue(['hydrogenSulfide', 'h2sContent']), type: 'number' },
-  { key: 'carbonDioxide', label: fieldLabels.co2Content, value: getInputValue(['carbonDioxide', 'co2Content']), type: 'number' },
-  { key: 'nitrogen', label: fieldLabels.nitrogenContent, value: getInputValue(['nitrogen', 'nitrogenContent']), type: 'number' }
-])
-
 const getMethodValue = (key, legacyKey, options) => {
   const value = inputParams.value?.[key] ?? inputParams.value?.[legacyKey]
   if (value === undefined || value === null || value === '') return ''
@@ -145,11 +145,75 @@ const getMethodValue = (key, legacyKey, options) => {
   return value
 }
 
-const calculationMethods = computed(() => [
-  { key: 'modificationMethod', label: fieldLabels.nonHydrocarbonCorrectionMethod, value: getMethodValue('modificationMethod', 'nonHydrocarbonCorrectionMethod', nonHydrocarbonCorrectionOptions), type: 'select', options: nonHydrocarbonCorrectionOptions },
-  { key: 'deviationFactorMethod', label: fieldLabels.zFactorCalculationMethod, value: getMethodValue('deviationFactorMethod', 'zFactorCalculationMethod', zFactorCalculationOptions), type: 'select', options: zFactorCalculationOptions },
-  { key: 'viscosityMethod', label: fieldLabels.viscosityCalculationMethod, value: getMethodValue('viscosityMethod', 'viscosityCalculationMethod', viscosityCalculationOptions), type: 'select', options: viscosityCalculationOptions }
+const groupedInputSections = computed(() => [
+  {
+    title: '气体性质',
+    fields: [
+      { key: 'gasType', label: fieldLabels.gasType, value: getInputValue('gasType'), type: 'select', options: gasTypeOptions },
+      { key: 'specificGravity', label: fieldLabels.relativeDensity, value: getInputValue(['specificGravity', 'relativeDensity']), type: 'number' },
+      { key: 'hydrogenSulfide', label: fieldLabels.h2sContent, value: getInputValue(['hydrogenSulfide', 'h2sContent']), type: 'number' },
+      { key: 'carbonDioxide', label: fieldLabels.co2Content, value: getInputValue(['carbonDioxide', 'co2Content']), type: 'number' },
+      { key: 'nitrogen', label: fieldLabels.nitrogenContent, value: getInputValue(['nitrogen', 'nitrogenContent']), type: 'number' }
+    ]
+  },
+  {
+    title: '计算方法',
+    fields: [
+      { key: 'modificationMethod', label: fieldLabels.nonHydrocarbonCorrectionMethod, value: getMethodValue('modificationMethod', 'nonHydrocarbonCorrectionMethod', nonHydrocarbonCorrectionOptions), type: 'select', options: nonHydrocarbonCorrectionOptions },
+      { key: 'deviationFactorMethod', label: fieldLabels.zFactorCalculationMethod, value: getMethodValue('deviationFactorMethod', 'zFactorCalculationMethod', zFactorCalculationOptions), type: 'select', options: zFactorCalculationOptions },
+      { key: 'viscosityMethod', label: fieldLabels.viscosityCalculationMethod, value: getMethodValue('viscosityMethod', 'viscosityCalculationMethod', viscosityCalculationOptions), type: 'select', options: viscosityCalculationOptions }
+    ]
+  },
+  {
+    title: '其它数据',
+    fields: otherData.value
+  }
 ])
+
+const toNumber = (value) => {
+  const number = Number(value)
+  return Number.isFinite(number) ? number : null
+}
+
+const syncRecalculationForm = () => {
+  const unstableLength = toNumber(getInputValue(['unstableFlowPeriodLength', 'unstableFlowTime'], 180))
+  const minimumWaterGasRatio = toNumber(getInputValue(['waterGasRatioLimit'], -1))
+  const currentResultId = resultId.value
+  const initializedKey = `${props.projectId}-${props.gasReservoirId}-${currentWellName.value}-${currentResultId}`
+  const isFirstOpen = recalculationInitializedKey.value !== initializedKey
+  recalculationInitializedKey.value = initializedKey
+  recalculationForm.value = {
+    minimumWaterGasRatioEnabled: isFirstOpen
+      ? minimumWaterGasRatio !== null && minimumWaterGasRatio >= 0
+      : recalculationForm.value.minimumWaterGasRatioEnabled,
+    unstableFlowPeriodLength: unstableLength !== null ? unstableLength : 180,
+    minimumWaterGasRatio: minimumWaterGasRatio !== null && minimumWaterGasRatio >= 0 ? minimumWaterGasRatio : 0.0602
+  }
+}
+
+const requestRecalculation = () => {
+  const unstableLength = Number(recalculationForm.value.unstableFlowPeriodLength)
+  const minimumWaterGasRatio = Number(recalculationForm.value.minimumWaterGasRatio)
+  
+  if (!currentWellName.value) {
+    ElMessage.warning('没有找到当前井名')
+    return
+  }
+  if (!Number.isFinite(unstableLength) || unstableLength <= 0) {
+    ElMessage.warning('不稳定流动段时间必须大于 0')
+    return
+  }
+  if (recalculationForm.value.minimumWaterGasRatioEnabled && (!Number.isFinite(minimumWaterGasRatio) || minimumWaterGasRatio < 0)) {
+    ElMessage.warning('生产水气比上限不能小于 0')
+    return
+  }
+
+  ElMessage.info(`重新计算请求已发送：不稳定流动段时间=${unstableLength}d，生产水气比上限=${recalculationForm.value.minimumWaterGasRatioEnabled ? minimumWaterGasRatio : '未启用'}`)
+}
+
+watch(() => [resultData.value, inputParams.value], () => {
+  syncRecalculationForm()
+}, { immediate: true, deep: true })
 
 const equationTypeValue = computed(() => {
   const value = inputParams.value?.mbEquationType ?? inputParams.value?.equationType
@@ -666,50 +730,66 @@ onBeforeUnmount(() => {
 
       <div v-show="!panelCollapsed" class="panel-body">
         <div v-if="activeTab === 'input'">
-          <div class="sec-label">气体性质</div>
-          <div class="field-grid">
-            <div v-for="item in gasProperties" :key="item.key" class="field">
-              <label>{{ item.label }}</label>
-              <el-select v-if="item.type === 'select'" size="small" :model-value="item.value" style="width:100%">
-                <el-option v-for="opt in item.options" :key="opt.value" :label="opt.label" :value="opt.value" />
-              </el-select>
-              <el-input v-else size="small" readonly :model-value="item.value" />
-            </div>
-          </div>
-
-          <div class="sec-label">计算方法</div>
-          <div class="field-grid">
-            <div v-for="item in calculationMethods" :key="item.key" class="field">
-              <label>{{ item.label }}</label>
-              <el-select size="small" :model-value="item.value" style="width:100%">
-                <el-option v-for="opt in item.options" :key="opt.value" :label="opt.label" :value="opt.value" />
-              </el-select>
-            </div>
-          </div>
-
-          <div class="sec-label">其它数据</div>
-          <div class="field-grid">
-            <template v-for="item in otherData" :key="item.key">
-              <div v-if="item.hasSwitch" class="field field-with-switch">
-                <div class="wgr-label-row">
-                  <span>{{ item.label }}</span>
-                  <el-switch
-                      :model-value="item.switchValue"
-                      disabled
-                      style="--el-switch-on-color:#e8a000;--el-switch-off-color:#ccc"
-                      size="small"
-                  />
+          <template v-for="section in groupedInputSections" :key="section.title">
+            <div class="sec-label">{{ section.title }}</div>
+            <div class="field-grid">
+              <template v-for="item in section.fields" :key="item.key">
+                <div v-if="item.hasSwitch" class="field field-with-switch">
+                  <div class="wgr-label-row">
+                    <span>{{ item.label }}</span>
+                    <el-switch
+                        :model-value="item.switchValue"
+                        disabled
+                        style="--el-switch-on-color:#e8a000;--el-switch-off-color:#ccc"
+                        size="small"
+                    />
+                  </div>
+                  <el-input size="small" readonly :disabled="!item.switchValue" :model-value="item.value" />
                 </div>
-                <el-input size="small" readonly :disabled="!item.switchValue" :model-value="item.value" />
-              </div>
-              <div v-else class="field">
-                <label>{{ item.label }}</label>
-                <el-select v-if="item.type === 'select'" size="small" :model-value="item.value" style="width:100%">
-                  <el-option v-for="opt in item.options" :key="opt.value" :label="opt.label" :value="opt.value" />
-                </el-select>
-                <el-input v-else size="small" readonly :model-value="item.value" />
-              </div>
-            </template>
+                <div v-else class="field">
+                  <label>{{ item.label }}</label>
+                  <el-select v-if="item.type === 'select' || item.options" size="small" :model-value="item.value" style="width:100%">
+                    <el-option v-for="opt in item.options" :key="opt.value" :label="opt.label" :value="opt.value" />
+                  </el-select>
+                  <el-input v-else size="small" readonly :model-value="item.value" />
+                </div>
+              </template>
+            </div>
+          </template>
+
+          <div class="sec-label">计算条件</div>
+          <div class="recalculation-condition unstable-condition">
+            <span>不稳定流动段时间(d)</span>
+            <div class="recalculation-value">
+              <el-input-number
+                  v-model="recalculationForm.unstableFlowPeriodLength"
+                  size="small"
+                  :min="0.0001"
+                  :step="1"
+                  :controls="false"
+                  style="width: 100%"
+              />
+            </div>
+          </div>
+          <div class="recalculation-condition wgr-condition">
+            <el-checkbox v-model="recalculationForm.minimumWaterGasRatioEnabled">
+              生产水气比上限(m³/10⁴m³)
+            </el-checkbox>
+            <div class="recalculation-value">
+              <el-input-number
+                  v-model="recalculationForm.minimumWaterGasRatio"
+                  size="small"
+                  :disabled="!recalculationForm.minimumWaterGasRatioEnabled"
+                  :min="0"
+                  :step="0.0001"
+                  :precision="4"
+                  :controls="false"
+                  style="width: 100%"
+              />
+            </div>
+            <el-button size="small" @click="requestRecalculation">
+              重新计算
+            </el-button>
           </div>
         </div>
 
@@ -937,6 +1017,58 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   margin-bottom: 3px;
   span { color: #555; font-size: 12px; }
+}
+
+.recalculation-condition {
+  min-height: 26px;
+  display: flex;
+  align-items: center;
+  font-size: 12px;
+
+  :deep(.el-checkbox__label),
+  :deep(.el-checkbox.is-checked .el-checkbox__label) {
+    padding-left: 4px;
+    color: #000;
+    font-size: 12px;
+  }
+
+  :deep(.el-checkbox__input.is-checked .el-checkbox__inner) {
+    background-color: #000;
+    border-color: #000;
+  }
+
+  :deep(.el-checkbox__input.is-focus .el-checkbox__inner),
+  :deep(.el-checkbox__inner:hover) {
+    border-color: #000;
+  }
+}
+
+.unstable-condition {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 66px;
+  gap: 6px;
+}
+
+.wgr-condition {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 72px 68px;
+  gap: 6px;
+
+  :deep(.el-checkbox) {
+    min-width: 0;
+    margin-right: 0;
+  }
+
+  :deep(.el-checkbox__label) {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+.recalculation-value {
+  width: 66px;
+  min-width: 66px;
 }
 
 .panel-tabs {
