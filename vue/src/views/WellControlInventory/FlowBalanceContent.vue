@@ -1,13 +1,17 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
+import { ElMessage } from 'element-plus'
 import { materialBalanceApi } from '@/api/docker'
 
 const props = defineProps({
   node: Object,
   projectId: [Number, String],
-  gasReservoirId: [Number, String]
+  gasReservoirId: [Number, String],
+  recalculating: Boolean
 })
+
+const emit = defineEmits(['recalculate'])
 
 const loading = ref(false)
 const resultData = ref(null)
@@ -16,7 +20,7 @@ const chartAreaEl = ref(null)
 const activeParamTab = ref('input')
 const activeChartTab = ref('chart')
 const paramsPanelEl = ref(null)
-const paramsPanelWidth = ref(238)
+const paramsPanelWidth = ref(400)
 const paramsCollapsed = ref(false)
 const resizingParamsPanel = ref(false)
 const equationGraphicPosition = ref(null)
@@ -24,6 +28,14 @@ const legendPosition = ref({ x: null, y: null })
 const draggingLegend = ref(false)
 const legendDragOffset = ref({ x: 0, y: 0 })
 const hiddenLegendNames = ref(new Set())
+const recalculationForm = ref({
+  minimumWaterGasRatioEnabled: false,
+  pressurePosition: 1,
+  unstableFlowPeriodLength: 180,
+  minimumWaterGasRatio: 0.0602
+})
+const recalculationInitializedKey = ref('')
+const getXlsx = async () => import('xlsx')
 let chart = null
 let requestSeq = 0
 
@@ -216,13 +228,13 @@ const tableRows = computed(() =>
         .filter(Boolean)
 )
 
-const formatSci = (value) => {
+const formatSci = (value, decimalPlaces = 4) => {
   if (!Number.isFinite(value)) return ''
   if (value === 0) return '0'
   const sign = value < 0 ? '-' : ''
   const abs = Math.abs(value)
   const exponent = Math.floor(Math.log10(abs))
-  const coefficient = (abs / 10 ** exponent).toFixed(4)
+  const coefficient = (abs / 10 ** exponent).toFixed(decimalPlaces)
   return `${sign}${coefficient}E${exponent >= 0 ? '+' : ''}${exponent}`
 }
 
@@ -256,6 +268,89 @@ const getMappedInputValue = (keys, map, fallback = '') => {
   const value = getInputValue(keys, fallback)
   if (value === '') return ''
   return map?.[value] ?? map?.[Number(value)] ?? value
+}
+
+const getPressurePositionFromResult = () => {
+  const value = Number(input.value?.pressurePosition)
+  if ([1, 2].includes(value)) return value
+
+  const description = String(
+      output.value?.dynamicOriginalGasInplaceMethodDescription ||
+      output.value?.dynamicOriginalGasInPlaceMethodDescription ||
+      rawNode.value?.dynamicOriginalGasInplaceMethodDescription ||
+      rawNode.value?.dynamicOriginalGasInPlaceMethodDescription ||
+      ''
+  )
+  return description.includes('井底流压') ? 2 : 1
+}
+
+const productionTemplateColumns = computed(() => {
+  const isBottomPressure = getPressurePositionFromResult() === 2
+  return [
+    { label: '日期', unit: '日期' },
+    { label: isBottomPressure ? '井底流压' : '井口流压', unit: 'MPa' },
+    { label: '累产气量', unit: '10⁸m³' },
+    { label: '累产水量', unit: '10⁴m³' }
+  ]
+})
+
+const downloadProductionTemplate = async () => {
+  try {
+    const XLSX = await getXlsx()
+    const rows = [
+      productionTemplateColumns.value.map(column => column.label),
+      productionTemplateColumns.value.map(column => column.unit)
+    ]
+    const sheet = XLSX.utils.aoa_to_sheet(rows)
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, sheet, '生产数据')
+    XLSX.writeFile(workbook, `流动物质平衡生产数据模板-${wellName.value || 'well'}.xlsx`)
+  } catch (error) {
+    ElMessage.error(error?.message || '生产数据模板下载失败')
+  }
+}
+
+const syncRecalculationForm = () => {
+  const unstableLength = toNumber(getInputValue(['unstableFlowPeriodLength'], 180))
+  const minimumWaterGasRatio = toNumber(getInputValue(['minimumWaterGasRatio', 'waterGasRatioLimit'], -1))
+  const resultId = getResultId(rawNode.value) ?? getResultId(input.value) ?? ''
+  const initializedKey = `${props.projectId}-${props.gasReservoirId}-${wellName.value}-${resultId}`
+  const isFirstOpen = recalculationInitializedKey.value !== initializedKey
+  recalculationInitializedKey.value = initializedKey
+  recalculationForm.value = {
+    minimumWaterGasRatioEnabled: isFirstOpen
+      ? minimumWaterGasRatio !== null && minimumWaterGasRatio >= 0
+      : recalculationForm.value.minimumWaterGasRatioEnabled,
+    pressurePosition: getPressurePositionFromResult(),
+    unstableFlowPeriodLength: unstableLength !== null ? unstableLength : 180,
+    minimumWaterGasRatio: minimumWaterGasRatio !== null && minimumWaterGasRatio >= 0 ? minimumWaterGasRatio : 0.0602
+  }
+}
+
+const requestRecalculation = () => {
+  const unstableLength = Number(recalculationForm.value.unstableFlowPeriodLength)
+  const minimumWaterGasRatio = Number(recalculationForm.value.minimumWaterGasRatio)
+  if (!wellName.value) {
+    ElMessage.warning('没有找到当前井名')
+    return
+  }
+  if (!Number.isFinite(unstableLength) || unstableLength <= 0) {
+    ElMessage.warning('不稳定流动段时间必须大于 0')
+    return
+  }
+  if (recalculationForm.value.minimumWaterGasRatioEnabled && (!Number.isFinite(minimumWaterGasRatio) || minimumWaterGasRatio < 0)) {
+    ElMessage.warning('生产水气比上限不能小于 0')
+    return
+  }
+
+  emit('recalculate', {
+    wellName: wellName.value,
+    resultId: getResultId(rawNode.value) ?? getResultId(input.value),
+    minimumWaterGasRatioEnabled: recalculationForm.value.minimumWaterGasRatioEnabled,
+    pressurePosition: Number(recalculationForm.value.pressurePosition),
+    unstableFlowPeriodLength: unstableLength,
+    minimumWaterGasRatio
+  })
 }
 
 const flowBalanceInputSections = computed(() => [
@@ -295,9 +390,7 @@ const flowBalanceInputSections = computed(() => [
     title: '其它数据',
     fields: [
       { key: 'originalPressure', label: '原始地层压力(MPa)', value: getInputValue(['originalPressure']) },
-      { key: 'temperature', label: '地层温度(℃)', value: getInputValue(['temperature', 'formationTemperature']) },
-      { key: 'unstableFlowPeriodLength', label: '不稳定流动段时间(d)', value: getInputValue(['unstableFlowPeriodLength']) },
-      { key: 'minimumWaterGasRatio', label: '生产水气比上限(m³/10⁴m³)', value: getInputValue(['minimumWaterGasRatio', 'waterGasRatioLimit']) }
+      { key: 'temperature', label: '地层温度(℃)', value: getInputValue(['temperature', 'formationTemperature']) }
     ]
   }
 ])
@@ -308,15 +401,53 @@ const hasFlowBalanceInputFields = computed(() =>
     )
 )
 
-const outputFields = computed(() => {
+const getOutputValue = (name) => {
   const value = output.value || {}
-  return [
-    { key: 'originalGasVolume', label: '动态储量(10⁸m³)', value: value.originalGasVolume ?? '' },
-    { key: 'intercept', label: '回归分析截距(MPa)', value: formatSci(toNumber(value.intercept)) },
-    { key: 'gradient', label: '回归分析斜率(MPa/10⁸m³)', value: formatSci(toNumber(value.gradient ?? value.slope)) },
-    { key: 'rsquared', label: 'R²(dless)', value: value.rsquared ?? value.r2 ?? '' },
-    { key: 'reliabilityDescription', label: '结果可靠性', value: value.reliabilityDescription ?? value.reliability ?? value.reliablity ?? '' }
+  if (name === 'gradient') return value.gradient ?? value.slope
+  if (name === 'rsquared') return value.rsquared ?? value.r2
+  if (name === 'reliablity') return value.reliablity ?? value.reliability ?? value.reliabilityDescription
+  return value[name]
+}
+
+const formatOutputValue = (field, value) => {
+  if (value === undefined || value === null || value === '') return ''
+  const number = toNumber(value)
+  if (number === null) return value
+
+  const decimalPlaces = Number(field?.displayDecimal)
+  const precision = Number.isInteger(decimalPlaces) && decimalPlaces >= 0 ? decimalPlaces : null
+  if (field?.isScientificNotation) return formatSci(number, precision ?? 4)
+  return precision === null ? number : number.toFixed(precision)
+}
+
+const outputFields = computed(() => {
+  const interfaceFields = Array.isArray(resultData.value?.resultFields)
+      ? resultData.value.resultFields
+      : []
+
+  if (interfaceFields.length) {
+    return interfaceFields.map(field => ({
+      key: field.name,
+      label: `${field.name_cn || field.name}${field.unit_label ? `(${field.unit_label})` : ''}`,
+      value: formatOutputValue(field, getOutputValue(field.name))
+    }))
+  }
+
+  const fallbackFields = [
+    { name: 'originalGasVolume', name_cn: '动态储量', unit_label: '10⁸m³', displayDecimal: 4 },
+    { name: 'gfi', name_cn: '游离气动态储量', unit_label: '10⁸m³', displayDecimal: 4 },
+    { name: 'gai', name_cn: '吸附气动态储量', unit_label: '10⁸m³', displayDecimal: 4 },
+    { name: 'gradient', name_cn: '回归分析斜率', unit_label: 'MPa/10⁸m³', displayDecimal: 2, isScientificNotation: true },
+    { name: 'intercept', name_cn: '回归分析截距', unit_label: 'MPa', displayDecimal: 4 },
+    { name: 'rsquared', name_cn: 'R²', unit_label: 'dless', displayDecimal: 4 },
+    { name: 'reliablity', name_cn: '结果可靠性' }
   ]
+
+  return fallbackFields.map(field => ({
+    key: field.name,
+    label: `${field.name_cn}${field.unit_label ? `(${field.unit_label})` : ''}`,
+    value: formatOutputValue(field, getOutputValue(field.name))
+  }))
 })
 
 const equationText = computed(() => {
@@ -498,8 +629,8 @@ async function loadFlowBalanceResult() {
         nextResultData = {
           ...result,
           output: {
-            ...(result.output || result.result || {}),
-            ...(row || rawNode.value || {})
+            ...(row || rawNode.value || {}),
+            ...(result.output || result.result || {})
           }
         }
         break
@@ -517,6 +648,7 @@ async function loadFlowBalanceResult() {
     legendPosition.value = { x: null, y: null }
     hiddenLegendNames.value = new Set()
     resultData.value = nextResultData
+    syncRecalculationForm()
     await nextTick()
     renderChart()
   } catch (error) {
@@ -631,7 +763,7 @@ function toggleParamsPanel() {
 function onParamsPanelResize(event) {
   if (!resizingParamsPanel.value) return
   const left = paramsPanelEl.value?.getBoundingClientRect().left || 0
-  paramsPanelWidth.value = Math.max(238, Math.min(520, event.clientX - left))
+  paramsPanelWidth.value = Math.max(400, Math.min(620, event.clientX - left))
   chart?.resize()
 }
 
@@ -655,7 +787,7 @@ function startParamsPanelResize(event) {
   window.addEventListener('mouseup', stopParamsPanelResize)
 }
 
-watch(() => [props.node?.id, wellName.value, props.projectId, props.gasReservoirId], loadFlowBalanceResult, { immediate: true })
+watch(() => [props.node, props.node?.id, wellName.value, props.projectId, props.gasReservoirId], loadFlowBalanceResult, { immediate: true })
 watch(activeChartTab, renderChartSoon)
 
 onMounted(() => {
@@ -724,6 +856,47 @@ onBeforeUnmount(() => {
                 </div>
               </div>
             </template>
+
+            <div class="sec-label">计算条件</div>
+            <div class="recalculation-condition unstable-condition">
+              <span>不稳定流动段时间(d)</span>
+              <div class="recalculation-value">
+                <el-input-number
+                    v-model="recalculationForm.unstableFlowPeriodLength"
+                    size="small"
+                    :min="0.0001"
+                    :step="1"
+                    :controls="false"
+                    style="width: 100%"
+                />
+              </div>
+            </div>
+            <div class="recalculation-condition wgr-condition">
+              <el-checkbox v-model="recalculationForm.minimumWaterGasRatioEnabled">
+                生产水气比上限(m³/10⁴m³)
+              </el-checkbox>
+              <div class="recalculation-value">
+                <el-input-number
+                    v-model="recalculationForm.minimumWaterGasRatio"
+                    size="small"
+                    :disabled="!recalculationForm.minimumWaterGasRatioEnabled"
+                    :min="0"
+                    :step="0.0001"
+                    :precision="4"
+                    :controls="false"
+                    style="width: 100%"
+                />
+              </div>
+              <el-button size="small" :loading="props.recalculating" @click="requestRecalculation">
+                重新计算
+              </el-button>
+            </div>
+
+            <div class="sec-label">生产数据</div>
+            <div class="btn-row">
+              <el-button size="small" @click="downloadProductionTemplate">模版下载</el-button>
+              <el-button size="small">导入</el-button>
+            </div>
           </template>
         </div>
 
@@ -817,8 +990,8 @@ onBeforeUnmount(() => {
 }
 
 .params-panel {
-  width: 238px;
-  min-width: 238px;
+  width: 400px;
+  min-width: 400px;
   border-right: 1px solid #e0e0e0;
   display: flex;
   flex-direction: column;
@@ -957,6 +1130,63 @@ onBeforeUnmount(() => {
     font-size: 12px;
     margin-bottom: 3px;
   }
+}
+
+.recalculation-condition {
+  min-height: 26px;
+  display: flex;
+  align-items: center;
+  font-size: 12px;
+
+  :deep(.el-checkbox__label),
+  :deep(.el-checkbox.is-checked .el-checkbox__label) {
+    padding-left: 4px;
+    color: #000;
+    font-size: 12px;
+  }
+
+  :deep(.el-checkbox__input.is-checked .el-checkbox__inner) {
+    background-color: #000;
+    border-color: #000;
+  }
+
+  :deep(.el-checkbox__input.is-focus .el-checkbox__inner),
+  :deep(.el-checkbox__inner:hover) {
+    border-color: #000;
+  }
+}
+
+.unstable-condition {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 66px;
+  gap: 6px;
+}
+
+.wgr-condition {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 72px 68px;
+  gap: 6px;
+
+  :deep(.el-checkbox) {
+    min-width: 0;
+    margin-right: 0;
+  }
+
+  :deep(.el-checkbox__label) {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+.recalculation-value {
+  width: 66px;
+  min-width: 66px;
+}
+
+.btn-row {
+  display: flex;
+  gap: 8px;
 }
 
 .empty {
