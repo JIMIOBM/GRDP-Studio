@@ -28,6 +28,11 @@ const paramsPanelEl = ref(null)
 const paramsPanelWidth = ref(238)
 const paramsCollapsed = ref(false)
 const resizingParamsPanel = ref(false)
+//计算方式参数-物质平衡方程
+const reservoirType=ref('constant')
+//水气比
+const enableWaterGasRatioLimit = ref(false)
+const waterGasRatioLimitValue = ref('0.0602')
 
 let chart = null
 let requestSeq = 0
@@ -41,6 +46,8 @@ const currentWellName = computed(() =>
     props.node?.label ||
     ''
 )
+const chartTabTitle = computed(() =>
+    `物质平衡-${currentWellName.value || '当前井'}-分析结果`)
 
 const findDynamicOriginalGasInPlaceId = (value) => {
   if (!value || typeof value !== 'object') return null
@@ -872,6 +879,13 @@ async function fetchData() {
   }
 }
 
+function handleRecalculate() {
+  emit('recalculate', {
+    gasReservoirType: reservoirType.value,
+    waterGasRatioLimit: enableWaterGasRatioLimit.value ? Number(waterGasRatioLimitValue.value) : -1
+  })
+}
+
 watch(() => [
   props.node?.id,
   currentWellName.value,
@@ -879,10 +893,16 @@ watch(() => [
   props.gasReservoirId
 ], fetchData, { immediate: true })
 watch(activeChartTab, () => nextTick(renderChart))
-watch(activeContentTab, (tab) => {
-  if (tab === 'chart') nextTick(renderChart)
-})
+watch(activeContentTab, (tab) => { if (tab === 'chart') nextTick(renderChart)})
 watch([chartPoints, regressionLinePoints], () => nextTick(renderChart), { deep: true })
+//监听计算方式
+watch(input,(value)=>{
+  reservoirType.value=value?.gasReservoirType?'constant':'closed'
+  const limit = value?.waterGasRatioLimit
+  enableWaterGasRatioLimit.value = Number(limit) > 0
+  waterGasRatioLimitValue.value = Number(limit) > 0 ? String(limit) : '0.0602'
+})
+
 
 onMounted(() => {
   chart = echarts.init(chartEl.value)
@@ -904,7 +924,11 @@ onBeforeUnmount(() => {
     <aside
         ref="paramsPanelEl"
         class="params-panel"
-        :class="{ collapsed: paramsCollapsed, resizing: resizingParamsPanel }"
+        :class="{
+          collapsed: paramsCollapsed,
+          resizing: resizingParamsPanel,
+          narrow: !paramsCollapsed && paramsPanelWidth < 380
+        }"
         :style="{
         width: paramsCollapsed ? '22px' : `${paramsPanelWidth}px`,
         minWidth: paramsCollapsed ? '22px' : `${paramsPanelWidth}px`
@@ -962,6 +986,35 @@ onBeforeUnmount(() => {
               </div>
             </div>
           </template>
+
+          <!--计算条件-->
+          <div class="section-title">计算条件</div>
+          <div class="condition-panel">
+
+            <div class="type-row">
+              <span class="type-name-label">请选择物质平衡方程类型：</span>
+              <el-radio-group v-model="reservoirType">
+                <el-radio value="constant">定容气藏物质平衡</el-radio>
+                <el-radio value="closed">封闭气藏物质平衡方程</el-radio>
+              </el-radio-group>
+            </div>
+            <div class="condition-row condition-limit-row">
+              <div class="condition-limit-label" :class="{ 'condition-muted': !enableWaterGasRatioLimit }">
+                <el-checkbox v-model="enableWaterGasRatioLimit" class="condition-checkbox" />
+                <span class="condition-text">生产水气比上限(m³/10⁴m³):</span>
+              </div>
+              <div class="condition-actions">
+                <el-input
+                    v-model="waterGasRatioLimitValue"
+                    size="small"
+                    :disabled="!enableWaterGasRatioLimit"
+                />
+                <el-button size="small" class="condition-recalculate" @click="handleRecalculate">
+                  重新计算
+                </el-button>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div v-show="activePanelTab === 'output'" class="panel-body">
@@ -986,7 +1039,14 @@ onBeforeUnmount(() => {
       </template>
     </aside>
 
+    <!-- 右侧图表区域 -->
     <main ref="chartAreaEl" class="chart-area">
+      <div class="dynamic-result-tabs">
+        <button type="button" class="dynamic-result-tab active" :title="chartTabTitle">
+          <span class="dynamic-result-tab-text">{{ chartTabTitle }}</span>
+        </button>
+      </div>
+
       <div class="result-tabs">
         <button
             v-for="(tab, index) in chartTabs"
@@ -1147,6 +1207,135 @@ onBeforeUnmount(() => {
   column-gap: 24px;
 }
 
+.condition-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  padding: 1px 0 9px;
+  color: #303133;
+
+  :deep(.el-checkbox) {
+    height: 24px;
+    margin-right: 0;
+  }
+
+  :deep(.el-checkbox__label) {
+    font-size: 13px;
+    color: #303133;
+  }
+
+  :deep(.el-checkbox__inner) {
+    border-color: #c0c4cc;
+  }
+
+  :deep(.el-checkbox__input.is-checked .el-checkbox__inner),
+  :deep(.el-checkbox__input.is-indeterminate .el-checkbox__inner) {
+    background-color: #303133;
+    border-color: #303133;
+  }
+
+  :deep(.el-checkbox__input.is-checked + .el-checkbox__label) {
+    color: #303133;
+  }
+}
+
+.type-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  width: 100%;
+
+  .type-name-label {
+    color: #303133;
+    font-size: 13px;
+    line-height: 24px;
+  }
+
+  :deep(.el-radio-group) {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  :deep(.el-radio) {
+    height: 24px;
+    margin-right: 0;
+  }
+
+  :deep(.el-radio__label) {
+    color: #303133;
+    font-size: 13px;
+  }
+}
+
+.condition-row {
+  display: flex;
+  align-items: center;
+  min-height: 24px;
+}
+
+.condition-limit-row {
+  width: 100%;
+  gap: 8px;
+}
+
+.condition-limit-label,
+.condition-actions {
+  display: flex;
+  align-items: center;
+}
+
+.condition-limit-label {
+  gap: 8px;
+  flex-shrink: 0;
+
+  .condition-text {
+    font-size: 13px;
+    color: #303133;
+    white-space: nowrap;
+  }
+}
+
+.condition-actions {
+  gap: 4px;
+  min-width: 0;
+
+  .el-input {
+    width: 135px;
+  }
+}
+
+.condition-muted {
+  :deep(.el-checkbox__label),
+  .condition-text {
+    color: #a8abb2;
+  }
+}
+
+.condition-recalculate {
+  flex-shrink: 0;
+}
+
+.params-panel.narrow {
+  .condition-limit-row {
+    flex-wrap: wrap;
+    row-gap: 5px;
+  }
+
+  .condition-actions {
+    width: 100%;
+    padding-left: 22px;
+
+    .el-input {
+      flex: 1;
+      width: auto;
+      min-width: 0;
+    }
+  }
+}
+
 .section-title {
   font-size: 14px;
   color: #333;
@@ -1210,6 +1399,46 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
+.dynamic-result-tabs {
+  height: 34px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid #e4e7ed;
+  background: #fafafa;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.dynamic-result-tab {
+  height: 34px;
+  max-width: 340px;
+  border: 0;
+  border-right: 1px solid #e4e7ed;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: #409eff;
+  font-size: 14px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  cursor: default;
+  white-space: nowrap;
+
+  &.active {
+    border-bottom-color: #409eff;
+    background: #fff;
+  }
+}
+
+.dynamic-result-tab-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .result-tabs {
   height: 34px;
   display: flex;
@@ -1222,17 +1451,23 @@ onBeforeUnmount(() => {
   button {
     border: 0;
     border-right: 1px solid #e4e7ed;
+    border-bottom: 2px solid transparent;
     background: transparent;
     padding: 0 16px;
     color: #555;
     cursor: pointer;
     flex-shrink: 0;
+    white-space: nowrap;
+
+    &:hover {
+      color: #409eff;
+    }
 
     &.active {
       background: #fff;
       color: #409eff;
       font-weight: 600;
-      border-bottom: 2px solid #409eff;
+      border-bottom-color: #409eff;
     }
   }
 }

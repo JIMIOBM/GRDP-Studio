@@ -1,6 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
+import { ElMessage } from 'element-plus'
 import { typicalCurveApi } from '@/api/docker'
 import wattenbargerTypeCurveData from '@/constants/typeCurves/wattenbarger.json'
 
@@ -9,6 +10,7 @@ const props = defineProps({
   projectId: [Number, String],
   gasReservoirId: [Number, String]
 })
+const emit = defineEmits(['recalculate'])
 
 const activePanelTab = ref('input')
 const activeChartTab = ref('chart')
@@ -111,17 +113,55 @@ const deviationMethod = computed(() =>
 const viscosityMethod = computed(() =>
     methodLabel(inputValue(['viscosityMethod'], 0), ['Lee-Gonzalez-Eakin 方法', 'Carr-Kobayashi-Burrous 方法', 'Sutton 方法'], 'Lee-Gonzalez-Eakin 方法')
 )
-const fittingMode = computed(() => {
-  const isSkip = inputValue(['isSkipFitting'], false)
-  return isSkip ? '跳过拟合' : '自动拟合'
-})
-const waterGasRatioLimit = computed(() => inputValue(['minimumWaterGasRatio', 'waterGasRatioLimit'], ''))
-const waterGasRatioEnabled = computed(() => Number(waterGasRatioLimit.value) > 0)
+const fittingModeValue = ref('automatic')
+const dataSizeValue = ref('300')
+const initScanDataSizeValue = ref('10')
+const fineScanDataSizeValue = ref('30')
+const waterGasRatioEnabled = ref(true)
+const waterGasRatioLimitValue = ref('0.0602')
+
+watch(input, (value) => {
+  fittingModeValue.value = value?.isSkipFitting ? 'manual' : 'automatic'
+  dataSizeValue.value = String(value?.dataSize ?? 300)
+  initScanDataSizeValue.value = String(value?.initScanDataSize ?? 10)
+  fineScanDataSizeValue.value = String(value?.fineScanDataSize ?? value?.fineSandDataSize ?? 30)
+
+  const limit = value?.minimumWaterGasRatio ?? value?.waterGasRatioLimit
+  waterGasRatioEnabled.value = limit === undefined ? true : Number(limit) > 0
+  waterGasRatioLimitValue.value = Number(limit) > 0 ? String(limit) : '0.0602'
+}, { immediate: true })
+
+const handleRecalculate = () => {
+  const dataSize = Number(dataSizeValue.value)
+  const initScanDataSize = Number(initScanDataSizeValue.value)
+  const fineScanDataSize = Number(fineScanDataSizeValue.value)
+  const minimumWaterGasRatio = waterGasRatioEnabled.value
+    ? Number(waterGasRatioLimitValue.value)
+    : -1
+
+  if (![dataSize, initScanDataSize, fineScanDataSize].every(value => Number.isInteger(value) && value > 0)) {
+    ElMessage.warning('抽稀点数、粗扫点数和精扫点数必须是大于 0 的整数')
+    return
+  }
+  if (waterGasRatioEnabled.value && !(minimumWaterGasRatio > 0)) {
+    ElMessage.warning('生产水气比上限必须大于 0')
+    return
+  }
+
+  emit('recalculate', {
+    wellName: wellName.value,
+    isSkipFitting: fittingModeValue.value === 'manual',
+    dataSize,
+    initScanDataSize,
+    fineScanDataSize,
+    minimumWaterGasRatio
+  })
+}
+
 const GAS_TYPE_OPTIONS = ['干气', '湿气', '凝析气']
 const MODIFICATION_METHOD_OPTIONS = ['Wichert-Aziz 修正方法', 'Carr-Kobayashi-Burrous 修正方法']
 const DEVIATION_METHOD_OPTIONS = ['Dranchuk-Abu-Kassem 方法', 'Dranchuk-Purvis-Robinson 方法', 'Hall-Yarborough 方法']
 const VISCOSITY_METHOD_OPTIONS = ['Lee-Gonzalez-Eakin 方法', 'Carr-Kobayashi-Burrous 方法', 'Sutton 方法']
-const FITTING_MODE_OPTIONS = ['自动拟合', '跳过拟合']
 const MATERIAL_BALANCE_TYPE_OPTIONS = ['封闭气藏', '定容气藏', '页岩气藏']
 
 const inputFields = computed(() => ({
@@ -136,12 +176,6 @@ const inputFields = computed(() => ({
     { label: '非烃气体修正方法', value: modificationMethod.value, select: true, options: MODIFICATION_METHOD_OPTIONS },
     { label: '天然气偏差系数计算方法', value: deviationMethod.value, select: true, options: DEVIATION_METHOD_OPTIONS },
     { label: '天然气粘度计算方法', value: viscosityMethod.value, select: true, options: VISCOSITY_METHOD_OPTIONS }
-  ],
-  control: [
-    { label: '拟合方式', value: fittingMode.value, select: true, options: FITTING_MODE_OPTIONS },
-    { label: '抽样点数', value: inputValue(['dataSize'], 300) },
-    { label: '粗扫数据点数量', value: inputValue(['initScanDataSize'], 10) },
-    { label: '精扫数据点数量', value: inputValue(['fineSandDataSize'], 30) }
   ],
   other: [
     { label: '原始地层压力(MPa)', value: inputValue(['originalFormationPressure'], 50) },
@@ -608,37 +642,43 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="sec-label">控制参数</div>
-          <div class="field-grid">
-            <div v-for="field in inputFields.control" :key="field.label" class="field">
-              <label>{{ field.label }}</label>
-              <el-select
-                  v-if="field.select"
-                  :key="`${readonlySelectKey}-${field.label}`"
-                  size="small"
-                  :model-value="field.value"
-                  style="width:100%"
-                  @change="keepReadonlySelectValue"
-              >
-                <el-option
-                    v-for="option in field.options || [field.value]"
-                    :key="option"
-                    :label="option"
-                    :value="option"
-                />
-              </el-select>
-              <el-input v-else size="small" readonly :model-value="field.value" />
+          <div class="control-panel">
+            <div class="fitting-mode-row">
+              <span class="control-label">请选择拟合方式：</span>
+              <el-radio-group v-model="fittingModeValue" size="small">
+                <el-radio value="automatic">自动拟合</el-radio>
+                <el-radio value="manual">手动拟合</el-radio>
+              </el-radio-group>
             </div>
-            <div class="field field-with-switch">
-              <div class="wgr-label-row">
-                <span>生产水气比上限(m³/10⁴m³)</span>
-                <el-switch
-                    :model-value="waterGasRatioEnabled"
-                    disabled
-                    style="--el-switch-on-color:#e8a000;--el-switch-off-color:#ccc"
-                    size="small"
-                />
+
+            <div class="field-grid control-field-grid">
+              <div class="field">
+                <label>抽稀后的数据点数量</label>
+                <el-input v-model="dataSizeValue" size="small" />
               </div>
-              <el-input size="small" readonly :disabled="!waterGasRatioEnabled" :model-value="waterGasRatioLimit" />
+              <div class="field">
+                <label>粗扫数据点数量</label>
+                <el-input v-model="initScanDataSizeValue" size="small" />
+              </div>
+              <div class="field">
+                <label>精扫数据点数量</label>
+                <el-input v-model="fineScanDataSizeValue" size="small" />
+              </div>
+              <div class="field field-with-switch">
+                <div class="wgr-label-row">
+                  <el-checkbox v-model="waterGasRatioEnabled">
+                    生产水气比上限(m³/10⁴m³)
+                  </el-checkbox>
+                </div>
+                <div class="wgr-input-row">
+                  <el-input
+                      v-model="waterGasRatioLimitValue"
+                      size="small"
+                      :disabled="!waterGasRatioEnabled"
+                  />
+                  <el-button size="small" @click="handleRecalculate">重新计算</el-button>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -889,6 +929,62 @@ onBeforeUnmount(() => {
   column-gap: 24px;
 }
 
+.control-panel {
+  padding-bottom: 2px;
+}
+
+.fitting-mode-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  min-height: 28px;
+  margin-bottom: 7px;
+
+  .control-label {
+    color: #555;
+    font-size: 12px;
+  }
+
+  :deep(.el-radio) {
+    margin-right: 16px;
+  }
+}
+
+.control-field-grid {
+  align-items: end;
+}
+
+.wgr-input-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+
+  .el-input {
+    flex: 1;
+    min-width: 0;
+    margin-top: 0;
+  }
+
+  .el-button {
+    flex-shrink: 0;
+  }
+}
+
+.wgr-label-row {
+  margin-bottom: 2px;
+
+  :deep(.el-checkbox) {
+    height: 20px;
+    line-height: 20px;
+  }
+
+  :deep(.el-checkbox__label) {
+    font-size: 12px;
+    line-height: 20px;
+  }
+}
+
 .field-with-switch {
   .el-input {
     margin-top: 3px;
@@ -910,7 +1006,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 3px;
+  margin-bottom: 2px;
 
   span {
     color: #555;
