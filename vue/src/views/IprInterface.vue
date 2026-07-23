@@ -17,8 +17,8 @@ import AGContent from '@/views/WellControlInventory/AGContent.vue'
 import { NODETYPE } from '@/constants/nodeType'
 import { analyticMethodApi, dynamicBalanceApi, materialBalanceApi, nodeApi, projectApi, typicalCurveApi, waterInvasionApi } from '@/api/docker'
 
-const PROJECT_ID = 6
-const GAS_RESERVOIR_ID = 3
+const PROJECT_ID = 1
+const GAS_RESERVOIR_ID = 1
 const FLOW_BALANCE_NODE_TYPE = NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure
 
 const WELL_GROUPS = [
@@ -2243,9 +2243,86 @@ const runDynamicBalanceForSelectedWell = async () => {
     })
 
     ElMessage.info(`${targetWellName} 动态平衡计算中，请稍候...`)
-    const { rootNode, resultNode } = await getDynamicBalanceNodeOnce(targetWellName)
+
+    const maxRetries = 20
+    const intervalMs = 1500
+    let rootNode = null
+    let resultNode = null
+
+    for (let i = 0; i < maxRetries; i++) {
+      await new Promise(resolve => setTimeout(resolve, intervalMs))
+      const res = await fetchMaterialBalanceNode()
+      rootNode = res
+      resultNode = findDynamicBalanceNode(rootNode, targetWellName)
+      if (resultNode?.nodeId) break
+    }
+
     if (!resultNode?.nodeId) {
-      throw new Error('动态平衡计算失败，未生成分析结果节点')
+      throw new Error('动态平衡计算超时，未生成分析结果节点')
+    }
+
+    const treeNode = {
+      id: resultNode.nodeId,
+      label: '动态平衡',
+      type: NODETYPE.NodeType_DynamicMaterialBalanceMethodBlasingame,
+      wellName: targetWellName,
+      raw: resultNode
+    }
+    addAnalysisNode(targetWellName, {
+      ...resultNode,
+      nodeType: NODETYPE.NodeType_DynamicMaterialBalanceMethodBlasingame,
+      nodeTitle: '动态平衡',
+      wellName: targetWellName
+    })
+    await openDynamicBalanceNode(treeNode)
+    ElMessage.success(`${targetWellName} 动态平衡计算完成`)
+  } catch (error) {
+    const message = error.response?.data?.msg || error.response?.data?.message || error.message
+    ElMessage.error(message || '动态平衡计算失败')
+    console.error('动态平衡计算失败', error)
+  } finally {
+    dynamicBalanceRunning.value = false
+  }
+}
+
+const handleDynamicBalanceRecalculate = async (options = {}) => {
+  const targetWellName = selectedWellName.value
+
+  if (!targetWellName) {
+    ElMessage.warning('请先在左侧选择一口井')
+    return
+  }
+
+  if (dynamicBalanceRunning.value) return
+
+  dynamicBalanceRunning.value = true
+  try {
+    await dynamicBalanceApi.calc({
+      gasReservoirId: Number(GAS_RESERVOIR_ID),
+      projectId: Number(PROJECT_ID),
+      wellNames: [targetWellName],
+      unstableFlowPeriodLength: options.unstableFlowPeriodLength ?? 180,
+      minimumWaterGasRatio: options.minimumWaterGasRatio ?? -1,
+      dataSize: 300
+    })
+
+    ElMessage.info(`${targetWellName} 动态平衡计算中，请稍候...`)
+
+    const maxRetries = 20
+    const intervalMs = 1500
+    let rootNode = null
+    let resultNode = null
+
+    for (let i = 0; i < maxRetries; i++) {
+      await new Promise(resolve => setTimeout(resolve, intervalMs))
+      const res = await fetchMaterialBalanceNode()
+      rootNode = res
+      resultNode = findDynamicBalanceNode(rootNode, targetWellName)
+      if (resultNode?.nodeId) break
+    }
+
+    if (!resultNode?.nodeId) {
+      throw new Error('动态平衡计算超时，未生成分析结果节点')
     }
 
     const treeNode = {
@@ -3079,7 +3156,7 @@ onBeforeUnmount(() => {
         <WattenbargerContent v-if="currentView === 'wattenbarger'" :node="currentViewNode" :project-id="PROJECT_ID"
           :gas-reservoir-id="GAS_RESERVOIR_ID" />
         <DynamicBalanceContent v-if="currentView === 'dynamic-balance'" :node="currentViewNode" :project-id="PROJECT_ID"
-          :gas-reservoir-id="GAS_RESERVOIR_ID" />
+          :gas-reservoir-id="GAS_RESERVOIR_ID" @recalculate="handleDynamicBalanceRecalculate" />
         <AGContent v-if="currentView === 'Agarwal-Gardner'" :node="currentViewNode" :project-id="PROJECT_ID"
           :gas-reservoir-id="GAS_RESERVOIR_ID" />
       </main>

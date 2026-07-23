@@ -10,6 +10,8 @@ const props = defineProps({
   gasReservoirId: [Number, String]
 })
 
+const emit = defineEmits(['recalculate'])
+
 const loading = ref(false)
 const chartEl = ref(null)
 const chartAreaEl = ref(null)
@@ -194,7 +196,7 @@ const syncRecalculationForm = () => {
 const requestRecalculation = () => {
   const unstableLength = Number(recalculationForm.value.unstableFlowPeriodLength)
   const minimumWaterGasRatio = Number(recalculationForm.value.minimumWaterGasRatio)
-  
+
   if (!currentWellName.value) {
     ElMessage.warning('没有找到当前井名')
     return
@@ -208,7 +210,10 @@ const requestRecalculation = () => {
     return
   }
 
-  ElMessage.info(`重新计算请求已发送：不稳定流动段时间=${unstableLength}d，生产水气比上限=${recalculationForm.value.minimumWaterGasRatioEnabled ? minimumWaterGasRatio : '未启用'}`)
+  emit('recalculate', {
+    unstableFlowPeriodLength: unstableLength,
+    minimumWaterGasRatio: recalculationForm.value.minimumWaterGasRatioEnabled ? minimumWaterGasRatio : -1
+  })
 }
 
 watch(() => [resultData.value, inputParams.value], () => {
