@@ -1250,6 +1250,13 @@ onBeforeUnmount(() => {
   width: 135px;
 }
 
+.condition-value-row {
+  .condition-number-input {
+    width: 66px;
+    flex-shrink: 0;
+  }
+}
+
 .condition-muted .condition-text {
   color: #a8abb2;
 }
@@ -1259,14 +1266,9 @@ onBeforeUnmount(() => {
 }
 
 .params-panel.narrow {
-  .condition-value-row,
   .condition-limit-row {
     flex-wrap: wrap;
     row-gap: 5px;
-  }
-
-  .condition-value-row .condition-number-input {
-    width: 100%;
   }
 
   .condition-actions {
