@@ -761,8 +761,8 @@ onBeforeUnmount(() => {
             <div class="fitting-mode-row">
               <label class="control-label">请选择拟合方式：</label>
               <el-radio-group size="small" v-model="fittingModeValue">
-                <el-radio label="自动拟合">自动拟合</el-radio>
-                <el-radio label="手动拟合">手动拟合</el-radio>
+                <el-radio value="automatic">自动拟合</el-radio>
+                <el-radio value="manual">手动拟合</el-radio>
               </el-radio-group>
             </div>
 
@@ -779,7 +779,10 @@ onBeforeUnmount(() => {
                 <label>精扫数据点数量</label>
                 <el-input v-model="fineScanDataSizeValue" size="small" />
               </div>
-              <div class="field field-with-switch">
+              <div
+                  class="field field-with-switch"
+                  :class="{ 'control-muted': !waterGasRatioEnabled }"
+              >
                 <div class="wgr-label-row">
                   <el-checkbox v-model="waterGasRatioEnabled">
                     生产水气比上限(m³/10⁴m³)
@@ -1026,6 +1029,23 @@ onBeforeUnmount(() => {
 
 .control-panel {
   padding-bottom: 2px;
+
+  :deep(.el-radio__inner),
+  :deep(.el-checkbox__inner) {
+    border-color: #c0c4cc;
+  }
+
+  :deep(.el-radio__input.is-checked .el-radio__inner),
+  :deep(.el-checkbox__input.is-checked .el-checkbox__inner),
+  :deep(.el-checkbox__input.is-indeterminate .el-checkbox__inner) {
+    background-color: #303133;
+    border-color: #303133;
+  }
+
+  :deep(.el-radio__input.is-checked + .el-radio__label),
+  :deep(.el-checkbox__input.is-checked + .el-checkbox__label) {
+    color: #303133;
+  }
 }
 
 .fitting-mode-row {
@@ -1104,6 +1124,12 @@ onBeforeUnmount(() => {
     color: #555;
     font-size: 12px;
     line-height: 18px;
+  }
+}
+
+.control-muted {
+  .wgr-label-row :deep(.el-checkbox__label) {
+    color: #a8abb2;
   }
 }
 

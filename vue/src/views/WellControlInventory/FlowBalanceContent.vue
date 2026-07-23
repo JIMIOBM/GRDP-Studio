@@ -20,7 +20,7 @@ const chartAreaEl = ref(null)
 const activeParamTab = ref('input')
 const activeChartTab = ref('chart')
 const paramsPanelEl = ref(null)
-const paramsPanelWidth = ref(400)
+const paramsPanelWidth = ref(238)
 const paramsCollapsed = ref(false)
 const resizingParamsPanel = ref(false)
 const equationGraphicPosition = ref(null)
@@ -763,7 +763,7 @@ function toggleParamsPanel() {
 function onParamsPanelResize(event) {
   if (!resizingParamsPanel.value) return
   const left = paramsPanelEl.value?.getBoundingClientRect().left || 0
-  paramsPanelWidth.value = Math.max(400, Math.min(620, event.clientX - left))
+  paramsPanelWidth.value = Math.max(238, Math.min(520, event.clientX - left))
   chart?.resize()
 }
 
@@ -811,7 +811,7 @@ onBeforeUnmount(() => {
     <aside
         ref="paramsPanelEl"
         class="params-panel"
-        :class="{ collapsed: paramsCollapsed }"
+        :class="{ collapsed: paramsCollapsed, narrow: !paramsCollapsed && paramsPanelWidth < 380 }"
         :style="{
         width: paramsCollapsed ? '22px' : `${paramsPanelWidth}px`,
         minWidth: paramsCollapsed ? '22px' : `${paramsPanelWidth}px`
@@ -858,38 +858,47 @@ onBeforeUnmount(() => {
             </template>
 
             <div class="sec-label">计算条件</div>
-            <div class="recalculation-condition unstable-condition">
-              <span>不稳定流动段时间(d)</span>
-              <div class="recalculation-value">
+            <div class="condition-panel">
+              <div class="condition-row condition-value-row">
+                <span class="condition-text">不稳定流动段时间(d)</span>
                 <el-input-number
                     v-model="recalculationForm.unstableFlowPeriodLength"
+                    class="condition-number-input"
                     size="small"
                     :min="0.0001"
                     :step="1"
                     :controls="false"
-                    style="width: 100%"
                 />
               </div>
-            </div>
-            <div class="recalculation-condition wgr-condition">
-              <el-checkbox v-model="recalculationForm.minimumWaterGasRatioEnabled">
-                生产水气比上限(m³/10⁴m³)
-              </el-checkbox>
-              <div class="recalculation-value">
-                <el-input-number
-                    v-model="recalculationForm.minimumWaterGasRatio"
-                    size="small"
-                    :disabled="!recalculationForm.minimumWaterGasRatioEnabled"
-                    :min="0"
-                    :step="0.0001"
-                    :precision="4"
-                    :controls="false"
-                    style="width: 100%"
-                />
+              <div class="condition-row condition-limit-row">
+                <div
+                    class="condition-limit-label"
+                    :class="{ 'condition-muted': !recalculationForm.minimumWaterGasRatioEnabled }"
+                >
+                  <el-checkbox v-model="recalculationForm.minimumWaterGasRatioEnabled" />
+                  <span class="condition-text">生产水气比上限(m³/10⁴m³):</span>
+                </div>
+                <div class="condition-actions">
+                  <el-input-number
+                      v-model="recalculationForm.minimumWaterGasRatio"
+                      class="condition-number-input"
+                      size="small"
+                      :disabled="!recalculationForm.minimumWaterGasRatioEnabled"
+                      :min="0"
+                      :step="0.0001"
+                      :precision="4"
+                      :controls="false"
+                  />
+                  <el-button
+                      size="small"
+                      class="condition-recalculate"
+                      :loading="props.recalculating"
+                      @click="requestRecalculation"
+                  >
+                    重新计算
+                  </el-button>
+                </div>
               </div>
-              <el-button size="small" :loading="props.recalculating" @click="requestRecalculation">
-                重新计算
-              </el-button>
             </div>
 
             <div class="sec-label">生产数据</div>
@@ -990,8 +999,8 @@ onBeforeUnmount(() => {
 }
 
 .params-panel {
-  width: 400px;
-  min-width: 400px;
+  width: 238px;
+  min-width: 238px;
   border-right: 1px solid #e0e0e0;
   display: flex;
   flex-direction: column;
@@ -1182,6 +1191,94 @@ onBeforeUnmount(() => {
 .recalculation-value {
   width: 66px;
   min-width: 66px;
+}
+
+.condition-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  padding: 1px 0 9px;
+  color: #303133;
+
+  :deep(.el-checkbox) {
+    height: 24px;
+    margin-right: 0;
+  }
+
+  :deep(.el-checkbox__inner) {
+    border-color: #c0c4cc;
+  }
+
+  :deep(.el-checkbox__input.is-checked .el-checkbox__inner),
+  :deep(.el-checkbox__input.is-indeterminate .el-checkbox__inner) {
+    background-color: #303133;
+    border-color: #303133;
+  }
+}
+
+.condition-row,
+.condition-limit-label,
+.condition-actions {
+  display: flex;
+  align-items: center;
+}
+
+.condition-row {
+  width: 100%;
+  min-height: 24px;
+  gap: 8px;
+}
+
+.condition-text {
+  color: #303133;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.condition-limit-label {
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.condition-actions {
+  gap: 4px;
+  min-width: 0;
+}
+
+.condition-number-input {
+  width: 135px;
+}
+
+.condition-muted .condition-text {
+  color: #a8abb2;
+}
+
+.condition-recalculate {
+  flex-shrink: 0;
+}
+
+.params-panel.narrow {
+  .condition-value-row,
+  .condition-limit-row {
+    flex-wrap: wrap;
+    row-gap: 5px;
+  }
+
+  .condition-value-row .condition-number-input {
+    width: 100%;
+  }
+
+  .condition-actions {
+    width: 100%;
+    padding-left: 22px;
+
+    .condition-number-input {
+      flex: 1;
+      width: auto;
+      min-width: 0;
+    }
+  }
 }
 
 .btn-row {

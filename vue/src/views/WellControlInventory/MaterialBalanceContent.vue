@@ -1225,16 +1225,19 @@ onBeforeUnmount(() => {
     color: #303133;
   }
 
-  :deep(.el-checkbox__inner) {
+  :deep(.el-checkbox__inner),
+  :deep(.el-radio__inner) {
     border-color: #c0c4cc;
   }
 
+  :deep(.el-radio__input.is-checked .el-radio__inner),
   :deep(.el-checkbox__input.is-checked .el-checkbox__inner),
   :deep(.el-checkbox__input.is-indeterminate .el-checkbox__inner) {
     background-color: #303133;
     border-color: #303133;
   }
 
+  :deep(.el-radio__input.is-checked + .el-radio__label),
   :deep(.el-checkbox__input.is-checked + .el-checkbox__label) {
     color: #303133;
   }
