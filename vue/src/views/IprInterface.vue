@@ -14,11 +14,12 @@ import NpiContent from '@/views/WellControlInventory/NpiContent.vue'
 import TransientContent from '@/views/WellControlInventory/TransientContent.vue'
 import DynamicBalanceContent from '@/views/WellControlInventory/DynamicBalanceContent.vue'
 import AGContent from '@/views/WellControlInventory/AGContent.vue'
+import PvtPropertiesContent from '@/views/DataManagement/PvtPropertiesContent.vue'
 import { NODETYPE } from '@/constants/nodeType'
 import { analyticMethodApi, dynamicBalanceApi, materialBalanceApi, nodeApi, notifyApi, projectApi, typicalCurveApi, waterInvasionApi } from '@/api/docker'
 
-const PROJECT_ID = 2
-const GAS_RESERVOIR_ID = 1
+const PROJECT_ID = 6
+const GAS_RESERVOIR_ID = 3
 const FLOW_BALANCE_NODE_TYPE = NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure
 
 const WELL_GROUPS = [
@@ -3187,6 +3188,12 @@ const handleSelect = async (node) => { // 点击左侧树节点
 }
 
 const handleCommand = ({ group, name }) => { // 接收顶部菜单栏的点击事件
+  if (name === 'PVT性质') {
+    currentView.value = 'pvt-properties'
+    currentViewNode.value = null
+    return
+  }
+
   switch (name) {
     case '水侵分析':
       runWaterInvasionForSelectedWell()
@@ -3281,6 +3288,7 @@ onBeforeUnmount(() => {
 
       <!--     右侧的主要内容区域-->
       <main class="content-area">
+        <PvtPropertiesContent v-if="currentView === 'pvt-properties'" />
         <WaterInvasionContent v-if="currentView === 'water-invasion'" :node="currentViewNode" :project-id="PROJECT_ID"
           :gas-reservoir-id="GAS_RESERVOIR_ID" @refresh-tree="handleRefreshTree"
           @recalculate="runWaterInvasionForSelectedWell" />

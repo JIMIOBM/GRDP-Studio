@@ -7,3 +7,6 @@ vue/.env.local
 vue/.env.*.local
 .idea/
 vue/*.log
+backend/target/
+backend/.m2/
+backend/.env

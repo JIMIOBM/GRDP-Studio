@@ -4,6 +4,10 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "backend": "mvn -f backend/pom.xml spring-boot:run",
+    "backend:test": "mvn -f backend/pom.xml test",
+    "infra:up": "docker compose -f backend/compose.yml up -d",
+    "infra:down": "docker compose -f backend/compose.yml down",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
