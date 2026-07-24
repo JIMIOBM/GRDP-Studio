@@ -10,6 +10,8 @@ const props = defineProps({
   gasReservoirId: [Number, String]
 })
 
+const emit = defineEmits(['recalculate'])
+
 const MODIFICATION_METHODS = ['Wichert-Aziz 修正方法', 'Carr-Kobayashi-Burrous 修正方法']
 const DEVIATION_METHODS = ['Dranchuk-Abu-Kassem 方法', 'Dranchuk-Purvis-Robinson 方法', 'Hall-Yarborough 方法']
 const VISCOSITY_METHODS = ['Lee-Gonzalez-Eakin 方法', 'Carr-Kobayashi-Burrous 方法', 'Sutton 方法']
@@ -226,12 +228,6 @@ const inputFields = computed(() => ({
     { label: '天然气偏差系数计算方法', value: deviationMethod.value, select: true },
     { label: '天然气粘度计算方法', value: viscosityMethod.value, select: true }
   ],
-  // control: [
-  //   // { label: '拟合方式', value: fittingMode.value, select: true },
-  //   { label: '抽样点数', value: inputValue(['dataSize'], 300) },
-  //   { label: '粗扫数据点数量', value: inputValue(['initScanDataSize'], 10) },
-  //   { label: '精扫数据点数量', value: inputValue(['fineSandDataSize'], 30) }
-  // ],
   other: [
     { label: '原始地层压力(MPa)', value: inputValue(['originalFormationPressure'], 50) },
     { label: '气井地层温度(℃)', value: inputValue(['formationTemperature'], 80) },

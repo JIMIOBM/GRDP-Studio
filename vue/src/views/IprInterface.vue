@@ -17,7 +17,7 @@ import AGContent from '@/views/WellControlInventory/AGContent.vue'
 import { NODETYPE } from '@/constants/nodeType'
 import { analyticMethodApi, dynamicBalanceApi, materialBalanceApi, nodeApi, projectApi, typicalCurveApi, waterInvasionApi } from '@/api/docker'
 
-const PROJECT_ID = 1
+const PROJECT_ID = 6
 const GAS_RESERVOIR_ID = 1
 const FLOW_BALANCE_NODE_TYPE = NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure
 
@@ -1069,7 +1069,7 @@ const clearTypicalCurveNodesForWell = (wellName) => {
   if (!inventoryGroup?.children?.length) return
 
   inventoryGroup.children = inventoryGroup.children.filter(item =>
-      item.type !== NODETYPE.NodeType_TypicalCurve
+    item.type !== NODETYPE.NodeType_TypicalCurve
   )
 }
 
@@ -1238,17 +1238,17 @@ const createWaterInvasionLogWaiter = (wellName, timeoutMs = WATER_INVASION_LOG_T
 }
 
 const createAnalysisLogWaiter = ({
-                                   module,
-                                   wellName,
-                                   timeoutMs,
-                                   timeoutMessage,
-                                   fallbackErrorMessage,
-                                   allowGlobalComplete = false,
-                                   correlateGlobalCompleteByPin = false,
-                                   rejectOnError = true,
-                                   isComplete = (payload, logText) => WATER_INVASION_COMPLETE_PATTERN.test(logText),
-                                   isRelevant = null
-                                 }) => {
+  module,
+  wellName,
+  timeoutMs,
+  timeoutMessage,
+  fallbackErrorMessage,
+  allowGlobalComplete = false,
+  correlateGlobalCompleteByPin = false,
+  rejectOnError = true,
+  isComplete = (payload, logText) => WATER_INVASION_COMPLETE_PATTERN.test(logText),
+  isRelevant = null
+}) => {
   let settled = false
   let correlationPin = ''
   let cleanup = () => { }
@@ -1365,26 +1365,26 @@ const createAnalyticMethodLogWaiter = (wellName, timeoutMs = ANALYTIC_METHOD_LOG
 //物质平衡日志等待器
 // 物质平衡日志等待器
 const createMaterialBalanceLogWaiter = (wellName, timeoutMs = MATERIAL_BALANCE_LOG_TIMEOUT) =>
-    createAnalysisLogWaiter({
-      module: MATERIAL_BALANCE_NOTIFY_MODULE,
-      wellName: '',
-      timeoutMs,
-      timeoutMessage: `${wellName}物质平衡日志超时，未收到完成消息`,
-      fallbackErrorMessage: `${wellName}物质平衡计算失败`
-    })
+  createAnalysisLogWaiter({
+    module: MATERIAL_BALANCE_NOTIFY_MODULE,
+    wellName: '',
+    timeoutMs,
+    timeoutMessage: `${wellName}物质平衡日志超时，未收到完成消息`,
+    fallbackErrorMessage: `${wellName}物质平衡计算失败`
+  })
 
 //wattenbarger日志等待器
 const createWattenbargerLogWaiter = (wellName, timeoutMs = TYPICAL_CURVE_LOG_TIMEOUT) =>
-    createAnalysisLogWaiter({
-      module: TYPICAL_CURVE_NOTIFY_MODULE,
-      wellName,
-      timeoutMs,
-      timeoutMessage: `${wellName} Wattenbarger日志超时，未收到完成消息`,
-      fallbackErrorMessage: `${wellName} Wattenbarger计算失败`,
-      allowGlobalComplete: true,
-      isComplete: (_payload, logText) =>
-          WATER_INVASION_COMPLETE_PATTERN.test(logText)
-    })
+  createAnalysisLogWaiter({
+    module: TYPICAL_CURVE_NOTIFY_MODULE,
+    wellName,
+    timeoutMs,
+    timeoutMessage: `${wellName} Wattenbarger日志超时，未收到完成消息`,
+    fallbackErrorMessage: `${wellName} Wattenbarger计算失败`,
+    allowGlobalComplete: true,
+    isComplete: (_payload, logText) =>
+      WATER_INVASION_COMPLETE_PATTERN.test(logText)
+  })
 
 const pollAnalyticMethodNodes = async (wellNames, maxRetries = 20, intervalMs = 1500) => {
   const targets = wellNames.filter(Boolean)
@@ -1445,13 +1445,13 @@ const waitForMaterialBalanceResult = async (wellName, maxRetries = 20, intervalM
 
     try {
       const { rootNode, resultNode } =
-          await getMaterialBalanceNodeOnce(wellName, 0)
+        await getMaterialBalanceNodeOnce(wellName, 0)
 
       const materialBalanceRows = resultNode
-          ? await getMaterialBalanceRowsForWell(wellName, {
-            silentError: true
-          })
-          : []
+        ? await getMaterialBalanceRowsForWell(wellName, {
+          silentError: true
+        })
+        : []
 
       latestResult = {
         rootNode,
@@ -1682,9 +1682,9 @@ const getWattenbargerNodeOnce = async (wellName, delayMs = 1200) => {
 
 //wattenbarger节点结果等待
 const waitForWattenbargerNode = async (
-    wellName,
-    maxRetries = 20,
-    intervalMs = 500
+  wellName,
+  maxRetries = 20,
+  intervalMs = 500
 ) => {
   let latestResult = {
     rootNode: null,
@@ -1723,65 +1723,65 @@ const getAGNodeOnce = async (wellName, delayMs = 1200) => {
   return { rootNode, agNode }
 }
 
-  const finalizeAgResult = async (wellName, logPayload, maxRetries = 8, intervalMs = 1000) => {
-    const logNodeId = logPayload?.node ?? logPayload?.nodeId
-    let lastError = null
+const finalizeAgResult = async (wellName, logPayload, maxRetries = 8, intervalMs = 1000) => {
+  const logNodeId = logPayload?.node ?? logPayload?.nodeId
+  let lastError = null
 
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      try {
-        const { rootNode, agNode } = await getAGNodeOnce(
-          wellName,
-          attempt === 0 ? 1 : intervalMs
-        )
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const { rootNode, agNode } = await getAGNodeOnce(
+        wellName,
+        attempt === 0 ? 1 : intervalMs
+      )
 
-        if (rootNode) {
-          applyTypicalCurveNodes(rootNode)
-        }
-
-        const resultNode = agNode || (logNodeId ? {
-          nodeId: logNodeId,
-          nodeTitle: 'AG',
-          nodeType: NODETYPE.NodeType_TypicalCurveAG,
-          wellName
-        } : null)
-        const nodeId = resultNode?.nodeId || resultNode?.id
-
-        if (!nodeId) {
-          lastError = new Error('没有找到 AG 对应的 nodeId')
-          continue
-        }
-
-        const resultRes = await typicalCurveApi.getResult(PROJECT_ID, GAS_RESERVOIR_ID, nodeId)
-        const result = normalizePayload(resultRes)
-
-        const treeNode = addAGNode(wellName, {
-          ...resultNode,
-          nodeType: NODETYPE.NodeType_TypicalCurveAG,
-          nodeTitle: 'AG'
-        })
-
-        const viewNode = {
-          id: nodeId,
-          label: 'AG',
-          type: NODETYPE.NodeType_TypicalCurveAG,
-          wellName,
-          raw: result,
-          treeNode: resultNode
-        }
-
-        activeNodeId.value = viewNode.id
-        currentView.value = 'Agarwal-Gardner'
-        currentViewNode.value = viewNode
-        activeNode.value = treeNode || viewNode
-        ElMessage.success(`${wellName} AG计算完成`)
-        return
-      } catch (error) {
-        lastError = error
+      if (rootNode) {
+        applyTypicalCurveNodes(rootNode)
       }
-    }
 
-    throw lastError || new Error(`${wellName} AG结果已完成，但暂时没有拿到结果`)
+      const resultNode = agNode || (logNodeId ? {
+        nodeId: logNodeId,
+        nodeTitle: 'AG',
+        nodeType: NODETYPE.NodeType_TypicalCurveAG,
+        wellName
+      } : null)
+      const nodeId = resultNode?.nodeId || resultNode?.id
+
+      if (!nodeId) {
+        lastError = new Error('没有找到 AG 对应的 nodeId')
+        continue
+      }
+
+      const resultRes = await typicalCurveApi.getResult(PROJECT_ID, GAS_RESERVOIR_ID, nodeId)
+      const result = normalizePayload(resultRes)
+
+      const treeNode = addAGNode(wellName, {
+        ...resultNode,
+        nodeType: NODETYPE.NodeType_TypicalCurveAG,
+        nodeTitle: 'AG'
+      })
+
+      const viewNode = {
+        id: nodeId,
+        label: 'AG',
+        type: NODETYPE.NodeType_TypicalCurveAG,
+        wellName,
+        raw: result,
+        treeNode: resultNode
+      }
+
+      activeNodeId.value = viewNode.id
+      currentView.value = 'Agarwal-Gardner'
+      currentViewNode.value = viewNode
+      activeNode.value = treeNode || viewNode
+      ElMessage.success(`${wellName} AG计算完成`)
+      return
+    } catch (error) {
+      lastError = error
+    }
   }
+
+  throw lastError || new Error(`${wellName} AG结果已完成，但暂时没有拿到结果`)
+}
 
 const runWaterInvasionForSelectedWell = async (options = {}) => { //点击水侵分析的操作
   const targetWellName = selectedWellName.value
@@ -1915,17 +1915,17 @@ const runMaterialBalanceForSelectedWell = async () => {
     // const materialBalanceRows = await getMaterialBalanceRowsForWell(targetWellName, { silentError: true })
     //
     // 日志确认成功后，等待首次创建的节点和结果数据完成落库。
-    const {rootNode, resultNode, materialBalanceRows} = await waitForMaterialBalanceResult(targetWellName)
+    const { rootNode, resultNode, materialBalanceRows } = await waitForMaterialBalanceResult(targetWellName)
 
     if (!resultNode) {
       throw new Error(
-          `${targetWellName}井物质平衡日志已完成，但未生成结果节点`
+        `${targetWellName}井物质平衡日志已完成，但未生成结果节点`
       )
     }
 
     if (!materialBalanceRows.length) {
       throw new Error(
-          `${targetWellName}井物质平衡日志已完成，但未生成结果数据`
+        `${targetWellName}井物质平衡日志已完成，但未生成结果数据`
       )
     }
     const materialBalanceRawNode = {
@@ -1993,14 +1993,14 @@ const getFlowBalanceRowsForWell = async (wellName, options = {}) => {
   if (!wellName) return []
 
   const pressureRes = await materialBalanceApi.getAverageFormationPressure(
-      PROJECT_ID,
-      GAS_RESERVOIR_ID,
-      wellName,
-      options
+    PROJECT_ID,
+    GAS_RESERVOIR_ID,
+    wellName,
+    options
   )
 
   return getAverageFormationPressureRows(pressureRes.data)
-      .filter(isFlowBalanceAverageRow)
+    .filter(isFlowBalanceAverageRow)
 }
 
 const ensureFlowBalanceNodeForWell = (wellName, rawNode = {}) => {
@@ -2017,8 +2017,8 @@ const ensureFlowBalanceNodeForWell = (wellName, rawNode = {}) => {
 
   const targetGroup = wellItem?.children.find(item => item.type === 'well-control-inventory')
   return targetGroup?.children.find(item =>
-      item.type === FLOW_BALANCE_NODE_TYPE &&
-      item.wellName === wellName
+    item.type === FLOW_BALANCE_NODE_TYPE &&
+    item.wellName === wellName
   )
 }
 
@@ -2030,16 +2030,16 @@ const removeFlowBalanceNodeForWell = (wellName) => {
   if (!inventoryGroup?.children?.length) return
 
   inventoryGroup.children = inventoryGroup.children.filter(item =>
-      item.type !== FLOW_BALANCE_NODE_TYPE
+    item.type !== FLOW_BALANCE_NODE_TYPE
   )
 }
 
 const refreshFlowBalanceNodes = async (targetWellName = '') => {
   const wells = targetWellName
-      ? (getWellGroup()?.children ?? []).filter(well =>
-          (well.wellName || well.label) === targetWellName
-      )
-      : getWellGroup()?.children ?? []
+    ? (getWellGroup()?.children ?? []).filter(well =>
+      (well.wellName || well.label) === targetWellName
+    )
+    : getWellGroup()?.children ?? []
 
   await Promise.all(wells.map(async (well) => {
     const wellName = well.wellName || well.label
@@ -2165,16 +2165,16 @@ const runFlowBalanceForWell = async ({
       minimumWaterGasRatio: minimumWaterGasRatioEnabled ? normalizedMinimumWaterGasRatio : -1
     }
     const calculationRequest = normalizedResultId === null
-        ? materialBalanceApi.calcFMB({
-          ...commonPayload,
-          pressurePosition: normalizedPressurePosition,
-          wellNames: [targetWellName]
-        })
-        : materialBalanceApi.recalcFMB({
-          ...commonPayload,
-          resultId: normalizedResultId,
-          deletePointIds: Array.isArray(deletePointIds) ? deletePointIds : []
-        })
+      ? materialBalanceApi.calcFMB({
+        ...commonPayload,
+        pressurePosition: normalizedPressurePosition,
+        wellNames: [targetWellName]
+      })
+      : materialBalanceApi.recalcFMB({
+        ...commonPayload,
+        resultId: normalizedResultId,
+        deletePointIds: Array.isArray(deletePointIds) ? deletePointIds : []
+      })
 
     // 重新计算接口返回后直接刷新结果，不再依赖可能缺失的 WebSocket 完成日志。
     await calculationRequest
@@ -2379,7 +2379,7 @@ const runBlasingameForSelectedWell = async (options = {}) => {
       }
 
       // 接口成功只表示任务已启动，不能作为计算完成信号。
-      return new Promise(() => {})
+      return new Promise(() => { })
     })
 
     ElMessage.info(`${targetWellName} Blasingame计算中，请稍候...`)
@@ -2527,7 +2527,7 @@ const runWattenbargerForSelectedWell = async () => {
       wattenbargerNode: resultNode
     } = await waitForWattenbargerNode(targetWellName)
 
-    if (!resultNode) {throw new Error(`${targetWellName}井Wattenbarger日志已完成，但未生成结果节点`)}
+    if (!resultNode) { throw new Error(`${targetWellName}井Wattenbarger日志已完成，但未生成结果节点`) }
 
     applyTypicalCurveNodes(rootNode)
 
@@ -2562,8 +2562,8 @@ const runWattenbargerForSelectedWell = async () => {
   }
 }
 
-const runAGForSelectedWell = async () => {
-  const targetWellName = selectedWellName.value
+const runAGForSelectedWell = async (params = {}) => {
+  const targetWellName = params.wellName || selectedWellName.value
 
   if (!targetWellName) {
     ElMessage.warning('请先在左侧选择一口井')
@@ -2580,11 +2580,11 @@ const runAGForSelectedWell = async () => {
       projectId: Number(PROJECT_ID),
       wellNames: [targetWellName],
       fittingType: 2,
-      isSkipFitting: false,
-      dataSize: 300,
-      fineScanDataSize: 30,
-      initScanDataSize: 10,
-      minimumWaterGasRatio: 0.0602
+      isSkipFitting: params.isSkipFitting ?? false,
+      dataSize: params.dataSize ?? 300,
+      fineScanDataSize: params.fineScanDataSize ?? 30,
+      initScanDataSize: params.initScanDataSize ?? 10,
+      minimumWaterGasRatio: params.minimumWaterGasRatio ?? 0.0602
     })
 
     const fittingMessage = getResponseMessage(fittingRes)
@@ -2597,17 +2597,17 @@ const runAGForSelectedWell = async () => {
     logWaiter.promise
       .then((logPayload) => finalizeAgResult(targetWellName, logPayload))
       .catch((error) => {
-        ElMessage.error(error.message || 'AG计算失败')
-        console.error('AG计算失败', error)
+        ElMessage.warning(`${targetWellName} Blasingame已完成，结果暂未刷新，请稍后重新打开`)
+      console.warn('Blasingame计算已完成，但结果刷新失败', error)
       })
-    } catch (error) {
-      logWaiter.cancel()
-      ElMessage.error(error.message || 'AG计算失败')
-      console.error('AG计算失败', error)
-    } finally {
-      typicalCurveRunning.value = false
-    }
+  } catch (error) {
+    logWaiter.cancel()
+    ElMessage.error(error.message || 'AG计算失败')
+    console.error('AG计算失败', error)
+  } finally {
+    typicalCurveRunning.value = false
   }
+}
 
 const openBlasingameNode = async (node) => {
   const targetWellName = node?.wellName || selectedWellName.value
@@ -2933,8 +2933,8 @@ const handleDeleteContextNode = async () => {
     return
   }
 
-   if (node.type === NODETYPE.NodeType_AnalysisMethods) {
-       const resultId = getAnalysisId(node)
+  if (node.type === NODETYPE.NodeType_AnalysisMethods) {
+    const resultId = getAnalysisId(node)
     if (!resultId || Number.isNaN(Number(resultId))) {
       ElMessage.error('没有找到动态平衡结果 ID')
       return
@@ -3130,7 +3130,7 @@ onBeforeUnmount(() => {
 
         <div v-show="!sideTreeCollapsed" class="side-tree">
           <TreeNode v-for="node in filteredTreeData" :key="node.id" :node="node" :active-id="activeNodeId"
-                    @select="handleSelect" @expand="handleNodeExpand" @node-contextmenu="handleNodeContextMenu" />
+            @select="handleSelect" @expand="handleNodeExpand" @node-contextmenu="handleNodeContextMenu" />
         </div>
       </aside>
 
@@ -3142,15 +3142,14 @@ onBeforeUnmount(() => {
         <AnalyticMethodContent v-if="currentView === 'analytic-method'" :node="currentViewNode" :project-id="PROJECT_ID"
           :gas-reservoir-id="GAS_RESERVOIR_ID" />
         <MaterialBalanceContent v-if="currentView === 'material-balance'" :node="currentViewNode"
-                                 :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" @refresh-tree="handleRefreshTree" />
-        <FlowBalanceContent v-if="currentView === 'flow-balance'" :node="currentViewNode"
-                            :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID"
-                            :recalculating="flowBalanceRunning" @recalculate="handleFlowBalanceRecalculate"
-                            @refresh-tree="handleRefreshTree" />
+          :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" @refresh-tree="handleRefreshTree" />
+        <FlowBalanceContent v-if="currentView === 'flow-balance'" :node="currentViewNode" :project-id="PROJECT_ID"
+          :gas-reservoir-id="GAS_RESERVOIR_ID" :recalculating="flowBalanceRunning"
+          @recalculate="handleFlowBalanceRecalculate" @refresh-tree="handleRefreshTree" />
         <BlasingameContent v-if="currentView === 'blasingame'" :node="currentViewNode" :project-id="PROJECT_ID"
           :gas-reservoir-id="GAS_RESERVOIR_ID" @recalculate="runBlasingameForSelectedWell" />
         <NpiContent v-if="currentView === 'npi'" :node="currentViewNode" :project-id="PROJECT_ID"
-                    :gas-reservoir-id="GAS_RESERVOIR_ID" />
+          :gas-reservoir-id="GAS_RESERVOIR_ID" />
         <TransientContent v-if="currentView === 'transient'" :node="currentViewNode" :project-id="PROJECT_ID"
           :gas-reservoir-id="GAS_RESERVOIR_ID" />
         <WattenbargerContent v-if="currentView === 'wattenbarger'" :node="currentViewNode" :project-id="PROJECT_ID"
@@ -3158,7 +3157,7 @@ onBeforeUnmount(() => {
         <DynamicBalanceContent v-if="currentView === 'dynamic-balance'" :node="currentViewNode" :project-id="PROJECT_ID"
           :gas-reservoir-id="GAS_RESERVOIR_ID" @recalculate="handleDynamicBalanceRecalculate" />
         <AGContent v-if="currentView === 'Agarwal-Gardner'" :node="currentViewNode" :project-id="PROJECT_ID"
-          :gas-reservoir-id="GAS_RESERVOIR_ID" />
+          :gas-reservoir-id="GAS_RESERVOIR_ID" @recalculate="runAGForSelectedWell" />
       </main>
     </div>
 
