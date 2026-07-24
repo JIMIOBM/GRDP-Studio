@@ -200,9 +200,6 @@ const resultIsFractured = computed(() => {
 const isFracturedHorizontalWell = computed(() =>
     resultIsFractured.value && resultWellType.value === '水平井'
 )
-const showsFractureHalfLength = computed(() =>
-    resultIsFractured.value && ['直井', '水平井'].includes(resultWellType.value)
-)
 
 const outputFields = computed(() => {
   const items = [
@@ -213,10 +210,10 @@ const outputFields = computed(() => {
     { label: withUnit('表皮系数', 'skinFactor', 'dless'), value: outputValue(['skinFactor']) }
   ]
 
-  if (showsFractureHalfLength.value) {
+  if (resultIsFractured.value) {
     items.push({
       label: withUnit('裂缝半长', 'fractureHalfLength', 'm'),
-      value: outputValue(['fractureHalfLength'])
+      value: outputValue(['fractureHalfLength', 'effectiveFractureHalfLength'])
     })
   }
   if (isFracturedHorizontalWell.value) {

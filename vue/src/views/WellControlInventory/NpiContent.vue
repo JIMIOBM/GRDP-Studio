@@ -41,10 +41,12 @@ const wellName = computed(() => props.node?.wellName || raw.value?.wellName || r
 const methodName = computed(() => isTransient.value ? 'Transient' : 'NPI')
 const chartTabTitle = computed(() => `诊断曲线-${methodName.value}-${wellName.value || '当前井'}-分析结果`)
 const nodeType = computed(() => props.node?.type ?? props.node?.treeNode?.nodeType ?? props.node?.raw?.nodeType)
+const normalizeBoolean = value =>
+    value === true || value === 1 || value === '1' || value === '是'
 const isFractured = computed(() => (isTransient.value
     ? [NODETYPE.NodeType_FracturedVerticalWellTypicalCurveTransient, NODETYPE.NodeType_FracturedHorizontalWellTypicalCurveTransient]
     : [NODETYPE.NodeType_FracturedVerticalWellTypicalCurveNPI, NODETYPE.NodeType_FracturedHorizontalWellTypicalCurveNPI]
-).includes(Number(nodeType.value)))
+).includes(Number(nodeType.value)) || normalizeBoolean(raw.value?.analysis?.isFractured))
 const activeTypeCurves = computed(() => {
   if (isTransient.value) return isFractured.value ? fissureTransientTypeCurves : transientTypeCurves
   return isFractured.value ? fissureNpiTypeCurves : npiTypeCurves
@@ -164,13 +166,26 @@ const inputGroups = computed(() => [
   }
 ])
 
-const outputFields = computed(() => [
-  { label: '渗透率(mD)', value: resultValue(['permeability']) },
-  { label: '表皮系数(dless)', value: resultValue(['skinFactor']) },
-  { label: '动态地质储量(10⁸m³)', value: resultValue(['originalGasVolume']) },
-  { label: '井控面积(km²)', value: resultValue(['wellControlArea']) },
-  { label: '井控半径(m)', value: resultValue(['wellControlRadius']) }
-])
+const outputFields = computed(() => {
+  const fields = [
+    { label: '渗透率(mD)', value: resultValue(['permeability']) }
+  ]
+
+  if (isFractured.value) {
+    fields.push({
+      label: '裂缝半长(m)',
+      value: resultValue(['effectiveFractureHalfLength', 'fractureHalfLength'])
+    })
+  }
+
+  fields.push(
+      { label: '表皮系数(dless)', value: resultValue(['skinFactor']) },
+      { label: '动态地质储量(10⁸m³)', value: resultValue(['originalGasVolume']) },
+      { label: '井控面积(km²)', value: resultValue(['wellControlArea']) },
+      { label: '井控半径(m)', value: resultValue(['wellControlRadius']) }
+  )
+  return fields
+})
 
 const seriesConfig = computed(() => isTransient.value ? {
   qD: { name: 'qD-实际数据', color: '#7ee000', tableField: 'primaryValue' },
