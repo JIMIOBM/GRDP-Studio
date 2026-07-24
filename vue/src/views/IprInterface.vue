@@ -2244,21 +2244,32 @@ const runDynamicBalanceForSelectedWell = async () => {
 
     ElMessage.info(`${targetWellName} 动态平衡计算中，请稍候...`)
 
-    const maxRetries = 20
-    const intervalMs = 1500
+    const maxRetries = 40
+    const intervalMs = 2000
     let rootNode = null
     let resultNode = null
+    let lastError = null
 
     for (let i = 0; i < maxRetries; i++) {
-      await new Promise(resolve => setTimeout(resolve, intervalMs))
-      const res = await fetchMaterialBalanceNode()
-      rootNode = res
-      resultNode = findDynamicBalanceNode(rootNode, targetWellName)
-      if (resultNode?.nodeId) break
+      try {
+        await new Promise(resolve => setTimeout(resolve, intervalMs))
+        const res = await fetchMaterialBalanceNode()
+        rootNode = res
+        resultNode = findDynamicBalanceNode(rootNode, targetWellName)
+        if (resultNode?.nodeId) break
+      } catch (err) {
+        lastError = err
+        console.warn(`动态平衡节点查询第${i + 1}次失败：`, err)
+      }
     }
 
     if (!resultNode?.nodeId) {
-      throw new Error('动态平衡计算超时，未生成分析结果节点')
+      if (lastError && !lastError.message.includes('超时')) {
+        throw lastError
+      }
+      ElMessage.warning(`${targetWellName} 动态平衡计算时间较长，请在左侧树中手动查看结果`)
+      console.warn('动态平衡计算超时，未在规定时间内获取到结果节点')
+      return
     }
 
     const treeNode = {
@@ -2308,21 +2319,32 @@ const handleDynamicBalanceRecalculate = async (options = {}) => {
 
     ElMessage.info(`${targetWellName} 动态平衡计算中，请稍候...`)
 
-    const maxRetries = 20
-    const intervalMs = 1500
+    const maxRetries = 40
+    const intervalMs = 2000
     let rootNode = null
     let resultNode = null
+    let lastError = null
 
     for (let i = 0; i < maxRetries; i++) {
-      await new Promise(resolve => setTimeout(resolve, intervalMs))
-      const res = await fetchMaterialBalanceNode()
-      rootNode = res
-      resultNode = findDynamicBalanceNode(rootNode, targetWellName)
-      if (resultNode?.nodeId) break
+      try {
+        await new Promise(resolve => setTimeout(resolve, intervalMs))
+        const res = await fetchMaterialBalanceNode()
+        rootNode = res
+        resultNode = findDynamicBalanceNode(rootNode, targetWellName)
+        if (resultNode?.nodeId) break
+      } catch (err) {
+        lastError = err
+        console.warn(`动态平衡节点查询第${i + 1}次失败：`, err)
+      }
     }
 
     if (!resultNode?.nodeId) {
-      throw new Error('动态平衡计算超时，未生成分析结果节点')
+      if (lastError && !lastError.message.includes('超时')) {
+        throw lastError
+      }
+      ElMessage.warning(`${targetWellName} 动态平衡计算时间较长，请在左侧树中手动查看结果`)
+      console.warn('动态平衡计算超时，未在规定时间内获取到结果节点')
+      return
     }
 
     const treeNode = {
