@@ -1,15 +1,17 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
-import { materialBalanceApi } from '@/api/docker'
+import {analyticMethodApi, materialBalanceApi} from '@/api/docker'
+import {ElMessage} from "element-plus";
 
 const props = defineProps({
   node: Object,
   projectId: [Number, String],
-  gasReservoirId: [Number, String]
+  gasReservoirId: [Number, String],
+  recalculating: Boolean
 })
 
-const emit = defineEmits(['refresh-tree'])
+const emit = defineEmits(['refresh-tree','recalculate'])
 
 const loading = ref(false)
 const resultData = ref(null)
@@ -33,6 +35,14 @@ const reservoirType=ref('constant')
 //水气比
 const enableWaterGasRatioLimit = ref(false)
 const waterGasRatioLimitValue = ref('0.0602')
+const importFileInput = ref(null)
+
+const PRODUCTION_TEMPLATE_COLUMNS = [
+  { label: '日期', unit: '无' },
+  { label: '地层压力', unit: 'MPa' },
+  { label: '累产气量', unit: '10^8m3' },
+  { label: '累产水量', unit: '10^4m3' }
+]
 
 let chart = null
 let requestSeq = 0
@@ -116,18 +126,44 @@ const getMaterialBalanceResultId = (row) => {
   )
 }
 
-const MATERIAL_BALANCE_TYPES = new Set([1, 2])
+const getResultGasReservoirType = (result) => {
+  const value = result?.input?.gasReservoirType
+  const type = Number(value)
+  return type === 1 || type === 2 ? type : null
+}
+
+const requestedGasReservoirType = computed(() => {
+  const type = Number(props.node?.materialBalanceReservoirType)
+  return type === 1 || type === 2 ? type : null
+})
+
+const MATERIAL_BALANCE_TYPES = new Set([1, 2, 3, 4])
+
+const getAverageRowGasReservoirType = (row) => {
+  const type = Number(row?.dynamicOriginalGasInplaceType ?? row?.dynamicOriginalGasInPlaceType)
+  if (type === 1 || type === 2) return 1
+  if (type === 3 || type === 4) return 2
+
+  const description = String(
+      row?.dynamicOriginalGasInplaceMethodDescription ||
+      row?.dynamicOriginalGasInPlaceMethodDescription ||
+      ''
+  )
+  if (description.includes('定容气藏')) return 1
+  if (description.includes('封闭气藏')) return 2
+  return null
+}
 
 const isMaterialBalanceRow = (row) => {
   const type = Number(row?.dynamicOriginalGasInplaceType)
 
   // averageFormationPressure 接口会返回同一井的多种动态储量分析结果。
-  // 物质平衡页面只接收 1（实测静压）和 2（计算静压），排除流动/动态物质平衡结果。
+  // 定容气藏对应 1/2，封闭气藏对应 3/4，其他类型属于其他分析方法。
   if (Number.isFinite(type)) return MATERIAL_BALANCE_TYPES.has(type)
 
   // 兼容缺少类型字段的旧数据，避免历史物质平衡结果无法展示。
   const description = row?.dynamicOriginalGasInplaceMethodDescription || row?.dynamicOriginalGasInPlaceMethodDescription || ''
-  return /物质平衡方程-根据(?:实测|计算)静压/.test(description)
+  return /(?:定容|封闭)气藏物质平衡方程-根据(?:实测|计算)静压/.test(description)
 }
 
 const getMaterialBalanceTabLabel = (row, index) => {
@@ -800,8 +836,13 @@ async function fetchData() {
             wellName,
             { silentError: true }
         )
-        const averageRows = getAverageFormationPressureRows(pressureRes.data)
+        const materialBalanceRows = getAverageFormationPressureRows(pressureRes.data)
             .filter(isMaterialBalanceRow)
+        const averageRows = requestedGasReservoirType.value === null
+            ? materialBalanceRows
+            : materialBalanceRows.filter(
+                row => getAverageRowGasReservoirType(row) === requestedGasReservoirType.value
+            )
         const resultRequests = averageRows
             .map((row, index) => ({
               row,
@@ -825,11 +866,19 @@ async function fetchData() {
               null,
               { silentError: true }
           )
+
+          if (
+              requestedGasReservoirType.value !== null &&
+              getResultGasReservoirType(fallbackRes.data) !== requestedGasReservoirType.value
+          ) {
+            throw new Error('本次物质平衡计算结果尚未完成落库')
+          }
+
           nextResultData = fallbackRes.data
           break
         }
 
-        const resultResponses = await Promise.all(
+        const allResultResponses = await Promise.all(
             resultRequests.map(item =>
                 materialBalanceApi.getResult(
                     props.projectId,
@@ -841,6 +890,10 @@ async function fetchData() {
                 ).then(res => ({ ...item, result: res.data }))
             )
         )
+
+        // resultRequests 已按 averageFormationPressure 的分析类型精确筛选，
+        // 这里直接使用对应节点结果，避免结果详情缺少 gasReservoirType 时被误判为无结果。
+        const resultResponses = allResultResponses
 
         const firstResult = resultResponses[0]?.result || {}
         nextResultData = {
@@ -879,10 +932,48 @@ async function fetchData() {
   }
 }
 
+//模板生产数据导入导出
+const getXlsx = async () => import('xlsx')
+
+const saveWorkbook = (XLSX, workbook, filename) => {
+  XLSX.writeFile(workbook, filename)
+}
+
+const downloadProductionTemplate = async () => {
+  const XLSX = await getXlsx()
+  const rows = [
+    PRODUCTION_TEMPLATE_COLUMNS.map(column => column.label),
+    PRODUCTION_TEMPLATE_COLUMNS.map(column => column.unit)
+  ]
+  const sheet = XLSX.utils.aoa_to_sheet(rows)
+  const workbook = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(workbook, sheet, '生产数据')
+  saveWorkbook(XLSX, workbook, `物质平衡生产数据模板-${currentWellName.value || 'well'}.xlsx`)
+}
+
+const openProductionImport = () => {
+  importFileInput.value?.click()
+}
+
+const importProductionData = async (event) => {
+  ElMessage.success('生产数据导入完成，物质平衡结果已更新')
+}
+
 function handleRecalculate() {
+  if (props.recalculating) return
+
+  const waterGasRatioLimit = enableWaterGasRatioLimit.value
+      ? Number(waterGasRatioLimitValue.value)
+      : -1
+
+  if (enableWaterGasRatioLimit.value && (!Number.isFinite(waterGasRatioLimit) || waterGasRatioLimit <= 0)) {
+    ElMessage.warning('请输入大于 0 的生产水气比上限')
+    return
+  }
+
   emit('recalculate', {
-    gasReservoirType: reservoirType.value,
-    waterGasRatioLimit: enableWaterGasRatioLimit.value ? Number(waterGasRatioLimitValue.value) : -1
+    gasReservoirType: reservoirType.value === 'closed' ? 2 : 1,
+    waterGasRatioLimit
   })
 }
 
@@ -890,14 +981,22 @@ watch(() => [
   props.node?.id,
   currentWellName.value,
   props.projectId,
-  props.gasReservoirId
+  props.gasReservoirId,
+  props.node?.materialBalanceRefreshKey,
+  props.node?.materialBalanceReservoirType
 ], fetchData, { immediate: true })
 watch(activeChartTab, () => nextTick(renderChart))
 watch(activeContentTab, (tab) => { if (tab === 'chart') nextTick(renderChart)})
 watch([chartPoints, regressionLinePoints], () => nextTick(renderChart), { deep: true })
 //监听计算方式
 watch(input,(value)=>{
-  reservoirType.value=value?.gasReservoirType?'constant':'closed'
+  const gasReservoirType = requestedGasReservoirType.value ?? value?.gasReservoirType
+  if (gasReservoirType !== undefined && gasReservoirType !== null && gasReservoirType !== '') {
+    reservoirType.value =
+        gasReservoirType === 'closed' || Number(gasReservoirType) === 2
+            ? 'closed'
+            : 'constant'
+  }
   const limit = value?.waterGasRatioLimit
   enableWaterGasRatioLimit.value = Number(limit) > 0
   waterGasRatioLimitValue.value = Number(limit) > 0 ? String(limit) : '0.0602'
@@ -1004,17 +1103,23 @@ onBeforeUnmount(() => {
                 <span class="condition-text">生产水气比上限(m³/10⁴m³):</span>
               </div>
               <div class="condition-actions">
-                <el-input
-                    v-model="waterGasRatioLimitValue"
+                <el-input v-model="waterGasRatioLimitValue" size="small" :disabled="!enableWaterGasRatioLimit"/>
+                <el-button
                     size="small"
-                    :disabled="!enableWaterGasRatioLimit"
-                />
-                <el-button size="small" class="condition-recalculate" @click="handleRecalculate">
-                  重新计算
-                </el-button>
+                    class="condition-recalculate"
+                    :loading="recalculating"
+                    :disabled="recalculating"
+                    @click="handleRecalculate"
+                >重新计算</el-button>
               </div>
             </div>
           </div>
+          <div class="section-title">生产数据</div>
+          <div class="btn-row">
+            <el-button size="small" @click="downloadProductionTemplate">模版下载</el-button>
+            <el-button size="small" @click="openProductionImport">导入</el-button>
+          </div>
+<!--          <input ref="importFileInput" class="hidden-file-input" type="file" accept=".xlsx,.xls" @change="importProductionData"/>-->
         </div>
 
         <div v-show="activePanelTab === 'output'" class="panel-body">
@@ -1340,10 +1445,11 @@ onBeforeUnmount(() => {
 }
 
 .section-title {
-  font-size: 14px;
+  font-weight: 500;
   color: #333;
+  font-size: 13px;
   margin: 10px 0 7px;
-  font-weight: 600;
+  &:first-child { margin-top: 4px; }
 }
 
 .field {
@@ -1569,4 +1675,6 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
   border: none;
 }
+
+.btn-row { display: flex; gap: 8px; }
 </style>
