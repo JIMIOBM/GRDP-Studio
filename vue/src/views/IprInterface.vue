@@ -15,7 +15,7 @@ import TransientContent from '@/views/WellControlInventory/TransientContent.vue'
 import DynamicBalanceContent from '@/views/WellControlInventory/DynamicBalanceContent.vue'
 import AGContent from '@/views/WellControlInventory/AGContent.vue'
 import { NODETYPE } from '@/constants/nodeType'
-import { analyticMethodApi, dynamicBalanceApi, materialBalanceApi, nodeApi, projectApi, typicalCurveApi, waterInvasionApi } from '@/api/docker'
+import { analyticMethodApi, dynamicBalanceApi, materialBalanceApi, nodeApi, notifyApi, projectApi, typicalCurveApi, waterInvasionApi } from '@/api/docker'
 
 const PROJECT_ID = 2
 const GAS_RESERVOIR_ID = 1
@@ -97,8 +97,10 @@ const WATER_INVASION_COMPLETE_PATTERN = /完成|分析结束|结束/i
 const WATER_INVASION_FINAL_COMPLETE_PATTERN = /\[\s*水侵动态分析-水体活跃性\s*\]\s*[:：]\s*完成/
 const TYPICAL_CURVE_NOTIFY_MODULE = 'projectanalysis.typicalcurvefitting'
 const TYPICAL_CURVE_LOG_TIMEOUT = 120000
-const ANALYTIC_METHOD_NOTIFY_MODULE_PATTERN = /projectanalysis\.analysismethods(?:history)?fitting/i
+const ANALYTIC_METHOD_NOTIFY_MODULE_PATTERN = /^projectanalysis\.analysismethods(?:historyfitting|fitting)?$/i
 const ANALYTIC_METHOD_LOG_TIMEOUT = 120000
+const ANALYTIC_METHOD_LOG_POLL_INTERVAL = 500
+const ANALYTIC_METHOD_COMPLETE_PATTERN = /\[\s*产量不稳定分析-解析法\s*\]\s*[:：]\s*完成/
 const BLASINGAME_FITTING_REGRESSION_ERROR = '计算动态储量错误:参与回归分析的数据点数必须大于0'
 const AG_FITTING_REGRESSION_ERROR = '计算AG节点错误:参与回归分析的数据点数必须大于0'
 const selectedWellName = ref('')
@@ -1264,6 +1266,14 @@ const createWaterInvasionLogWaiter = (wellName, timeoutMs = WATER_INVASION_LOG_T
   })
 }
 
+const matchesNotifyModule = (expectedModule, actualModule) => {
+  if (expectedModule instanceof RegExp) {
+    expectedModule.lastIndex = 0
+    return expectedModule.test(String(actualModule || ''))
+  }
+  return expectedModule === actualModule
+}
+
 const createAnalysisLogWaiter = ({
   module,
   wellName,
@@ -1298,7 +1308,7 @@ const createAnalysisLogWaiter = ({
       if (message?.type !== 'user') return
 
       const modules = Array.isArray(module) ? module : (module ? [module] : [])
-      if (modules.length && !modules.includes(payload?.module)) return
+      if (modules.length && !modules.some(expected => matchesNotifyModule(expected, payload?.module))) return
 
       const logText = String(payload.message || '')
       const errorText = String(payload.error || '')
@@ -1378,16 +1388,103 @@ const createTypicalCurveLogWaiter = (wellName, methodName, timeoutMs = TYPICAL_C
     isComplete: (payload, logText) => logText.includes('完成') && !logText.includes('分析结束')
   })
 
-const createAnalyticMethodLogWaiter = (wellName, timeoutMs = ANALYTIC_METHOD_LOG_TIMEOUT) =>
-  createAnalysisLogWaiter({
-    module: ANALYTIC_METHOD_NOTIFY_MODULE_PATTERN,
-    wellName,
-    timeoutMs,
-    timeoutMessage: `${wellName} 解析法日志超时，未收到完成消息`,
-    fallbackErrorMessage: `${wellName} 解析法计算失败`,
-    allowGlobalComplete: true,
-    allowGlobalFailure: true
+const createAnalyticMethodLogWaiter = (wellName, timeoutMs = ANALYTIC_METHOD_LOG_TIMEOUT) => {
+  const startTime = Date.now()
+  let settled = false
+  let pollTimer = null
+  let timeoutTimer = null
+
+  const promise = new Promise((resolve, reject) => {
+    const finish = (callback, value) => {
+      if (settled) return
+      settled = true
+      window.clearTimeout(pollTimer)
+      window.clearTimeout(timeoutTimer)
+      callback(value)
+    }
+
+    const pollLogs = async () => {
+      try {
+        const response = await notifyApi.getLogs({
+          start_time: startTime,
+          keyword: '产量不稳定分析-解析法',
+          order: 'asc',
+          page: 1,
+          page_size: 1000
+        })
+        const logs = Array.isArray(response?.data?.logs) ? response.data.logs : []
+        const payloads = logs
+          .map(log => ({
+            ...log.fields,
+            module: log.module || log.fields?.module,
+            level: log.level || log.fields?.level,
+            message: log.message || '',
+            error: log.fields?.error || '',
+            node: log.fields?.node,
+            pin: log.pin,
+            timestamp: log.timestamp
+          }))
+          .filter(payload => matchesNotifyModule(
+            ANALYTIC_METHOD_NOTIFY_MODULE_PATTERN,
+            payload.module
+          ))
+
+        // 一次分析的井级错误和全局“完成”可能同时写入，必须优先处理井级错误。
+        const failedPayload = payloads.find(payload => {
+          const logText = String(payload.message || '')
+          const errorText = String(payload.error || '')
+          const logLevel = String(payload.level || '').toLowerCase()
+          return logText.includes(wellName) && (
+            logLevel === 'error' ||
+            WATER_INVASION_ERROR_PATTERN.test(logText) ||
+            WATER_INVASION_ERROR_PATTERN.test(errorText)
+          )
+        })
+        if (failedPayload) {
+          finish(
+            reject,
+            new Error(failedPayload.error || failedPayload.message || `${wellName} 解析法计算失败`)
+          )
+          return
+        }
+
+        const completedPayload = payloads.find(payload =>
+          ANALYTIC_METHOD_COMPLETE_PATTERN.test(String(payload.message || ''))
+        )
+        if (completedPayload) {
+          finish(resolve, completedPayload)
+          return
+        }
+      } catch (error) {
+        if (error.response?.status === 401) {
+          finish(reject, new Error('原平台登录状态已失效，无法读取解析法日志'))
+          return
+        }
+        console.warn('解析法日志读取失败，稍后重试', error)
+      }
+
+      if (!settled) {
+        pollTimer = window.setTimeout(pollLogs, ANALYTIC_METHOD_LOG_POLL_INTERVAL)
+      }
+    }
+
+    timeoutTimer = window.setTimeout(() => {
+      finish(reject, new Error(`${wellName} 解析法日志超时，未收到完成消息`))
+    }, timeoutMs)
+
+    void pollLogs()
   })
+
+  return {
+    promise,
+    cancel: () => {
+      if (settled) return
+      settled = true
+      window.clearTimeout(pollTimer)
+      window.clearTimeout(timeoutTimer)
+    }
+  }
+}
 
 //物质平衡日志等待器
 // 物质平衡日志等待器
@@ -1955,15 +2052,17 @@ const runAnalyticMethodForSelectedWell = async (options = {}) => {
   analyticMethodRunning.value = true
   const logWaiters = wellNames.map(wellName => createAnalyticMethodLogWaiter(wellName))
   try {
-    await analyticMethodApi.historyFitting({
+    ElMessage.info('解析法计算中，请稍候...')
+    void analyticMethodApi.historyFitting({
       gasReservoirId: Number(GAS_RESERVOIR_ID),
       projectId: Number(PROJECT_ID),
       wellNames,
       dataSize: options.dataSize ?? 30,
       minimumWaterGasRatio: options.minimumWaterGasRatio ?? -1
+    }).catch(error => {
+      console.warn('解析法启动接口异常，继续等待最终完成日志', error)
     })
 
-    ElMessage.info('解析法计算中，请稍候...')
     const logPayloads = await Promise.all(logWaiters.map(waiter => waiter.promise))
     await Promise.all(wellNames.map((wellName, index) =>
       finalizeAnalyticMethodResult(wellName, logPayloads[index])

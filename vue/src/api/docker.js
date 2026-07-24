@@ -100,10 +100,17 @@ export const analyticMethodApi = {
 
   getSummaryChart: (projectId, gasReservoirId) =>
     dockerRequest.get(`/projectanalysis/analysismethods/summary/chart/${projectId}/${gasReservoirId}`),
+
   deleteResult: (projectId, gasReservoirId, wellName) =>
-    dockerRequest.delete(`/projectanalysis/analysismethods/${projectId}/${gasReservoirId}/${wellName}`,{
+    dockerRequest.delete(`/projectanalysis/analysismethods/${projectId}/${gasReservoirId}/${wellName}`, {
       data: { wellName }
-})
+    })
+}
+
+/* ===== 通知日志 ===== */
+export const notifyApi = {
+  getLogs: (params) =>
+    dockerRequest.get('/common/notify/logs', { params })
 }
 
 /* ===== 动态储量 - 物质平衡 ===== */
