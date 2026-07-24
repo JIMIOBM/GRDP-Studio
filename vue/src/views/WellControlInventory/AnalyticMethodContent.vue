@@ -7,8 +7,11 @@ import { analyticMethodApi } from '@/api/docker'
 const props = defineProps({
   node: Object,
   projectId: [Number, String],
-  gasReservoirId: [Number, String]
+  gasReservoirId: [Number, String],
+  recalculating: Boolean
 })
+
+const emit = defineEmits(['recalculate'])
 
 const MODIFICATION_METHODS = ['Wichert-Aziz 修正方法', 'Carr-Kobayashi-Burrous 修正方法']
 const DEVIATION_METHODS = ['Dranchuk-Abu-Kassem 方法', 'Dranchuk-Purvis-Robinson 方法', 'Hall-Yarborough 方法']
@@ -111,6 +114,29 @@ const materialBalanceMethod = computed(() =>
 )
 const minimumWaterGasRatio = computed(() => inputValue(['minimumWaterGasRatio', 'waterGasRatioLimit'], -1))
 const waterGasRatioEnabled = computed(() => Number(minimumWaterGasRatio.value) > 0)
+const waterGasRatioLimitEnabled = ref(false)
+const waterGasRatioLimitValue = ref(0.0602)
+
+watch(input, (value) => {
+  const limit = Number(value?.minimumWaterGasRatio ?? value?.waterGasRatioLimit)
+  waterGasRatioLimitEnabled.value = Number.isFinite(limit) && limit > 0
+  waterGasRatioLimitValue.value = limit > 0 ? limit : 0.0602
+}, { immediate: true })
+
+const handleRecalculate = () => {
+  const minimumWaterGasRatioValue = Number(waterGasRatioLimitValue.value)
+  if (waterGasRatioLimitEnabled.value &&
+      (!Number.isFinite(minimumWaterGasRatioValue) || minimumWaterGasRatioValue <= 0)) {
+    ElMessage.warning('生产水气比上限必须大于 0')
+    return
+  }
+
+  emit('recalculate', {
+    wellName: wellName.value,
+    dataSize: inputValue(['dataSize'], 30),
+    minimumWaterGasRatio: waterGasRatioLimitEnabled.value ? minimumWaterGasRatioValue : -1
+  })
+}
 const isDryGas = computed(() => gasType.value === '干气')
 const productionColumns = computed(() => {
   const base = [
@@ -166,10 +192,42 @@ const displayedFieldGroups = computed(() => {
   })).filter(group => group.items.length)
 })
 
-const outputFields = computed(() => [
-  { label: withUnit('渗透率', 'permeability', 'mD'), value: outputValue(['permeability']) },
-  { label: withUnit('表皮系数', 'skinFactor', 'dless'), value: outputValue(['skinFactor']) }
-].filter(item => item.value !== undefined && item.value !== null && item.value !== ''))
+const resultWellType = computed(() => outputValue(['wellType']))
+const resultIsFractured = computed(() => {
+  const value = outputValue(['isFractured'])
+  return value === true || value === 1 || value === '1' || value === '是'
+})
+const isFracturedHorizontalWell = computed(() =>
+    resultIsFractured.value && resultWellType.value === '水平井'
+)
+const showsFractureHalfLength = computed(() =>
+    resultIsFractured.value && ['直井', '水平井'].includes(resultWellType.value)
+)
+
+const outputFields = computed(() => {
+  const items = [
+    {
+      label: withUnit(isFracturedHorizontalWell.value ? '基质渗透率' : '渗透率', 'permeability', 'mD'),
+      value: outputValue(['permeability'])
+    },
+    { label: withUnit('表皮系数', 'skinFactor', 'dless'), value: outputValue(['skinFactor']) }
+  ]
+
+  if (showsFractureHalfLength.value) {
+    items.push({
+      label: withUnit('裂缝半长', 'fractureHalfLength', 'm'),
+      value: outputValue(['fractureHalfLength'])
+    })
+  }
+  if (isFracturedHorizontalWell.value) {
+    items.push({
+      label: withUnit('裂缝渗透率', 'fracturePermeability', 'mD'),
+      value: outputValue(['fracturePermeability'])
+    })
+  }
+
+  return items.filter(item => item.value !== undefined && item.value !== null && item.value !== '')
+})
 const hasOutputResults = computed(() => outputFields.value.length > 0)
 
 const formatDate = (_row, _column, value) => value ? String(value).slice(0, 10) : ''
@@ -583,6 +641,32 @@ onBeforeUnmount(() => {
             </div>
           </template>
 
+          <div class="sec-label">计算条件</div>
+          <div class="condition-panel">
+            <div class="field">
+              <div class="wgr-label-row">
+                <span :class="{ 'condition-muted': !waterGasRatioLimitEnabled }">生产水气比上限(m³/10⁴m³)</span>
+                <el-switch v-model="waterGasRatioLimitEnabled" size="small" />
+              </div>
+              <el-input-number
+                  v-model="waterGasRatioLimitValue"
+                  :min="0"
+                  :controls="false"
+                  :disabled="!waterGasRatioLimitEnabled"
+                  size="small"
+              />
+            </div>
+            <el-button
+                size="small"
+                type="primary"
+                :loading="recalculating"
+                :disabled="recalculating"
+                @click="handleRecalculate"
+            >
+              重新计算
+            </el-button>
+          </div>
+
           <div class="sec-label">生产数据</div>
           <div class="btn-row">
             <el-button size="small" @click="downloadProductionTemplate">模板下载</el-button>
@@ -847,6 +931,20 @@ onBeforeUnmount(() => {
     color: #555;
     font-size: 12px;
   }
+}
+
+.condition-panel {
+  padding: 9px;
+  border: 1px solid #e4e7ed;
+  background: #fafafa;
+
+  :deep(.el-input-number) {
+    width: 100%;
+  }
+}
+
+.condition-muted {
+  color: #aaa !important;
 }
 
 .btn-row {

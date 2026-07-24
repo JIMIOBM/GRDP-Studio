@@ -6,16 +6,20 @@ import npiTypeCurves from '@/constants/typeCurves/normalizedPressureInteral.json
 import fissureTransientTypeCurves from '@/constants/typeCurves/fissureTransient.json'
 import transientTypeCurves from '@/constants/typeCurves/transient.json'
 import { NODETYPE } from '@/constants/nodeType'
+import { ElMessage } from 'element-plus'
 
 const props = defineProps({
   node: Object,
   projectId: [Number, String],
   gasReservoirId: [Number, String],
+  recalculating: Boolean,
   method: {
     type: String,
     default: 'npi'
   }
 })
+
+const emit = defineEmits(['recalculate'])
 
 const activePanelTab = ref('input')
 const activeChartTab = ref('chart')
@@ -73,6 +77,47 @@ const gasType = computed(() => methodLabel(inputValue(['gasType'], 2), ['', '', 
 const fittingMode = computed(() => inputValue(['isSkipFitting'], false) ? '跳过拟合' : '自动拟合')
 const waterGasRatioLimit = computed(() => inputValue(['minimumWaterGasRatio', 'waterGasRatioLimit'], -1))
 const waterGasRatioEnabled = computed(() => Number(waterGasRatioLimit.value) > 0)
+const fittingModeValue = ref('automatic')
+const dataSizeValue = ref(300)
+const initScanDataSizeValue = ref(10)
+const fineScanDataSizeValue = ref(30)
+const waterGasRatioLimitEnabled = ref(true)
+const waterGasRatioLimitValue = ref(0.0602)
+
+watch(input, (value) => {
+  fittingModeValue.value = value?.isSkipFitting ? 'manual' : 'automatic'
+  dataSizeValue.value = Number(value?.dataSize) || 300
+  initScanDataSizeValue.value = Number(value?.initScanDataSize) || 10
+  fineScanDataSizeValue.value = Number(value?.fineScanDataSize) || 30
+
+  const limit = Number(value?.minimumWaterGasRatio ?? value?.waterGasRatioLimit)
+  waterGasRatioLimitEnabled.value = Number.isFinite(limit) ? limit > 0 : true
+  waterGasRatioLimitValue.value = limit > 0 ? limit : 0.0602
+}, { immediate: true })
+
+const isPositiveInteger = value => Number.isInteger(Number(value)) && Number(value) > 0
+
+const handleRecalculate = () => {
+  if (![dataSizeValue.value, initScanDataSizeValue.value, fineScanDataSizeValue.value].every(isPositiveInteger)) {
+    ElMessage.warning('抽稀点数、粗扫点数和精扫点数必须为正整数')
+    return
+  }
+
+  const minimumWaterGasRatio = Number(waterGasRatioLimitValue.value)
+  if (waterGasRatioLimitEnabled.value && (!Number.isFinite(minimumWaterGasRatio) || minimumWaterGasRatio <= 0)) {
+    ElMessage.warning('生产水气比上限必须大于 0')
+    return
+  }
+
+  emit('recalculate', {
+    wellName: wellName.value,
+    isSkipFitting: fittingModeValue.value === 'manual',
+    dataSize: Number(dataSizeValue.value),
+    initScanDataSize: Number(initScanDataSizeValue.value),
+    fineScanDataSize: Number(fineScanDataSizeValue.value),
+    minimumWaterGasRatio: waterGasRatioLimitEnabled.value ? minimumWaterGasRatio : -1
+  })
+}
 
 const inputGroups = computed(() => [
   {
@@ -392,6 +437,50 @@ onBeforeUnmount(() => {
               </div>
             </div>
           </template>
+          <div class="sec-label">计算条件</div>
+          <div class="condition-panel">
+            <div class="field">
+              <label>拟合方式</label>
+              <el-select v-model="fittingModeValue" size="small" style="width:100%">
+                <el-option label="自动拟合" value="automatic" />
+                <el-option label="手动拟合" value="manual" />
+              </el-select>
+            </div>
+            <div class="field">
+              <label>抽稀点数</label>
+              <el-input-number v-model="dataSizeValue" :min="1" :precision="0" :controls="false" size="small" />
+            </div>
+            <div class="field">
+              <label>粗扫数据点数量</label>
+              <el-input-number v-model="initScanDataSizeValue" :min="1" :precision="0" :controls="false" size="small" />
+            </div>
+            <div class="field">
+              <label>精扫数据点数量</label>
+              <el-input-number v-model="fineScanDataSizeValue" :min="1" :precision="0" :controls="false" size="small" />
+            </div>
+            <div class="field">
+              <div class="wgr-label-row">
+                <span :class="{ 'condition-muted': !waterGasRatioLimitEnabled }">生产水气比上限(m³/10⁴m³)</span>
+                <el-switch v-model="waterGasRatioLimitEnabled" size="small" />
+              </div>
+              <el-input-number
+                  v-model="waterGasRatioLimitValue"
+                  :min="0"
+                  :controls="false"
+                  :disabled="!waterGasRatioLimitEnabled"
+                  size="small"
+              />
+            </div>
+            <el-button
+                size="small"
+                type="primary"
+                :loading="recalculating"
+                :disabled="recalculating"
+                @click="handleRecalculate"
+            >
+              重新计算
+            </el-button>
+          </div>
           <div class="sec-label">生产数据</div>
           <div class="btn-row"><el-button size="small">模板下载</el-button><el-button size="small">导入</el-button></div>
         </div>
@@ -460,6 +549,9 @@ onBeforeUnmount(() => {
 .field { margin-bottom:9px; }
 .field label,.wgr-label-row span { display:block; margin-bottom:3px; color:#555; font-size:12px; }
 .wgr-label-row { display:flex; align-items:center; justify-content:space-between; }
+.condition-panel { padding:9px; border:1px solid #e4e7ed; background:#fafafa; }
+.condition-panel :deep(.el-input-number) { width:100%; }
+.condition-muted { color:#aaa !important; }
 .btn-row { display:flex; gap:8px; }
 .param-tabs { display:flex; height:30px; border-top:1px solid #ddd; }
 .param-tab { flex:1; display:flex; align-items:center; justify-content:center; border-right:1px solid #ddd; font-size:13px; cursor:pointer; }

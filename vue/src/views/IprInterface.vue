@@ -17,7 +17,7 @@ import AGContent from '@/views/WellControlInventory/AGContent.vue'
 import { NODETYPE } from '@/constants/nodeType'
 import { analyticMethodApi, dynamicBalanceApi, materialBalanceApi, nodeApi, projectApi, typicalCurveApi, waterInvasionApi } from '@/api/docker'
 
-const PROJECT_ID = 6
+const PROJECT_ID = 2
 const GAS_RESERVOIR_ID = 1
 const FLOW_BALANCE_NODE_TYPE = NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure
 
@@ -1943,8 +1943,8 @@ const runWaterInvasionForSelectedWell = async (options = {}) => { //点击水侵
   }
 }
 
-const runAnalyticMethodForSelectedWell = async () => {
-  const wellNames = getSelectedAnalyticWellNames()
+const runAnalyticMethodForSelectedWell = async (options = {}) => {
+  const wellNames = options.wellName ? [options.wellName] : getSelectedAnalyticWellNames()
   if (!wellNames.length) {
     ElMessage.warning('请先在左侧选择一口井')
     return
@@ -1959,8 +1959,8 @@ const runAnalyticMethodForSelectedWell = async () => {
       gasReservoirId: Number(GAS_RESERVOIR_ID),
       projectId: Number(PROJECT_ID),
       wellNames,
-      dataSize: 30,
-      minimumWaterGasRatio: -1
+      dataSize: options.dataSize ?? 30,
+      minimumWaterGasRatio: options.minimumWaterGasRatio ?? -1
     })
 
     ElMessage.info('解析法计算中，请稍候...')
@@ -2441,8 +2441,8 @@ const runBlasingameForSelectedWell = async (options = {}) => {
   }
 }
 
-const runNpiForSelectedWell = async () => {
-  const targetWellName = selectedWellName.value
+const runNpiForSelectedWell = async (options = {}) => {
+  const targetWellName = options.wellName || selectedWellName.value
   if (!targetWellName) {
     ElMessage.warning('请先在左侧选择一口井')
     return
@@ -2457,11 +2457,11 @@ const runNpiForSelectedWell = async () => {
       projectId: Number(PROJECT_ID),
       wellNames: [targetWellName],
       fittingType: 3,
-      isSkipFitting: false,
-      dataSize: 300,
-      initScanDataSize: 10,
-      fineScanDataSize: 30,
-      minimumWaterGasRatio: 0.0602
+      isSkipFitting: options.isSkipFitting ?? false,
+      dataSize: options.dataSize ?? 300,
+      initScanDataSize: options.initScanDataSize ?? 10,
+      fineScanDataSize: options.fineScanDataSize ?? 30,
+      minimumWaterGasRatio: options.minimumWaterGasRatio ?? 0.0602
     })
 
     ElMessage.info(`${targetWellName} NPI计算中，请稍候...`)
@@ -2486,8 +2486,8 @@ const runNpiForSelectedWell = async () => {
   }
 }
 
-const runTransientForSelectedWell = async () => {
-  const targetWellName = selectedWellName.value
+const runTransientForSelectedWell = async (options = {}) => {
+  const targetWellName = options.wellName || selectedWellName.value
   if (!targetWellName) {
     ElMessage.warning('请先在左侧选择一口井')
     return
@@ -2502,11 +2502,11 @@ const runTransientForSelectedWell = async () => {
       projectId: Number(PROJECT_ID),
       wellNames: [targetWellName],
       fittingType: 4,
-      isSkipFitting: false,
-      dataSize: 300,
-      initScanDataSize: 10,
-      fineScanDataSize: 30,
-      minimumWaterGasRatio: 0.0602
+      isSkipFitting: options.isSkipFitting ?? false,
+      dataSize: options.dataSize ?? 300,
+      initScanDataSize: options.initScanDataSize ?? 10,
+      fineScanDataSize: options.fineScanDataSize ?? 30,
+      minimumWaterGasRatio: options.minimumWaterGasRatio ?? 0.0602
     })
 
     ElMessage.info(`${targetWellName} Transient计算中，请稍候...`)
@@ -3187,7 +3187,8 @@ onBeforeUnmount(() => {
           :gas-reservoir-id="GAS_RESERVOIR_ID" @refresh-tree="handleRefreshTree"
           @recalculate="runWaterInvasionForSelectedWell" />
         <AnalyticMethodContent v-if="currentView === 'analytic-method'" :node="currentViewNode" :project-id="PROJECT_ID"
-          :gas-reservoir-id="GAS_RESERVOIR_ID" />
+          :gas-reservoir-id="GAS_RESERVOIR_ID" :recalculating="analyticMethodRunning"
+          @recalculate="runAnalyticMethodForSelectedWell" />
         <MaterialBalanceContent v-if="currentView === 'material-balance'" :node="currentViewNode" :project-id="PROJECT_ID"
                                 :gas-reservoir-id="GAS_RESERVOIR_ID" :recalculating="materialBalanceRunning"
                                 @refresh-tree="handleRefreshTree" @recalculate="runMaterialBalanceForSelectedWell"/>
@@ -3198,9 +3199,11 @@ onBeforeUnmount(() => {
         <BlasingameContent v-if="currentView === 'blasingame'" :node="currentViewNode" :project-id="PROJECT_ID"
           :gas-reservoir-id="GAS_RESERVOIR_ID" @recalculate="runBlasingameForSelectedWell" />
         <NpiContent v-if="currentView === 'npi'" :node="currentViewNode" :project-id="PROJECT_ID"
-          :gas-reservoir-id="GAS_RESERVOIR_ID" />
+          :gas-reservoir-id="GAS_RESERVOIR_ID" :recalculating="typicalCurveRunning"
+          @recalculate="runNpiForSelectedWell" />
         <TransientContent v-if="currentView === 'transient'" :node="currentViewNode" :project-id="PROJECT_ID"
-          :gas-reservoir-id="GAS_RESERVOIR_ID" />
+          :gas-reservoir-id="GAS_RESERVOIR_ID" :recalculating="typicalCurveRunning"
+          @recalculate="runTransientForSelectedWell" />
         <WattenbargerContent v-if="currentView === 'wattenbarger'" :node="currentViewNode" :project-id="PROJECT_ID"
           :gas-reservoir-id="GAS_RESERVOIR_ID" :recalculating="typicalCurveRunning"
           @recalculate="runWattenbargerForSelectedWell"/>
