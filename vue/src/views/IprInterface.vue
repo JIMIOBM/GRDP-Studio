@@ -17,7 +17,7 @@ import AGContent from '@/views/WellControlInventory/AGContent.vue'
 import { NODETYPE } from '@/constants/nodeType'
 import { analyticMethodApi, dynamicBalanceApi, materialBalanceApi, nodeApi, projectApi, typicalCurveApi, waterInvasionApi } from '@/api/docker'
 
-const PROJECT_ID = 6
+const PROJECT_ID = 4
 const GAS_RESERVOIR_ID = 3
 const FLOW_BALANCE_NODE_TYPE = NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure
 
@@ -197,6 +197,11 @@ const WATTENBARGER_NODE_TYPES = new Set([
   NODETYPE.NodeType_FracturedHorizontalWellTypicalCurveWattenbarger
 ])
 
+const Material_NODE_Types = new Set([
+  NODETYPE.NodeType_MaterialBalanceMethodForClosedReservoriType,
+
+])
+
 const isBlasingameNode = (item) => {
   const nodeType = item?.nodeType ?? item?.type
   return BLASINGAME_NODE_TYPES.has(nodeType) || getNodeName(item) === 'Blasingame'
@@ -293,13 +298,28 @@ const getMaterialBalanceAverageRowId = (row) =>
   row?.dynamicOriginalGasInplaceID ??
   row?.id
 
+const getMaterialBalanceAverageRowGasReservoirType = (row) => {
+  const type = Number(row?.dynamicOriginalGasInplaceType ?? row?.dynamicOriginalGasInPlaceType)
+  if (type === 1 || type === 2) return 1
+  if (type === 3 || type === 4) return 2
+
+  const description = String(
+    row?.dynamicOriginalGasInplaceMethodDescription ||
+    row?.dynamicOriginalGasInPlaceMethodDescription ||
+    ''
+  )
+  if (description.includes('定容气藏')) return 1
+  if (description.includes('封闭气藏')) return 2
+  return null
+}
+
 const isMaterialBalanceAverageRow = (row) => {
   const type = Number(row?.dynamicOriginalGasInplaceType ?? row?.dynamicOriginalGasInPlaceType)
   const description = String(row?.dynamicOriginalGasInplaceMethodDescription || row?.dynamicOriginalGasInPlaceMethodDescription || '')
-  return type === 1 || type === 2 || /物质平衡.*(实测静压|计算静压)/.test(description)
+  return [1, 2, 3, 4].includes(type) || /(?:定容|封闭)气藏物质平衡.*(实测静压|计算静压)/.test(description)
 }
 
-const getMaterialBalanceRowsForWell = async (wellName, options = {}) => {
+const getMaterialBalanceRowsForWell = async (wellName, options = {}, gasReservoirType = null) => {
   if (!wellName) return []
 
   const pressureRes = await materialBalanceApi.getAverageFormationPressure(
@@ -309,8 +329,15 @@ const getMaterialBalanceRowsForWell = async (wellName, options = {}) => {
     options
   )
 
-  return getAverageFormationPressureRows(pressureRes.data)
+  const rows = getAverageFormationPressureRows(pressureRes.data)
     .filter(isMaterialBalanceAverageRow)
+
+  const requestedType = Number(gasReservoirType)
+  if (requestedType !== 1 && requestedType !== 2) return rows
+
+  return rows.filter(
+    row => getMaterialBalanceAverageRowGasReservoirType(row) === requestedType
+  )
 }
 
 const getMaterialBalanceDeleteIds = async (node) => {
@@ -1410,26 +1437,38 @@ const getDynamicBalanceNodeOnce = async (wellName, delayMs = 1200) => {
   return { rootNode, resultNode: findDynamicBalanceNode(rootNode, wellName) }
 }
 
-const getMaterialBalanceNodeOnce = async (wellName, delayMs = 1200) => {
+const getMaterialBalanceNodeOnce = async (wellName, delayMs = 1200, gasReservoirType = null) => {
   if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs))
   const rootNode = await fetchMaterialBalanceNode()
   const wellNode = (rootNode?.subNodes || []).find(item =>
     item.nodeTitle === wellName || item.wellName === wellName
   )
+  const requestedType = Number(gasReservoirType)
+  const allowedNodeTypes = requestedType === 2
+    ? [
+        NODETYPE.NodeType_ConfinedGasReservoirMaterialBalanceMethodForActualStaticPressure,
+        NODETYPE.NodeType_ConfinedGasReservoirMaterialBalanceMethodForCalculatedStaticPressure
+      ]
+    : requestedType === 1
+      ? [
+          NODETYPE.NodeType_ConstantVolumeGasReservoirMaterialBalanceMethodForActualStaticPressure,
+          NODETYPE.NodeType_ConstantVolumeReservoirMaterialBalanceMethodForCalculatedStaticPressure
+        ]
+      : [
+          NODETYPE.NodeType_ConfinedGasReservoirMaterialBalanceMethodForActualStaticPressure,
+          NODETYPE.NodeType_ConfinedGasReservoirMaterialBalanceMethodForCalculatedStaticPressure,
+          NODETYPE.NodeType_ConstantVolumeGasReservoirMaterialBalanceMethodForActualStaticPressure,
+          NODETYPE.NodeType_ConstantVolumeReservoirMaterialBalanceMethodForCalculatedStaticPressure
+        ]
   const resultNode = (wellNode?.subNodes || []).find(item => {
-    const type = item.nodeType ?? item.type
-    return [
-      NODETYPE.NodeType_ConfinedGasReservoirMaterialBalanceMethodForActualStaticPressure,
-      NODETYPE.NodeType_ConfinedGasReservoirMaterialBalanceMethodForCalculatedStaticPressure,
-      NODETYPE.NodeType_ConstantVolumeGasReservoirMaterialBalanceMethodForActualStaticPressure,
-      NODETYPE.NodeType_ConstantVolumeReservoirMaterialBalanceMethodForCalculatedStaticPressure
-    ].includes(type)
+    const type = Number(item.nodeType ?? item.type)
+    return allowedNodeTypes.includes(type)
   })
   return { rootNode, resultNode }
 }
 
 //物质平衡结果等待函数
-const waitForMaterialBalanceResult = async (wellName, maxRetries = 20, intervalMs = 500) => {
+const waitForMaterialBalanceResult = async (wellName, gasReservoirType, maxRetries = 20, intervalMs = 500) => {
   let latestResult = {
     rootNode: null,
     resultNode: null,
@@ -1445,12 +1484,12 @@ const waitForMaterialBalanceResult = async (wellName, maxRetries = 20, intervalM
 
     try {
       const { rootNode, resultNode } =
-          await getMaterialBalanceNodeOnce(wellName, 0)
+          await getMaterialBalanceNodeOnce(wellName, 0, gasReservoirType)
 
       const materialBalanceRows = resultNode
           ? await getMaterialBalanceRowsForWell(wellName, {
             silentError: true
-          })
+          }, gasReservoirType)
           : []
 
       latestResult = {
@@ -1880,7 +1919,12 @@ const runAnalyticMethodForSelectedWell = async () => {
   }
 }
 
-const runMaterialBalanceForSelectedWell = async () => {
+const normalizeMaterialBalanceReservoirType = (value) => {
+  if (value === 'closed' || Number(value) === 2) return 2
+  return 1
+}
+
+const runMaterialBalanceForSelectedWell = async (recalculateOptions = {}) => {
   const targetWellName = selectedWellName.value
   // 接口需要批量计算全部井，但页面仍只展示当前选中井的计算状态。
   // const allWellNames = getAllWellNames()
@@ -1895,12 +1939,20 @@ const runMaterialBalanceForSelectedWell = async () => {
   //调计算接口之前创建日志监听器
   const logWaiter = createMaterialBalanceLogWaiter(targetWellName)
   try {
+    const gasReservoirType = normalizeMaterialBalanceReservoirType(
+      recalculateOptions?.gasReservoirType
+    )
+    const requestedWaterGasRatioLimit = Number(recalculateOptions?.waterGasRatioLimit)
+    const waterGasRatioLimit = Number.isFinite(requestedWaterGasRatioLimit)
+      ? requestedWaterGasRatioLimit
+      : 0.0602
+
     await materialBalanceApi.calc({
       wellNames: [targetWellName],
-      gasReservoirType: 1,
+      gasReservoirType,
       gasReservoirId: Number(GAS_RESERVOIR_ID),
       projectId: Number(PROJECT_ID),
-      waterGasRatioLimit: 0.0602
+      waterGasRatioLimit
     })
 
     ElMessage.info(`${targetWellName} 物质平衡计算中，请稍候...`)
@@ -1915,7 +1967,10 @@ const runMaterialBalanceForSelectedWell = async () => {
     // const materialBalanceRows = await getMaterialBalanceRowsForWell(targetWellName, { silentError: true })
     //
     // 日志确认成功后，等待首次创建的节点和结果数据完成落库。
-    const {rootNode, resultNode, materialBalanceRows} = await waitForMaterialBalanceResult(targetWellName)
+    const {rootNode, resultNode, materialBalanceRows} = await waitForMaterialBalanceResult(
+      targetWellName,
+      gasReservoirType
+    )
 
     if (!resultNode) {
       throw new Error(
@@ -1954,7 +2009,11 @@ const runMaterialBalanceForSelectedWell = async () => {
 
     activeNodeId.value = viewNode.id
     currentView.value = 'material-balance'
-    currentViewNode.value = viewNode
+    currentViewNode.value = {
+      ...viewNode,
+      materialBalanceReservoirType: gasReservoirType,
+      materialBalanceRefreshKey: Date.now()
+    }
     ElMessage.success(`${targetWellName} 物质平衡计算完成`)
   } catch (error) {
     logWaiter.cancel()
@@ -3064,8 +3123,9 @@ onBeforeUnmount(() => {
           @recalculate="runWaterInvasionForSelectedWell" />
         <AnalyticMethodContent v-if="currentView === 'analytic-method'" :node="currentViewNode" :project-id="PROJECT_ID"
           :gas-reservoir-id="GAS_RESERVOIR_ID" />
-        <MaterialBalanceContent v-if="currentView === 'material-balance'" :node="currentViewNode"
-                                 :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" @refresh-tree="handleRefreshTree" />
+        <MaterialBalanceContent v-if="currentView === 'material-balance'" :node="currentViewNode" :project-id="PROJECT_ID"
+                                :gas-reservoir-id="GAS_RESERVOIR_ID" :recalculating="materialBalanceRunning"
+                                @refresh-tree="handleRefreshTree" @recalculate="runMaterialBalanceForSelectedWell"/>
         <FlowBalanceContent v-if="currentView === 'flow-balance'" :node="currentViewNode"
                             :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID"
                             :recalculating="flowBalanceRunning" @recalculate="handleFlowBalanceRecalculate"
