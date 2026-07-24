@@ -1968,7 +1968,6 @@ const finalizeAgResult = async (wellName, logPayload, maxRetries = 8, intervalMs
       currentView.value = 'Agarwal-Gardner'
       currentViewNode.value = viewNode
       activeNode.value = treeNode || viewNode
-      ElMessage.success(`${wellName} AG计算完成`)
       return
     } catch (error) {
       lastError = error
