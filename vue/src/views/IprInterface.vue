@@ -2620,8 +2620,8 @@ const runAGForSelectedWell = async (params = {}) => {
 
   typicalCurveRunning.value = true
   const logWaiter = createAGLogWaiter(targetWellName)
-  try {
-    const fittingRes = await typicalCurveApi.fitting({
+   try {
+    const fittingFailure = typicalCurveApi.fitting({
       gasReservoirId: Number(GAS_RESERVOIR_ID),
       projectId: Number(PROJECT_ID),
       wellNames: [targetWellName],
@@ -2631,21 +2631,22 @@ const runAGForSelectedWell = async (params = {}) => {
       fineScanDataSize: params.fineScanDataSize ?? 30,
       initScanDataSize: params.initScanDataSize ?? 10,
       minimumWaterGasRatio: params.minimumWaterGasRatio ?? 0.0602
+    }).then((fittingRes) => {
+      const fittingMessage = getResponseMessage(fittingRes)
+      if (isFailureResponse(fittingRes) && !fittingMessage.includes('大于0')) {
+        throw new Error(fittingMessage || AG_FITTING_REGRESSION_ERROR)
+      }
+      return new Promise(() => { })
     })
 
-    const fittingMessage = getResponseMessage(fittingRes)
-    if (isFailureResponse(fittingRes || fittingMessage.includes('大于0'))) {
-      throw new Error(fittingMessage || AG_FITTING_REGRESSION_ERROR)
-    }
-
     ElMessage.info(`${targetWellName} AG计算中，请稍候...`)
+    const logPayload = await Promise.race([logWaiter.promise, fittingFailure])
+    ElMessage.success(`${targetWellName} AG计算完成`)
 
-    logWaiter.promise
-      .then((logPayload) => finalizeAgResult(targetWellName, logPayload))
-      .catch((error) => {
-        ElMessage.warning(`${targetWellName} Blasingame已完成，结果暂未刷新，请稍后重新打开`)
-      console.warn('Blasingame计算已完成，但结果刷新失败', error)
-      })
+    void finalizeAgResult(targetWellName, logPayload).catch((error) => {
+      ElMessage.warning(`${targetWellName} AG已完成，结果暂未刷新，请稍后重新打开`)
+      console.warn('AG计算已完成，但结果刷新失败', error)
+    })
   } catch (error) {
     logWaiter.cancel()
     ElMessage.error(error.message || 'AG计算失败')
