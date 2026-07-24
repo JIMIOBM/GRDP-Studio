@@ -1751,6 +1751,65 @@ const waitForWattenbargerNode = async (
   return latestResult
 }
 
+const getWattenbargerResultInput = (payload) =>
+  payload?.input || payload?.inputs || payload?.parameter || {}
+
+const getFirstDefinedValue = (source, keys) => {
+  for (const key of keys) {
+    if (source?.[key] !== undefined && source?.[key] !== null) return source[key]
+  }
+  return undefined
+}
+
+const isWattenbargerResultForOptions = (payload, options) => {
+  const input = getWattenbargerResultInput(payload)
+  const numericFields = [
+    [['dataSize'], options.dataSize],
+    [['initScanDataSize'], options.initScanDataSize],
+    [['fineScanDataSize', 'fineSandDataSize'], options.fineScanDataSize],
+    [['minimumWaterGasRatio', 'waterGasRatioLimit'], options.minimumWaterGasRatio]
+  ]
+
+  const numericMatches = numericFields.every(([keys, expected]) => {
+    const actual = Number(getFirstDefinedValue(input, keys))
+    return Number.isFinite(actual) && actual === Number(expected)
+  })
+  const actualSkipFitting = getFirstDefinedValue(input, ['isSkipFitting'])
+
+  return numericMatches &&
+    actualSkipFitting !== undefined &&
+    Boolean(actualSkipFitting) === Boolean(options.isSkipFitting)
+}
+
+const waitForWattenbargerResult = async (
+  nodeId,
+  options,
+  maxRetries = 30,
+  intervalMs = 500
+) => {
+  let latestPayload = null
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    if (attempt > 0) await new Promise(resolve => setTimeout(resolve, intervalMs))
+
+    try {
+      const response = await typicalCurveApi.getResult(
+        PROJECT_ID,
+        GAS_RESERVOIR_ID,
+        nodeId
+      )
+      latestPayload = normalizePayload(response)
+      if (isWattenbargerResultForOptions(latestPayload, options)) {
+        return latestPayload
+      }
+    } catch {
+      // 完成日志可能略早于结果详情落库，继续轮询。
+    }
+  }
+
+  throw new Error('Wattenbarger计算已完成，但最新结果尚未更新')
+}
+
 const getAGNodeOnce = async (wellName, delayMs = 1200) => {
   if (delayMs > 0) {
     await new Promise(resolve => setTimeout(resolve, delayMs))
@@ -2472,8 +2531,8 @@ const runTransientForSelectedWell = async () => {
   }
 }
 
-const runWattenbargerForSelectedWell = async () => {
-  const targetWellName = selectedWellName.value
+const runWattenbargerForSelectedWell = async (options={}) => {
+  const targetWellName = options.wellName || selectedWellName.value
   if (!targetWellName) {
     ElMessage.warning('请先在左侧选择一口井')
     return
@@ -2483,16 +2542,20 @@ const runWattenbargerForSelectedWell = async () => {
   //监听器创建
   const logWaiter = createWattenbargerLogWaiter(targetWellName)
   try {
+    const fittingOptions = {
+      isSkipFitting: options.isSkipFitting ?? false,
+      dataSize: options.dataSize ?? 300,
+      fineScanDataSize: options.fineScanDataSize ?? 30,
+      initScanDataSize: options.initScanDataSize ?? 10,
+      minimumWaterGasRatio: options.minimumWaterGasRatio ?? 0.0602
+    }
+
     await typicalCurveApi.fitting({
       gasReservoirId: Number(GAS_RESERVOIR_ID),
       projectId: Number(PROJECT_ID),
       wellNames: [targetWellName],
       fittingType: 5,
-      isSkipFitting: false,
-      dataSize: 300,
-      fineScanDataSize: 30,
-      initScanDataSize: 10,
-      minimumWaterGasRatio: 0.0602
+      ...fittingOptions
     })
     ElMessage.info(`${targetWellName} Wattenbarger计算中，请稍候...`)
     await logWaiter.promise
@@ -2519,14 +2582,15 @@ const runWattenbargerForSelectedWell = async () => {
       nodeTitle: 'Wattenbarger'
     })
     const nodeId = resultNode.nodeId || resultNode.id
-    const resultRes = await typicalCurveApi.getResult(PROJECT_ID, GAS_RESERVOIR_ID, nodeId)
+    const latestResult = await waitForWattenbargerResult(nodeId, fittingOptions)
 
     const viewNode = {
       id: nodeId,
       label: 'Wattenbarger',
       type: resultNode?.nodeType || resultNode?.type || NODETYPE.NodeType_TypicalCurveWattenbarger,
       wellName: targetWellName,
-      raw: normalizePayload(resultRes),
+      raw: latestResult,
+      wattenbargerRefreshKey: Date.now(),
       treeNode: resultNode
     }
 
@@ -3137,7 +3201,8 @@ onBeforeUnmount(() => {
         <TransientContent v-if="currentView === 'transient'" :node="currentViewNode" :project-id="PROJECT_ID"
           :gas-reservoir-id="GAS_RESERVOIR_ID" />
         <WattenbargerContent v-if="currentView === 'wattenbarger'" :node="currentViewNode" :project-id="PROJECT_ID"
-          :gas-reservoir-id="GAS_RESERVOIR_ID" />
+          :gas-reservoir-id="GAS_RESERVOIR_ID" :recalculating="typicalCurveRunning"
+          @recalculate="runWattenbargerForSelectedWell"/>
         <DynamicBalanceContent v-if="currentView === 'dynamic-balance'" :node="currentViewNode" :project-id="PROJECT_ID"
           :gas-reservoir-id="GAS_RESERVOIR_ID" />
         <AGContent v-if="currentView === 'Agarwal-Gardner'" :node="currentViewNode" :project-id="PROJECT_ID"
