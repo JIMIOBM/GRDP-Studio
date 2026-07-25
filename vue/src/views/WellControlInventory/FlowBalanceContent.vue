@@ -409,45 +409,37 @@ const getOutputValue = (name) => {
   return value[name]
 }
 
-const formatOutputValue = (field, value) => {
-  if (value === undefined || value === null || value === '') return ''
-  const number = toNumber(value)
-  if (number === null) return value
-
-  const decimalPlaces = Number(field?.displayDecimal)
-  const precision = Number.isInteger(decimalPlaces) && decimalPlaces >= 0 ? decimalPlaces : null
-  if (field?.isScientificNotation) return formatSci(number, precision ?? 4)
-  return precision === null ? number : number.toFixed(precision)
-}
-
 const outputFields = computed(() => {
-  const interfaceFields = Array.isArray(resultData.value?.resultFields)
-      ? resultData.value.resultFields
-      : []
+  const originalGasVolume = toNumber(getOutputValue('originalGasVolume'))
+  const rsquared = toNumber(getOutputValue('rsquared'))
 
-  if (interfaceFields.length) {
-    return interfaceFields.map(field => ({
-      key: field.name,
-      label: `${field.name_cn || field.name}${field.unit_label ? `(${field.unit_label})` : ''}`,
-      value: formatOutputValue(field, getOutputValue(field.name))
-    }))
-  }
-
-  const fallbackFields = [
-    { name: 'originalGasVolume', name_cn: '动态储量', unit_label: '10⁸m³', displayDecimal: 4 },
-    { name: 'gfi', name_cn: '游离气动态储量', unit_label: '10⁸m³', displayDecimal: 4 },
-    { name: 'gai', name_cn: '吸附气动态储量', unit_label: '10⁸m³', displayDecimal: 4 },
-    { name: 'gradient', name_cn: '回归分析斜率', unit_label: 'MPa/10⁸m³', displayDecimal: 2, isScientificNotation: true },
-    { name: 'intercept', name_cn: '回归分析截距', unit_label: 'MPa', displayDecimal: 4 },
-    { name: 'rsquared', name_cn: 'R²', unit_label: 'dless', displayDecimal: 4 },
-    { name: 'reliablity', name_cn: '结果可靠性' }
+  return [
+    {
+      key: 'originalGasVolume',
+      label: '动态储量(10⁸m³)',
+      value: originalGasVolume === null ? '' : originalGasVolume.toFixed(4)
+    },
+    {
+      key: 'intercept',
+      label: '回归分析截距(MPa)',
+      value: formatSci(toNumber(getOutputValue('intercept')))
+    },
+    {
+      key: 'gradient',
+      label: '回归分析斜率(MPa/10⁸m³)',
+      value: formatSci(toNumber(getOutputValue('gradient')))
+    },
+    {
+      key: 'rsquared',
+      label: 'R²(dless)',
+      value: rsquared === null ? '' : rsquared.toFixed(4)
+    },
+    {
+      key: 'reliablity',
+      label: '结果可靠性',
+      value: getOutputValue('reliablity') ?? ''
+    }
   ]
-
-  return fallbackFields.map(field => ({
-    key: field.name,
-    label: `${field.name_cn}${field.unit_label ? `(${field.unit_label})` : ''}`,
-    value: formatOutputValue(field, getOutputValue(field.name))
-  }))
 })
 
 const equationText = computed(() => {

@@ -100,10 +100,17 @@ export const analyticMethodApi = {
 
   getSummaryChart: (projectId, gasReservoirId) =>
     dockerRequest.get(`/projectanalysis/analysismethods/summary/chart/${projectId}/${gasReservoirId}`),
+
   deleteResult: (projectId, gasReservoirId, wellName) =>
-    dockerRequest.delete(`/projectanalysis/analysismethods/${projectId}/${gasReservoirId}/${wellName}`,{
+    dockerRequest.delete(`/projectanalysis/analysismethods/${projectId}/${gasReservoirId}/${wellName}`, {
       data: { wellName }
-})
+    })
+}
+
+/* ===== 通知日志 ===== */
+export const notifyApi = {
+  getLogs: (params) =>
+    dockerRequest.get('/common/notify/logs', { params })
 }
 
 /* ===== 动态储量 - 物质平衡 ===== */
@@ -215,6 +222,55 @@ export const wellApi = {
      */
     getWells: (projectId, gasReservoirId) =>
         dockerRequest.get(`/projectanalysis/${projectId}/${gasReservoirId}/wells`)
+}
+
+/* ===== 数据管理 ===== */
+export const dataManagementApi = {
+  getWellHead: (projectId, gasReservoirId, options = {}) =>
+    dockerRequest.get(
+      `/projects/${projectId}/gasreservoirs/${gasReservoirId}/summary/head`,
+      {
+        ...options,
+        headers: {
+          'X-Project-Id': String(projectId),
+          ...options.headers
+        }
+      }
+    ),
+
+  getWellDeviation: (projectId, gasReservoirId, wellName, options = {}) =>
+    dockerRequest.get(
+      `/projects/${projectId}/gasreservoirs/${gasReservoirId}/wells/${encodeURIComponent(wellName)}/deviationdataformatone`,
+      {
+        ...options,
+        params: {
+          page: 1,
+          size: -1,
+          ...options.params
+        },
+        headers: {
+          'X-Project-Id': String(projectId),
+          ...options.headers
+        }
+      }
+    ),
+
+  getLogInterpretation: (projectId, gasReservoirId, wellName, options = {}) =>
+    dockerRequest.get(
+      `/projects/${projectId}/gasreservoirs/${gasReservoirId}/wells/${encodeURIComponent(wellName)}/loginterpretationresult`,
+      {
+        ...options,
+        params: {
+          page: 1,
+          size: -1,
+          ...options.params
+        },
+        headers: {
+          'X-Project-Id': String(projectId),
+          ...options.headers
+        }
+      }
+    )
 }
 
 /* ===== 分析参数 ===== */

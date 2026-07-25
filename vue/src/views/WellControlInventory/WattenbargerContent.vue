@@ -8,7 +8,8 @@ import wattenbargerTypeCurveData from '@/constants/typeCurves/wattenbarger.json'
 const props = defineProps({
   node: Object,
   projectId: [Number, String],
-  gasReservoirId: [Number, String]
+  gasReservoirId: [Number, String],
+  recalculating: Boolean
 })
 const emit = defineEmits(['recalculate'])
 
@@ -58,7 +59,33 @@ const wellName = computed(() =>
 )
 const resultTabTitle = computed(() => `诊断曲线-Wattenbarger-${wellName.value || '当前井'}-分析结果`)
 
+const PRODUCTION_TEMPLATE_COLUMNS = [
+  { label: '日期', unit: '无' },
+  { label: '井底流压', unit: 'MPa' },
+  { label: '气产量', unit: '10^4m3/d' },
+  { label: '累产气量', unit: '10^8m3' },
+  { label: '累产水量', unit: '10^4m3' }
+]
+
 const asArray = (value) => Array.isArray(value) ? value : []
+
+const getXlsx = async () => import('xlsx')
+
+const saveWorkbook = (XLSX, workbook, filename) => {
+  XLSX.writeFile(workbook, filename)
+}
+
+const downloadProductionTemplate = async () => {
+  const XLSX = await getXlsx()
+  const rows = [
+    PRODUCTION_TEMPLATE_COLUMNS.map(column => column.label),
+    PRODUCTION_TEMPLATE_COLUMNS.map(column => column.unit)
+  ]
+  const sheet = XLSX.utils.aoa_to_sheet(rows)
+  const workbook = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(workbook, sheet, '生产数据')
+  saveWorkbook(XLSX, workbook, `Wattenbarger生产数据模板-${wellName.value || 'well'}.xlsx`)
+}
 
 const collectCandidateArrays = (source, keys) => {
   const list = []
@@ -132,6 +159,8 @@ watch(input, (value) => {
 }, { immediate: true })
 
 const handleRecalculate = () => {
+  if (props.recalculating) return
+
   const dataSize = Number(dataSizeValue.value)
   const initScanDataSize = Number(initScanDataSizeValue.value)
   const fineScanDataSize = Number(fineScanDataSizeValue.value)
@@ -556,7 +585,12 @@ function startLegendDrag(event) {
   window.addEventListener('mouseup', stopLegendDrag)
 }
 
-watch(() => [resultId.value, props.projectId, props.gasReservoirId], loadResult, { immediate: true })
+watch(() => [
+  resultId.value,
+  props.projectId,
+  props.gasReservoirId,
+  props.node?.wattenbargerRefreshKey
+], loadResult, { immediate: true })
 watch(raw, renderChartSoon, { deep: true })
 watch(activeChartTab, renderChartSoon)
 
@@ -679,7 +713,12 @@ onBeforeUnmount(() => {
                       size="small"
                       :disabled="!waterGasRatioEnabled"
                   />
-                  <el-button size="small" @click="handleRecalculate">重新计算</el-button>
+                  <el-button
+                      size="small"
+                      :loading="recalculating"
+                      :disabled="recalculating"
+                      @click="handleRecalculate"
+                  >重新计算</el-button>
                 </div>
               </div>
             </div>
@@ -710,7 +749,7 @@ onBeforeUnmount(() => {
 
           <div class="sec-label">生产数据</div>
           <div class="btn-row">
-            <el-button size="small">模板下载</el-button>
+            <el-button size="small" @click="downloadProductionTemplate">模板下载</el-button>
             <el-button size="small">导入</el-button>
           </div>
         </div>

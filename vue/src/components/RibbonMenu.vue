@@ -22,7 +22,10 @@ const defaultTabs = [
       {
         title: '数据管理',
         columns: [
-          { type: 'checks', items: ['动态数据', '岩石及流体性质', '相渗数据'] }
+          { type: 'checks', items: ['井头数据', '井斜数据', '测井数据'] },
+          { type: 'checks', items: ['完井数据', '其他数据', '注采数据'] },
+          { type: 'checks', items: ['产能测试', '静压数据', 'PVT性质'] },
+          { type: 'checks', items: ['相渗数据'] }
         ]
       },
       {
@@ -231,6 +234,19 @@ const iconMap = Object.fromEntries(
   ])
 )
 
+// 数据管理沿用现有 Ribbon 图标资产，保持线宽、配色和视觉密度一致。
+const iconAliases = {
+  井头数据: '井身结构',
+  完井数据: '边界条件',
+  产能测试: '产能试井',
+  井斜数据: '温度模型',
+  其他数据: '数据映射',
+  静压数据: '压力折算',
+  测井数据: '动态数据',
+  注采数据: '注采拟合',
+  PVT性质: 'PVT模型'
+}
+
 const switchTab = (idx) => { //切换页签
   activeTab.value = idx
 }
@@ -242,7 +258,7 @@ const onItemClick = (groupTitle, label) => { //点击菜单项
 
 
 //渲染图表
-const getIcon = (label) => iconMap[normalizeIconKey(label)] || ''
+const getIcon = (label) => iconMap[normalizeIconKey(iconAliases[label] || label)] || ''
 </script>
 
 <template>
