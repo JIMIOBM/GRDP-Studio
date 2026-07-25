@@ -228,8 +228,8 @@ const analysisDataCellCount = computed(() => analysisTableColumns.value.length *
   flex: 1;
   min-height: 0;
   display: flex;
-  gap: 12px;
-  padding: 12px 14px;
+  gap: 0;
+  padding: 10px 12px;
   box-sizing: border-box;
   overflow: hidden;
 }
@@ -239,13 +239,13 @@ const analysisDataCellCount = computed(() => analysisTableColumns.value.length *
   min-height: 0;
   display: flex;
   gap: 0;
-  padding: 12px 14px;
+  padding: 10px 12px;
   box-sizing: border-box;
   overflow: hidden;
 }
 
 .gas-analysis-workspace.table-collapsed {
-  padding: 12px 14px;
+  padding: 10px 12px;
 }
 
 .gas-analysis-panel {
@@ -277,15 +277,14 @@ const analysisDataCellCount = computed(() => analysisTableColumns.value.length *
   flex-direction: column;
   border: 1px solid #d4d7db;
   border-right: 0;
-  border-radius: 4px 0 0 4px;
   background: #fff;
   overflow: hidden;
 }
 
 .gas-analysis-panel-heading {
-  height: 40px;
-  flex: 0 0 40px;
-  padding: 0 10px;
+  height: 36px;
+  flex: 0 0 36px;
+  padding: 0 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -300,7 +299,7 @@ const analysisDataCellCount = computed(() => analysisTableColumns.value.length *
   min-width: 0;
   display: grid;
   grid-template-columns: repeat(var(--analysis-column-count), minmax(0, 1fr));
-  grid-template-rows: 48px repeat(25, minmax(31px, 1fr));
+  grid-template-rows: 42px repeat(25, minmax(30px, 1fr));
   min-height: 0;
   overflow: hidden;
 }
@@ -378,17 +377,16 @@ const analysisDataCellCount = computed(() => analysisTableColumns.value.length *
   flex-direction: column;
   overflow: hidden;
   border: 1px solid #d4d7db;
-  border-radius: 0 4px 4px 0;
   background: #fff;
 }
 
 .gas-curve-selector {
-  height: 40px;
-  flex: 0 0 40px;
+  height: 36px;
+  flex: 0 0 36px;
   display: flex;
   align-items: center;
-  gap: 18px;
-  padding: 0 16px;
+  gap: 20px;
+  padding: 0 14px;
   box-sizing: border-box;
   border-bottom: 1px solid #e2e6ea;
   background: #fafbfc;
@@ -416,7 +414,7 @@ const analysisDataCellCount = computed(() => analysisTableColumns.value.length *
   display: grid;
   grid-template-columns: 56px minmax(0, 1fr) 56px;
   grid-template-rows: minmax(0, 1fr) 32px;
-  padding: 18px 20px 8px 12px;
+  padding: 16px 18px 8px 10px;
   box-sizing: border-box;
 }
 
@@ -462,22 +460,22 @@ const analysisDataCellCount = computed(() => analysisTableColumns.value.length *
 }
 
 .gas-parameter-panel {
-  width: 240px;
-  flex: 0 0 240px;
-  padding: 10px 12px 12px;
+  width: 260px;
+  flex: 0 0 260px;
+  padding: 12px 14px;
   box-sizing: border-box;
   background: #fff;
   border: 1px solid #d4d7db;
-  border-radius: 4px;
+  border-right: 0;
   overflow-y: auto;
 }
 
 .gas-parameter-section + .gas-parameter-section {
-  margin-top: 13px;
+  margin-top: 16px;
 }
 
 .gas-section-heading {
-  height: 23px;
+  height: 22px;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -492,19 +490,19 @@ const analysisDataCellCount = computed(() => analysisTableColumns.value.length *
 
 .gas-field-group {
   display: block;
-  margin-top: 9px;
+  margin-top: 10px;
   color: #404040;
 
   > span {
     display: block;
-    margin-bottom: 5px;
-    line-height: 19px;
+    margin-bottom: 4px;
+    line-height: 18px;
   }
 
   select,
   input {
     width: 100%;
-    height: 28px;
+    height: 30px;
     padding: 2px 8px;
     box-sizing: border-box;
     border: 1px solid #aeb6bf;
@@ -526,12 +524,10 @@ const analysisDataCellCount = computed(() => analysisTableColumns.value.length *
   min-width: 0;
   display: grid;
   grid-template-columns: repeat(5, minmax(145px, 1fr));
-  grid-template-rows: repeat(28, minmax(31px, 1fr));
+  grid-template-rows: 36px repeat(27, minmax(30px, 1fr));
   margin: 0;
   overflow: hidden;
   border: 1px solid #d4d7db;
-  border-radius: 4px;
-  box-shadow: 0 1px 3px rgba(31, 45, 61, 0.08);
 }
 
 .gas-grid-cell {
@@ -556,17 +552,19 @@ const analysisDataCellCount = computed(() => analysisTableColumns.value.length *
 }
 
 .gas-result-tabs {
-  height: 30px;
-  flex: 0 0 30px;
+  height: 32px;
+  flex: 0 0 32px;
   display: flex;
   align-items: flex-end;
+  padding-left: 12px;
+  box-sizing: border-box;
   border-top: 1px solid #e4e7ed;
   background: #fff;
 }
 
 .gas-result-tab {
   min-width: 88px;
-  height: 30px;
+  height: 32px;
   padding: 0 16px;
   border: 0;
   border-right: 1px solid #e4e7ed;
@@ -584,14 +582,14 @@ const analysisDataCellCount = computed(() => analysisTableColumns.value.length *
   &.active {
     color: #111;
     border-top-color: #111;
-    font-weight: 700;
+    font-weight: 600;
   }
 }
 
 @media (max-width: 950px) {
   .gas-parameter-panel {
-    width: 225px;
-    flex-basis: 225px;
+    width: 240px;
+    flex-basis: 240px;
   }
 
   .gas-data-grid {
