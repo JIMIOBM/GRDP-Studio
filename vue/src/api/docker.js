@@ -224,6 +224,55 @@ export const wellApi = {
         dockerRequest.get(`/projectanalysis/${projectId}/${gasReservoirId}/wells`)
 }
 
+/* ===== 数据管理 ===== */
+export const dataManagementApi = {
+  getWellHead: (projectId, gasReservoirId, options = {}) =>
+    dockerRequest.get(
+      `/projects/${projectId}/gasreservoirs/${gasReservoirId}/summary/head`,
+      {
+        ...options,
+        headers: {
+          'X-Project-Id': String(projectId),
+          ...options.headers
+        }
+      }
+    ),
+
+  getWellDeviation: (projectId, gasReservoirId, wellName, options = {}) =>
+    dockerRequest.get(
+      `/projects/${projectId}/gasreservoirs/${gasReservoirId}/wells/${encodeURIComponent(wellName)}/deviationdataformatone`,
+      {
+        ...options,
+        params: {
+          page: 1,
+          size: -1,
+          ...options.params
+        },
+        headers: {
+          'X-Project-Id': String(projectId),
+          ...options.headers
+        }
+      }
+    ),
+
+  getLogInterpretation: (projectId, gasReservoirId, wellName, options = {}) =>
+    dockerRequest.get(
+      `/projects/${projectId}/gasreservoirs/${gasReservoirId}/wells/${encodeURIComponent(wellName)}/loginterpretationresult`,
+      {
+        ...options,
+        params: {
+          page: 1,
+          size: -1,
+          ...options.params
+        },
+        headers: {
+          'X-Project-Id': String(projectId),
+          ...options.headers
+        }
+      }
+    )
+}
+
 /* ===== 分析参数 ===== */
 export const parametersApi = {
     /**

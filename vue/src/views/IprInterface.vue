@@ -15,6 +15,7 @@ import TransientContent from '@/views/WellControlInventory/TransientContent.vue'
 import DynamicBalanceContent from '@/views/WellControlInventory/DynamicBalanceContent.vue'
 import AGContent from '@/views/WellControlInventory/AGContent.vue'
 import PvtPropertiesContent from '@/views/DataManagement/PvtPropertiesContent.vue'
+import WellDataTableContent from '@/views/DataManagement/WellDataTableContent.vue'
 import { NODETYPE } from '@/constants/nodeType'
 import { analyticMethodApi, dynamicBalanceApi, materialBalanceApi, nodeApi, notifyApi, projectApi, typicalCurveApi, waterInvasionApi } from '@/api/docker'
 
@@ -3188,6 +3189,27 @@ const handleSelect = async (node) => { // 点击左侧树节点
 }
 
 const handleCommand = ({ group, name }) => { // 接收顶部菜单栏的点击事件
+  const dataViewByName = {
+    井头数据: 'wellhead',
+    井斜数据: 'deviation',
+    测井数据: 'logging'
+  }
+  const dataType = dataViewByName[name]
+
+  if (dataType) {
+    if (!selectedWellName.value) {
+      ElMessage.warning('请先在左侧选择一口井')
+      return
+    }
+
+    currentView.value = 'well-data-table'
+    currentViewNode.value = {
+      wellName: selectedWellName.value,
+      dataType
+    }
+    return
+  }
+
   if (name === 'PVT性质') {
     currentView.value = 'pvt-properties'
     currentViewNode.value = null
@@ -3289,6 +3311,9 @@ onBeforeUnmount(() => {
       <!--     右侧的主要内容区域-->
       <main class="content-area">
         <PvtPropertiesContent v-if="currentView === 'pvt-properties'" />
+        <WellDataTableContent v-if="currentView === 'well-data-table'"
+          :data-type="currentViewNode?.dataType" :well-name="currentViewNode?.wellName"
+          :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
         <WaterInvasionContent v-if="currentView === 'water-invasion'" :node="currentViewNode" :project-id="PROJECT_ID"
           :gas-reservoir-id="GAS_RESERVOIR_ID" @refresh-tree="handleRefreshTree"
           @recalculate="runWaterInvasionForSelectedWell" />
