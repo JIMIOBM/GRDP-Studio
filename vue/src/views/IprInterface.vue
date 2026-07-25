@@ -3211,15 +3211,8 @@ const handleCommand = ({ group, name }) => { // 接收顶部菜单栏的点击�
   }
 
   if (name === 'PVT性质') {
-    if (!selectedWellName.value) {
-      ElMessage.warning('请先在左侧选择一口井')
-      return
-    }
-
     currentView.value = 'pvt-properties'
-    currentViewNode.value = {
-      wellName: selectedWellName.value
-    }
+    currentViewNode.value = null
     return
   }
 
