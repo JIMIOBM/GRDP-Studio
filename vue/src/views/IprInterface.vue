@@ -2267,9 +2267,20 @@ const runDynamicBalanceForSelectedWell = async () => {
       if (lastError && !lastError.message.includes('超时')) {
         throw lastError
       }
-      ElMessage.warning(`${targetWellName} 动态平衡计算时间较长，请在左侧树中手动查看结果`)
-      console.warn('动态平衡计算超时，未在规定时间内获取到结果节点')
-      return
+
+      try {
+        await refreshProjectTree()
+        const refreshedRoot = await fetchMaterialBalanceNode()
+        resultNode = findDynamicBalanceNode(refreshedRoot, targetWellName)
+      } catch (refreshErr) {
+        console.warn('刷新树结构失败：', refreshErr)
+      }
+
+      if (!resultNode?.nodeId) {
+        ElMessage.info(`${targetWellName} 动态平衡计算已提交，结果将在稍后显示在左侧树中`)
+        console.info('动态平衡计算超时，已提交计算任务，请稍后在左侧树查看结果')
+        return
+      }
     }
 
     const treeNode = {
@@ -2342,9 +2353,20 @@ const handleDynamicBalanceRecalculate = async (options = {}) => {
       if (lastError && !lastError.message.includes('超时')) {
         throw lastError
       }
-      ElMessage.warning(`${targetWellName} 动态平衡计算时间较长，请在左侧树中手动查看结果`)
-      console.warn('动态平衡计算超时，未在规定时间内获取到结果节点')
-      return
+
+      try {
+        await refreshProjectTree()
+        const refreshedRoot = await fetchMaterialBalanceNode()
+        resultNode = findDynamicBalanceNode(refreshedRoot, targetWellName)
+      } catch (refreshErr) {
+        console.warn('刷新树结构失败：', refreshErr)
+      }
+
+      if (!resultNode?.nodeId) {
+        ElMessage.info(`${targetWellName} 动态平衡计算已提交，结果将在稍后显示在左侧树中`)
+        console.info('动态平衡计算超时，已提交计算任务，请稍后在左侧树查看结果')
+        return
+      }
     }
 
     const treeNode = {
