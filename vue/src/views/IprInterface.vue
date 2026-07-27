@@ -32,6 +32,11 @@ const WELL_GROUPS = [
   { id: 'production-allocation', label: '配产配注' }
 ]
 
+const WELL_DATA_NODES = [
+  { type: 'well-data-deliverability', label: '产能测试', dataType: 'deliverability' },
+  { type: 'well-data-static-pressure', label: '静压数据', dataType: 'staticPressure' }
+]
+
 const NODE_GROUP_BY_TYPE = {
   [NODETYPE.NodeType_WaterInvasionAnalysis]: 'well-control-inventory',  //水侵分析节点，要放到井控库存下面
   [NODETYPE.NodeType_AnalysisMethods]: 'well-control-inventory',
@@ -106,6 +111,11 @@ const ANALYTIC_METHOD_COMPLETE_PATTERN = /\[\s*产量不稳定分析-解析法\s
 const BLASINGAME_FITTING_REGRESSION_ERROR = '计算动态储量错误:参与回归分析的数据点数必须大于0'
 const AG_FITTING_REGRESSION_ERROR = '计算AG节点错误:参与回归分析的数据点数必须大于0'
 const selectedWellName = ref('')
+const projectWellNames = computed(() =>
+  getWellGroup()?.children
+    .map(item => item.wellName || item.label)
+    .filter(Boolean) || []
+)
 const treeContextMenu = ref({
   visible: false,
   x: 0,
@@ -553,6 +563,14 @@ const findWattenbargerNodeByWell = (root, wellName) => {
   return visit(root)
 }
 
+const createWellDataNodes = (wellName, wellId) =>
+  WELL_DATA_NODES.map(item => ({
+    ...item,
+    id: `${wellId || wellName}-${item.type}`,
+    wellName,
+    children: []
+  }))
+
 const createEmptyWell = (wellName, wellId) => ({ //创建一口空井
   id: wellId || `well-${wellName}`,
   label: wellName,
@@ -563,8 +581,11 @@ const createEmptyWell = (wellName, wellId) => ({ //创建一口空井
     ...group,
     id: `${wellId || wellName}-${group.id}`,
     type: group.id,
+    wellName,
     defaultExpanded: false,
-    children: []
+    children: group.id === 'data-management'
+      ? createWellDataNodes(wellName, wellId)
+      : []
   }))
 })
 
@@ -589,14 +610,25 @@ const ensureWell = (wellName, wellId) => { //确保井存在
   }
 
   WELL_GROUPS.forEach(group => {
-    if (!wellItem.children.some(item => item.type === group.id || item.label === group.label)) {
-      wellItem.children.push({
+    let groupItem = wellItem.children.find(item => item.type === group.id || item.label === group.label)
+    if (!groupItem) {
+      groupItem = {
         ...group,
         id: `${wellItem.id}-${group.id}`,
         type: group.id,
         wellName,
         defaultExpanded: false,
         children: []
+      }
+      wellItem.children.push(groupItem)
+    }
+
+    groupItem.wellName = wellName
+    if (group.id === 'data-management') {
+      createWellDataNodes(wellName, wellItem.id).forEach(dataNode => {
+        if (!groupItem.children.some(item => item.type === dataNode.type)) {
+          groupItem.children.push(dataNode)
+        }
       })
     }
   })
@@ -3127,10 +3159,20 @@ const handleSelect = async (node) => { // 点击左侧树节点
   const nodeWellName = node.wellName || (node.type === NODETYPE.NodeType_Well ? node.label : '')
 
   if (nodeWellName) selectedWellName.value = nodeWellName
-  if (isWellMenuGroup) return
-
   activeNodeId.value = node.id
   activeNode.value = node
+
+  if (isWellMenuGroup) return
+
+  if (node.dataType) {
+    currentView.value = 'well-data-table'
+    currentViewNode.value = {
+      ...node,
+      wellName: node.wellName,
+      dataType: node.dataType
+    }
+    return
+  }
 
   if (node.type === NODETYPE.NodeType_WaterInvasionAnalysis) {
     currentView.value = 'water-invasion'
@@ -3192,19 +3234,26 @@ const handleCommand = ({ group, name }) => { // 接收顶部菜单栏的点击�
   const dataViewByName = {
     井头数据: 'wellhead',
     井斜数据: 'deviation',
-    测井数据: 'logging'
+    测井数据: 'logging',
+    产能测试: 'deliverability',
+    静压数据: 'staticPressure'
   }
   const dataType = dataViewByName[name]
 
   if (dataType) {
-    if (!selectedWellName.value) {
+    const activeWellName =
+      activeNode.value?.wellName ||
+      (activeNode.value?.type === NODETYPE.NodeType_Well ? activeNode.value.label : '')
+    const supportsProjectScope = ['deliverability', 'staticPressure'].includes(dataType)
+
+    if (!supportsProjectScope && !activeWellName) {
       ElMessage.warning('请先在左侧选择一口井')
       return
     }
 
     currentView.value = 'well-data-table'
     currentViewNode.value = {
-      wellName: selectedWellName.value,
+      wellName: activeWellName,
       dataType
     }
     return
@@ -3313,7 +3362,7 @@ onBeforeUnmount(() => {
         <PvtPropertiesContent v-if="currentView === 'pvt-properties'" />
         <WellDataTableContent v-if="currentView === 'well-data-table'"
           :data-type="currentViewNode?.dataType" :well-name="currentViewNode?.wellName"
-          :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
+          :well-names="projectWellNames" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
         <WaterInvasionContent v-if="currentView === 'water-invasion'" :node="currentViewNode" :project-id="PROJECT_ID"
           :gas-reservoir-id="GAS_RESERVOIR_ID" @refresh-tree="handleRefreshTree"
           @recalculate="runWaterInvasionForSelectedWell" />

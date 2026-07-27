@@ -226,6 +226,52 @@ export const wellApi = {
 
 /* ===== 数据管理 ===== */
 export const dataManagementApi = {
+  uploadExcel: (file, options = {}) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('override', 'false')
+
+    return dockerRequest.post('/common/basedatas/excel/upload', formData, {
+      timeout: 60000,
+      ...options
+    })
+  },
+
+  importCoreData: (gasReservoirId, schema, filePath, mappings, options = {}) =>
+    dockerRequest.post(
+      '/common/coredb/import',
+      { mappings },
+      {
+        timeout: 60000,
+        ...options,
+        params: {
+          reservoirId: gasReservoirId,
+          schema,
+          fpath: filePath,
+          dateFormat: '2006-01-02',
+          isReplace: false,
+          ...options.params
+        }
+      }
+    ),
+
+  getWellData: (projectId, gasReservoirId, wellName, dataType, options = {}) =>
+    dockerRequest.get(
+      `/projects/${projectId}/gasreservoirs/${gasReservoirId}/wells/${encodeURIComponent(wellName)}/${encodeURIComponent(dataType)}`,
+      {
+        ...options,
+        params: {
+          page: 1,
+          size: -1,
+          ...options.params
+        },
+        headers: {
+          'X-Project-Id': String(projectId),
+          ...options.headers
+        }
+      }
+    ),
+
   getWellHead: (projectId, gasReservoirId, options = {}) =>
     dockerRequest.get(
       `/projects/${projectId}/gasreservoirs/${gasReservoirId}/summary/head`,
@@ -270,6 +316,24 @@ export const dataManagementApi = {
           ...options.headers
         }
       }
+    ),
+
+  getDeliverabilityTest: (projectId, gasReservoirId, wellName, options = {}) =>
+    dataManagementApi.getWellData(
+      projectId,
+      gasReservoirId,
+      wellName,
+      'deliverabilitytestdata',
+      options
+    ),
+
+  getStaticPressure: (projectId, gasReservoirId, wellName, options = {}) =>
+    dataManagementApi.getWellData(
+      projectId,
+      gasReservoirId,
+      wellName,
+      'staticpressuredata',
+      options
     )
 }
 
