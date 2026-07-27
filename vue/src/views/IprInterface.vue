@@ -17,10 +17,10 @@ import AGContent from '@/views/WellControlInventory/AGContent.vue'
 import PvtPropertiesContent from '@/views/DataManagement/PvtPropertiesContent.vue'
 import WellDataTableContent from '@/views/DataManagement/WellDataTableContent.vue'
 import { NODETYPE } from '@/constants/nodeType'
-import { analyticMethodApi, dynamicBalanceApi, materialBalanceApi, nodeApi, notifyApi, projectApi, typicalCurveApi, waterInvasionApi } from '@/api/docker'
+import { analyticMethodApi, dataManagementApi, dynamicBalanceApi, materialBalanceApi, nodeApi, notifyApi, projectApi, typicalCurveApi, waterInvasionApi } from '@/api/docker'
 
-const PROJECT_ID = 4
-const GAS_RESERVOIR_ID = 3
+const PROJECT_ID = 1
+const GAS_RESERVOIR_ID = 1
 const FLOW_BALANCE_NODE_TYPE = NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure
 
 const WELL_GROUPS = [
@@ -1212,8 +1212,26 @@ const refreshProjectTree = async () => { //加在项目树
   try {
     const res = await projectApi.getProject(PROJECT_ID)
     rebuildProjectTree(normalizePayload(res))
+    await refreshOtherDataNodes()
   } catch (error) {
     console.warn('项目树加载失败', error)
+  }
+}
+
+const refreshOtherDataNodes = async () => {  //加载其他数据（x-1到x-5）
+  try {
+    const res = await dataManagementApi.getOtherData(PROJECT_ID, GAS_RESERVOIR_ID)
+    const data = normalizePayload(res)
+    const items = data?.items || []
+
+    items.forEach(item => {
+      const wellName = item?.wellName
+      if (!wellName) return
+
+      ensureWell(wellName, item?.id || `well-${wellName}`)
+    })
+  } catch (error) {
+    console.warn('其他数据加载失败', error)
   }
 }
 
@@ -3234,7 +3252,10 @@ const handleCommand = ({ group, name }) => { // 接收顶部菜单栏的点击�
   const dataViewByName = {
     井头数据: 'wellhead',
     井斜数据: 'deviation',
+    完井数据: 'wellcompletion',
     测井数据: 'logging',
+    其他数据: 'otherdata',
+    注采数据: 'productiondata',
     产能测试: 'deliverability',
     静压数据: 'staticPressure'
   }

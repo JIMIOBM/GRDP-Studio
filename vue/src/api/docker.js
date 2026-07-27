@@ -295,9 +295,60 @@ export const dataManagementApi = {
       }
     ),
 
+  getOtherData: (projectId, gasReservoirId, options = {}) =>
+    dockerRequest.get(
+      `/projects/${projectId}/gasreservoirs/${gasReservoirId}/summary/otherdata`,
+      {
+        ...options,
+        params: {
+          page: 1,
+          size: -1,
+          ...options.params
+        },
+        headers: {
+          'X-Project-Id': String(projectId),
+          ...options.headers
+        }
+      }
+    ),
+
+  getProductionData: (projectId, gasReservoirId, wellName, options = {}) =>
+    dockerRequest.get(
+      `/projects/${projectId}/gasreservoirs/${gasReservoirId}/wells/${encodeURIComponent(wellName)}/productiondata`,
+      {
+        ...options,
+        params: {
+          page: 1,
+          size: -1,
+          ...options.params
+        },
+        headers: {
+          'X-Project-Id': String(projectId),
+          ...options.headers
+        }
+      }
+    ),
+
   getWellDeviation: (projectId, gasReservoirId, wellName, options = {}) =>
     dockerRequest.get(
       `/projects/${projectId}/gasreservoirs/${gasReservoirId}/wells/${encodeURIComponent(wellName)}/deviationdataformatone`,
+      {
+        ...options,
+        params: {
+          page: 1,
+          size: -1,
+          ...options.params
+        },
+        headers: {
+          'X-Project-Id': String(projectId),
+          ...options.headers
+        }
+      }
+    ),
+
+  getWellCompletion: (projectId, gasReservoirId, wellName, options = {}) =>
+    dockerRequest.get(
+      `/projects/${projectId}/gasreservoirs/${gasReservoirId}/wells/${encodeURIComponent(wellName)}/wellcompletiondata`,
       {
         ...options,
         params: {

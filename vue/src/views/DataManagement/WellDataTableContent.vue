@@ -53,6 +53,20 @@ const DATA_CONFIG = {
       'trueVerticalDepth'
     ]
   },
+  wellcompletion: {
+    title: '完井数据',
+    keys: [
+      'wellName',
+      'date',
+      'type',
+      'topMeasuredDepth',
+      'bottomMeasuredDepth',
+      'innerDiameter',
+      'innerRoughness',
+      'outerDiameter',
+      'outerRoughness'
+    ]
+  },
   logging: {
     title: '测井数据',
     keys: [
@@ -170,13 +184,45 @@ const DATA_CONFIG = {
       'cumulativeGasProduction',
       'cumulativeWaterProduction'
     ]
+  },
+  otherdata: {
+    title: '其他数据',
+    keys: [
+      'wellName',
+      'wellType',
+      'isFractured',
+      'flowPath',
+      'originalFormationPressure',
+      'formationTemperature',
+      'fracturingSegment',
+      'horizontalSectionOfGasWellLength',
+      'singleWellOriginalGasInplace'
+    ]
+  },
+  productiondata: {
+    title: '注采数据',
+    keys: [
+      'date',
+      'wellHeadTubingPressure',
+      'wellHeadCasingPressure',
+      'wellHeadTubingTemperature',
+      'wellHeadCasingTemperature',
+      'dailyGasProduction',
+      'dailyWaterProduction',
+      'measuredBottomHolePressure',
+      'cumulativeGasProduction',
+      'cumulativeWaterProduction',
+      'waterGasRatio',
+      'liquidGasRatio',
+      'calculatedBottomHolePressure'
+    ]
   }
 }
 
 const FALLBACK_FIELDS = {
   wellName: { name_cn: '井名', unit_label: '' },
   xCoordinate: { name_cn: '横坐标', unit_label: 'm' },
-  yCoordinate: { name_cn: '纵坐标', unit_label: 'm' },
+  yCoordinate: { name_cn: '纵坐标', label: 'm' },
   kellyBushing: { name_cn: '补心海拔', unit_label: 'm' },
   measuredDepth: { name_cn: '测量深度', unit_label: 'm' },
   trueVerticalDepth: { name_cn: '真实垂直深度', unit_label: 'm' },
@@ -197,6 +243,14 @@ const FALLBACK_FIELDS = {
   topVerticalDepth: { name_cn: '储层顶部垂直深度', unit_label: 'm' },
   bottomVerticalDepth: { name_cn: '储层底部垂直深度', unit_label: 'm' },
   VvrticalThickness: { name_cn: '储层垂直厚度', unit_label: 'm' },
+  date: { name_cn: '日期', unit_label: '' },
+  type: { name_cn: '套管类型', unit_label: '' },
+  topMeasuredDepth: { name_cn: '顶部测量深度', unit_label: 'm', displayDecimal: 2 },
+  bottomMeasuredDepth: { name_cn: '底部测量深度', unit_label: 'm', displayDecimal: 2 },
+  innerDiameter: { name_cn: '内径', unit_label: 'mm', displayDecimal: 2 },
+  innerRoughness: { name_cn: '内壁粗糙度', unit_label: '', displayDecimal: 4 },
+  outerDiameter: { name_cn: '外径', unit_label: 'mm', displayDecimal: 2 },
+  outerRoughness: { name_cn: '外壁粗糙度', unit_label: '', displayDecimal: 4 },
   productivityWellTestDate: { name_cn: '产能试井日期', unit_label: '' },
   productivityWellTestType: { name_cn: '产能试井类型', unit_label: '' },
   testPointNumber: { name_cn: '测点序号', unit_label: '' },
@@ -209,7 +263,27 @@ const FALLBACK_FIELDS = {
   cumulativeGasProduction: { name_cn: '累产气量', unit_label: '10⁸m³', displayDecimal: 4 },
   cumulativeWaterProduction: { name_cn: '累产水量', unit_label: '10⁴m³', displayDecimal: 4 },
   cumulativeOilProduction: { name_cn: '累产油量', unit_label: '10⁴m³', displayDecimal: 4 },
-  equivalentCumulativeGasProduction: { name_cn: '折算累产气量', unit_label: '10⁸m³', displayDecimal: 4 }
+  equivalentCumulativeGasProduction: { name_cn: '折算累产气量', unit_label: '10⁸m³', displayDecimal: 4 },
+  wellType: { name_cn: '井型', unit_label: '' },
+  flowPath: { name_cn: '流动路径', unit_label: '' },
+  isFractured: { name_cn: '是否压裂', unit_label: '' },
+  originalFormationPressure: { name_cn: '原始地层压力', unit_label: 'MPa', displayDecimal: 0 },
+  formationTemperature: { name_cn: '地层温度', unit_label: '℃', displayDecimal: 0 },
+  fracturingSegment: { name_cn: '压裂段数', unit_label: '', displayDecimal: 0 },
+  horizontalSectionOfGasWellLength: { name_cn: '水平段长度', unit_label: 'm', displayDecimal: 2 },
+  singleWellOriginalGasInplace: { name_cn: '单井控制储量', unit_label: '10⁸m³' },
+  wellHeadTubingPressure: { name_cn: '井口油压', unit_label: 'MPa' },
+  wellHeadCasingPressure: { name_cn: '井口套压', unit_label: 'MPa' },
+  wellHeadTubingTemperature: { name_cn: '井口油温', unit_label: '℃' },
+  wellHeadCasingTemperature: { name_cn: '井口套温', unit_label: '℃' },
+  dailyGasProduction: { name_cn: '气产量', unit_label: '10⁴m³/d' },
+  dailyWaterProduction: { name_cn: '水产量', unit_label: 'm³/d' },
+  measuredBottomHolePressure: { name_cn: '井底压力（实测）', unit_label: '' },
+  cumulativeGasProduction: { name_cn: '累产气量', unit_label: '10⁸m³' },
+  cumulativeWaterProduction: { name_cn: '累产水量', unit_label: '10⁴m³' },
+  waterGasRatio: { name_cn: '水气比', unit_label: 'm³/10⁴m³' },
+  liquidGasRatio: { name_cn: '液气比', unit_label: 'm³/10⁴m³' },
+  calculatedBottomHolePressure: { name_cn: '井底压力（计算）', unit_label: '' }
 }
 
 const loading = ref(false)
@@ -218,6 +292,30 @@ const importFileInput = ref(null)
 const rows = ref([])
 const responseFields = ref([])
 let loadSequence = 0
+
+const productionDataCache = new Map()
+
+const getProductionCacheKey = (projectId, gasReservoirId, wellName) =>
+  `${projectId}_${gasReservoirId}_${wellName}`
+
+const getCachedProductionData = (cacheKey) => {
+  if (productionDataCache.has(cacheKey)) {
+    const cached = productionDataCache.get(cacheKey)
+    const now = Date.now()
+    if (now - cached.timestamp < 5 * 60 * 1000) {
+      return cached.data
+    }
+    productionDataCache.delete(cacheKey)
+  }
+  return null
+}
+
+const setCachedProductionData = (cacheKey, data) => {
+  productionDataCache.set(cacheKey, {
+    data,
+    timestamp: Date.now()
+  })
+}
 
 const config = computed(() => DATA_CONFIG[props.dataType] || DATA_CONFIG.wellhead)
 const isImportableData = computed(() =>
@@ -234,12 +332,18 @@ const fields = computed(() => {
 
   return config.value.keys
     .filter(key => key !== 'wellName' || !props.wellName)
-    .map(key => ({
-    key,
-    ...(FALLBACK_FIELDS[key] || { name_cn: key, unit_label: '' }),
-    ...(fieldMap.get(key) || {}),
-    ...(config.value.fields?.[key] || {})
-    }))
+    .map(key => {
+      const apiField = fieldMap.get(key) || {}
+      const customField = config.value.fields?.[key] || {}
+      const fallbackField = FALLBACK_FIELDS[key] || { name_cn: key, unit_label: '' }
+
+      return {
+        key,
+        ...apiField,
+        ...customField,
+        ...fallbackField
+      }
+    })
 })
 
 const getFieldLabel = (field) => {
@@ -248,12 +352,32 @@ const getFieldLabel = (field) => {
   return unit ? `${name}(${unit})` : name
 }
 
-const formatCellValue = (row, _column, value, _index, field) => {
-  if (value === undefined || value === null || value === '') return ''
-  if (field.key === 'date' || field.key === 'productivityWellTestDate') {
+const formatCellValue = (row, field) => {
+  const key = field.key
+  let value = row[key]
+
+  if (value === undefined || value === null) return ''
+
+  if (key === 'date' || key === 'productivityWellTestDate') {
     return String(value).slice(0, 10).replaceAll('-', '/')
   }
-  return value
+
+  const numValue = Number(value)
+  if (!Number.isNaN(numValue)) {
+    if (field.displayDecimal !== undefined) {
+      const fixedValue = numValue.toFixed(field.displayDecimal)
+      if (Number.isInteger(numValue)) {
+        return String(numValue)
+      }
+      return fixedValue
+    }
+    if (Number.isInteger(numValue)) {
+      return String(numValue)
+    }
+    return String(value)
+  }
+
+  return String(value)
 }
 
 const normalizeHeader = (value) =>
@@ -439,6 +563,9 @@ const getItems = (response) => {
         ? payload
         : []
 
+  if (items.length > 0 && items[0]?.wellName) {
+  }
+
   return {
     items,
     fields: Array.isArray(payload.fields) ? payload.fields : []
@@ -459,12 +586,52 @@ const loadData = async () => {
         props.gasReservoirId,
         props.wellName
       )
+    } else if (props.dataType === 'wellcompletion') {
+      response = await dataManagementApi.getWellCompletion(
+        props.projectId,
+        props.gasReservoirId,
+        props.wellName
+      )
     } else if (props.dataType === 'logging') {
       response = await dataManagementApi.getLogInterpretation(
         props.projectId,
         props.gasReservoirId,
         props.wellName
       )
+    } else if (props.dataType === 'otherdata') {
+      response = await dataManagementApi.getOtherData(props.projectId, props.gasReservoirId)
+    } else if (props.dataType === 'productiondata') {
+      const targetWellNames = props.wellName ? [props.wellName] : props.wellNames
+
+      const results = await Promise.all(
+        targetWellNames.map(async wellName => {
+          const cacheKey = getProductionCacheKey(props.projectId, props.gasReservoirId, wellName)
+
+          let cachedResult = getCachedProductionData(cacheKey)
+
+          if (!cachedResult) {
+            try {
+              const response = await dataManagementApi.getProductionData(
+                props.projectId,
+                props.gasReservoirId,
+                wellName
+              )
+              cachedResult = getItems(response)
+              setCachedProductionData(cacheKey, cachedResult)
+            } catch (error) {
+              console.warn(`加载${wellName}的注采数据失败:`, error)
+              return { items: [], fields: [] }
+            }
+          }
+
+          return cachedResult
+        })
+      )
+
+      if (sequence !== loadSequence) return
+      rows.value = results.flatMap(result => result.items)
+      responseFields.value = results.find(result => result.fields.length)?.fields || []
+      return
     } else if (props.dataType === 'deliverability') {
       const targetWellNames = props.wellName ? [props.wellName] : props.wellNames
       const responses = await Promise.all(
@@ -503,9 +670,11 @@ const loadData = async () => {
 
     const result = getItems(response)
 
-    rows.value = props.dataType === 'wellhead'
-      ? result.items.filter(item => String(item?.wellName) === String(props.wellName))
+    const finalItems = (props.dataType === 'wellhead' || props.dataType === 'otherdata')
+      ? result.items.filter(item => !props.wellName || String(item?.wellName) === String(props.wellName))
       : result.items
+
+    rows.value = finalItems
     responseFields.value = result.fields
   } catch (error) {
     if (sequence !== loadSequence) return
@@ -554,12 +723,14 @@ watch(
         <el-table-column
           v-for="field in fields"
           :key="field.key"
-          :prop="field.key"
           :label="getFieldLabel(field)"
-          :formatter="(row, column, value, index) => formatCellValue(row, column, value, index, field)"
-          min-width="140"
+          min-width="120"
           show-overflow-tooltip
-        />
+        >
+          <template #default="{ row }">
+            {{ formatCellValue(row, field) }}
+          </template>
+        </el-table-column>
       </el-table>
     </div>
   </section>
