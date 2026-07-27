@@ -226,6 +226,17 @@ export const wellApi = {
 
 /* ===== 数据管理 ===== */
 export const dataManagementApi = {
+  getFormationWaterSource: (options = {}) =>
+    dockerRequest.get('/common/basedatas/excel/query/contents', {
+      ...options,
+      params: {
+        filepath: '0c96a876-5358-4254-b0fe-b7ced4930626/物质平衡/05气体性质.xlsx',
+        nextLocation: '',
+        size: 500,
+        ...options.params
+      }
+    }),
+
   getWellHead: (projectId, gasReservoirId, options = {}) =>
     dockerRequest.get(
       `/projects/${projectId}/gasreservoirs/${gasReservoirId}/summary/head`,
@@ -270,7 +281,22 @@ export const dataManagementApi = {
           ...options.headers
         }
       }
-    )
+  )
+}
+
+/* ===== 工具箱 - 地层水 PVT ===== */
+export const toolboxApi = {
+  create: (algorithm, projectId, options = {}) =>
+    dockerRequest.post('/toolbox', { algorithm, projectId }, options),
+
+  getResult: (id, options = {}) =>
+    dockerRequest.get(`/toolbox/${encodeURIComponent(id)}`, options),
+
+  calculate: (id, input, options = {}) =>
+    dockerRequest.post('/toolbox/calc', {
+      id,
+      input: JSON.stringify(input)
+    }, options)
 }
 
 /* ===== 分析参数 ===== */

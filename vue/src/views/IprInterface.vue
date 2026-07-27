@@ -19,8 +19,8 @@ import WellDataTableContent from '@/views/DataManagement/WellDataTableContent.vu
 import { NODETYPE } from '@/constants/nodeType'
 import { analyticMethodApi, dynamicBalanceApi, materialBalanceApi, nodeApi, notifyApi, projectApi, typicalCurveApi, waterInvasionApi } from '@/api/docker'
 
-const PROJECT_ID = 6
-const GAS_RESERVOIR_ID = 1
+const PROJECT_ID = 4
+const GAS_RESERVOIR_ID = 3
 const FLOW_BALANCE_NODE_TYPE = NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure
 
 const WELL_GROUPS = [
@@ -3211,8 +3211,15 @@ const handleCommand = ({ group, name }) => { // 接收顶部菜单栏的点击�
   }
 
   if (name === 'PVT性质') {
+    if (!selectedWellName.value) {
+      ElMessage.warning('请先在左侧选择一口井')
+      return
+    }
+
     currentView.value = 'pvt-properties'
-    currentViewNode.value = null
+    currentViewNode.value = {
+      wellName: selectedWellName.value
+    }
     return
   }
 
@@ -3310,7 +3317,12 @@ onBeforeUnmount(() => {
 
       <!--     右侧的主要内容区域-->
       <main class="content-area">
-        <PvtPropertiesContent v-if="currentView === 'pvt-properties'" />
+        <PvtPropertiesContent
+          v-if="currentView === 'pvt-properties'"
+          :well-name="currentViewNode?.wellName"
+          :project-id="PROJECT_ID"
+          :gas-reservoir-id="GAS_RESERVOIR_ID"
+        />
         <WellDataTableContent v-if="currentView === 'well-data-table'"
           :data-type="currentViewNode?.dataType" :well-name="currentViewNode?.wellName"
           :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
