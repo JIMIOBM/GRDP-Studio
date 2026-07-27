@@ -6,18 +6,9 @@ import FormationWaterProperties from './FormationWaterProperties.vue'
 import RockProperties from './RockProperties.vue'
 
 defineProps({
-  wellName: {
-    type: String,
-    required: true
-  },
-  projectId: {
-    type: [Number, String],
-    required: true
-  },
-  gasReservoirId: {
-    type: [Number, String],
-    required: true
-  }
+  wellName: {type: String, required: true},
+  projectId: {type: [Number, String], required: true},
+  gasReservoirId: {type: [Number, String], required: true}
 })
 
 const propertyTabs = [
@@ -60,11 +51,7 @@ const handleImport = () => {
     </header>
 
     <NaturalGasProperties v-if="activePropertyTab === '天然气性质'" />
-    <FormationWaterProperties
-      v-else-if="activePropertyTab === '地层水性质'"
-      :well-name="wellName"
-      :project-id="projectId"
-    />
+    <FormationWaterProperties v-else-if="activePropertyTab === '地层水性质'" :well-name="wellName" :project-id="projectId"/>
     <RockProperties v-else />
   </section>
 </template>

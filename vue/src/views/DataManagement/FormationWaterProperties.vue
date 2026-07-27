@@ -98,13 +98,16 @@ let chart = null
 let sourceSequence = 0
 let analysisSequence = 0
 
+// 根据当前选中的曲线名称返回对应的曲线配置
 const activeCurveOption = computed(
   () => CURVE_OPTIONS.find(option => option.name === activeCurve.value) ?? CURVE_OPTIONS[0]
 )
 
+// 提取真正数据
 const unwrapResponse = (response) =>
   response?.data?.data ?? response?.data ?? response ?? {}
 
+// 将 Excel 单元格形式的接口数据转换为可直接供表格使用的行对象
 const normalizeExcelRows = (payload) => {
   const items = Array.isArray(payload?.items)
     ? payload.items
@@ -116,6 +119,7 @@ const normalizeExcelRows = (payload) => {
 
   return items.map((item, index) => {
     if (!Array.isArray(item?.excelCells)) return { ...item, _rowKey: item?.id ?? index }
+    // 按 Excel 列号把同一行中的单元格合并为一个对象
     return item.excelCells.reduce((row, cell) => {
       row[cell.column || cell.location] = cell.value
       return row
@@ -123,6 +127,7 @@ const normalizeExcelRows = (payload) => {
   })
 }
 
+// 优先使用接口字段元数据生成基础数据表列，缺失时使用预设列
 const sourceColumns = computed(() => {
   if (!sourceFields.value.length) return SOURCE_FALLBACK_COLUMNS
   return sourceFields.value.map((field, index) => {
@@ -135,6 +140,7 @@ const sourceColumns = computed(() => {
   })
 })
 
+// 根据当前井名筛选基础数据，页面只展示一口井的数据
 const filteredSourceRows = computed(() => {
   const wellName = String(props.wellName || '').trim()
   return sourceRows.value.filter(row => {
@@ -143,12 +149,15 @@ const filteredSourceRows = computed(() => {
   })
 })
 
+// 按字段映射
 const fieldMetadata = computed(() =>
   new Map(toolFields.value.filter(field => field?.name).map(field => [field.name, field]))
 )
 
+// 取得当前曲线对应的输入、输出数据行
 const activeRows = computed(() => curveResults.value[activeCurve.value]?.rows || [])
 
+// 生成分析表列
 const analysisColumns = computed(() => [
   { key: 'pressure', label: '压力(MPa)' },
   { key: 'temperature', label: '温度(℃)' },
@@ -159,6 +168,7 @@ const analysisColumns = computed(() => [
   }))
 ])
 
+// 输出固定两位小数
 const formatValue = (row, key) => {
   const value = row?.[key]
   if (value === null || value === undefined || value === '') return ''
@@ -170,9 +180,11 @@ const formatValue = (row, key) => {
   return Number(value).toFixed(field?.displayDecimal ?? (key === 'temperature' || key === 'salinity' ? 2 : 4))
 }
 
+// 将曲线输出值统一格式化为两位小数
 const formatOutputValue = (value) =>
   Number.isFinite(Number(value)) ? Number(value).toFixed(2) : ''
 
+// 从原平台 Excel 接口加载基础数据
 const loadSourceData = async () => {
   const sequence = ++sourceSequence
   sourceLoading.value = true
@@ -191,6 +203,7 @@ const loadSourceData = async () => {
   }
 }
 
+// 合并不同工具箱结果中的字段元数据，按字段名去重
 const collectFields = (fields) => {
   if (!Array.isArray(fields)) return
   const merged = new Map(toolFields.value.map(field => [field?.name, field]))
@@ -200,6 +213,7 @@ const collectFields = (fields) => {
   toolFields.value = [...merged.values()]
 }
 
+// 从工具箱结果中提取指定输出序列，统一转换为压力数据行
 const extractRows = (result, series) => {
   const collections = [
     result?.items,
@@ -228,6 +242,7 @@ const extractRows = (result, series) => {
   }]
 }
 
+// 按压力合并同一曲线中的多个输出序列，并按压力升序排列。
 const mergeSeriesRows = (seriesResults) => {
   const rowsByPressure = new Map()
   seriesResults.flat().forEach(row => {
@@ -239,6 +254,7 @@ const mergeSeriesRows = (seriesResults) => {
   return [...rowsByPressure.values()].sort((left, right) => left.pressure - right.pressure)
 }
 
+// 按需加载当前曲线的工具箱结果
 const loadActiveCurve = async ({ force = false } = {}) => {
   const curve = activeCurveOption.value
   if (!force && curveResults.value[curve.name]) {
@@ -251,7 +267,8 @@ const loadActiveCurve = async ({ force = false } = {}) => {
   const sequence = ++analysisSequence
   analysisLoading.value = true
   try {
-    // 每个算法严格只创建一次实例并读取一次结果；切换回来直接使用缓存。
+    // 每个算法严格只创建一次实例并读取一次结果
+    // 并行加载当前曲线包含的一个或多个输出序列
     const seriesResults = await Promise.all(curve.series.map(async series => {
       const created = unwrapResponse(
         await toolboxApi.create(series.algorithm, Number(props.projectId))
@@ -298,6 +315,7 @@ const chartOption = computed(() => {
         nameLocation: 'middle',
         nameGap: index === 0 ? 52 : 62,
         axisLine: { show: true },
+        // 所有输出坐标轴刻度统一保留两位小数。
         axisLabel: { formatter: value => Number(value).toFixed(2) },
         splitLine: { show: index === 0, lineStyle: { color: '#e8edf2' } }
       }))
@@ -307,6 +325,7 @@ const chartOption = computed(() => {
         nameLocation: 'middle',
         nameGap: 54,
         axisLine: { show: true },
+        // 单 Y 轴曲线同样固定显示两位小数
         axisLabel: { formatter: value => Number(value).toFixed(2) },
         splitLine: { lineStyle: { color: '#e8edf2' } }
       }
@@ -316,6 +335,7 @@ const chartOption = computed(() => {
     color: ['#1677ff', '#ef7d00'],
     tooltip: {
       trigger: 'axis',
+      // 组合压力和各输出序列，生成统一保留两位小数的提示内容
       formatter: (params) => {
         const items = Array.isArray(params) ? params : [params]
         if (!items.length) return ''
@@ -356,6 +376,7 @@ const chartOption = computed(() => {
       symbolSize: 7,
       smooth: activeRows.value.length > 2,
       connectNulls: false,
+      // 过滤无效输出，并转换为 ECharts 所需的 [压力, 输出值] 数据点
       data: activeRows.value
         .filter(row => Number.isFinite(Number(row[series.key])))
         .map(row => [Number(row.pressure), Number(row[series.key])])
@@ -363,6 +384,7 @@ const chartOption = computed(() => {
   }
 })
 
+// 创建或更新图表实例
 const renderChart = () => {
   if (activeResultTab.value !== '结果分析图' || !chartEl.value) return
   if (chart && chart.getDom() !== chartEl.value) {
@@ -374,12 +396,14 @@ const renderChart = () => {
   chart.resize()
 }
 
+// 切换到数据列表，并释放当前不可见的图表实例
 const showDataList = () => {
   activeResultTab.value = '数据列表'
   chart?.dispose()
   chart = null
 }
 
+// 切换到结果分析页，初始化图表并加载当前曲线数据
 const showAnalysis = async () => {
   activeResultTab.value = '结果分析图'
   await nextTick()
@@ -387,6 +411,7 @@ const showAnalysis = async () => {
   loadActiveCurve()
 }
 
+// 清除当前曲线缓存并重新向工具箱获取最新结果
 const reloadActiveCurve = () => {
   const nextResults = { ...curveResults.value }
   delete nextResults[activeCurve.value]
@@ -394,8 +419,10 @@ const reloadActiveCurve = () => {
   loadActiveCurve({ force: true })
 }
 
+// 浏览器尺寸变化时同步调整 ECharts 画布尺寸
 const handleResize = () => chart?.resize()
 
+// 监听曲线选择变化，切换图表并按需加载对应数据
 watch(activeCurve, async () => {
   if (activeResultTab.value !== '结果分析图') return
   await nextTick()
@@ -403,6 +430,7 @@ watch(activeCurve, async () => {
   loadActiveCurve()
 })
 
+// 监听当前井变化，清除旧井曲线缓存并重新加载基础数据
 watch(() => props.wellName, () => {
   analysisSequence += 1
   curveResults.value = {}
@@ -411,6 +439,7 @@ watch(() => props.wellName, () => {
 
 window.addEventListener('resize', handleResize)
 
+// 组件卸载时终止旧请求结果写入，并移除事件和图表实例
 onBeforeUnmount(() => {
   sourceSequence += 1
   analysisSequence += 1
@@ -469,55 +498,22 @@ onBeforeUnmount(() => {
       </aside>
 
       <div class="water-data-table">
-        <el-table
-          v-loading="sourceLoading"
-          :data="filteredSourceRows"
-          border
-          height="100%"
-          empty-text="当前井暂无数据"
-          :row-key="row => row._rowKey"
-        >
-          <el-table-column
-            v-for="column in sourceColumns"
-            :key="column.key"
-            :prop="column.key"
-            :label="column.label"
-            min-width="145"
-            show-overflow-tooltip
-          />
+        <el-table v-loading="sourceLoading" :data="filteredSourceRows" border height="100%" empty-text="当前井暂无数据" :row-key="row => row._rowKey">
+          <el-table-column v-for="column in sourceColumns" :key="column.key" :prop="column.key" :label="column.label" min-width="145" show-overflow-tooltip/>
         </el-table>
       </div>
     </div>
 
-    <div
-      v-else
-      class="water-analysis-workspace"
-      :class="{ 'table-collapsed': analysisTableCollapsed }"
-    >
+    <div v-else class="water-analysis-workspace" :class="{ 'table-collapsed': analysisTableCollapsed }">
       <aside class="water-analysis-panel" :class="{ collapsed: analysisTableCollapsed }">
-        <button
-          v-if="analysisTableCollapsed"
-          class="water-analysis-collapsed-tab"
-          type="button"
-          title="展开分析数据表"
-          @click="analysisTableCollapsed = false"
-        >
-          图表数据
-        </button>
+        <button v-if="analysisTableCollapsed" class="water-analysis-collapsed-tab" type="button" title="展开分析数据表" @click="analysisTableCollapsed = false">图表数据</button>
 
         <div v-else class="water-analysis-expanded">
           <div class="water-analysis-panel-heading">
             <span>图表数据</span>
             <div class="water-analysis-heading-actions">
-              <el-button size="small" :loading="analysisLoading" @click="reloadActiveCurve">
-                重新获取
-              </el-button>
-              <button
-                class="water-analysis-toggle"
-                type="button"
-                title="收起图表数据"
-                @click="analysisTableCollapsed = true"
-              >
+              <el-button size="small" :loading="analysisLoading" @click="reloadActiveCurve">重新获取</el-button>
+              <button class="water-analysis-toggle" type="button" title="收起图表数据" @click="analysisTableCollapsed = true">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="#777">
                   <path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z" />
                 </svg>
@@ -525,21 +521,8 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <div class="water-analysis-table-body">
-            <el-table
-              v-loading="analysisLoading"
-              :data="activeRows"
-              border
-              height="100%"
-              empty-text="暂无分析数据"
-            >
-              <el-table-column
-                v-for="column in analysisColumns"
-                :key="column.key"
-                :prop="column.key"
-                :label="column.label"
-                min-width="150"
-                show-overflow-tooltip
-              >
+            <el-table v-loading="analysisLoading" :data="activeRows" border height="100%" empty-text="暂无分析数据">
+              <el-table-column v-for="column in analysisColumns" :key="column.key" :prop="column.key" :label="column.label" min-width="150" show-overflow-tooltip>
                 <template #default="{ row }">{{ formatValue(row, column.key) }}</template>
               </el-table-column>
             </el-table>
@@ -559,22 +542,8 @@ onBeforeUnmount(() => {
     </div>
 
     <footer class="water-result-tabs">
-      <button
-        type="button"
-        class="water-result-tab"
-        :class="{ active: activeResultTab === '数据列表' }"
-        @click="showDataList"
-      >
-        数据列表
-      </button>
-      <button
-        type="button"
-        class="water-result-tab"
-        :class="{ active: activeResultTab === '结果分析图' }"
-        @click="showAnalysis"
-      >
-        结果分析图
-      </button>
+      <button type="button" class="water-result-tab" :class="{ active: activeResultTab === '数据列表' }" @click="showDataList">数据列表</button>
+      <button type="button" class="water-result-tab" :class="{ active: activeResultTab === '结果分析图' }" @click="showAnalysis">结果分析图</button>
     </footer>
   </div>
 </template>
