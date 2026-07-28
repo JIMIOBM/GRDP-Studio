@@ -7,7 +7,8 @@ import { dynamicBalanceApi } from '@/api/docker'
 const props = defineProps({
   node: Object,
   projectId: [Number, String],
-  gasReservoirId: [Number, String]
+  gasReservoirId: [Number, String],
+  recalculating: Boolean
 })
 
 const emit = defineEmits(['recalculate'])
@@ -194,6 +195,8 @@ const syncRecalculationForm = () => {
 }
 
 const requestRecalculation = () => {
+  if (props.recalculating) return
+
   const unstableLength = Number(recalculationForm.value.unstableFlowPeriodLength)
   const minimumWaterGasRatio = Number(recalculationForm.value.minimumWaterGasRatio)
 
@@ -798,7 +801,13 @@ onBeforeUnmount(() => {
                     :precision="4"
                     :controls="false"
                 />
-                <el-button size="small" class="condition-recalculate" @click="requestRecalculation">
+                <el-button
+                    size="small"
+                    class="condition-recalculate"
+                    :loading="props.recalculating"
+                    :disabled="props.recalculating"
+                    @click="requestRecalculation"
+                >
                   重新计算
                 </el-button>
               </div>

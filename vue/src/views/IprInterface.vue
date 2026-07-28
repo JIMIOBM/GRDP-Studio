@@ -2540,6 +2540,60 @@ const runDynamicBalanceForSelectedWell = async () => {
   }
 }
 
+const handleDynamicBalanceRecalculate = async (params = {}) => {
+  const targetWellName = selectedWellName.value
+  if (!targetWellName) {
+    ElMessage.warning('请先在左侧选择一口井')
+    return
+  }
+  if (dynamicBalanceRunning.value) return
+
+  const unstableFlowPeriodLength = params.unstableFlowPeriodLength ?? 180
+  const minimumWaterGasRatio = params.minimumWaterGasRatio ?? 0.0602
+
+  dynamicBalanceRunning.value = true
+  try {
+    await dynamicBalanceApi.calc({
+      gasReservoirId: Number(GAS_RESERVOIR_ID),
+      projectId: Number(PROJECT_ID),
+      wellNames: [targetWellName],
+      unstableFlowPeriodLength,
+      minimumWaterGasRatio,
+      dataSize: 300
+    })
+
+    ElMessage.info(`${targetWellName} 动态平衡计算中，请稍候...`)
+
+    const { rootNode, resultNode } = await getDynamicBalanceNodeOnce(targetWellName)
+    if (!resultNode?.nodeId) {
+      throw new Error('动态平衡重新计算失败，未生成分析结果节点')
+    }
+
+    const treeNode = {
+      id: resultNode.nodeId,
+      label: '动态平衡',
+      type: NODETYPE.NodeType_DynamicMaterialBalanceMethodBlasingame,
+      wellName: targetWellName,
+      raw: resultNode
+    }
+
+    currentViewNode.value = {
+      ...treeNode,
+      loading: false
+    }
+
+    activeNodeId.value = resultNode.nodeId
+
+    ElMessage.success(`${targetWellName} 动态平衡计算完成`)
+  } catch (error) {
+    const message = error.response?.data?.msg || error.response?.data?.message || error.message
+    ElMessage.error(message || '动态平衡重新计算失败')
+    console.error('动态平衡重新计算失败', error)
+  } finally {
+    dynamicBalanceRunning.value = false
+  }
+}
+
 const runBlasingameForSelectedWell = async (options = {}) => {
   const targetWellName = options.wellName || selectedWellName.value
 
@@ -3421,7 +3475,7 @@ onBeforeUnmount(() => {
           :gas-reservoir-id="GAS_RESERVOIR_ID" :recalculating="typicalCurveRunning"
           @recalculate="runWattenbargerForSelectedWell"/>
         <DynamicBalanceContent v-if="currentView === 'dynamic-balance'" :node="currentViewNode" :project-id="PROJECT_ID"
-          :gas-reservoir-id="GAS_RESERVOIR_ID" />
+          :gas-reservoir-id="GAS_RESERVOIR_ID" :recalculating="dynamicBalanceRunning" @recalculate="handleDynamicBalanceRecalculate"/>
         <AGContent v-if="currentView === 'Agarwal-Gardner'" :node="currentViewNode" :project-id="PROJECT_ID"
           :gas-reservoir-id="GAS_RESERVOIR_ID" @recalculate="runAGForSelectedWell" />
       </main>
