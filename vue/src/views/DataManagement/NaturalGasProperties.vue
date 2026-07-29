@@ -1,13 +1,96 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import * as echarts from 'echarts'
+import { ElMessage } from 'element-plus'
+import { toolboxApi } from '@/api/docker'
+import { gasPvtApi } from '@/api/gasPvt'
+
+const props = defineProps({
+  importedRows: { type: Array, default: () => [] },
+  projectId: { type: [Number, String], required: true }
+})
+
+const DEFAULT_GAS_CORRECTION_METHOD = 'Wichert-Aziz 修正方法'
+const DEFAULT_DEVIATION_FACTOR_METHOD = 'Dranchuk-Abu-Kassem 方法'
+const DEFAULT_VISCOSITY_METHOD = 'Lee-Gonzalez-Eakin 方法'
+const DEFAULT_PRESSURE = '20'
+const DEFAULT_TEMPERATURE = '39.35'
 
 const activeResultTab = ref('数据列表')
 const activeCurve = ref('曲线1')
 const analysisTableCollapsed = ref(false)
-const gasCorrectionMethod = ref('Wichert-Aziz 修正方法')
-const deviationFactorMethod = ref('Dranchuk-Abu-Kassem 方法')
-const initialPressure = ref('56.34')
-const reservoirTemperature = ref('120')
+const hasAnalysisResult = ref(false)
+const gasCorrectionMethod = ref(DEFAULT_GAS_CORRECTION_METHOD)
+const deviationFactorMethod = ref(DEFAULT_DEVIATION_FACTOR_METHOD)
+const viscosityMethod = ref(DEFAULT_VISCOSITY_METHOD)
+const pressure = ref(DEFAULT_PRESSURE)
+const reservoirTemperature = ref(DEFAULT_TEMPERATURE)
+const gasDeviationFactorResult = ref('0')
+const gasPseudoPressureResult = ref('0')
+const gasVolumeFactorResult = ref('0')
+const gasDensityResult = ref('0')
+const gasCompressibilityResult = ref('0')
+const gasViscosityResult = ref('0')
+const calculating = ref(false)
+const calculationMode = ref('')
+const curveOneSeries = ref([])
+const selectedCurveOneSourceRow = ref(null)
+const curveTwoSeries = ref([])
+const selectedCurveTwoSourceRow = ref(null)
+const curveThreeSeries = ref([])
+const selectedCurveThreeSourceRow = ref(null)
+const viscosityCurveSeries = ref([])
+const selectedViscositySourceRow = ref(null)
+const selectedViscositySeries = computed(
+  () => viscosityCurveSeries.value.find(
+    curve => curve.sourceRow === selectedViscositySourceRow.value
+  ) ?? viscosityCurveSeries.value[0] ?? null
+)
+const viscosityCurveRows = computed(
+  () => selectedViscositySeries.value?.items ?? []
+)
+const selectedCurveOneSeries = computed(
+  () => curveOneSeries.value.find(
+    curve => curve.sourceRow === selectedCurveOneSourceRow.value
+  ) ?? curveOneSeries.value[0] ?? null
+)
+const curveOneRows = computed(
+  () => selectedCurveOneSeries.value?.items ?? []
+)
+const selectedCurveTwoSeries = computed(
+  () => curveTwoSeries.value.find(
+    curve => curve.sourceRow === selectedCurveTwoSourceRow.value
+  ) ?? curveTwoSeries.value[0] ?? null
+)
+const curveTwoRows = computed(
+  () => selectedCurveTwoSeries.value?.items ?? []
+)
+const selectedCurveThreeSeries = computed(
+  () => curveThreeSeries.value.find(
+    curve => curve.sourceRow === selectedCurveThreeSourceRow.value
+  ) ?? curveThreeSeries.value[0] ?? null
+)
+const curveThreeRows = computed(
+  () => selectedCurveThreeSeries.value?.items ?? []
+)
+const activeAnalysisRows = computed(() => {
+  if (activeCurve.value === '曲线1') return curveOneRows.value
+  if (activeCurve.value === '曲线2') return curveTwoRows.value
+  if (activeCurve.value === '曲线3') return curveThreeRows.value
+  if (activeCurve.value === '曲线4') return viscosityCurveRows.value
+  return []
+})
+const activeCurveHasData = computed(() => {
+  if (activeCurve.value === '曲线1') return curveOneSeries.value.length > 0
+  if (activeCurve.value === '曲线2') return curveTwoSeries.value.length > 0
+  if (activeCurve.value === '曲线3') return curveThreeSeries.value.length > 0
+  if (activeCurve.value === '曲线4') return viscosityCurveSeries.value.length > 0
+  return false
+})
+const chartEl = ref(null)
+let chart = null
+let chartRenderFrame = null
+let chartResizeTimer = null
 
 const gasPropertyColumns = [
   '天然气类型',
@@ -16,6 +99,21 @@ const gasPropertyColumns = [
   'CO₂摩尔百分含量(%)',
   'N₂摩尔百分含量(%)'
 ]
+const gasTableColumns = ['序号', ...gasPropertyColumns]
+const curveColors = [
+  '#1677ff',
+  '#f56c6c',
+  '#67c23a',
+  '#e6a23c',
+  '#8b5cf6',
+  '#13c2c2',
+  '#eb2f96',
+  '#fa8c16'
+]
+
+const gasGridTemplateColumns = computed(
+  () => `48px repeat(${gasPropertyColumns.length}, minmax(145px, 1fr))`
+)
 
 const gasCurveOptions = [
   {
@@ -49,13 +147,704 @@ const activeCurveOption = computed(
 )
 
 const analysisTableColumns = computed(() => [
-  '原始地层压力(MPa)',
-  '地层温度(℃)',
+  '序号',
+  '压力(MPa)',
+  '温度(℃)',
   activeCurveOption.value.leftTableColumn,
   ...(activeCurveOption.value.rightTableColumn ? [activeCurveOption.value.rightTableColumn] : [])
 ])
 
-const analysisDataCellCount = computed(() => analysisTableColumns.value.length * 25)
+const analysisGridTemplateColumns = computed(
+  () => `48px repeat(${analysisTableColumns.value.length - 1}, minmax(0, 1fr))`
+)
+
+const analysisDataCells = computed(() => {
+  const columnCount = analysisTableColumns.value.length
+  const rowCount = Math.max(25, activeAnalysisRows.value.length)
+  return Array.from({ length: columnCount * rowCount }, (_, cellIndex) => {
+    const rowIndex = Math.floor(cellIndex / columnCount)
+    const columnIndex = cellIndex % columnCount
+    const row = activeAnalysisRows.value[rowIndex] ?? null
+    const values = [
+      String(rowIndex + 1),
+      ...(row
+        ? [
+          Number(row.pressure).toFixed(2),
+          Number(row.temperature).toFixed(2),
+          ...(activeCurve.value === '曲线1'
+            ? [
+                Number(row.deviationFactor).toFixed(6),
+                Number(row.pseudoPressure).toFixed(6)
+              ]
+            : (activeCurve.value === '曲线2'
+                ? [
+                    Number(row.volumeFactor).toFixed(6),
+                    Number(row.density).toFixed(6)
+                  ]
+                : (activeCurve.value === '曲线3'
+                    ? [Number(row.compressibility).toExponential(6)]
+                    : [Number(row.viscosity).toFixed(6)])))
+        ]
+        : [])
+    ]
+    return {
+      key: `${activeCurve.value}-${rowIndex}-${columnIndex}`,
+      value: values[columnIndex] ?? '',
+      columnIndex
+    }
+  })
+})
+
+const gasDataCells = computed(() => {
+  const rowCount = Math.max(27, props.importedRows.length)
+  return Array.from({ length: rowCount * gasTableColumns.length }, (_, cellIndex) => {
+    const rowIndex = Math.floor(cellIndex / gasTableColumns.length)
+    const columnIndex = cellIndex % gasTableColumns.length
+    const importedValue = columnIndex === 0
+      ? undefined
+      : props.importedRows[rowIndex]?.[columnIndex - 1]
+    return {
+      key: `${rowIndex}-${columnIndex}`,
+      value: columnIndex === 0 ? String(rowIndex + 1) : (importedValue ?? ''),
+      columnIndex,
+      imported: importedValue !== undefined && importedValue !== null && importedValue !== ''
+    }
+  })
+})
+
+const gasTypeIndexes = {
+  干气: 0,
+  湿气: 1,
+  凝析气: 2
+}
+const gasTypeNames = ['干气', '湿气', '凝析气']
+
+const unwrapResponse = (response) =>
+  response?.data?.data ?? response?.data ?? response ?? {}
+
+const parseJsonValue = (value) => {
+  if (typeof value !== 'string') return value
+  try {
+    return JSON.parse(value)
+  } catch {
+    return value
+  }
+}
+
+const findViscosityResult = (source, depth = 0) => {
+  const value = parseJsonValue(source)
+  if (depth > 5 || value === null || value === undefined) return undefined
+  if (typeof value !== 'object') return undefined
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const itemResult = findViscosityResult(item, depth + 1)
+      if (itemResult !== undefined) return itemResult
+    }
+    return undefined
+  }
+
+  for (const key of ['gasViscosity', 'naturalGasViscosity', 'viscosity']) {
+    if (value[key] !== null && value[key] !== undefined && value[key] !== '') {
+      return value[key]
+    }
+  }
+
+  for (const [key, item] of Object.entries(value)) {
+    if (/viscosity/i.test(key) && !/method/i.test(key) &&
+        item !== null && item !== undefined && item !== '' &&
+        typeof item !== 'object') {
+      return item
+    }
+  }
+
+  for (const item of Object.values(value)) {
+    const nestedResult = findViscosityResult(item, depth + 1)
+    if (nestedResult !== undefined) return nestedResult
+  }
+  return undefined
+}
+
+const renderChart = () => {
+  const element = chartEl.value
+  if (activeResultTab.value !== '结果分析图' || !element) return
+  if (element.clientWidth <= 0 || element.clientHeight <= 0) return
+  if (!chart || chart.getDom() !== element) {
+    chart?.dispose()
+    chart = echarts.init(element)
+  }
+
+  let chartSeries = []
+  if (activeCurve.value === '曲线1') {
+    chartSeries = curveOneSeries.value.flatMap((curve, index) => {
+      const color = curve.color || curveColors[index % curveColors.length]
+      return [
+        {
+          name: `序号${curve.sourceRow}-Z`,
+          metric: 'deviationFactor',
+          type: 'line',
+          yAxisIndex: 0,
+          showSymbol: false,
+          smooth: true,
+          lineStyle: { color, width: 1.5, type: 'solid' },
+          itemStyle: { color },
+          data: curve.items.map(row => [
+            Number(row.pressure),
+            Number(row.deviationFactor)
+          ])
+        },
+        {
+          name: `序号${curve.sourceRow}-m(p)`,
+          metric: 'pseudoPressure',
+          type: 'line',
+          yAxisIndex: 1,
+          showSymbol: false,
+          smooth: true,
+          lineStyle: { color, width: 1.5, type: 'dashed' },
+          itemStyle: { color },
+          data: curve.items.map(row => [
+            Number(row.pressure),
+            Number(row.pseudoPressure)
+          ])
+        }
+      ]
+    })
+  } else if (activeCurve.value === '曲线2') {
+    chartSeries = curveTwoSeries.value.flatMap((curve, index) => {
+      const color = curve.color || curveColors[index % curveColors.length]
+      return [
+        {
+          name: `序号${curve.sourceRow}-Bg`,
+          metric: 'volumeFactor',
+          type: 'line',
+          yAxisIndex: 0,
+          showSymbol: false,
+          smooth: true,
+          lineStyle: { color, width: 1.5, type: 'solid' },
+          itemStyle: { color },
+          data: curve.items.map(row => [
+            Number(row.pressure),
+            Number(row.volumeFactor)
+          ])
+        },
+        {
+          name: `序号${curve.sourceRow}-ρg`,
+          metric: 'density',
+          type: 'line',
+          yAxisIndex: 1,
+          showSymbol: false,
+          smooth: true,
+          lineStyle: { color, width: 1.5, type: 'dashed' },
+          itemStyle: { color },
+          data: curve.items.map(row => [
+            Number(row.pressure),
+            Number(row.density)
+          ])
+        }
+      ]
+    })
+  } else if (activeCurve.value === '曲线3') {
+    chartSeries = curveThreeSeries.value.map((curve, index) => {
+      const color = curve.color || curveColors[index % curveColors.length]
+      return {
+        name: curve.name,
+        metric: 'compressibility',
+        type: 'line',
+        showSymbol: false,
+        smooth: true,
+        lineStyle: { color, width: 1.5 },
+        itemStyle: { color },
+        data: curve.items.map(row => [
+          Number(row.pressure),
+          Number(row.compressibility)
+        ])
+      }
+    })
+  } else if (activeCurve.value === '曲线4') {
+    chartSeries = viscosityCurveSeries.value.map((curve, index) => {
+        const color = curve.color || curveColors[index % curveColors.length]
+        return {
+          name: curve.name,
+          metric: 'viscosity',
+          type: 'line',
+          showSymbol: false,
+          smooth: true,
+          lineStyle: { color, width: 1.5 },
+          itemStyle: { color },
+          data: curve.items.map(row => [
+            Number(row.pressure),
+            Number(row.viscosity)
+          ])
+        }
+      })
+  }
+  const hasMultipleSeries = chartSeries.length > 1
+
+  chart.setOption({
+    animation: false,
+    color: chartSeries.map(series => series.lineStyle.color),
+    title: {
+      text: activeCurve.value === '曲线1'
+        ? '天然气偏差系数与气体拟压力随压力变化曲线'
+        : (activeCurve.value === '曲线2'
+            ? '天然气体积系数与天然气密度随压力变化曲线'
+            : (activeCurve.value === '曲线3'
+                ? '天然气压缩系数随压力变化曲线'
+                : (activeCurve.value === '曲线4' ? '天然气粘度随压力变化曲线' : activeCurve.value))),
+      left: 'center',
+      top: 8,
+      textStyle: { fontSize: 14, fontWeight: 600, color: '#333' }
+    },
+    legend: {
+      show: hasMultipleSeries,
+      type: 'scroll',
+      top: 30,
+      left: 62,
+      right: 92,
+      data: chartSeries.map(series => series.name)
+    },
+    grid: { left: 62, right: 92, top: hasMultipleSeries ? 70 : 44, bottom: 56 },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: {
+        type: 'line',
+        lineStyle: { color: '#d936d0', type: 'solid', width: 1 }
+      },
+      formatter: params => {
+        const items = (Array.isArray(params) ? params : [params])
+          .filter(item => item?.value)
+        if (!items.length) return ''
+        if (activeCurve.value === '曲线1') {
+          return [
+            `压力：${Number(items[0].value[0]).toFixed(2)} MPa`,
+            ...items.map(item => {
+              const unit = item.seriesName.endsWith('-Z')
+                ? 'dless'
+                : 'MPa²/(mPa·s)'
+              return `${item.marker}${item.seriesName}：${Number(item.value[1]).toFixed(6)} ${unit}`
+            })
+          ].join('<br/>')
+        }
+        if (activeCurve.value === '曲线2') {
+          return [
+            `压力：${Number(items[0].value[0]).toFixed(2)} MPa`,
+            ...items.map(item => {
+              const unit = item.seriesName.endsWith('-Bg') ? 'dless' : 'kg/m³'
+              return `${item.marker}${item.seriesName}：${Number(item.value[1]).toFixed(6)} ${unit}`
+            })
+          ].join('<br/>')
+        }
+        if (activeCurve.value === '曲线3') {
+          return [
+            `压力：${Number(items[0].value[0]).toFixed(2)} MPa`,
+            ...items.map(item =>
+              `${item.marker}${item.seriesName}：${Number(item.value[1]).toExponential(6)} MPa⁻¹`
+            )
+          ].join('<br/>')
+        }
+        return [
+          `压力：${Number(items[0].value[0]).toFixed(2)} MPa`,
+          ...items.map(item =>
+            `${item.marker}${item.seriesName}：${Number(item.value[1]).toFixed(6)} mPa·s`
+          )
+        ].join('<br/>')
+      }
+    },
+    xAxis: {
+      type: 'value',
+      min: 5,
+      name: '压力 P(MPa)',
+      nameLocation: 'middle',
+      nameGap: 34,
+      minorTick: { show: true },
+      minorSplitLine: { show: true, lineStyle: { color: '#f1f5fb' } },
+      splitLine: { show: true, lineStyle: { color: '#dce5f2' } }
+    },
+    yAxis: [
+      {
+        type: 'value',
+        name: activeCurveOption.value.leftYAxis,
+        nameLocation: 'middle',
+        nameGap: 44,
+        axisLabel: {
+          formatter: value => activeCurve.value === '曲线3'
+            ? Number(value).toExponential(2)
+            : Number(value).toFixed(4)
+        },
+        minorTick: { show: true },
+        minorSplitLine: { show: true, lineStyle: { color: '#f1f5fb' } },
+        splitLine: { lineStyle: { color: '#dce5f2' } }
+      },
+      ...(activeCurveOption.value.rightYAxis
+        ? [{
+            type: 'value',
+            name: activeCurveOption.value.rightYAxis,
+            nameLocation: 'middle',
+            nameGap: 44,
+            axisLabel: { formatter: value => Number(value).toFixed(4) },
+            splitLine: { show: false }
+          }]
+        : [])
+    ],
+    series: chartSeries
+  }, true)
+  chart.resize()
+}
+
+const disposeChart = () => {
+  chart?.dispose()
+  chart = null
+}
+
+const scheduleRenderChart = async () => {
+  await nextTick()
+  if (chartRenderFrame !== null) cancelAnimationFrame(chartRenderFrame)
+  chartRenderFrame = requestAnimationFrame(() => {
+    chartRenderFrame = requestAnimationFrame(() => {
+      chartRenderFrame = null
+      renderChart()
+    })
+  })
+}
+
+const handleCalculate = async (calculateAnalysis = false) => {
+  if (calculating.value) return
+
+  const calculationPressure = Number(pressure.value)
+  const calculationTemperature = Number(reservoirTemperature.value)
+  if (!Number.isFinite(calculationPressure) || !Number.isFinite(calculationTemperature)) {
+    ElMessage.error('请检查压力和温度是否为有效数字')
+    return
+  }
+
+  const sourceRows = props.importedRows
+    .map((row, rowIndex) => ({ row, rowNumber: rowIndex + 1 }))
+    .filter(({ row }) =>
+      Array.isArray(row) && row.some(value => String(value ?? '').trim() !== '')
+    )
+  if (!sourceRows.length) {
+    ElMessage.error('右侧表格中没有可计算的天然气数据')
+    return
+  }
+
+  const rowsToCalculate = calculateAnalysis ? sourceRows : sourceRows.slice(0, 1)
+  const calculationRows = []
+  for (const { row, rowNumber } of rowsToCalculate) {
+    const gasTypeCell = String(row?.[0] ?? '').trim()
+    const numericGasType = gasTypeCell === '' ? Number.NaN : Number(gasTypeCell)
+    const gasType = Object.prototype.hasOwnProperty.call(gasTypeIndexes, gasTypeCell)
+      ? gasTypeIndexes[gasTypeCell]
+      : ([0, 1, 2].includes(numericGasType) ? numericGasType : undefined)
+    if (gasType === undefined) {
+      ElMessage.error(`右侧表格序号 ${rowNumber} 的天然气类型必须为干气、湿气或凝析气`)
+      return
+    }
+
+    const values = {
+      specificGravity: Number(row?.[1]),
+      h2SMoleFraction: Number(row?.[2]),
+      co2MoleFraction: Number(row?.[3]),
+      n2MoleFraction: Number(row?.[4])
+    }
+    if (Object.values(values).some(value => !Number.isFinite(value)) ||
+        values.specificGravity <= 0) {
+      ElMessage.error(`请检查右侧表格序号 ${rowNumber} 是否为有效数据`)
+      return
+    }
+    calculationRows.push({
+      rowNumber,
+      gasType,
+      gasTypeName: gasTypeNames[gasType],
+      ...values
+    })
+  }
+
+  const modificationMethod = [
+    'Wichert-Aziz 修正方法',
+    'Carr-Kobayashi-Burrous 修正方法'
+  ].indexOf(gasCorrectionMethod.value)
+  const deviationMethod = [
+    'Dranchuk-Abu-Kassem 方法',
+    'Dranchuk-Purvis-Robinson 方法',
+    'Hall-Yarborough 方法'
+  ].indexOf(deviationFactorMethod.value)
+  const selectedViscosityMethod = [
+    'Lee-Gonzalez-Eakin 方法',
+    'Carr-Kobayashi-Burrous 方法',
+    'Sutton 方法'
+  ].indexOf(viscosityMethod.value)
+
+  const buildPointInput = row => ({
+    gasType: row.gasType,
+    specificGravity: row.specificGravity,
+    h2SMoleFraction: row.h2SMoleFraction,
+    co2MoleFraction: row.co2MoleFraction,
+    n2MoleFraction: row.n2MoleFraction,
+    pressure: calculationPressure,
+    temperature: calculationTemperature,
+    originalPressure: 40,
+    pseudoPressure: 4e-8,
+    regularizedPseudoPressure: 40,
+    apparentPressure: 40,
+    modificationMethod,
+    deviationFactorMethod: deviationMethod,
+    viscosityMethod: selectedViscosityMethod
+  })
+
+  const buildCurveRequest = row => ({
+    projectId: Number(props.projectId),
+    gasType: row.gasType,
+    specificGravity: row.specificGravity,
+    h2SMoleFraction: row.h2SMoleFraction,
+    co2MoleFraction: row.co2MoleFraction,
+    n2MoleFraction: row.n2MoleFraction,
+    temperature: calculationTemperature,
+    pressureStart: 5,
+    pressureEnd: 200,
+    pressureStep: 5,
+    modificationMethod,
+    deviationFactorMethod: deviationMethod,
+    viscosityMethod: selectedViscosityMethod
+  })
+
+  calculating.value = true
+  calculationMode.value = calculateAnalysis ? 'analysis' : 'point'
+  try {
+    if (!calculateAnalysis) {
+      const firstCalculationRow = calculationRows[0]
+      const firstInput = buildPointInput(firstCalculationRow)
+      const created = unwrapResponse(
+        await toolboxApi.create('GasPVT_Viscosity', Number(props.projectId))
+      )
+      const toolboxId = created?.id
+      if (toolboxId === null || toolboxId === undefined || toolboxId === '') {
+        throw new Error('创建天然气 PVT 工具箱后未返回 id')
+      }
+
+      await toolboxApi.calculate(toolboxId, firstInput)
+      const result = unwrapResponse(await toolboxApi.getResult(toolboxId))
+      const viscosity = findViscosityResult(result)
+      if (viscosity === undefined) {
+        throw new Error('接口结果中未找到天然气粘度')
+      }
+      gasViscosityResult.value = String(viscosity)
+
+      const pointCurveRequest = {
+        ...buildCurveRequest(firstCalculationRow),
+        pressureStart: calculationPressure,
+        pressureEnd: calculationPressure
+      }
+      const [
+        curveOnePointResponse,
+        curveTwoPointResponse,
+        curveThreePointResponse
+      ] = await Promise.all([
+        gasPvtApi.calculateCurveOne(pointCurveRequest),
+        gasPvtApi.calculateCurveTwo(pointCurveRequest),
+        gasPvtApi.calculateCurveThree(pointCurveRequest)
+      ])
+      const curveOnePointResult = unwrapResponse(curveOnePointResponse)
+      const curveOnePoint = Array.isArray(curveOnePointResult?.items)
+        ? curveOnePointResult.items[0]
+        : null
+      if (!curveOnePoint) {
+        throw new Error('曲线1接口未返回单点计算结果')
+      }
+      gasDeviationFactorResult.value = String(curveOnePoint.deviationFactor)
+      gasPseudoPressureResult.value = String(curveOnePoint.pseudoPressure)
+
+      const curveTwoPointResult = unwrapResponse(curveTwoPointResponse)
+      const curveTwoPoint = Array.isArray(curveTwoPointResult?.items)
+        ? curveTwoPointResult.items[0]
+        : null
+      if (!curveTwoPoint) {
+        throw new Error('曲线2接口未返回单点计算结果')
+      }
+      gasVolumeFactorResult.value = String(curveTwoPoint.volumeFactor)
+      gasDensityResult.value = String(curveTwoPoint.density)
+
+      const curveThreePointResult = unwrapResponse(curveThreePointResponse)
+      const curveThreePoint = Array.isArray(curveThreePointResult?.items)
+        ? curveThreePointResult.items[0]
+        : null
+      if (!curveThreePoint) {
+        throw new Error('曲线3接口未返回单点计算结果')
+      }
+      gasCompressibilityResult.value = String(curveThreePoint.compressibility)
+      ElMessage.success('单点计算完成')
+      return
+    }
+
+    const calculatedCurveOneSeries = []
+    const calculatedCurveTwoSeries = []
+    const calculatedCurveThreeSeries = []
+    const calculatedSeries = []
+    for (const [index, row] of calculationRows.entries()) {
+      try {
+        const curveRequest = buildCurveRequest(row)
+        const [
+          curveOneResponse,
+          curveTwoResponse,
+          curveThreeResponse,
+          viscosityResponse
+        ] = await Promise.all([
+          gasPvtApi.calculateCurveOne(curveRequest),
+          gasPvtApi.calculateCurveTwo(curveRequest),
+          gasPvtApi.calculateCurveThree(curveRequest),
+          gasPvtApi.calculateViscosityCurve(curveRequest)
+        ])
+
+        const curveOneResult = unwrapResponse(curveOneResponse)
+        const curveOneItems = Array.isArray(curveOneResult?.items)
+          ? curveOneResult.items
+          : []
+        if (!curveOneItems.length) {
+          throw new Error('曲线1接口未返回数据')
+        }
+        calculatedCurveOneSeries.push({
+          sourceRow: row.rowNumber,
+          name: `序号${row.rowNumber}-${row.gasTypeName}`,
+          color: curveColors[index % curveColors.length],
+          items: curveOneItems
+        })
+
+        const curveTwoResult = unwrapResponse(curveTwoResponse)
+        const curveTwoItems = Array.isArray(curveTwoResult?.items)
+          ? curveTwoResult.items
+          : []
+        if (!curveTwoItems.length) {
+          throw new Error('曲线2接口未返回数据')
+        }
+        calculatedCurveTwoSeries.push({
+          sourceRow: row.rowNumber,
+          name: `序号${row.rowNumber}-${row.gasTypeName}`,
+          color: curveColors[index % curveColors.length],
+          items: curveTwoItems
+        })
+
+        const curveThreeResult = unwrapResponse(curveThreeResponse)
+        const curveThreeItems = Array.isArray(curveThreeResult?.items)
+          ? curveThreeResult.items
+          : []
+        if (!curveThreeItems.length) {
+          throw new Error('曲线3接口未返回数据')
+        }
+        calculatedCurveThreeSeries.push({
+          sourceRow: row.rowNumber,
+          name: `序号${row.rowNumber}-${row.gasTypeName}`,
+          color: curveColors[index % curveColors.length],
+          items: curveThreeItems
+        })
+
+        const curveResult = unwrapResponse(viscosityResponse)
+        const items = Array.isArray(curveResult?.items) ? curveResult.items : []
+        if (!items.length) {
+          throw new Error('接口未返回曲线数据')
+        }
+        calculatedSeries.push({
+          sourceRow: row.rowNumber,
+          name: `序号${row.rowNumber}-${row.gasTypeName}`,
+          color: curveColors[index % curveColors.length],
+          items
+        })
+      } catch (error) {
+        const message = error.response?.data?.message ||
+          error.response?.data?.msg ||
+          error.message ||
+          '曲线计算失败'
+        throw new Error(`序号 ${row.rowNumber}：${message}`)
+      }
+    }
+
+    curveOneSeries.value = calculatedCurveOneSeries
+    selectedCurveOneSourceRow.value = calculatedCurveOneSeries[0]?.sourceRow ?? null
+    curveTwoSeries.value = calculatedCurveTwoSeries
+    selectedCurveTwoSourceRow.value = calculatedCurveTwoSeries[0]?.sourceRow ?? null
+    curveThreeSeries.value = calculatedCurveThreeSeries
+    selectedCurveThreeSourceRow.value = calculatedCurveThreeSeries[0]?.sourceRow ?? null
+    viscosityCurveSeries.value = calculatedSeries
+    selectedViscositySourceRow.value = calculatedSeries[0]?.sourceRow ?? null
+    activeCurve.value = '曲线1'
+    hasAnalysisResult.value = true
+    ElMessage.success(`${calculatedSeries.length} 条天然气数据计算完成`)
+  } catch (error) {
+    ElMessage.error(
+      error.response?.data?.message ||
+      error.response?.data?.msg ||
+      error.message ||
+      '天然气粘度计算失败'
+    )
+  } finally {
+    calculating.value = false
+    calculationMode.value = ''
+  }
+}
+
+const handleReset = () => {
+  gasCorrectionMethod.value = DEFAULT_GAS_CORRECTION_METHOD
+  deviationFactorMethod.value = DEFAULT_DEVIATION_FACTOR_METHOD
+  viscosityMethod.value = DEFAULT_VISCOSITY_METHOD
+  pressure.value = DEFAULT_PRESSURE
+  reservoirTemperature.value = DEFAULT_TEMPERATURE
+  hasAnalysisResult.value = false
+  gasDeviationFactorResult.value = '0'
+  gasPseudoPressureResult.value = '0'
+  gasVolumeFactorResult.value = '0'
+  gasDensityResult.value = '0'
+  gasCompressibilityResult.value = '0'
+  gasViscosityResult.value = '0'
+  curveOneSeries.value = []
+  selectedCurveOneSourceRow.value = null
+  curveTwoSeries.value = []
+  selectedCurveTwoSourceRow.value = null
+  curveThreeSeries.value = []
+  selectedCurveThreeSourceRow.value = null
+  viscosityCurveSeries.value = []
+  selectedViscositySourceRow.value = null
+}
+
+watch(activeResultTab, (value) => {
+  if (value !== '结果分析图') {
+    disposeChart()
+    return
+  }
+  scheduleRenderChart()
+})
+
+watch([
+  activeCurve,
+  curveOneRows,
+  curveOneSeries,
+  curveTwoRows,
+  curveTwoSeries,
+  curveThreeRows,
+  curveThreeSeries,
+  viscosityCurveRows,
+  viscosityCurveSeries
+], () => {
+  if (activeResultTab.value === '结果分析图') scheduleRenderChart()
+})
+
+watch(analysisTableCollapsed, () => {
+  if (activeResultTab.value !== '结果分析图') return
+  scheduleRenderChart()
+  if (chartResizeTimer !== null) clearTimeout(chartResizeTimer)
+  chartResizeTimer = setTimeout(() => {
+    chartResizeTimer = null
+    scheduleRenderChart()
+  }, 180)
+})
+
+const handleResize = () => {
+  if (activeResultTab.value === '结果分析图') scheduleRenderChart()
+}
+window.addEventListener('resize', handleResize)
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', handleResize)
+  if (chartRenderFrame !== null) cancelAnimationFrame(chartRenderFrame)
+  if (chartResizeTimer !== null) clearTimeout(chartResizeTimer)
+  disposeChart()
+})
 </script>
 
 <template>
@@ -84,6 +873,16 @@ const analysisDataCellCount = computed(() => analysisTableColumns.value.length *
               <option>Hall-Yarborough 方法</option>
             </select>
           </label>
+
+          <label class="gas-field-group">
+            <span>天然气粘度计算方法</span>
+            <select v-model="viscosityMethod">
+              <option>Lee-Gonzalez-Eakin 方法</option>
+              <option>Carr-Kobayashi-Burrous 方法</option>
+              <option>Sutton 方法</option>
+            </select>
+          </label>
+
         </div>
 
         <div class="gas-parameter-section">
@@ -93,30 +892,85 @@ const analysisDataCellCount = computed(() => analysisTableColumns.value.length *
           </div>
 
           <label class="gas-field-group">
-            <span>原始地层压力（MPa）</span>
-            <input v-model="initialPressure" inputmode="decimal" />
+            <span>压力（MPa）</span>
+            <input v-model="pressure" type="number" step="any" inputmode="decimal" />
           </label>
 
           <label class="gas-field-group">
-            <span>地层温度（℃）</span>
+            <span>温度（℃）</span>
             <input v-model="reservoirTemperature" inputmode="decimal" />
           </label>
         </div>
+
+        <div class="gas-parameter-actions">
+          <button type="button" :disabled="calculating" @click="handleCalculate()">
+            {{ calculationMode === 'point' ? '计算中...' : '计算' }}
+          </button>
+          <button type="button" :disabled="calculating" @click="handleReset">重置</button>
+        </div>
+
+        <label class="gas-field-group gas-result-field">
+          <span>天然气偏差系数计算结果(dless)</span>
+          <input v-model="gasDeviationFactorResult" type="text" readonly />
+        </label>
+
+        <label class="gas-field-group gas-result-field">
+          <span>气体拟压力计算结果(MPa²/(mPa·s))</span>
+          <input v-model="gasPseudoPressureResult" type="text" readonly />
+        </label>
+
+        <label class="gas-field-group gas-result-field">
+          <span>天然气体积系数计算结果(dless)</span>
+          <input v-model="gasVolumeFactorResult" type="text" readonly />
+        </label>
+
+        <label class="gas-field-group gas-result-field">
+          <span>天然气密度计算结果(kg/m³)</span>
+          <input v-model="gasDensityResult" type="text" readonly />
+        </label>
+
+        <label class="gas-field-group gas-result-field">
+          <span>天然气压缩系数计算结果(MPa⁻¹)</span>
+          <input v-model="gasCompressibilityResult" type="text" readonly />
+        </label>
+
+        <label class="gas-field-group gas-result-field">
+          <span>天然气粘度计算结果</span>
+          <input v-model="gasViscosityResult" type="text" readonly />
+        </label>
+
+        <div class="gas-parameter-actions gas-overall-action">
+          <button type="button" :disabled="calculating" @click="handleCalculate(true)">
+            {{ calculationMode === 'analysis' ? '整体计算中...' : '整体计算' }}
+          </button>
+        </div>
+
       </aside>
 
-      <div class="gas-data-grid" aria-label="天然气性质数据表格">
+      <div
+        class="gas-data-grid"
+        aria-label="天然气性质数据表格"
+        :style="{ gridTemplateColumns: gasGridTemplateColumns }"
+      >
         <div
-          v-for="column in gasPropertyColumns"
+          v-for="column in gasTableColumns"
           :key="column"
           class="gas-grid-cell header"
         >
           {{ column }}
         </div>
         <div
-          v-for="cell in 135"
-          :key="`data-${cell}`"
+          v-for="cell in gasDataCells"
+          :key="cell.key"
           class="gas-grid-cell"
-        ></div>
+          :class="{
+            imported: cell.imported,
+            numeric: cell.columnIndex > 1,
+            'row-index': cell.columnIndex === 0
+          }"
+        >
+          {{ cell.value }}
+        </div>
       </div>
     </div>
 
@@ -140,21 +994,79 @@ const analysisDataCellCount = computed(() => analysisTableColumns.value.length *
           <div class="gas-analysis-expanded">
             <div class="gas-analysis-panel-heading">
               <span>图表数据</span>
-              <button
-                class="gas-analysis-toggle"
-                type="button"
-                title="收起图表数据"
-                @click="analysisTableCollapsed = true"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="#777">
-                  <path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z" />
-                </svg>
-              </button>
+              <div class="gas-analysis-heading-actions">
+                <select
+                  v-if="activeCurve === '曲线1' && curveOneSeries.length"
+                  v-model="selectedCurveOneSourceRow"
+                  class="gas-analysis-series-select"
+                  aria-label="选择曲线1图表数据"
+                >
+                  <option
+                    v-for="curve in curveOneSeries"
+                    :key="curve.sourceRow"
+                    :value="curve.sourceRow"
+                  >
+                    {{ curve.name }}
+                  </option>
+                </select>
+                <select
+                  v-if="activeCurve === '曲线2' && curveTwoSeries.length"
+                  v-model="selectedCurveTwoSourceRow"
+                  class="gas-analysis-series-select"
+                  aria-label="选择曲线2图表数据"
+                >
+                  <option
+                    v-for="curve in curveTwoSeries"
+                    :key="curve.sourceRow"
+                    :value="curve.sourceRow"
+                  >
+                    {{ curve.name }}
+                  </option>
+                </select>
+                <select
+                  v-if="activeCurve === '曲线3' && curveThreeSeries.length"
+                  v-model="selectedCurveThreeSourceRow"
+                  class="gas-analysis-series-select"
+                  aria-label="选择曲线3图表数据"
+                >
+                  <option
+                    v-for="curve in curveThreeSeries"
+                    :key="curve.sourceRow"
+                    :value="curve.sourceRow"
+                  >
+                    {{ curve.name }}
+                  </option>
+                </select>
+                <select
+                  v-if="activeCurve === '曲线4' && viscosityCurveSeries.length"
+                  v-model="selectedViscositySourceRow"
+                  class="gas-analysis-series-select"
+                  aria-label="选择图表数据曲线"
+                >
+                  <option
+                    v-for="curve in viscosityCurveSeries"
+                    :key="curve.sourceRow"
+                    :value="curve.sourceRow"
+                  >
+                    {{ curve.name }}
+                  </option>
+                </select>
+                <button
+                  class="gas-analysis-toggle"
+                  type="button"
+                  title="收起图表数据"
+                  @click="analysisTableCollapsed = true"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="#777">
+                    <path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z" />
+                  </svg>
+                </button>
+              </div>
             </div>
             <div
               class="gas-analysis-grid"
               aria-label="天然气分析数据表格"
-              :style="{ '--analysis-column-count': analysisTableColumns.length }"
+              :style="{ gridTemplateColumns: analysisGridTemplateColumns }"
             >
               <div
                 v-for="column in analysisTableColumns"
@@ -164,10 +1076,16 @@ const analysisDataCellCount = computed(() => analysisTableColumns.value.length *
                 {{ column }}
               </div>
               <div
-                v-for="cell in analysisDataCellCount"
-                :key="`analysis-data-${cell}`"
+                v-for="cell in analysisDataCells"
+                :key="cell.key"
                 class="gas-analysis-grid-cell"
-              ></div>
+                :class="{
+                  numeric: cell.value !== '',
+                  'row-index': cell.columnIndex === 0
+                }"
+              >
+                {{ cell.value }}
+              </div>
             </div>
           </div>
         </template>
@@ -181,15 +1099,16 @@ const analysisDataCellCount = computed(() => analysisTableColumns.value.length *
           </label>
         </div>
 
-        <div class="gas-chart" :class="{ 'has-right-axis': activeCurveOption.rightYAxis }">
-          <div class="gas-chart-y-title gas-chart-y-title-left">
-            {{ activeCurveOption.leftYAxis }}
+        <div class="gas-chart">
+          <div class="gas-chart-plot-shell">
+            <div ref="chartEl" class="gas-chart-plot"></div>
+            <div
+              v-if="!activeCurveHasData"
+              class="gas-chart-empty"
+            >
+              {{ ['曲线1', '曲线2', '曲线3', '曲线4'].includes(activeCurve) ? '暂无计算结果' : '当前曲线尚未完成' }}
+            </div>
           </div>
-          <div class="gas-chart-plot"></div>
-          <div v-if="activeCurveOption.rightYAxis" class="gas-chart-y-title gas-chart-y-title-right">
-            {{ activeCurveOption.rightYAxis }}
-          </div>
-          <div class="gas-chart-x-title">压力 P(MPa)</div>
         </div>
       </section>
     </div>
@@ -294,14 +1213,37 @@ const analysisDataCellCount = computed(() => analysisTableColumns.value.length *
   font-weight: 400;
 }
 
+.gas-analysis-heading-actions {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.gas-analysis-series-select {
+  width: 150px;
+  height: 26px;
+  padding: 0 24px 0 8px;
+  border: 1px solid #d4d7db;
+  border-radius: 3px;
+  background: #fff;
+  color: #333;
+  font: inherit;
+  outline: none;
+
+  &:focus {
+    border-color: #1677ff;
+  }
+}
+
 .gas-analysis-grid {
   flex: 1;
   min-width: 0;
   display: grid;
-  grid-template-columns: repeat(var(--analysis-column-count), minmax(0, 1fr));
-  grid-template-rows: 42px repeat(25, minmax(30px, 1fr));
+  grid-template-rows: 42px;
+  grid-auto-rows: max(30px, calc((100% - 42px) / 25));
   min-height: 0;
-  overflow: hidden;
+  overflow: auto;
 }
 
 .gas-analysis-toggle {
@@ -353,7 +1295,19 @@ const analysisDataCellCount = computed(() => analysisTableColumns.value.length *
   border-bottom: 1px solid #d4d7db;
   background: #fff;
 
+  &.numeric {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding: 0 8px;
+    box-sizing: border-box;
+    font-variant-numeric: tabular-nums;
+  }
+
   &.header {
+    position: sticky;
+    top: 0;
+    z-index: 2;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -366,6 +1320,13 @@ const analysisDataCellCount = computed(() => analysisTableColumns.value.length *
     line-height: 1.35;
     text-align: center;
     white-space: nowrap;
+  }
+
+  &.row-index {
+    justify-content: center;
+    padding: 0 6px;
+    background: #f4f4f4;
+    color: #333;
   }
 }
 
@@ -411,52 +1372,33 @@ const analysisDataCellCount = computed(() => analysisTableColumns.value.length *
 .gas-chart {
   flex: 1;
   min-height: 0;
-  display: grid;
-  grid-template-columns: 56px minmax(0, 1fr) 56px;
-  grid-template-rows: minmax(0, 1fr) 32px;
-  padding: 16px 18px 8px 10px;
+  display: flex;
+  padding: 8px;
   box-sizing: border-box;
 }
 
-.gas-chart-y-title {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #111;
-  white-space: nowrap;
-  line-height: 1;
-}
-
-.gas-chart-y-title-left {
-  transform: rotate(-90deg);
-}
-
-.gas-chart-y-title-right {
-  grid-column: 3;
-  transform: rotate(90deg);
+.gas-chart-plot-shell {
+  flex: 1;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
 }
 
 .gas-chart-plot {
-  min-width: 0;
-  min-height: 0;
-  border-left: 1px solid #777;
-  border-bottom: 1px solid #777;
-  background-image:
-    linear-gradient(to right, rgba(212, 220, 229, 0.45) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(212, 220, 229, 0.45) 1px, transparent 1px);
-  background-size: 10% 10%;
+  position: absolute;
+  inset: 0;
 }
 
-.gas-chart.has-right-axis .gas-chart-plot {
-  border-right: 1px solid #777;
-}
-
-.gas-chart-x-title {
-  grid-column: 2;
+.gas-chart-empty {
+  position: absolute;
+  inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #111;
+  background: transparent;
+  color: #999;
+  z-index: 1;
+  pointer-events: none;
 }
 
 .gas-parameter-panel {
@@ -519,11 +1461,63 @@ const analysisDataCellCount = computed(() => analysisTableColumns.value.length *
   }
 }
 
+.gas-parameter-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 22px;
+
+  button {
+    flex: 1;
+    height: 32px;
+    padding: 0 12px;
+    border: 1px solid #777;
+    border-radius: 5px;
+    background: #fff;
+    color: #222;
+    font: inherit;
+    cursor: pointer;
+
+    &:hover {
+      border-color: #333;
+      background: #f5f5f5;
+    }
+
+    &:focus-visible {
+      outline: 2px solid rgba(47, 116, 192, 0.25);
+      outline-offset: 2px;
+    }
+
+    &:active {
+      background: #ebebeb;
+    }
+
+    &:disabled {
+      border-color: #c8c8c8;
+      background: #f3f3f3;
+      color: #999;
+      cursor: not-allowed;
+    }
+  }
+}
+
+.gas-overall-action {
+  margin-top: 16px;
+}
+
+.gas-result-field {
+  margin-top: 16px;
+
+  input {
+    background: #f5f5f5;
+    color: #333;
+    cursor: default;
+  }
+}
+
 .gas-data-grid {
   flex: 1;
   min-width: 0;
   display: grid;
-  grid-template-columns: repeat(5, minmax(145px, 1fr));
   grid-template-rows: 36px repeat(27, minmax(30px, 1fr));
   margin: 0;
   overflow: hidden;
@@ -535,6 +1529,23 @@ const analysisDataCellCount = computed(() => analysisTableColumns.value.length *
   border-right: 1px solid #d4d7db;
   border-bottom: 1px solid #d4d7db;
   background: #fff;
+  padding: 0 8px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  color: #333;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  &.imported {
+    background: #fbfdff;
+  }
+
+  &.numeric {
+    justify-content: flex-end;
+    font-variant-numeric: tabular-nums;
+  }
 
   &.header {
     display: flex;
@@ -548,6 +1559,13 @@ const analysisDataCellCount = computed(() => analysisTableColumns.value.length *
     font-weight: 400;
     text-align: center;
     white-space: nowrap;
+  }
+
+  &.row-index {
+    justify-content: center;
+    padding: 0 6px;
+    background: #f4f4f4;
+    color: #333;
   }
 }
 
@@ -590,10 +1608,6 @@ const analysisDataCellCount = computed(() => analysisTableColumns.value.length *
   .gas-parameter-panel {
     width: 240px;
     flex-basis: 240px;
-  }
-
-  .gas-data-grid {
-    grid-template-columns: repeat(5, minmax(130px, 1fr));
   }
 
   .gas-analysis-panel {
