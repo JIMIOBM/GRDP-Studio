@@ -1586,6 +1586,18 @@ const getDynamicBalanceNodeOnce = async (wellName, delayMs = 1200) => {
   return { rootNode, resultNode: findDynamicBalanceNode(rootNode, wellName) }
 }
 
+const pollDynamicBalanceNode = async (wellName, maxRetries = 20, intervalMs = 1500) => {
+  for (let i = 0; i < maxRetries; i++) {
+    await new Promise(resolve => setTimeout(resolve, intervalMs))
+    const rootNode = await fetchMaterialBalanceNode()
+    const resultNode = findDynamicBalanceNode(rootNode, wellName)
+    if (resultNode?.nodeId) {
+      return { rootNode, resultNode }
+    }
+  }
+  return { rootNode: null, resultNode: null }
+}
+
 const getMaterialBalanceNodeOnce = async (wellName, delayMs = 1200, gasReservoirType = null) => {
   if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs))
   const rootNode = await fetchMaterialBalanceNode()
@@ -2512,9 +2524,9 @@ const runDynamicBalanceForSelectedWell = async () => {
     })
 
     ElMessage.info(`${targetWellName} 动态平衡计算中，请稍候...`)
-    const { rootNode, resultNode } = await getDynamicBalanceNodeOnce(targetWellName)
+    const { rootNode, resultNode } = await pollDynamicBalanceNode(targetWellName)
     if (!resultNode?.nodeId) {
-      throw new Error('动态平衡计算失败，未生成分析结果节点')
+      throw new Error('动态平衡计算超时，未生成分析结果节点')
     }
 
     const treeNode = {
@@ -2565,9 +2577,9 @@ const handleDynamicBalanceRecalculate = async (params = {}) => {
 
     ElMessage.info(`${targetWellName} 动态平衡计算中，请稍候...`)
 
-    const { rootNode, resultNode } = await getDynamicBalanceNodeOnce(targetWellName)
+    const { rootNode, resultNode } = await pollDynamicBalanceNode(targetWellName)
     if (!resultNode?.nodeId) {
-      throw new Error('动态平衡重新计算失败，未生成分析结果节点')
+      throw new Error('动态平衡重新计算超时，未生成分析结果节点')
     }
 
     const treeNode = {
