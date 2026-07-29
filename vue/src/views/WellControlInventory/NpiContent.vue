@@ -76,9 +76,6 @@ const methodLabel = (value, labels, fallback) => {
 }
 
 const gasType = computed(() => methodLabel(inputValue(['gasType'], 2), ['', '', '干气'], '干气'))
-const fittingMode = computed(() => inputValue(['isSkipFitting'], false) ? '跳过拟合' : '自动拟合')
-const waterGasRatioLimit = computed(() => inputValue(['minimumWaterGasRatio', 'waterGasRatioLimit'], -1))
-const waterGasRatioEnabled = computed(() => Number(waterGasRatioLimit.value) > 0)
 const fittingModeValue = ref('automatic')
 const dataSizeValue = ref(300)
 const initScanDataSizeValue = ref(10)
@@ -142,12 +139,7 @@ const inputGroups = computed(() => [
   },
   {
     title: '控制参数',
-    fields: [
-      { label: '拟合方式', value: fittingMode.value, select: true },
-      { label: '抽稀点数', value: inputValue(['dataSize'], 300) },
-      { label: '粗扫数据点数量', value: inputValue(['initScanDataSize'], 10) },
-      { label: '精扫数据点数量', value: inputValue(['fineScanDataSize'], 30) }
-    ]
+    fields: []
   },
   {
     title: '其它数据',
@@ -438,7 +430,56 @@ onBeforeUnmount(() => {
         <div v-if="activePanelTab === 'input'" class="panel-body">
           <template v-for="group in inputGroups" :key="group.title">
             <div class="sec-label">{{ group.title }}</div>
-            <div class="field-grid">
+            <div v-if="group.title === '控制参数'" class="control-panel">
+              <div class="fitting-mode-row">
+                <span class="control-label">请选择拟合方式：</span>
+                <el-radio-group v-model="fittingModeValue" size="small">
+                  <el-radio value="automatic">自动拟合</el-radio>
+                  <el-radio value="manual">手动拟合</el-radio>
+                </el-radio-group>
+              </div>
+
+              <div class="field-grid control-field-grid">
+                <div class="field">
+                  <label>抽稀后的数据点数量</label>
+                  <el-input v-model="dataSizeValue" size="small" />
+                </div>
+                <div class="field">
+                  <label>粗扫数据点数量</label>
+                  <el-input v-model="initScanDataSizeValue" size="small" />
+                </div>
+                <div class="field">
+                  <label>精扫数据点数量</label>
+                  <el-input v-model="fineScanDataSizeValue" size="small" />
+                </div>
+                <div
+                    class="field field-with-switch"
+                    :class="{ 'control-muted': !waterGasRatioLimitEnabled }"
+                >
+                  <div class="wgr-label-row">
+                    <el-checkbox v-model="waterGasRatioLimitEnabled">
+                      生产水气比上限(m³/10⁴m³)
+                    </el-checkbox>
+                  </div>
+                  <div class="wgr-input-row">
+                    <el-input
+                        v-model="waterGasRatioLimitValue"
+                        size="small"
+                        :disabled="!waterGasRatioLimitEnabled"
+                    />
+                    <el-button
+                        size="small"
+                        :loading="recalculating"
+                        :disabled="recalculating"
+                        @click="handleRecalculate"
+                    >
+                      重新计算
+                    </el-button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div v-else class="field-grid">
               <div v-for="field in group.fields" :key="field.label" class="field">
                 <label>{{ field.label }}</label>
                 <el-select v-if="field.select" size="small" disabled :model-value="field.value" style="width:100%">
@@ -446,56 +487,8 @@ onBeforeUnmount(() => {
                 </el-select>
                 <el-input v-else size="small" readonly :model-value="field.value" />
               </div>
-              <div v-if="group.title === '控制参数'" class="field">
-                <div class="wgr-label-row"><span>生产水气比上限(m³/10⁴m³)</span><el-switch :model-value="waterGasRatioEnabled" disabled size="small" /></div>
-                <el-input size="small" readonly :disabled="!waterGasRatioEnabled" :model-value="waterGasRatioLimit" />
-              </div>
             </div>
           </template>
-          <div class="sec-label">计算条件</div>
-          <div class="condition-panel">
-            <div class="field">
-              <label>拟合方式</label>
-              <el-select v-model="fittingModeValue" size="small" style="width:100%">
-                <el-option label="自动拟合" value="automatic" />
-                <el-option label="手动拟合" value="manual" />
-              </el-select>
-            </div>
-            <div class="field">
-              <label>抽稀点数</label>
-              <el-input-number v-model="dataSizeValue" :min="1" :precision="0" :controls="false" size="small" />
-            </div>
-            <div class="field">
-              <label>粗扫数据点数量</label>
-              <el-input-number v-model="initScanDataSizeValue" :min="1" :precision="0" :controls="false" size="small" />
-            </div>
-            <div class="field">
-              <label>精扫数据点数量</label>
-              <el-input-number v-model="fineScanDataSizeValue" :min="1" :precision="0" :controls="false" size="small" />
-            </div>
-            <div class="field">
-              <div class="wgr-label-row">
-                <span :class="{ 'condition-muted': !waterGasRatioLimitEnabled }">生产水气比上限(m³/10⁴m³)</span>
-                <el-switch v-model="waterGasRatioLimitEnabled" size="small" />
-              </div>
-              <el-input-number
-                  v-model="waterGasRatioLimitValue"
-                  :min="0"
-                  :controls="false"
-                  :disabled="!waterGasRatioLimitEnabled"
-                  size="small"
-              />
-            </div>
-            <el-button
-                size="small"
-                type="primary"
-                :loading="recalculating"
-                :disabled="recalculating"
-                @click="handleRecalculate"
-            >
-              重新计算
-            </el-button>
-          </div>
           <div class="sec-label">生产数据</div>
           <div class="btn-row"><el-button size="small">模板下载</el-button><el-button size="small">导入</el-button></div>
         </div>
@@ -562,11 +555,79 @@ onBeforeUnmount(() => {
 .sec-label { margin:10px 0 7px; color:#333; font-size:13px; font-weight:500; }
 .field-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:0 24px; }
 .field { margin-bottom:9px; }
-.field label,.wgr-label-row span { display:block; margin-bottom:3px; color:#555; font-size:12px; }
-.wgr-label-row { display:flex; align-items:center; justify-content:space-between; }
-.condition-panel { padding:9px; border:1px solid #e4e7ed; background:#fafafa; }
-.condition-panel :deep(.el-input-number) { width:100%; }
-.condition-muted { color:#aaa !important; }
+.field label { display:block; margin-bottom:3px; color:#555; font-size:12px; }
+.control-panel {
+  padding-bottom:2px;
+
+  :deep(.el-radio__inner),
+  :deep(.el-checkbox__inner) {
+    border-color:#c0c4cc;
+  }
+
+  :deep(.el-radio__input.is-checked .el-radio__inner),
+  :deep(.el-checkbox__input.is-checked .el-checkbox__inner),
+  :deep(.el-checkbox__input.is-indeterminate .el-checkbox__inner) {
+    background-color:#303133;
+    border-color:#303133;
+  }
+
+  :deep(.el-radio__input.is-checked + .el-radio__label),
+  :deep(.el-checkbox__input.is-checked + .el-checkbox__label) {
+    color:#303133;
+  }
+}
+.fitting-mode-row {
+  display:flex;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:4px 12px;
+  min-height:28px;
+  margin-bottom:7px;
+
+  .control-label {
+    color:#555;
+    font-size:12px;
+  }
+
+  :deep(.el-radio) {
+    margin-right:16px;
+  }
+}
+.control-field-grid { align-items:end; }
+.wgr-label-row {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  margin-bottom:3px;
+
+  :deep(.el-checkbox) {
+    height:auto;
+    margin-right:0;
+  }
+
+  :deep(.el-checkbox__label) {
+    padding-left:6px;
+    color:#555;
+    font-size:12px;
+    line-height:18px;
+  }
+}
+.wgr-input-row {
+  display:flex;
+  align-items:center;
+  gap:4px;
+
+  .el-input {
+    flex:1;
+    min-width:0;
+  }
+
+  .el-button {
+    flex-shrink:0;
+  }
+}
+.field-with-switch .el-input { margin-top:3px; }
+.control-muted .wgr-label-row :deep(.el-checkbox__label) { color:#a8abb2; }
 .btn-row { display:flex; gap:8px; }
 .param-tabs { display:flex; height:30px; border-top:1px solid #ddd; }
 .param-tab { flex:1; display:flex; align-items:center; justify-content:center; border-right:1px solid #ddd; font-size:13px; cursor:pointer; }

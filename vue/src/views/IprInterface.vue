@@ -19,8 +19,8 @@ import WellDataTableContent from '@/views/DataManagement/WellDataTableContent.vu
 import { NODETYPE } from '@/constants/nodeType'
 import { analyticMethodApi, dataManagementApi, dynamicBalanceApi, materialBalanceApi, nodeApi, notifyApi, projectApi, typicalCurveApi, waterInvasionApi } from '@/api/docker'
 
-const PROJECT_ID = 1
-const GAS_RESERVOIR_ID = 1
+const PROJECT_ID = 6
+const GAS_RESERVOIR_ID = 3
 const FLOW_BALANCE_NODE_TYPE = NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure
 
 const WELL_GROUPS = [
@@ -2072,7 +2072,8 @@ const runWaterInvasionForSelectedWell = async (options = {}) => { //点击水侵
         label: '水侵分析',
         type: NODETYPE.NodeType_WaterInvasionAnalysis,
         wellName: targetWellName,
-        raw: resultNode
+        raw: resultNode,
+        waterInvasionRefreshKey: Date.now()
       }
 
       activeNodeId.value = viewNode.id

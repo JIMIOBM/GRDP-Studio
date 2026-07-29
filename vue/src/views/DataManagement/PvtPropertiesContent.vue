@@ -4,6 +4,7 @@ import { ElMessage } from 'element-plus'
 import NaturalGasProperties from './NaturalGasProperties.vue'
 import FormationWaterProperties from './FormationWaterProperties.vue'
 import RockProperties from './RockProperties.vue'
+import NaturalGasImportDialog from './NaturalGasImportDialog.vue'
 
 defineProps({
   wellName: {type: String, required: true},
@@ -18,12 +19,17 @@ const propertyTabs = [
 ]
 
 const activePropertyTab = ref('天然气性质')
+const importDialogVisible = ref(false)
 
 const handleSave = () => {
   ElMessage.success(`${activePropertyTab.value}参数已保存`)
 }
 
 const handleImport = () => {
+  if (activePropertyTab.value === '天然气性质') {
+    importDialogVisible.value = true
+    return
+  }
   ElMessage.info(`${activePropertyTab.value}导入功能暂未接入`)
 }
 </script>
@@ -53,6 +59,8 @@ const handleImport = () => {
     <NaturalGasProperties v-if="activePropertyTab === '天然气性质'" />
     <FormationWaterProperties v-else-if="activePropertyTab === '地层水性质'" :well-name="wellName" :project-id="projectId"/>
     <RockProperties v-else />
+
+    <NaturalGasImportDialog v-model="importDialogVisible" />
   </section>
 </template>
 

@@ -161,9 +161,9 @@ const inputFields = computed(() => ({
     { label: withUnit('N2摩尔百分含量', 'nitrogen', '%'), value: inputValue(['nitrogen']) }
   ],
   method: [
-    { label: '非烃气体修正方法', value: modificationMethod.value, select: true },
-    { label: '天然气偏差系数计算方法', value: deviationMethod.value, select: true },
-    { label: '天然气粘度计算方法', value: viscosityMethod.value, select: true }
+    { label: '非烃气体修正方法', value: modificationMethod.value, options: MODIFICATION_METHODS },
+    { label: '天然气偏差系数计算方法', value: deviationMethod.value, options: DEVIATION_METHODS },
+    { label: '天然气粘度计算方法', value: viscosityMethod.value, options: VISCOSITY_METHODS }
   ],
   other: [
     { label: withUnit('原始地层压力', 'originalFormationPressure', 'MPa'), value: inputValue(['originalFormationPressure']) },
@@ -606,7 +606,7 @@ onBeforeUnmount(() => {
     <aside
         ref="paramsPanelEl"
         class="params-panel"
-        :class="{ collapsed: paramsCollapsed }"
+        :class="{ collapsed: paramsCollapsed, narrow: !paramsCollapsed && paramsPanelWidth < 380 }"
         :style="{ width: paramsCollapsed ? '22px' : `${paramsPanelWidth}px`, minWidth: paramsCollapsed ? '22px' : `${paramsPanelWidth}px` }"
     >
       <div v-if="paramsCollapsed" class="panel-collapsed-tab" @click="toggleParamsPanel">
@@ -630,7 +630,10 @@ onBeforeUnmount(() => {
             <div class="field-grid">
               <div v-for="field in group.items" :key="`${group.title}-${field.label}`" class="field">
                 <label>{{ field.label }}</label>
-                <el-select v-if="field.select" size="small" disabled :model-value="field.value" style="width:100%">
+                <el-select v-if="field.options" size="small" :model-value="field.value" style="width:100%">
+                  <el-option v-for="option in field.options" :key="option" :label="option" :value="option" />
+                </el-select>
+                <el-select v-else-if="field.select" size="small" disabled :model-value="field.value" style="width:100%">
                   <el-option :label="field.value" :value="field.value" />
                 </el-select>
                 <el-input v-else size="small" readonly :model-value="field.value" />
@@ -640,28 +643,28 @@ onBeforeUnmount(() => {
 
           <div class="sec-label">计算条件</div>
           <div class="condition-panel">
-            <div class="field">
-              <div class="wgr-label-row">
-                <span :class="{ 'condition-muted': !waterGasRatioLimitEnabled }">生产水气比上限(m³/10⁴m³)</span>
-                <el-switch v-model="waterGasRatioLimitEnabled" size="small" />
+            <div class="condition-row condition-limit-row">
+              <div class="condition-limit-label" :class="{ 'condition-muted': !waterGasRatioLimitEnabled }">
+                <el-checkbox v-model="waterGasRatioLimitEnabled" class="condition-checkbox" />
+                <span class="condition-text">生产水气比上限(m³/10⁴m³):</span>
               </div>
-              <el-input-number
-                  v-model="waterGasRatioLimitValue"
-                  :min="0"
-                  :controls="false"
-                  :disabled="!waterGasRatioLimitEnabled"
-                  size="small"
-              />
+              <div class="condition-actions">
+                <el-input
+                    v-model="waterGasRatioLimitValue"
+                    size="small"
+                    :disabled="!waterGasRatioLimitEnabled"
+                />
+                <el-button
+                    size="small"
+                    class="condition-recalculate"
+                    :loading="recalculating"
+                    :disabled="recalculating"
+                    @click="handleRecalculate"
+                >
+                  重新计算
+                </el-button>
+              </div>
             </div>
-            <el-button
-                size="small"
-                type="primary"
-                :loading="recalculating"
-                :disabled="recalculating"
-                @click="handleRecalculate"
-            >
-              重新计算
-            </el-button>
           </div>
 
           <div class="sec-label">生产数据</div>
@@ -912,36 +915,103 @@ onBeforeUnmount(() => {
   }
 }
 
-.field-with-switch {
-  .el-input {
-    margin-top: 3px;
+.condition-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  padding: 1px 0 9px;
+  color: #303133;
+
+  :deep(.el-checkbox) {
+    height: 24px;
+    margin-right: 0;
+  }
+
+  :deep(.el-checkbox__label) {
+    font-size: 13px;
+    color: #303133;
+  }
+
+  :deep(.el-checkbox__inner) {
+    border-color: #c0c4cc;
+  }
+
+  :deep(.el-checkbox__input.is-checked .el-checkbox__inner),
+  :deep(.el-checkbox__input.is-indeterminate .el-checkbox__inner) {
+    background-color: #303133;
+    border-color: #303133;
+  }
+
+  :deep(.el-checkbox__input.is-checked + .el-checkbox__label) {
+    color: #303133;
   }
 }
 
-.wgr-label-row {
+.condition-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 3px;
+  min-height: 24px;
+}
 
-  span {
-    color: #555;
-    font-size: 12px;
+.condition-limit-row {
+  width: 100%;
+  gap: 8px;
+}
+
+.condition-limit-label,
+.condition-actions {
+  display: flex;
+  align-items: center;
+}
+
+.condition-limit-label {
+  gap: 8px;
+  flex-shrink: 0;
+
+  .condition-text {
+    font-size: 13px;
+    color: #303133;
+    white-space: nowrap;
   }
 }
 
-.condition-panel {
-  padding: 9px;
-  border: 1px solid #e4e7ed;
-  background: #fafafa;
+.condition-actions {
+  gap: 4px;
+  min-width: 0;
 
-  :deep(.el-input-number) {
-    width: 100%;
+  .el-input {
+    width: 135px;
   }
 }
 
 .condition-muted {
-  color: #aaa !important;
+  :deep(.el-checkbox__label),
+  .condition-text {
+    color: #a8abb2;
+  }
+}
+
+.condition-recalculate {
+  flex-shrink: 0;
+}
+
+.params-panel.narrow {
+  .condition-limit-row {
+    flex-wrap: wrap;
+    row-gap: 5px;
+  }
+
+  .condition-actions {
+    width: 100%;
+    padding-left: 22px;
+
+    .el-input {
+      flex: 1;
+      width: auto;
+      min-width: 0;
+    }
+  }
 }
 
 .btn-row {

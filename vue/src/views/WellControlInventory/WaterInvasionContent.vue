@@ -685,8 +685,13 @@ async function fetchData() { //请求水侵分析详情
 }
 
 
-//监听井名变化
-watch(() => props.node?.wellName, fetchData, { immediate: true })
+// 井名不变时，重新计算完成也需要主动拉取最新详情。
+watch(() => [
+  props.node?.wellName,
+  props.projectId,
+  props.gasReservoirId,
+  props.node?.waterInvasionRefreshKey
+], fetchData, { immediate: true })
 
 //监听图表页切换
 watch(activeChartIdx, () => {
