@@ -79,6 +79,12 @@ const OUTPUT_KEYS = new Set([
   'viscosity'
 ])
 
+const DEFAULT_CALCULATION_INPUT = {
+  pressure: 40,
+  temperature: 119.85,
+  salinity: 25000
+}
+
 const activeResultTab = ref('数据列表')
 const activeCurve = ref('曲线1')
 const analysisTableCollapsed = ref(false)
@@ -97,6 +103,20 @@ const chartEl = ref(null)
 let chart = null
 let sourceSequence = 0
 let analysisSequence = 0
+let calculationSequence = 0
+
+// 左侧计算、重置状态及已创建的工具箱实例 ID。
+const calculating = ref(false)
+const calculationMode = ref('')
+const calculationToolId = ref(null)
+const calculationToolPromise = ref(null)
+const calculationResult = ref({
+  gasSolubilityInWater: '',
+  volumeFactor: '',
+  isothermalCompressionCoefficient: '',
+  viscosity: '',
+  density: ''
+})
 
 // 根据当前选中的曲线名称返回对应的曲线配置
 const activeCurveOption = computed(
@@ -106,6 +126,133 @@ const activeCurveOption = computed(
 // 提取真正数据
 const unwrapResponse = (response) =>
   response?.data?.data ?? response?.data ?? response ?? {}
+
+// 将单个计算输出统一转换为结果组件要求的两位小数字符串。
+const formatCalculationOutput = (value) =>
+  Number.isFinite(Number(value)) ? Number(value).toFixed(2) : ''
+
+// 把工具箱详情中的输入、输出和字段元数据同步到左侧表单。
+const applyCalculationResult = (result, { syncInput = false } = {}) => {
+  if (syncInput && result?.input) {
+    const pressure = Number(result.input.pressure)
+    const temperature = Number(result.input.temperature)
+    const waterSalinity = Number(result.input.salinity)
+    if (Number.isFinite(pressure)) initialPressure.value = pressure
+    if (Number.isFinite(temperature)) reservoirTemperature.value = temperature
+    if (Number.isFinite(waterSalinity)) salinity.value = waterSalinity
+  }
+
+  calculationResult.value = {
+    gasSolubilityInWater: formatCalculationOutput(result?.output?.gasSolubilityInWater),
+    volumeFactor: formatCalculationOutput(result?.output?.volumeFactor),
+    isothermalCompressionCoefficient: formatCalculationOutput(
+      result?.output?.isothermalCompressionCoefficient
+    ),
+    viscosity: formatCalculationOutput(result?.output?.viscosity),
+    density: formatCalculationOutput(result?.output?.density)
+  }
+  collectFields(result?.fields)
+}
+
+// 确保计算按钮使用的工具箱实例只创建一次，并缓存后端返回的 ID。
+const ensureCalculationToolId = async () => {
+  if (calculationToolId.value !== null && calculationToolId.value !== undefined) {
+    return calculationToolId.value
+  }
+  if (calculationToolPromise.value) return calculationToolPromise.value
+
+  calculationToolPromise.value = toolboxApi
+    .create('WaterPVT_GasSolubilityInWater', Number(props.projectId), { silentError: true })
+    .then((response) => {
+      const created = unwrapResponse(response)
+      if (created?.id === null || created?.id === undefined || created?.id === '') {
+        throw new Error('工具箱接口未返回计算 ID')
+      }
+      calculationToolId.value = created.id
+      return created.id
+    })
+    .finally(() => {
+      calculationToolPromise.value = null
+    })
+
+  return calculationToolPromise.value
+}
+
+// 提交三个输入参数进行后端计算，再回读工具箱详情并更新结果组件。
+const handleCalculate = async () => {
+  if (calculating.value) return
+
+  const calculationPressure = Number(initialPressure.value)
+  const calculationTemperature = Number(reservoirTemperature.value)
+  const calculationSalinity = Number(salinity.value)
+  if (
+    !Number.isFinite(calculationPressure) ||
+    calculationPressure <= 0 ||
+    !Number.isFinite(calculationTemperature) ||
+    !Number.isFinite(calculationSalinity) ||
+    calculationSalinity < 0
+  ) {
+    ElMessage.error('请输入有效的地层压力、地层温度和地层水矿化度')
+    return
+  }
+
+  const sequence = ++calculationSequence
+  calculating.value = true
+  calculationMode.value = 'point'
+  try {
+    const id = await ensureCalculationToolId()
+    await toolboxApi.calculate(id, {
+      pressure: calculationPressure,
+      temperature: calculationTemperature,
+      salinity: calculationSalinity
+    })
+    const result = unwrapResponse(await toolboxApi.getResult(id))
+    if (sequence !== calculationSequence) return
+    applyCalculationResult(result)
+    curveResults.value = {}
+    ElMessage.success('地层水性质计算完成')
+  } catch (error) {
+    if (sequence !== calculationSequence) return
+    ElMessage.error(error.response?.data?.message || error.message || '地层水性质计算失败')
+  } finally {
+    if (sequence === calculationSequence) {
+      calculating.value = false
+      calculationMode.value = ''
+    }
+  }
+}
+
+// 重置后端工具箱实例，回读默认输入和输出并刷新左侧表单。
+const handleReset = async () => {
+  if (calculating.value) return
+
+  const sequence = ++calculationSequence
+  calculating.value = true
+  calculationMode.value = 'reset'
+  try {
+    const id = await ensureCalculationToolId()
+    await toolboxApi.reset(id)
+    const result = unwrapResponse(await toolboxApi.getResult(id))
+    if (sequence !== calculationSequence) return
+    applyCalculationResult(result, { syncInput: true })
+    curveResults.value = {}
+    ElMessage.success('地层水性质参数已重置')
+  } catch (error) {
+    if (sequence !== calculationSequence) return
+    initialPressure.value = DEFAULT_CALCULATION_INPUT.pressure
+    reservoirTemperature.value = DEFAULT_CALCULATION_INPUT.temperature
+    salinity.value = DEFAULT_CALCULATION_INPUT.salinity
+    Object.keys(calculationResult.value).forEach((key) => {
+      calculationResult.value[key] = ''
+    })
+    ElMessage.error(error.response?.data?.message || error.message || '地层水性质重置失败')
+  } finally {
+    if (sequence === calculationSequence) {
+      calculating.value = false
+      calculationMode.value = ''
+    }
+  }
+}
 
 // 将 Excel 单元格形式的接口数据转换为可直接供表格使用的行对象
 const normalizeExcelRows = (payload) => {
@@ -270,13 +417,12 @@ const loadActiveCurve = async ({ force = false } = {}) => {
     // 每个算法严格只创建一次实例并读取一次结果
     // 并行加载当前曲线包含的一个或多个输出序列
     const seriesResults = await Promise.all(curve.series.map(async series => {
-      const created = unwrapResponse(
-        await toolboxApi.create(series.algorithm, Number(props.projectId))
-      )
-      const id = created?.id
-      if (id === null || id === undefined || id === '') {
-        throw new Error(`${series.algorithm} 未返回工具箱 id`)
-      }
+      const id = series.key === 'gasSolubilityInWater'
+        ? await ensureCalculationToolId()
+        : unwrapResponse(
+            await toolboxApi.create(series.algorithm, Number(props.projectId))
+          )?.id
+      if (id === null || id === undefined || id === '') throw new Error(`${series.algorithm} 未返回工具箱 id`)
       const result = unwrapResponse(await toolboxApi.getResult(id))
       collectFields(result?.fields)
       return extractRows(result, series)
@@ -435,6 +581,10 @@ watch(() => props.wellName, () => {
   analysisSequence += 1
   curveResults.value = {}
   loadSourceData()
+  // 页面初始化时预先取得计算 ID，点击“计算”时可直接调用 calc 接口。
+  void ensureCalculationToolId().catch((error) => {
+    console.warn('地层水工具箱计算 ID 初始化失败，将在点击计算时重试', error)
+  })
 }, { immediate: true })
 
 window.addEventListener('resize', handleResize)
@@ -443,6 +593,7 @@ window.addEventListener('resize', handleResize)
 onBeforeUnmount(() => {
   sourceSequence += 1
   analysisSequence += 1
+  calculationSequence += 1
   window.removeEventListener('resize', handleResize)
   chart?.dispose()
   chart = null
@@ -494,7 +645,48 @@ onBeforeUnmount(() => {
             <span>地层温度（℃）</span>
             <input v-model.number="reservoirTemperature" inputmode="decimal" />
           </label>
+          <div class="water-parameter-actions">
+            <button type="button" :disabled="calculating" @click="handleCalculate">
+              {{ calculationMode === 'point' ? '计算中...' : '计算' }}
+            </button>
+            <button type="button" :disabled="calculating" @click="handleReset">
+              {{ calculationMode === 'reset' ? '重置中...' : '重置' }}
+            </button>
+          </div>
         </div>
+
+        <div class="water-parameter-section">
+          <div class="water-section-heading">
+            <span>地层水计算结果</span>
+            <span class="water-section-rule"></span>
+          </div>
+
+          <label class="water-field-group water-result-field">
+            <span>天然气在地层水中的溶解度(dless)</span>
+            <input v-model="calculationResult.gasSolubilityInWater" type="text" readonly />
+          </label>
+
+          <label class="water-field-group water-result-field">
+            <span>地层水体积系数(dless)</span>
+            <input v-model="calculationResult.volumeFactor" type="text" readonly />
+          </label>
+
+          <label class="water-field-group water-result-field">
+            <span>地层水等温压缩系数(MPa⁻¹)</span>
+            <input v-model="calculationResult.isothermalCompressionCoefficient" type="text" readonly />
+          </label>
+
+          <label class="water-field-group water-result-field">
+            <span>地层水粘度(mPa·s)</span>
+            <input v-model="calculationResult.viscosity" type="text" readonly />
+          </label>
+
+          <label class="water-field-group water-result-field">
+            <span>地层水密度(kg/m³)</span>
+            <input v-model="calculationResult.density" type="text" readonly />
+          </label>
+        </div>
+
       </aside>
 
       <div class="water-data-table">
@@ -625,6 +817,14 @@ onBeforeUnmount(() => {
       border-color: #4c81b6;
       box-shadow: 0 0 0 1px rgba(76, 129, 182, 0.18);
     }
+  }
+}
+
+.water-result-field {
+  input[readonly] {
+    background: #f5f7fa;
+    color: #303133;
+    cursor: default;
   }
 }
 
@@ -829,6 +1029,45 @@ onBeforeUnmount(() => {
   .water-analysis-panel {
     width: 640px;
     flex-basis: 640px;
+  }
+}
+
+.water-parameter-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 22px;
+
+  button {
+    flex: 1;
+    height: 32px;
+    padding: 0 12px;
+    border: 1px solid #777;
+    border-radius: 5px;
+    background: #fff;
+    color: #222;
+    font: inherit;
+    cursor: pointer;
+
+    &:hover {
+      border-color: #333;
+      background: #f5f5f5;
+    }
+
+    &:focus-visible {
+      outline: 2px solid rgba(47, 116, 192, 0.25);
+      outline-offset: 2px;
+    }
+
+    &:active {
+      background: #ebebeb;
+    }
+
+    &:disabled {
+      border-color: #c8c8c8;
+      background: #f3f3f3;
+      color: #999;
+      cursor: not-allowed;
+    }
   }
 }
 </style>

@@ -411,7 +411,10 @@ export const toolboxApi = {
     dockerRequest.post('/toolbox/calc', {
       id,
       input: JSON.stringify(input)
-    }, options)
+    }, options),
+
+  reset: (id, options = {}) =>
+    dockerRequest.post(`/toolbox/reset/${encodeURIComponent(id)}`, null, options)
 }
 
 /* ===== 分析参数 ===== */
