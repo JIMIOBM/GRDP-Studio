@@ -4,7 +4,12 @@ import { ElMessage } from 'element-plus'
 import { Document } from '@element-plus/icons-vue'
 
 const props = defineProps({
-  modelValue: { type: Boolean, default: false }
+  modelValue: { type: Boolean, default: false },
+  importKind: {
+    type: String,
+    default: 'data',
+    validator: value => ['data', 'result'].includes(value)
+  }
 })
 
 const emit = defineEmits(['update:modelValue', 'confirm'])
@@ -46,24 +51,83 @@ const clearFile = (event) => {
   selectedFile.value = null
 }
 
-const downloadTemplate = (kind) => {
-  const rows = kind === 'result'
-    ? [
-        ['压力(MPa)', '天然气偏差系数(dless)', '天然气体积系数(dless)', '天然气密度(kg/m³)', '天然气粘度(mPa·s)'],
-        ['', '', '', '', '']
-      ]
-    : [
-        ['天然气类型', '天然气比重(dless)', 'H₂S摩尔百分含量(%)', 'CO₂摩尔百分含量(%)', 'N₂摩尔百分含量(%)'],
-        ['干气', '', '', '', '']
-      ]
-  const csv = `\uFEFF${rows.map(row => row.join(',')).join('\r\n')}`
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+const triggerDownload = (blob, filename) => {
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
   anchor.href = url
-  anchor.download = kind === 'result' ? '天然气结果数据模板.csv' : '天然气数据模板.csv'
+  anchor.download = filename
   anchor.click()
   URL.revokeObjectURL(url)
+}
+
+const downloadTemplate = async (kind) => {
+  if (kind === 'result') {
+    const rows = [
+      [
+        '压力(MPa)',
+        '温度(℃)',
+        '天然气偏差系数(dless)',
+        '气体拟压力(MPa²/(mPa·s))',
+        '天然气体积系数(dless)',
+        '天然气密度(kg/m³)',
+        '天然气压缩系数(MPa⁻¹)',
+        '天然气粘度(mPa·s)'
+      ]
+    ]
+    const csv = `\uFEFF${rows.map(row => row.join(',')).join('\r\n')}`
+    triggerDownload(
+      new Blob([csv], { type: 'text/csv;charset=utf-8' }),
+      '天然气结果数据模板.csv'
+    )
+    return
+  }
+
+  try {
+    const { default: ExcelJS } = await import('exceljs')
+    const workbook = new ExcelJS.Workbook()
+    const worksheet = workbook.addWorksheet('天然气数据')
+    const headers = [
+      '天然气类型',
+      '天然气比重(dless)',
+      'H₂S摩尔百分含量(%)',
+      'CO₂摩尔百分含量(%)',
+      'N₂摩尔百分含量(%)'
+    ]
+
+    worksheet.addRow(headers)
+    worksheet.views = [{ state: 'frozen', ySplit: 1 }]
+    worksheet.columns = [
+      { width: 18 },
+      { width: 22 },
+      { width: 24 },
+      { width: 24 },
+      { width: 24 }
+    ]
+
+    const headerRow = worksheet.getRow(1)
+    headerRow.font = { bold: true }
+    headerRow.alignment = { vertical: 'middle', horizontal: 'center' }
+
+    worksheet.dataValidations.add('A2:A1048576', {
+      type: 'list',
+      allowBlank: true,
+      formulae: ['"干气,湿气,凝析气"'],
+      showErrorMessage: true,
+      errorStyle: 'stop',
+      errorTitle: '天然气类型不正确',
+      error: '天然气类型只能选择：干气、湿气或凝析气'
+    })
+
+    const buffer = await workbook.xlsx.writeBuffer()
+    triggerDownload(
+      new Blob([buffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      }),
+      '天然气数据模板.xlsx'
+    )
+  } catch (error) {
+    ElMessage.error(error?.message || '天然气数据模板下载失败')
+  }
 }
 
 const confirmImport = () => {
@@ -73,7 +137,8 @@ const confirmImport = () => {
   }
   emit('confirm', {
     file: selectedFile.value,
-    options: { ...importOptions }
+    options: { ...importOptions },
+    kind: props.importKind
   })
   close()
 }
@@ -107,14 +172,17 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
         aria-labelledby="gas-import-title"
       >
         <header class="gas-import-header">
-          <h2 id="gas-import-title">导入</h2>
+          <h2 id="gas-import-title">
+            {{ importKind === 'result' ? '导入结果分析数据' : '导入天然气基础数据' }}
+          </h2>
           <button type="button" class="gas-import-close" aria-label="关闭导入窗口" @click="close">×</button>
         </header>
 
         <div class="gas-import-body">
           <div class="gas-import-downloads">
-            <button type="button" @click="downloadTemplate('data')">数据模板下载</button>
-            <button type="button" @click="downloadTemplate('result')">结果数据模板下载</button>
+            <button type="button" @click="downloadTemplate(importKind)">
+              {{ importKind === 'result' ? '结果数据模板下载' : '数据模板下载' }}
+            </button>
           </div>
 
           <div class="gas-import-options" aria-label="导入清洗选项">

@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import NaturalGasProperties from './NaturalGasProperties.vue'
 import FormationWaterProperties from './FormationWaterProperties.vue'
@@ -19,8 +19,13 @@ const propertyTabs = [
 ]
 
 const activePropertyTab = ref('天然气性质')
+const activeGasResultTab = ref('数据列表')
 const importDialogVisible = ref(false)
 const importedGasRows = ref([])
+const importedGasResultRows = ref([])
+const activeGasImportKind = computed(
+  () => activeGasResultTab.value === '结果分析图' ? 'result' : 'data'
+)
 
 const handleSave = () => {
   ElMessage.success(`${activePropertyTab.value}参数已保存`)
@@ -42,6 +47,17 @@ const GAS_IMPORT_COLUMNS = [
   'N₂摩尔百分含量(%)'
 ]
 
+const GAS_RESULT_IMPORT_COLUMNS = [
+  '压力(MPa)',
+  '温度(℃)',
+  '天然气偏差系数(dless)',
+  '气体拟压力(MPa²/(mPa·s))',
+  '天然气体积系数(dless)',
+  '天然气密度(kg/m³)',
+  '天然气压缩系数(MPa⁻¹)',
+  '天然气粘度(mPa·s)'
+]
+
 const normalizeHeader = (value) => String(value ?? '')
   .trim()
   .replace(/\s+/g, '')
@@ -55,7 +71,7 @@ const isZeroCell = (value) => !isEmptyCell(value)
   && Number.isFinite(Number(value))
   && Number(value) === 0
 
-const cleanImportRows = (sourceRows, options) => {
+const cleanImportRows = (sourceRows, options, requiredColumns) => {
   let rows = sourceRows.map(row => [...row])
 
   if (options.removeEmptyRows) {
@@ -78,7 +94,7 @@ const cleanImportRows = (sourceRows, options) => {
 
   if (options.removeZeroColumns && rows.length > 1) {
     const headers = rows[0].map(normalizeHeader)
-    const requiredHeaders = new Set(GAS_IMPORT_COLUMNS.map(normalizeHeader))
+    const requiredHeaders = new Set(requiredColumns.map(normalizeHeader))
     const keptIndexes = headers.map((_, index) => index).filter(index => {
       if (requiredHeaders.has(headers[index])) return true
       const values = rows.slice(1).map(row => row[index])
@@ -100,7 +116,77 @@ const cleanImportRows = (sourceRows, options) => {
   return rows
 }
 
-const handleGasImport = async ({ file, options }) => {
+const assertStrictHeaders = (rows, expectedColumns, templateName) => {
+  const actualHeaders = rows[0].map(normalizeHeader)
+  const expectedHeaders = expectedColumns.map(normalizeHeader)
+  const headersMatch = actualHeaders.length === expectedHeaders.length
+    && expectedHeaders.every((header, index) => actualHeaders[index] === header)
+
+  if (!headersMatch) {
+    throw new Error(
+      `${templateName}格式不正确。表头必须严格依次为：${expectedColumns.join('、')}`
+    )
+  }
+}
+
+const parseDataImportRows = (rows, options) => {
+  assertStrictHeaders(rows, GAS_IMPORT_COLUMNS, '数据模板')
+  const dataRows = rows.slice(1).filter(row =>
+    row.some(value => !isEmptyCell(value))
+  )
+  if (!dataRows.length) throw new Error('数据模板中没有可导入的数据行')
+
+  return dataRows.map((row, rowIndex) => {
+    const values = GAS_IMPORT_COLUMNS.map((_, columnIndex) => {
+      const value = row[columnIndex] ?? ''
+      if (columnIndex > 0 && options.fillEmptyWithZero && isEmptyCell(value)) return 0
+      return value
+    })
+    const gasType = String(values[0] ?? '').trim()
+    if (!['干气', '湿气', '凝析气'].includes(gasType)) {
+      throw new Error(`数据模板第 ${rowIndex + 2} 行：天然气类型只能为干气、湿气或凝析气`)
+    }
+    values[0] = gasType
+    GAS_IMPORT_COLUMNS.slice(1).forEach((column, numericIndex) => {
+      const value = values[numericIndex + 1]
+      if (isEmptyCell(value) || !Number.isFinite(Number(value))) {
+        throw new Error(`数据模板第 ${rowIndex + 2} 行：${column}必须填写数字`)
+      }
+      values[numericIndex + 1] = Number(value)
+    })
+    return values
+  })
+}
+
+const parseResultImportRows = (rows) => {
+  assertStrictHeaders(rows, GAS_RESULT_IMPORT_COLUMNS, '结果数据模板')
+  const dataRows = rows.slice(1).filter(row =>
+    row.some(value => !isEmptyCell(value))
+  )
+  if (!dataRows.length) throw new Error('结果数据模板中没有可导入的数据行')
+
+  return dataRows.map((row, rowIndex) => {
+    const values = GAS_RESULT_IMPORT_COLUMNS.map((column, columnIndex) => {
+      const value = row[columnIndex] ?? ''
+      if (isEmptyCell(value) || !Number.isFinite(Number(value))) {
+        throw new Error(`结果数据模板第 ${rowIndex + 2} 行：${column}必须填写数字`)
+      }
+      return Number(value)
+    })
+    return {
+      pressure: values[0],
+      temperature: values[1],
+      deviationFactor: values[2],
+      pseudoPressure: values[3],
+      volumeFactor: values[4],
+      density: values[5],
+      compressibility: values[6],
+      viscosity: values[7]
+    }
+  })
+}
+
+const handleGasImport = async ({ file, options, kind }) => {
   try {
     const extension = file.name.split('.').pop()?.toLowerCase()
     if (!['xlsx', 'xls', 'csv'].includes(extension)) {
@@ -115,34 +201,23 @@ const handleGasImport = async ({ file, options }) => {
       raw: true,
       defval: ''
     })
-    const rows = cleanImportRows(sourceRows, options)
+    const expectedColumns = kind === 'result'
+      ? GAS_RESULT_IMPORT_COLUMNS
+      : GAS_IMPORT_COLUMNS
+    const rows = cleanImportRows(sourceRows, options, expectedColumns)
 
     if (!rows.length) throw new Error('文件中没有可导入的数据')
 
-    const headers = rows[0].map(normalizeHeader)
-    const columnIndexes = GAS_IMPORT_COLUMNS.map(column =>
-      headers.indexOf(normalizeHeader(column))
-    )
-    const missingColumns = GAS_IMPORT_COLUMNS.filter((_, index) => columnIndexes[index] < 0)
-
-    if (missingColumns.length) {
-      throw new Error(`缺少字段：${missingColumns.join('、')}`)
+    if (kind === 'result') {
+      const parsedResultRows = parseResultImportRows(rows)
+      importedGasResultRows.value = parsedResultRows
+      ElMessage.success(`成功导入 ${parsedResultRows.length} 条天然气结果数据`)
+      return
     }
 
-    const parsedRows = rows.slice(1).map(row =>
-      columnIndexes.map((index, columnIndex) => {
-        const value = row[index] ?? ''
-        if (columnIndex > 0 && options.fillEmptyWithZero && isEmptyCell(value)) return 0
-        return value
-      })
-    )
-
-    if (!parsedRows.length || !parsedRows.some(row => row.some(value => !isEmptyCell(value)))) {
-      throw new Error('文件中没有可导入的数据行')
-    }
-
-    importedGasRows.value = parsedRows.slice(0, 27)
-    ElMessage.success(`成功导入 ${importedGasRows.value.length} 条天然气性质数据`)
+    const parsedRows = parseDataImportRows(rows, options)
+    importedGasRows.value = parsedRows
+    ElMessage.success(`成功导入 ${parsedRows.length} 条天然气性质数据`)
   } catch (error) {
     ElMessage.error(error.message || '天然气性质数据导入失败')
   }
@@ -174,13 +249,16 @@ const handleGasImport = async ({ file, options }) => {
     <NaturalGasProperties
       v-if="activePropertyTab === '天然气性质'"
       :imported-rows="importedGasRows"
+      :imported-result-rows="importedGasResultRows"
       :project-id="projectId"
+      @result-tab-change="activeGasResultTab = $event"
     />
     <FormationWaterProperties v-else-if="activePropertyTab === '地层水性质'" :well-name="wellName" :project-id="projectId"/>
     <RockProperties v-else />
 
     <NaturalGasImportDialog
       v-model="importDialogVisible"
+      :import-kind="activeGasImportKind"
       @confirm="handleGasImport"
     />
   </section>
