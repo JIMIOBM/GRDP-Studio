@@ -5,12 +5,12 @@ import NaturalGasProperties from './NaturalGasProperties.vue'
 import FormationWaterProperties from './FormationWaterProperties.vue'
 import RockProperties from './RockProperties.vue'
 import NaturalGasImportDialog from './NaturalGasImportDialog.vue'
+import RockImportDialog from './RockImportDialog.vue'
 
-const props = defineProps({
-  wellName: {type: String, required: true},
-  projectId: {type: [Number, String], required: true},
-  gasReservoirId: {type: [Number, String], required: true},
-  pvtIndex: {type: [Number, String], default: null}
+defineProps({
+  wellName: { type: String, required: true },
+  projectId: { type: [Number, String], required: true },
+  gasReservoirId: { type: [Number, String], required: true }
 })
 
 const STATIC_PVT_GAS_ROWS = {
@@ -30,11 +30,10 @@ const propertyTabs = [
 const activePropertyTab = ref('天然气性质')
 const activeGasResultTab = ref('数据列表')
 const importDialogVisible = ref(false)
-const importedGasRows = ref(createInitialGasRows())
-const importedGasResultRows = ref([])
-const activeGasImportKind = computed(
-  () => activeGasResultTab.value === '结果分析图' ? 'result' : 'data'
-)
+
+const rockImportDialogVisible = ref(false)        // ← 新增
+const importedGasRows = ref([])
+const importedRockRows = ref([])
 
 const handleSave = () => {
   ElMessage.success(`${activePropertyTab.value}参数已保存`)
@@ -43,6 +42,10 @@ const handleSave = () => {
 const handleImport = () => {
   if (activePropertyTab.value === '天然气性质') {
     importDialogVisible.value = true
+    return
+  }
+  if (activePropertyTab.value === '岩石性质') {
+    rockImportDialogVisible.value = true
     return
   }
   ElMessage.info(`${activePropertyTab.value}导入功能暂未接入`)
@@ -69,6 +72,7 @@ const GAS_RESULT_IMPORT_COLUMNS = [
 
 const normalizeHeader = (value) => String(value ?? '')
   .trim()
+  .replace(/^\uFEFF/, '')
   .replace(/\s+/g, '')
   .replace(/2/g, '₂')
 
@@ -113,14 +117,22 @@ const cleanImportRows = (sourceRows, options, requiredColumns) => {
   }
 
   if (options.removeZeroRows && rows.length > 1) {
-    rows = [
-      rows[0],
-      ...rows.slice(1).filter(row => {
-        const numericValues = row.slice(1).filter(value => !isEmptyCell(value))
-        return !numericValues.length || !numericValues.every(isZeroCell)
+  rows = [
+    rows[0],
+    ...rows.slice(1).filter(row => {
+      const headerRow = rows[0]
+      const numericValues = row.filter((value, index) => {
+        const header = String(headerRow[index] ?? '').trim()
+        const isTextColumn = ['类型', '名称', '单位'].some(keyword =>
+          header.includes(keyword)
+        )
+        if (isTextColumn || isEmptyCell(header)) return false
+        return !isEmptyCell(value)
       })
-    ]
-  }
+      return !numericValues.length || !numericValues.every(isZeroCell)
+    })
+  ]
+}
 
   return rows
 }
@@ -234,20 +246,78 @@ const handleGasImport = async ({ file, options, kind }) => {
     ElMessage.error(error.message || '天然气性质数据导入失败')
   }
 }
+
+const ROCK_IMPORT_COLUMNS = [
+  '岩石孔隙度（%）'
+]
+
+const handleRockImport = async ({ file, options }) => {
+  try {
+    const extension = file.name.split('.').pop()?.toLowerCase()
+    if (!['xlsx', 'xls', 'csv'].includes(extension)) {
+      throw new Error('仅支持 .xlsx、.xls、.csv 表格文件')
+    }
+
+
+const XLSX = await import('xlsx')
+const buffer = await file.arrayBuffer()
+
+const workbook = XLSX.read(buffer, {
+  type: 'array'
+})
+const firstSheet = workbook.Sheets[workbook.SheetNames[0]]
+    const sourceRows = XLSX.utils.sheet_to_json(firstSheet, {
+      header: 1,
+      raw: true,
+      defval: ''
+    })
+
+    const rows = cleanImportRows(sourceRows, options, ROCK_IMPORT_COLUMNS)
+
+    if (!rows.length) throw new Error('文件中没有可导入的数据')
+
+    const headers = rows[0].map(normalizeHeader)
+
+    const columnIndexes = ROCK_IMPORT_COLUMNS.map(column =>
+      headers.indexOf(normalizeHeader(column))
+    )
+
+    console.log('列索引匹配结果:', columnIndexes)
+
+    const missingColumns = ROCK_IMPORT_COLUMNS.filter((_, index) => columnIndexes[index] < 0)
+
+    if (missingColumns.length) {
+      console.error('匹配失败的列:', missingColumns)
+      throw new Error(`缺少字段：${missingColumns.join('、')}（请检查CSV表头是否为：${ROCK_IMPORT_COLUMNS.join('、')}）`)
+    }
+
+    const parsedRows = rows.slice(1).map(row =>
+      columnIndexes.map((index, columnIndex) => {
+        const value = row[index] ?? ''
+        if (options.fillEmptyWithZero && isEmptyCell(value)) return 0
+        return value
+      })
+    )
+
+    if (!parsedRows.length || !parsedRows.some(row => row.some(value => !isEmptyCell(value)))) {
+      throw new Error('文件中没有可导入的数据行')
+    }
+
+    importedRockRows.value = parsedRows.slice(0, 27)
+    ElMessage.success(`成功导入 ${importedRockRows.value.length} 条岩石性质数据`)
+  } catch (error) {
+    console.error('岩石导入错误详情:', error)
+    ElMessage.error(error.message || '岩石性质数据导入失败')
+  }
+}
 </script>
 
 <template>
   <section class="pvt-properties">
     <header class="pvt-toolbar">
       <nav class="property-tabs" aria-label="PVT 性质分类">
-        <button
-          v-for="tab in propertyTabs"
-          :key="tab.name"
-          type="button"
-          class="property-tab"
-          :class="{ active: activePropertyTab === tab.name }"
-          @click="activePropertyTab = tab.name"
-        >
+        <button v-for="tab in propertyTabs" :key="tab.name" type="button" class="property-tab"
+          :class="{ active: activePropertyTab === tab.name }" @click="activePropertyTab = tab.name">
           {{ tab.name }}
         </button>
       </nav>
@@ -258,21 +328,15 @@ const handleGasImport = async ({ file, options, kind }) => {
       </div>
     </header>
 
-    <NaturalGasProperties
-      v-if="activePropertyTab === '天然气性质'"
-      :imported-rows="importedGasRows"
-      :imported-result-rows="importedGasResultRows"
-      :project-id="projectId"
-      @result-tab-change="activeGasResultTab = $event"
-    />
-    <FormationWaterProperties v-else-if="activePropertyTab === '地层水性质'" :well-name="wellName" :project-id="projectId"/>
-    <RockProperties v-else />
+    <NaturalGasProperties v-if="activePropertyTab === '天然气性质'" :imported-rows="importedGasRows"
+      :project-id="projectId" />
+    <FormationWaterProperties v-else-if="activePropertyTab === '地层水性质'" :well-name="wellName" :project-id="projectId" />
+    <RockProperties v-else-if="activePropertyTab === '岩石性质'" :imported-rows="importedRockRows"
+      :project-id="projectId" />
 
-    <NaturalGasImportDialog
-      v-model="importDialogVisible"
-      :import-kind="activeGasImportKind"
-      @confirm="handleGasImport"
-    />
+    <NaturalGasImportDialog v-model="importDialogVisible" @confirm="handleGasImport" />
+
+    <RockImportDialog v-model="rockImportDialogVisible" @confirm="handleRockImport" />
   </section>
 </template>
 
