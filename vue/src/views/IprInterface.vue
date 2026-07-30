@@ -34,7 +34,8 @@ const WELL_GROUPS = [
 
 const WELL_DATA_NODES = [
   { type: 'well-data-deliverability', label: '产能测试', dataType: 'deliverability' },
-  { type: 'well-data-static-pressure', label: '静压数据', dataType: 'staticPressure' }
+  { type: 'well-data-static-pressure', label: '静压数据', dataType: 'staticPressure' },
+  { type: 'well-data-pvt-group', label: 'PVT性质' }
 ]
 
 const NODE_GROUP_BY_TYPE = {
@@ -563,12 +564,25 @@ const findWattenbargerNodeByWell = (root, wellName) => {
   return visit(root)
 }
 
+const createStaticPvtPropertyNodes = (wellName, wellId) =>
+  [1, 2].map(index => ({
+    id: `${wellId || wellName}-well-data-pvt-${index}`,
+    label: `PVT性质 ${index}`,
+    type: 'well-data-pvt',
+    wellName,
+    pvtIndex: index,
+    children: []
+  }))
+
 const createWellDataNodes = (wellName, wellId) =>
   WELL_DATA_NODES.map(item => ({
     ...item,
     id: `${wellId || wellName}-${item.type}`,
     wellName,
-    children: []
+    defaultExpanded: false,
+    children: item.type === 'well-data-pvt-group'
+      ? createStaticPvtPropertyNodes(wellName, wellId)
+      : []
   }))
 
 const createEmptyWell = (wellName, wellId) => ({ //创建一口空井
@@ -626,8 +640,13 @@ const ensureWell = (wellName, wellId) => { //确保井存在
     groupItem.wellName = wellName
     if (group.id === 'data-management') {
       createWellDataNodes(wellName, wellItem.id).forEach(dataNode => {
-        if (!groupItem.children.some(item => item.type === dataNode.type)) {
+        const existingNode = groupItem.children.find(item => item.type === dataNode.type)
+        if (!existingNode) {
           groupItem.children.push(dataNode)
+          return
+        }
+        if (dataNode.type === 'well-data-pvt-group') {
+          existingNode.children = dataNode.children
         }
       })
     }
@@ -3249,6 +3268,12 @@ const handleSelect = async (node) => { // 点击左侧树节点
 
   if (isWellMenuGroup) return
 
+  if (node.type === 'well-data-pvt') {
+    currentView.value = 'pvt-properties'
+    currentViewNode.value = node
+    return
+  }
+
   if (node.dataType) {
     currentView.value = 'well-data-table'
     currentViewNode.value = {
@@ -3456,9 +3481,11 @@ onBeforeUnmount(() => {
       <main class="content-area">
         <PvtPropertiesContent
           v-if="currentView === 'pvt-properties'"
+          :key="currentViewNode?.id || currentViewNode?.wellName"
           :well-name="currentViewNode?.wellName"
           :project-id="PROJECT_ID"
           :gas-reservoir-id="GAS_RESERVOIR_ID"
+          :pvt-index="currentViewNode?.pvtIndex"
         />
         <WellDataTableContent v-if="currentView === 'well-data-table'"
           :data-type="currentViewNode?.dataType" :well-name="currentViewNode?.wellName"

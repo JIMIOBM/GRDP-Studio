@@ -2,7 +2,6 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
-import { toolboxApi } from '@/api/docker'
 import { gasPvtApi } from '@/api/gasPvt'
 
 const props = defineProps({
@@ -16,28 +15,16 @@ const emit = defineEmits(['result-tab-change'])
 const DEFAULT_GAS_CORRECTION_METHOD = 'Wichert-Aziz 修正方法'
 const DEFAULT_DEVIATION_FACTOR_METHOD = 'Dranchuk-Abu-Kassem 方法'
 const DEFAULT_VISCOSITY_METHOD = 'Lee-Gonzalez-Eakin 方法'
-const DEFAULT_PRESSURE = '20'
 const DEFAULT_TEMPERATURE = '39.35'
 
 const activeResultTab = ref('数据列表')
 const activeCurve = ref('曲线1')
 const analysisTableCollapsed = ref(false)
-const hasAnalysisResult = ref(false)
 const gasCorrectionMethod = ref(DEFAULT_GAS_CORRECTION_METHOD)
 const deviationFactorMethod = ref(DEFAULT_DEVIATION_FACTOR_METHOD)
 const viscosityMethod = ref(DEFAULT_VISCOSITY_METHOD)
-const pressure = ref(DEFAULT_PRESSURE)
 const reservoirTemperature = ref(DEFAULT_TEMPERATURE)
-const gasDeviationFactorResult = ref('0')
-const gasPseudoPressureResult = ref('0')
-const gasVolumeFactorResult = ref('0')
-const gasDensityResult = ref('0')
-const gasCompressibilityResult = ref('0')
-const gasViscosityResult = ref('0')
 const calculating = ref(false)
-const calculationMode = ref('')
-const pointCalculationSeries = ref([])
-const selectedPointSourceRow = ref(null)
 const curveOneSeries = ref([])
 const selectedCurveOneSourceRow = ref(null)
 const curveTwoSeries = ref([])
@@ -46,11 +33,6 @@ const curveThreeSeries = ref([])
 const selectedCurveThreeSourceRow = ref(null)
 const viscosityCurveSeries = ref([])
 const selectedViscositySourceRow = ref(null)
-const selectedPointResult = computed(
-  () => pointCalculationSeries.value.find(
-    result => result.sourceRow === selectedPointSourceRow.value
-  ) ?? pointCalculationSeries.value[0] ?? null
-)
 const selectedViscositySeries = computed(
   () => viscosityCurveSeries.value.find(
     curve => curve.sourceRow === selectedViscositySourceRow.value
@@ -206,7 +188,7 @@ const analysisDataCells = computed(() => {
 })
 
 const gasDataCells = computed(() => {
-  const rowCount = Math.max(27, props.importedRows.length)
+  const rowCount = 27
   return Array.from({ length: rowCount * gasTableColumns.length }, (_, cellIndex) => {
     const rowIndex = Math.floor(cellIndex / gasTableColumns.length)
     const columnIndex = cellIndex % gasTableColumns.length
@@ -231,48 +213,6 @@ const gasTypeNames = ['干气', '湿气', '凝析气']
 
 const unwrapResponse = (response) =>
   response?.data?.data ?? response?.data ?? response ?? {}
-
-const parseJsonValue = (value) => {
-  if (typeof value !== 'string') return value
-  try {
-    return JSON.parse(value)
-  } catch {
-    return value
-  }
-}
-
-const findViscosityResult = (source, depth = 0) => {
-  const value = parseJsonValue(source)
-  if (depth > 5 || value === null || value === undefined) return undefined
-  if (typeof value !== 'object') return undefined
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const itemResult = findViscosityResult(item, depth + 1)
-      if (itemResult !== undefined) return itemResult
-    }
-    return undefined
-  }
-
-  for (const key of ['gasViscosity', 'naturalGasViscosity', 'viscosity']) {
-    if (value[key] !== null && value[key] !== undefined && value[key] !== '') {
-      return value[key]
-    }
-  }
-
-  for (const [key, item] of Object.entries(value)) {
-    if (/viscosity/i.test(key) && !/method/i.test(key) &&
-        item !== null && item !== undefined && item !== '' &&
-        typeof item !== 'object') {
-      return item
-    }
-  }
-
-  for (const item of Object.values(value)) {
-    const nestedResult = findViscosityResult(item, depth + 1)
-    if (nestedResult !== undefined) return nestedResult
-  }
-  return undefined
-}
 
 const renderChart = () => {
   const element = chartEl.value
@@ -516,23 +456,12 @@ const scheduleRenderChart = async () => {
   })
 }
 
-const showSelectedPointResult = () => {
-  const result = selectedPointResult.value
-  gasDeviationFactorResult.value = result ? String(result.deviationFactor) : '0'
-  gasPseudoPressureResult.value = result ? String(result.pseudoPressure) : '0'
-  gasVolumeFactorResult.value = result ? String(result.volumeFactor) : '0'
-  gasDensityResult.value = result ? String(result.density) : '0'
-  gasCompressibilityResult.value = result ? String(result.compressibility) : '0'
-  gasViscosityResult.value = result ? String(result.viscosity) : '0'
-}
-
-const handleCalculate = async (calculateAnalysis = false) => {
+const handleCalculate = async () => {
   if (calculating.value) return
 
-  const calculationPressure = Number(pressure.value)
   const calculationTemperature = Number(reservoirTemperature.value)
-  if (!Number.isFinite(calculationPressure) || !Number.isFinite(calculationTemperature)) {
-    ElMessage.error('请检查压力和温度是否为有效数字')
+  if (!Number.isFinite(calculationTemperature)) {
+    ElMessage.error('请检查温度是否为有效数字')
     return
   }
 
@@ -593,23 +522,6 @@ const handleCalculate = async (calculateAnalysis = false) => {
     'Sutton 方法'
   ].indexOf(viscosityMethod.value)
 
-  const buildPointInput = row => ({
-    gasType: row.gasType,
-    specificGravity: row.specificGravity,
-    h2SMoleFraction: row.h2SMoleFraction,
-    co2MoleFraction: row.co2MoleFraction,
-    n2MoleFraction: row.n2MoleFraction,
-    pressure: calculationPressure,
-    temperature: calculationTemperature,
-    originalPressure: 40,
-    pseudoPressure: 4e-8,
-    regularizedPseudoPressure: 40,
-    apparentPressure: 40,
-    modificationMethod,
-    deviationFactorMethod: deviationMethod,
-    viscosityMethod: selectedViscosityMethod
-  })
-
   const buildCurveRequest = row => ({
     projectId: Number(props.projectId),
     gasType: row.gasType,
@@ -627,88 +539,7 @@ const handleCalculate = async (calculateAnalysis = false) => {
   })
 
   calculating.value = true
-  calculationMode.value = calculateAnalysis ? 'analysis' : 'point'
   try {
-    if (!calculateAnalysis) {
-      const calculatedPointSeries = []
-      for (const row of calculationRows) {
-        try {
-          const calculateViscosityPoint = async () => {
-            const created = unwrapResponse(
-              await toolboxApi.create('GasPVT_Viscosity', Number(props.projectId))
-            )
-            const toolboxId = created?.id
-            if (toolboxId === null || toolboxId === undefined || toolboxId === '') {
-              throw new Error('创建天然气 PVT 工具箱后未返回 id')
-            }
-            await toolboxApi.calculate(toolboxId, buildPointInput(row))
-            const result = unwrapResponse(await toolboxApi.getResult(toolboxId))
-            const viscosity = findViscosityResult(result)
-            if (viscosity === undefined) {
-              throw new Error('接口结果中未找到天然气粘度')
-            }
-            return viscosity
-          }
-
-          const pointCurveRequest = {
-            ...buildCurveRequest(row),
-            pressureStart: calculationPressure,
-            pressureEnd: calculationPressure
-          }
-          const [
-            viscosity,
-            curveOnePointResponse,
-            curveTwoPointResponse,
-            curveThreePointResponse
-          ] = await Promise.all([
-            calculateViscosityPoint(),
-            gasPvtApi.calculateCurveOne(pointCurveRequest),
-            gasPvtApi.calculateCurveTwo(pointCurveRequest),
-            gasPvtApi.calculateCurveThree(pointCurveRequest)
-          ])
-
-          const curveOnePointResult = unwrapResponse(curveOnePointResponse)
-          const curveOnePoint = Array.isArray(curveOnePointResult?.items)
-            ? curveOnePointResult.items[0]
-            : null
-          const curveTwoPointResult = unwrapResponse(curveTwoPointResponse)
-          const curveTwoPoint = Array.isArray(curveTwoPointResult?.items)
-            ? curveTwoPointResult.items[0]
-            : null
-          const curveThreePointResult = unwrapResponse(curveThreePointResponse)
-          const curveThreePoint = Array.isArray(curveThreePointResult?.items)
-            ? curveThreePointResult.items[0]
-            : null
-          if (!curveOnePoint || !curveTwoPoint || !curveThreePoint) {
-            throw new Error('单点计算接口未返回完整结果')
-          }
-
-          calculatedPointSeries.push({
-            sourceRow: row.rowNumber,
-            name: `序号${row.rowNumber}-${row.gasTypeName}`,
-            deviationFactor: curveOnePoint.deviationFactor,
-            pseudoPressure: curveOnePoint.pseudoPressure,
-            volumeFactor: curveTwoPoint.volumeFactor,
-            density: curveTwoPoint.density,
-            compressibility: curveThreePoint.compressibility,
-            viscosity
-          })
-        } catch (error) {
-          const message = error.response?.data?.message ||
-            error.response?.data?.msg ||
-            error.message ||
-            '单点计算失败'
-          throw new Error(`序号 ${row.rowNumber}：${message}`)
-        }
-      }
-
-      pointCalculationSeries.value = calculatedPointSeries
-      selectedPointSourceRow.value = calculatedPointSeries[0]?.sourceRow ?? null
-      showSelectedPointResult()
-      ElMessage.success(`${calculatedPointSeries.length} 条天然气数据单点计算完成`)
-      return
-    }
-
     const calculatedCurveOneSeries = []
     const calculatedCurveTwoSeries = []
     const calculatedCurveThreeSeries = []
@@ -799,7 +630,6 @@ const handleCalculate = async (calculateAnalysis = false) => {
     viscosityCurveSeries.value = calculatedSeries
     selectedViscositySourceRow.value = calculatedSeries[0]?.sourceRow ?? null
     activeCurve.value = '曲线1'
-    hasAnalysisResult.value = true
     ElMessage.success(`${calculatedSeries.length} 条天然气数据计算完成`)
   } catch (error) {
     ElMessage.error(
@@ -810,7 +640,6 @@ const handleCalculate = async (calculateAnalysis = false) => {
     )
   } finally {
     calculating.value = false
-    calculationMode.value = ''
   }
 }
 
@@ -818,17 +647,7 @@ const handleReset = () => {
   gasCorrectionMethod.value = DEFAULT_GAS_CORRECTION_METHOD
   deviationFactorMethod.value = DEFAULT_DEVIATION_FACTOR_METHOD
   viscosityMethod.value = DEFAULT_VISCOSITY_METHOD
-  pressure.value = DEFAULT_PRESSURE
   reservoirTemperature.value = DEFAULT_TEMPERATURE
-  hasAnalysisResult.value = false
-  pointCalculationSeries.value = []
-  selectedPointSourceRow.value = null
-  gasDeviationFactorResult.value = '0'
-  gasPseudoPressureResult.value = '0'
-  gasVolumeFactorResult.value = '0'
-  gasDensityResult.value = '0'
-  gasCompressibilityResult.value = '0'
-  gasViscosityResult.value = '0'
   curveOneSeries.value = []
   selectedCurveOneSourceRow.value = null
   curveTwoSeries.value = []
@@ -837,9 +656,9 @@ const handleReset = () => {
   selectedCurveThreeSourceRow.value = null
   viscosityCurveSeries.value = []
   selectedViscositySourceRow.value = null
+  activeCurve.value = '曲线1'
+  analysisTableCollapsed.value = false
 }
-
-watch(selectedPointSourceRow, showSelectedPointResult)
 
 watch(
   () => props.importedResultRows,
@@ -872,7 +691,6 @@ watch(
     viscosityCurveSeries.value = [{ ...importedSeries }]
     selectedViscositySourceRow.value = 1
     activeCurve.value = '曲线1'
-    hasAnalysisResult.value = true
     scheduleRenderChart()
   },
   { deep: true }
@@ -969,73 +787,16 @@ onBeforeUnmount(() => {
           </div>
 
           <label class="gas-field-group">
-            <span>压力（MPa）</span>
-            <input v-model="pressure" type="number" step="any" inputmode="decimal" />
-          </label>
-
-          <label class="gas-field-group">
             <span>温度（℃）</span>
             <input v-model="reservoirTemperature" inputmode="decimal" />
           </label>
         </div>
 
         <div class="gas-parameter-actions">
-          <button type="button" :disabled="calculating" @click="handleCalculate()">
-            {{ calculationMode === 'point' ? '计算中...' : '计算' }}
+          <button type="button" :disabled="calculating" @click="handleCalculate">
+            {{ calculating ? '计算中...' : '计算' }}
           </button>
           <button type="button" :disabled="calculating" @click="handleReset">重置</button>
-        </div>
-
-        <label
-          v-if="pointCalculationSeries.length"
-          class="gas-field-group gas-point-result-selector"
-        >
-          <span>单点计算结果数据</span>
-          <select v-model="selectedPointSourceRow">
-            <option
-              v-for="result in pointCalculationSeries"
-              :key="result.sourceRow"
-              :value="result.sourceRow"
-            >
-              {{ result.name }}
-            </option>
-          </select>
-        </label>
-
-        <label class="gas-field-group gas-result-field">
-          <span>天然气偏差系数计算结果(dless)</span>
-          <input v-model="gasDeviationFactorResult" type="text" readonly />
-        </label>
-
-        <label class="gas-field-group gas-result-field">
-          <span>气体拟压力计算结果(MPa²/(mPa·s))</span>
-          <input v-model="gasPseudoPressureResult" type="text" readonly />
-        </label>
-
-        <label class="gas-field-group gas-result-field">
-          <span>天然气体积系数计算结果(dless)</span>
-          <input v-model="gasVolumeFactorResult" type="text" readonly />
-        </label>
-
-        <label class="gas-field-group gas-result-field">
-          <span>天然气密度计算结果(kg/m³)</span>
-          <input v-model="gasDensityResult" type="text" readonly />
-        </label>
-
-        <label class="gas-field-group gas-result-field">
-          <span>天然气压缩系数计算结果(MPa⁻¹)</span>
-          <input v-model="gasCompressibilityResult" type="text" readonly />
-        </label>
-
-        <label class="gas-field-group gas-result-field">
-          <span>天然气粘度计算结果</span>
-          <input v-model="gasViscosityResult" type="text" readonly />
-        </label>
-
-        <div class="gas-parameter-actions gas-overall-action">
-          <button type="button" :disabled="calculating" @click="handleCalculate(true)">
-            {{ calculationMode === 'analysis' ? '整体计算中...' : '整体计算' }}
-          </button>
         </div>
 
       </aside>
@@ -1590,20 +1351,6 @@ onBeforeUnmount(() => {
       color: #999;
       cursor: not-allowed;
     }
-  }
-}
-
-.gas-overall-action {
-  margin-top: 16px;
-}
-
-.gas-result-field {
-  margin-top: 16px;
-
-  input {
-    background: #f5f5f5;
-    color: #333;
-    cursor: default;
   }
 }
 

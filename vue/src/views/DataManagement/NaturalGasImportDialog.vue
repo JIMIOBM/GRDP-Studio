@@ -108,7 +108,7 @@ const downloadTemplate = async (kind) => {
     headerRow.font = { bold: true }
     headerRow.alignment = { vertical: 'middle', horizontal: 'center' }
 
-    worksheet.dataValidations.add('A2:A1048576', {
+    worksheet.dataValidations.add('A2', {
       type: 'list',
       allowBlank: true,
       formulae: ['"干气,湿气,凝析气"'],

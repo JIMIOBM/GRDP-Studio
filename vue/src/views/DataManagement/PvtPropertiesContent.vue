@@ -6,11 +6,20 @@ import FormationWaterProperties from './FormationWaterProperties.vue'
 import RockProperties from './RockProperties.vue'
 import NaturalGasImportDialog from './NaturalGasImportDialog.vue'
 
-defineProps({
+const props = defineProps({
   wellName: {type: String, required: true},
   projectId: {type: [Number, String], required: true},
-  gasReservoirId: {type: [Number, String], required: true}
+  gasReservoirId: {type: [Number, String], required: true},
+  pvtIndex: {type: [Number, String], default: null}
 })
+
+const STATIC_PVT_GAS_ROWS = {
+  1: [['干气', 0.58, 0.02, 1.2, 0.8]],
+  2: [['湿气', 0.65, 0.03, 1.5, 0.9]]
+}
+
+const createInitialGasRows = () =>
+  (STATIC_PVT_GAS_ROWS[Number(props.pvtIndex)] || []).map(row => [...row])
 
 const propertyTabs = [
   { name: '天然气性质', component: NaturalGasProperties },
@@ -21,7 +30,7 @@ const propertyTabs = [
 const activePropertyTab = ref('天然气性质')
 const activeGasResultTab = ref('数据列表')
 const importDialogVisible = ref(false)
-const importedGasRows = ref([])
+const importedGasRows = ref(createInitialGasRows())
 const importedGasResultRows = ref([])
 const activeGasImportKind = computed(
   () => activeGasResultTab.value === '结果分析图' ? 'result' : 'data'
@@ -135,6 +144,9 @@ const parseDataImportRows = (rows, options) => {
     row.some(value => !isEmptyCell(value))
   )
   if (!dataRows.length) throw new Error('数据模板中没有可导入的数据行')
+  if (dataRows.length > 1) {
+    throw new Error('每次 PVT 性质只能导入 1 条天然气基础数据，请删除多余数据行')
+  }
 
   return dataRows.map((row, rowIndex) => {
     const values = GAS_IMPORT_COLUMNS.map((_, columnIndex) => {
