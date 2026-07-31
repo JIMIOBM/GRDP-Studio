@@ -320,6 +320,10 @@ const firstSheet = workbook.Sheets[workbook.SheetNames[0]]
       throw new Error('文件中没有可导入的数据行')
     }
 
+    if (parsedRows.length > 1) {
+  throw new Error('每次岩石性质只能导入1条基础数据，请删除多余数据行')
+}
+
     importedRockRows.value = parsedRows.slice(0, 27)
     ElMessage.success(`成功导入 ${importedRockRows.value.length} 条岩石性质数据`)
   } catch (error) {

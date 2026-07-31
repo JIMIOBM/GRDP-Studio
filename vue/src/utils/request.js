@@ -6,7 +6,8 @@ import { disconnectNotifySocket } from '@/utils/notifySocket'
 
 const request = axios.create({
   baseURL: baseApi,
-  timeout: 15000
+  timeout: 15000,
+  withCredentials: true
 })
 
 // 请求拦截：自动带上 token

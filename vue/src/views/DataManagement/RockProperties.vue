@@ -3,7 +3,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
-// import { rockPvtApi } from '@/api/rockPvt'
+import { rockPvtApi } from '@/api/rockPvt'
 
 const props = defineProps({
   importedRows: { type: Array, default: () => [] },
@@ -22,7 +22,6 @@ const porosity = ref(DEFAULT_POROSITY)
 const cementedSandstoneCompressibility = ref('0')
 const carbonateCompressibility = ref('0')
 const calculating = ref(false)
-const calculationMode = ref('')
 const curveOneSeries = ref([])
 const selectedCurveOneSourceRow = ref(null)
 const curveTwoSeries = ref([])
@@ -88,7 +87,7 @@ const analysisDataCells = computed(() => {
       ...(row
         ? [
           Number(row.porosity).toFixed(2),
-          Number(row.compressibility).toExponential(6)
+          Number(row.compressibilityFactor).toExponential(6)
         ]
         : [])
     ]
@@ -167,7 +166,7 @@ const renderChart = () => {
       smooth: true,
       lineStyle: { color: curve.color || curveColors[index], width: 1.5 },
       itemStyle: { color: curve.color || curveColors[index] },
-      data: curve.items.map(row => [Number(row.porosity), Number(row.compressibility)])
+      data: curve.items.map(row => [Number(row.porosity), Number(row.compressibilityFactor)])
     }))
   } else if (activeCurve.value === '曲线2') {
     chartSeries = curveTwoSeries.value.map((curve, index) => ({
@@ -177,7 +176,7 @@ const renderChart = () => {
       smooth: true,
       lineStyle: { color: curve.color || curveColors[index], width: 1.5 },
       itemStyle: { color: curve.color || curveColors[index] },
-      data: curve.items.map(row => [Number(row.porosity), Number(row.compressibility)])
+      data: curve.items.map(row => [Number(row.porosity), Number(row.compressibilityFactor)])
     }))
   }
 
@@ -242,75 +241,115 @@ const scheduleRenderChart = async () => {
   })
 }
 
-const handleCalculate = async (calculateAnalysis = false) => {
+const handleCalculate = async () => {
   if (calculating.value) return
 
-  const calcPorosity = Number(porosity.value)
-  if (!Number.isFinite(calcPorosity)) {
-    ElMessage.error('请检查岩石孔隙度是否为有效数字')
+  const sourceRows = props.importedRows
+    .map((row, rowIndex) => ({ row, rowNumber: rowIndex + 1 }))
+    .filter(({ row }) =>
+      Array.isArray(row) && row.some(value => String(value ?? '').trim() !== '')
+    )
+
+  if (!sourceRows.length) {
+    ElMessage.error('右侧表格中没有可计算的岩石数据')
     return
   }
 
-  calculating.value = true
-  calculationMode.value = calculateAnalysis ? 'analysis' : 'point'
-
-  try {
-    if (!calculateAnalysis) {
-      // 单点计算 - 使用默认方法计算两个结果
-      // TODO: 替换为真实API调用
-      cementedSandstoneCompressibility.value = (1.5e-3).toExponential(6)
-      carbonateCompressibility.value = (0.8e-3).toExponential(6)
-      ElMessage.success('单点计算完成')
+  const calculationRows = []
+  for (const { row, rowNumber } of sourceRows) {
+    const porosityValue = Number(row?.[0])
+    if (!Number.isFinite(porosityValue) || porosityValue <= 0) {
+      ElMessage.error(`请检查右侧表格序号 ${rowNumber} 是否为有效数据`)
       return
     }
+    calculationRows.push({ rowNumber, porosity: porosityValue })
+  }
 
-    // 整体分析计算
-    const calculatedCurveOne = []
-    const calculatedCurveTwo = []
+  const buildCurveRequest = row => {
+    const projectId = Number(props.projectId)
+    
+    if (!Number.isFinite(projectId) || projectId <= 0) {
+      throw new Error(`项目 ID 无效: ${props.projectId} (转换为 ${projectId})`)
+    }
+    
+    return {
+      projectId,
+      porosityStart: 5,
+      porosityEnd: 40,
+      porosityStep: 2
+    }
+  }
 
-    for (let i = 0; i < props.importedRows.length; i++) {
-      const row = props.importedRows[i]
-      const rowPorosity = Number(row?.[0] ?? porosity.value)
+  calculating.value = true
+  try {
+    const calculatedCurveOneSeries = []
+    const calculatedCurveTwoSeries = []
 
-      // 模拟生成曲线数据（TODO: 替换为真实API调用）
-      const items = []
-      for (let p = 5; p <= 40; p += 2) {
-        items.push({
-          porosity: p,
-          compressibility: (1.5e-3 * Math.exp(-p / 30))
+    for (const [index, row] of calculationRows.entries()) {
+      try {
+        const curveRequest = buildCurveRequest(row)
+              const [curveOneResponse, curveTwoResponse] = await Promise.all([
+          rockPvtApi.calculateCurveOne(curveRequest),
+          rockPvtApi.calculateCurveTwo(curveRequest)
+        ])
+
+        
+
+        // 解包曲线1响应
+        const curveOneResult = unwrapResponse(curveOneResponse)
+        const curveOneItems = Array.isArray(curveOneResult?.items) ? curveOneResult.items : []
+        if (!curveOneItems.length) throw new Error('曲线1接口未返回数据')
+
+        calculatedCurveOneSeries.push({
+          sourceRow: row.rowNumber,
+          name: `序号${row.rowNumber}`,
+          color: curveColors[index % curveColors.length],
+          items: curveOneItems
         })
+
+        // 解包曲线2响应
+        const curveTwoResult = unwrapResponse(curveTwoResponse)
+        const curveTwoItems = Array.isArray(curveTwoResult?.items) ? curveTwoResult.items : []
+        if (!curveTwoItems.length) throw new Error('曲线2接口未返回数据')
+
+        calculatedCurveTwoSeries.push({
+          sourceRow: row.rowNumber,
+          name: `序号${row.rowNumber}`,
+          color: curveColors[index % curveColors.length],
+          items: curveTwoItems
+        })
+
+            } catch (error) {
+        console.error('[RockPvt] 内层完整错误:', {
+          message: error.message,
+          response: error.response?.data,
+          status: error.response?.status,
+          config: error.config
+        })
+        
+        const message = error?.response?.data?.msg 
+          || error?.msg 
+          || error?.message 
+          || JSON.stringify(error)
+          || '曲线计算失败'
+        throw new Error(`序号 ${row.rowNumber}：${message}`)
       }
-
-      calculatedCurveOne.push({
-        sourceRow: i + 1,
-        name: `序号${i + 1}`,
-        color: curveColors[i % curveColors.length],
-        items
-      })
-
-      calculatedCurveTwo.push({
-        sourceRow: i + 1,
-        name: `序号${i + 1}`,
-        color: curveColors[i % curveColors.length],
-        items: items.map(item => ({
-          ...item,
-          compressibility: item.compressibility * 0.53
-        }))
-      })
     }
 
-    curveOneSeries.value = calculatedCurveOne
-    selectedCurveOneSourceRow.value = calculatedCurveOne[0]?.sourceRow ?? null
-    curveTwoSeries.value = calculatedCurveTwo
-    selectedCurveTwoSourceRow.value = calculatedCurveTwo[0]?.sourceRow ?? null
+    // 赋值结果
+    curveOneSeries.value = calculatedCurveOneSeries
+    selectedCurveOneSourceRow.value = calculatedCurveOneSeries[0]?.sourceRow ?? null
+    curveTwoSeries.value = calculatedCurveTwoSeries
+    selectedCurveTwoSourceRow.value = calculatedCurveTwoSeries[0]?.sourceRow ?? null
     activeCurve.value = '曲线1'
-    hasAnalysisResult.value = true
-    ElMessage.success(`${calculatedCurveOne.length} 条岩石数据计算完成`)
-  } catch (error) {
-    ElMessage.error(error.message || '岩石性质计算失败')
+
+    ElMessage.success(`${calculatedCurveOneSeries.length} 条岩石数据计算完成`)
+
+    } catch (error) {
+    const errorMsg = error?.msg || error?.message || error.message || '岩石性质计算失败'
+    ElMessage.error(errorMsg)
   } finally {
     calculating.value = false
-    calculationMode.value = ''
   }
 }
 
@@ -402,8 +441,8 @@ onBeforeUnmount(() => {
           </label>
 
           <div class="rock-parameter-actions">
-            <button type="button" :disabled="calculating" @click="handleCalculate()">
-              {{ calculationMode === 'point' ? '计算中...' : '计算' }}
+            <button type="button" :disabled="calculating" @click="handleCalculate">
+              {{ calculating ? '计算中...' : '计算' }}
             </button>
             <button type="button" :disabled="calculating" @click="handleReset">重置</button>
           </div>
