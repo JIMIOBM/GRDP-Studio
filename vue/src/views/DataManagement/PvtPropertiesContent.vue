@@ -7,10 +7,11 @@ import RockProperties from './RockProperties.vue'
 import NaturalGasImportDialog from './NaturalGasImportDialog.vue'
 import RockImportDialog from './RockImportDialog.vue'
 
-defineProps({
+const props = defineProps({
   wellName: { type: String, required: true },
   projectId: { type: [Number, String], required: true },
-  gasReservoirId: { type: [Number, String], required: true }
+  gasReservoirId: { type: [Number, String], required: true },
+  pvtIndex: { type: [Number, String], required: true }
 })
 
 // 当前阶段使用静态挂载：每口井的 PVT 性质 1、2 各自只有一条基础气体数据。
@@ -30,11 +31,19 @@ const propertyTabs = [
 
 const activePropertyTab = ref('天然气性质')
 const activeGasResultTab = ref('数据列表')
+const gasImportKind = computed(() =>
+  activeGasResultTab.value === '结果分析图' ? 'result' : 'data'
+)
 const importDialogVisible = ref(false)
 
 const rockImportDialogVisible = ref(false)        // ← 新增
-const importedGasRows = ref([])
+const importedGasRows = ref(createInitialGasRows())
+const importedGasResultRows = ref([])
 const importedRockRows = ref([])
+
+const handleGasResultTabChange = (tabName) => {
+  activeGasResultTab.value = tabName
+}
 
 const handleSave = () => {
   ElMessage.success(`${activePropertyTab.value}参数已保存`)
@@ -336,13 +345,22 @@ const firstSheet = workbook.Sheets[workbook.SheetNames[0]]
       </div>
     </header>
 
-    <NaturalGasProperties v-if="activePropertyTab === '天然气性质'" :imported-rows="importedGasRows"
-      :project-id="projectId" />
+    <NaturalGasProperties
+      v-if="activePropertyTab === '天然气性质'"
+      :imported-rows="importedGasRows"
+      :imported-result-rows="importedGasResultRows"
+      :project-id="projectId"
+      @result-tab-change="handleGasResultTabChange"
+    />
     <FormationWaterProperties v-else-if="activePropertyTab === '地层水性质'" :well-name="wellName" :project-id="projectId" />
     <RockProperties v-else-if="activePropertyTab === '岩石性质'" :imported-rows="importedRockRows"
       :project-id="projectId" />
 
-    <NaturalGasImportDialog v-model="importDialogVisible" @confirm="handleGasImport" />
+    <NaturalGasImportDialog
+      v-model="importDialogVisible"
+      :import-kind="gasImportKind"
+      @confirm="handleGasImport"
+    />
 
     <RockImportDialog v-model="rockImportDialogVisible" @confirm="handleRockImport" />
   </section>
