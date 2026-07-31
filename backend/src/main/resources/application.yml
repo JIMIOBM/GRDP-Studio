@@ -6,9 +6,9 @@ spring:
     name: grdp-backend
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: ${MYSQL_URL:jdbc:mysql://127.0.0.1:3306/grdp_studio?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false}
-    username: ${MYSQL_USERNAME:grdp}
-    password: ${MYSQL_PASSWORD:grdp_dev_password}
+    url: ${MYSQL_URL:jdbc:mysql://127.0.0.1:32000/database?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false}
+    username: ${MYSQL_USERNAME:root}
+    password: ${MYSQL_PASSWORD:password}
     hikari:
       maximum-pool-size: ${MYSQL_POOL_MAX_SIZE:10}
       minimum-idle: ${MYSQL_POOL_MIN_IDLE:2}
