@@ -5,7 +5,9 @@ import { ElMessage } from 'element-plus'
 import { gasPvtApi } from '@/api/gasPvt'
 
 const props = defineProps({
+  // importedRows 是“数据列表”中的基础气体数据；目前每个 PVT 性质只使用一条有效数据。
   importedRows: { type: Array, default: () => [] },
+  // importedResultRows 来自“结果分析图”导入，用于直接回填四条曲线，不再请求后端计算。
   importedResultRows: { type: Array, default: () => [] },
   projectId: { type: [Number, String], required: true }
 })
@@ -25,6 +27,8 @@ const deviationFactorMethod = ref(DEFAULT_DEVIATION_FACTOR_METHOD)
 const viscosityMethod = ref(DEFAULT_VISCOSITY_METHOD)
 const reservoirTemperature = ref(DEFAULT_TEMPERATURE)
 const calculating = ref(false)
+// 每个数组代表一种图表，数组元素代表不同来源行的一组 series。
+// 目前业务只允许一条基础数据，保留 series 结构可让图表与表格切换逻辑保持统一。
 const curveOneSeries = ref([])
 const selectedCurveOneSourceRow = ref(null)
 const curveTwoSeries = ref([])
@@ -92,6 +96,7 @@ const gasPropertyColumns = [
   'N₂摩尔百分含量(%)'
 ]
 const gasTableColumns = ['序号', ...gasPropertyColumns]
+// 多组数据曾使用不同颜色；即使当前只有一组，统一色板仍由图表渲染逻辑管理。
 const curveColors = [
   '#1677ff',
   '#f56c6c',
@@ -107,6 +112,7 @@ const gasGridTemplateColumns = computed(
   () => `48px repeat(${gasPropertyColumns.length}, minmax(145px, 1fr))`
 )
 
+// 同一份配置同时决定结果表头、ECharts 左/右 Y 轴名称和当前曲线。
 const gasCurveOptions = [
   {
     name: '曲线1',
@@ -151,6 +157,7 @@ const analysisGridTemplateColumns = computed(
 )
 
 const analysisDataCells = computed(() => {
+  // 结果表保留至少 25 个可视行；更多压力点通过容器滚动展示。
   const columnCount = analysisTableColumns.value.length
   const rowCount = Math.max(25, activeAnalysisRows.value.length)
   return Array.from({ length: columnCount * rowCount }, (_, cellIndex) => {
@@ -188,6 +195,7 @@ const analysisDataCells = computed(() => {
 })
 
 const gasDataCells = computed(() => {
+  // 27 行只是为了保持原数据表格样式，真正参与计算的是 importedRows 中的有效行。
   const rowCount = 27
   return Array.from({ length: rowCount * gasTableColumns.length }, (_, cellIndex) => {
     const rowIndex = Math.floor(cellIndex / gasTableColumns.length)
@@ -211,10 +219,12 @@ const gasTypeIndexes = {
 }
 const gasTypeNames = ['干气', '湿气', '凝析气']
 
+// request 拦截器和后端 ApiResponse 的包装方式可能不同，因此兼容常见的两层 data。
 const unwrapResponse = (response) =>
   response?.data?.data ?? response?.data ?? response ?? {}
 
 const renderChart = () => {
+  // ECharts 直接挂载到右侧坐标区；折叠左表或窗口缩放后会重新 resize。
   const element = chartEl.value
   if (activeResultTab.value !== '结果分析图' || !element) return
   if (element.clientWidth <= 0 || element.clientHeight <= 0) return
@@ -457,6 +467,7 @@ const scheduleRenderChart = async () => {
 }
 
 const handleCalculate = async () => {
+  // “计算”是整体曲线计算：先校验基础数据，再一次生成曲线 1～4。
   if (calculating.value) return
 
   const calculationTemperature = Number(reservoirTemperature.value)
@@ -522,6 +533,7 @@ const handleCalculate = async () => {
     'Sutton 方法'
   ].indexOf(viscosityMethod.value)
 
+  // 四个后端接口使用同一套公共参数；压力固定为 5～200 MPa，间隔 5 MPa。
   const buildCurveRequest = row => ({
     projectId: Number(props.projectId),
     gasType: row.gasType,
@@ -547,6 +559,8 @@ const handleCalculate = async () => {
     for (const [index, row] of calculationRows.entries()) {
       try {
         const curveRequest = buildCurveRequest(row)
+        // 四条曲线彼此独立，并行请求可缩短等待时间。
+        // 曲线 1、2 在各自后端接口内部还会分别调用两种原平台算法。
         const [
           curveOneResponse,
           curveTwoResponse,
@@ -644,6 +658,7 @@ const handleCalculate = async () => {
 }
 
 const handleReset = () => {
+  // 重置计算方法、温度和曲线状态，但不删除已经导入的基础数据。
   gasCorrectionMethod.value = DEFAULT_GAS_CORRECTION_METHOD
   deviationFactorMethod.value = DEFAULT_DEVIATION_FACTOR_METHOD
   viscosityMethod.value = DEFAULT_VISCOSITY_METHOD
@@ -663,6 +678,8 @@ const handleReset = () => {
 watch(
   () => props.importedResultRows,
   (rows) => {
+    // 结果模板的一行含有四条曲线的全部 Y 轴字段。
+    // 导入后将同一批压力点装入四个 series，切换曲线即可显示对应字段。
     if (!Array.isArray(rows) || !rows.length) return
 
     const items = rows.map(row => ({
@@ -720,6 +737,7 @@ watch([
 })
 
 watch(analysisTableCollapsed, () => {
+  // 折叠动画完成前后都安排重绘，避免图表仍使用折叠前的容器宽度。
   if (activeResultTab.value !== '结果分析图') return
   scheduleRenderChart()
   if (chartResizeTimer !== null) clearTimeout(chartResizeTimer)

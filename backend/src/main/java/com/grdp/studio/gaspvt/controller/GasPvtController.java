@@ -14,6 +14,18 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * 天然气 PVT 曲线接口。
+ *
+ * <p>Controller 只负责接收前端参数、转交登录态请求头，并把 Service 的结果包装成统一响应。
+ * 实际的压力循环、原平台 toolbox 调用及结果字段解析都在 {@link GasPvtService} 中完成。</p>
+ *
+ * <p>曲线对应关系：
+ * curve-one = 偏差系数 + 拟压力；
+ * curve-two = 体积系数 + 密度；
+ * curve-three = 压缩系数；
+ * viscosity-curve = 黏度。</p>
+ */
 @RestController
 @RequestMapping("/pvt/gas")
 public class GasPvtController {
@@ -24,6 +36,7 @@ public class GasPvtController {
         this.gasPvtService = gasPvtService;
     }
 
+    /** 计算曲线 4：天然气黏度随压力变化的数据。 */
     @PostMapping("/viscosity-curve")
     public ApiResponse<GasViscosityCurveResponse> calculateViscosityCurve(
             @Valid @RequestBody GasViscosityCurveRequest request,
@@ -36,6 +49,7 @@ public class GasPvtController {
         );
     }
 
+    /** 计算曲线 1：一次请求返回偏差系数和拟压力两组指标。 */
     @PostMapping("/curve-one")
     public ApiResponse<GasCurveOneResponse> calculateCurveOne(
             @Valid @RequestBody GasViscosityCurveRequest request,
@@ -48,6 +62,7 @@ public class GasPvtController {
         );
     }
 
+    /** 计算曲线 2：一次请求返回体积系数和密度两组指标。 */
     @PostMapping("/curve-two")
     public ApiResponse<GasCurveTwoResponse> calculateCurveTwo(
             @Valid @RequestBody GasViscosityCurveRequest request,
@@ -60,6 +75,7 @@ public class GasPvtController {
         );
     }
 
+    /** 计算曲线 3：天然气压缩系数随压力变化的数据。 */
     @PostMapping("/curve-three")
     public ApiResponse<GasCurveThreeResponse> calculateCurveThree(
             @Valid @RequestBody GasViscosityCurveRequest request,

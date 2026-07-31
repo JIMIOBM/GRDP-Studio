@@ -22,16 +22,32 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * 天然气 PVT 曲线计算的核心服务。
+ *
+ * <p>每一种原平台算法都遵循相同的三步流程：</p>
+ * <ol>
+ *   <li>POST /api/toolbox，以 algorithm + projectId 创建工具箱并取得 id；</li>
+ *   <li>POST /api/toolbox/calc，把该压力点的 input JSON 交给工具箱计算；</li>
+ *   <li>GET /api/toolbox/{id}，读取刚刚计算出的结果。</li>
+ * </ol>
+ *
+ * <p>同一条曲线会复用第一次创建得到的 toolbox id，之后只针对不同压力重复第 2、3 步。
+ * 这样既符合原接口的状态模型，也避免为每个压力点重复创建工具箱。</p>
+ */
 @Service
 public class GasPvtService {
 
+    // 原平台登记的算法名称。曲线 1、2 各包含两个指标，因此各需要两个 toolbox。
     private static final String ALGORITHM = "GasPVT_Viscosity";
     private static final String DEVIATION_FACTOR_ALGORITHM = "GasPVT_DeviationFactor";
     private static final String PSEUDO_PRESSURE_ALGORITHM = "GasPVT_PseudoPressure";
     private static final String DENSITY_ALGORITHM = "GasPVT_Density";
     private static final String VOLUME_FACTOR_ALGORITHM = "GasPVT_VolumeFactor";
     private static final String COMPRESSIBILITY_ALGORITHM = "GasPVT_Compressibility";
+    // 防止前端误传过小步长，造成大量同步远程请求。
     private static final int MAX_POINT_COUNT = 500;
+    // 原算法不能稳定处理绝对零压力时使用的内部替代值；返回给前端的压力仍保持 0。
     private static final double ZERO_PRESSURE_CALCULATION_EPSILON_MPA = 1e-6;
 
     private final OriginalPlatformClient originalPlatformClient;
@@ -51,6 +67,7 @@ public class GasPvtService {
             String cookie,
             String processEnv
     ) {
+        // 曲线 4 只使用 GasPVT_Viscosity，一个压力点得到一个 viscosity。
         validateRange(request);
         Map<String, String> headers = forwardedHeaders(token, cookie, processEnv);
 
@@ -73,6 +90,7 @@ public class GasPvtService {
         }
 
         List<GasViscosityPoint> points = new ArrayList<>(pointCount);
+        // 压力点逐个执行是因为原 toolbox 是“计算后再读取结果”的有状态接口。
         for (int index = 0; index < pointCount; index++) {
             double pressure = request.pressureStart() + index * request.pressureStep();
             double calculationPressure = Math.abs(pressure) < 1e-12
@@ -108,6 +126,7 @@ public class GasPvtService {
             String cookie,
             String processEnv
     ) {
+        // 曲线 1 同时展示 Z 和 m(p)，必须分别走两套原平台算法流程。
         validateRange(request);
         Map<String, String> headers = forwardedHeaders(token, cookie, processEnv);
         long deviationFactorToolboxId = createToolbox(
@@ -184,6 +203,7 @@ public class GasPvtService {
             String cookie,
             String processEnv
     ) {
+        // 曲线 2：GasPVT_VolumeFactor 对应体积系数，GasPVT_Density 对应密度。
         validateRange(request);
         Map<String, String> headers = forwardedHeaders(token, cookie, processEnv);
         long volumeFactorToolboxId = createToolbox(
@@ -249,6 +269,7 @@ public class GasPvtService {
             String cookie,
             String processEnv
     ) {
+        // 曲线 3 只需要 GasPVT_Compressibility。
         validateRange(request);
         Map<String, String> headers = forwardedHeaders(token, cookie, processEnv);
         long toolboxId = createToolbox(
@@ -293,6 +314,7 @@ public class GasPvtService {
             long projectId,
             Map<String, String> headers
     ) {
+        // 只在一组曲线开始时创建一次，返回值 id 会用于该组全部压力点。
         JsonNode created = originalPlatformClient.post(
                 "/api/toolbox",
                 Map.of("algorithm", algorithm, "projectId", projectId),
@@ -307,6 +329,7 @@ public class GasPvtService {
             Map<String, Object> input,
             Map<String, String> headers
     ) {
+        // 原平台的 input 字段要求是 JSON 字符串，而不是直接嵌套的 JSON 对象。
         originalPlatformClient.post(
                 "/api/toolbox/calc",
                 Map.of("id", toolboxId, "input", writeJson(input)),
@@ -343,6 +366,7 @@ public class GasPvtService {
             String cookie,
             String processEnv
     ) {
+        // 将前端登录态继续传给原平台，否则 toolbox 接口可能返回未授权。
         Map<String, String> headers = new LinkedHashMap<>();
         headers.put("token", token);
         headers.put(HttpHeaders.COOKIE, cookie);
@@ -354,6 +378,10 @@ public class GasPvtService {
             GasViscosityCurveRequest request,
             double pressure
     ) {
+        /*
+         * 这里集中维护“本系统字段 -> 原平台字段”的映射。
+         * originalPressure 等 4 个参数是当前算法约定的固定值；界面可选项则使用请求中的编号。
+         */
         Map<String, Object> input = new LinkedHashMap<>();
         input.put("gasType", request.gasType());
         input.put("specificGravity", request.specificGravity());
@@ -464,6 +492,11 @@ public class GasPvtService {
     }
 
     private JsonNode findResultNumericField(JsonNode node, List<String> candidateNames) {
+        /*
+         * 原平台不同算法的响应层级并不完全一致，有的值在 output，有的会再包一层 data，
+         * 甚至某些节点本身是 JSON 字符串。因此这里递归寻找候选字段，而不依赖固定路径。
+         * 搜索时跳过 input/request/parameter，避免把请求参数误当成计算结果。
+         */
         JsonNode parsed = parseTextNode(node);
         if (parsed == null) {
             return null;

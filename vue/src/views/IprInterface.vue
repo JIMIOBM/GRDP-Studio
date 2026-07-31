@@ -564,6 +564,7 @@ const findWattenbargerNodeByWell = (root, wellName) => {
   return visit(root)
 }
 
+// 当前先静态创建两个 PVT 性质节点；pvtIndex 用来加载各自的初始数据。
 const createStaticPvtPropertyNodes = (wellName, wellId) =>
   [1, 2].map(index => ({
     id: `${wellId || wellName}-well-data-pvt-${index}`,
@@ -580,6 +581,7 @@ const createWellDataNodes = (wellName, wellId) =>
     id: `${wellId || wellName}-${item.type}`,
     wellName,
     defaultExpanded: false,
+    // PVT 性质挂在每口井的“数据管理”下面，而不是作为井的同级节点。
     children: item.type === 'well-data-pvt-group'
       ? createStaticPvtPropertyNodes(wellName, wellId)
       : []

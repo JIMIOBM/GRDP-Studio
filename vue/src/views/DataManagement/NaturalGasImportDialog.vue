@@ -62,6 +62,7 @@ const triggerDownload = (blob, filename) => {
 
 const downloadTemplate = async (kind) => {
   if (kind === 'result') {
+    // 结果模板只需要严格表头，CSV 足以表达全部数值列。
     const rows = [
       [
         '压力(MPa)',
@@ -83,6 +84,7 @@ const downloadTemplate = async (kind) => {
   }
 
   try {
+    // 基础数据模板使用 XLSX，因为“天然气类型”需要 Excel 下拉校验。
     const { default: ExcelJS } = await import('exceljs')
     const workbook = new ExcelJS.Workbook()
     const worksheet = workbook.addWorksheet('天然气数据')
@@ -108,6 +110,7 @@ const downloadTemplate = async (kind) => {
     headerRow.font = { bold: true }
     headerRow.alignment = { vertical: 'middle', horizontal: 'center' }
 
+    // A2 只能选择干气、湿气或凝析气，避免出现无法识别的自由文本。
     worksheet.dataValidations.add('A2', {
       type: 'list',
       allowBlank: true,

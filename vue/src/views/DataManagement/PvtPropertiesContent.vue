@@ -13,6 +13,7 @@ defineProps({
   gasReservoirId: { type: [Number, String], required: true }
 })
 
+// 当前阶段使用静态挂载：每口井的 PVT 性质 1、2 各自只有一条基础气体数据。
 const STATIC_PVT_GAS_ROWS = {
   1: [['干气', 0.58, 0.02, 1.2, 0.8]],
   2: [['湿气', 0.65, 0.03, 1.5, 0.9]]
@@ -51,6 +52,7 @@ const handleImport = () => {
   ElMessage.info(`${activePropertyTab.value}导入功能暂未接入`)
 }
 
+// “数据列表”模板只描述气体类型与组成，不包含计算结果。
 const GAS_IMPORT_COLUMNS = [
   '天然气类型',
   '天然气比重(dless)',
@@ -59,6 +61,7 @@ const GAS_IMPORT_COLUMNS = [
   'N₂摩尔百分含量(%)'
 ]
 
+// “结果分析图”模板包含压力、温度及曲线 1～4 的全部 Y 轴字段。
 const GAS_RESULT_IMPORT_COLUMNS = [
   '压力(MPa)',
   '温度(℃)',
@@ -85,6 +88,7 @@ const isZeroCell = (value) => !isEmptyCell(value)
   && Number(value) === 0
 
 const cleanImportRows = (sourceRows, options, requiredColumns) => {
+  // 按弹窗选项清理空行/空列；requiredColumns 可防止必需字段因全为 0 被误删。
   let rows = sourceRows.map(row => [...row])
 
   if (options.removeEmptyRows) {
@@ -138,6 +142,7 @@ const cleanImportRows = (sourceRows, options, requiredColumns) => {
 }
 
 const assertStrictHeaders = (rows, expectedColumns, templateName) => {
+  // 两种模板不可混用：列名、列数或顺序任一不一致都会提示格式错误。
   const actualHeaders = rows[0].map(normalizeHeader)
   const expectedHeaders = expectedColumns.map(normalizeHeader)
   const headersMatch = actualHeaders.length === expectedHeaders.length
@@ -151,6 +156,7 @@ const assertStrictHeaders = (rows, expectedColumns, templateName) => {
 }
 
 const parseDataImportRows = (rows, options) => {
+  // 一个 PVT 性质只接受一条基础数据，气体类型只能是干气、湿气或凝析气。
   assertStrictHeaders(rows, GAS_IMPORT_COLUMNS, '数据模板')
   const dataRows = rows.slice(1).filter(row =>
     row.some(value => !isEmptyCell(value))
@@ -183,6 +189,7 @@ const parseDataImportRows = (rows, options) => {
 }
 
 const parseResultImportRows = (rows) => {
+  // 结果数据允许多个压力点，但每个字段都必须是有效数值。
   assertStrictHeaders(rows, GAS_RESULT_IMPORT_COLUMNS, '结果数据模板')
   const dataRows = rows.slice(1).filter(row =>
     row.some(value => !isEmptyCell(value))
@@ -211,6 +218,7 @@ const parseResultImportRows = (rows) => {
 }
 
 const handleGasImport = async ({ file, options, kind }) => {
+  // kind 由当前底部页签决定：data 回填数据列表，result 回填结果表和图表。
   try {
     const extension = file.name.split('.').pop()?.toLowerCase()
     if (!['xlsx', 'xls', 'csv'].includes(extension)) {
