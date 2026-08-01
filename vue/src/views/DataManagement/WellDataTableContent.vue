@@ -71,6 +71,66 @@ const DATA_CONFIG = {
   },
   wellcompletion: {
     title: '完井数据',
+    schema: 'core_well_completion_data',
+    importFields: [
+      {
+        key: 'wellName',
+        name: '井名',
+        coreKey: 'well_name',
+        aliases: ['井名', 'wellName', 'well_name']
+      },
+      {
+        key: 'date',
+        name: '日期',
+        coreKey: 'date',
+        aliases: ['日期', 'date'],
+        date: true
+      },
+      {
+        key: 'type',
+        name: '套管类型',
+        coreKey: 'casing_type',
+        aliases: ['套管类型', 'type', 'casing_type']
+      },
+      {
+        key: 'topMeasuredDepth',
+        name: '顶部测量深度',
+        coreKey: 'top_measured_depth',
+        aliases: ['顶部测量深度', 'topMeasuredDepth', 'top_measured_depth']
+      },
+      {
+        key: 'bottomMeasuredDepth',
+        name: '底部测量深度',
+        coreKey: 'bottom_measured_depth',
+        aliases: ['底部测量深度', 'bottomMeasuredDepth', 'bottom_measured_depth']
+      },
+      {
+        key: 'innerDiameter',
+        name: '内径',
+        coreKey: 'inner_diameter',
+        aliases: ['内径', 'innerDiameter', 'inner_diameter']
+      },
+      {
+        key: 'innerRoughness',
+        name: '内壁粗糙度',
+        coreKey: 'inner_roughness',
+        aliases: ['内壁粗糙度', 'innerRoughness', 'inner_roughness'],
+        optional: true
+      },
+      {
+        key: 'outerDiameter',
+        name: '外径',
+        coreKey: 'outer_diameter',
+        aliases: ['外径', 'outerDiameter', 'outer_diameter']
+      },
+      {
+        key: 'outerRoughness',
+        name: '外壁粗糙度',
+        coreKey: 'outer_roughness',
+        aliases: ['外壁粗糙度', 'outerRoughness', 'outer_roughness'],
+        optional: true
+      }
+    ],
     keys: [
       'wellName',
       'date',
@@ -216,6 +276,63 @@ const DATA_CONFIG = {
   },
   otherdata: {
     title: '其他数据',
+    schema: 'core_other_data',
+    importFields: [
+      {
+        key: 'wellName',
+        name: '井名',
+        coreKey: 'well_name',
+        aliases: ['井名', 'wellName', 'well_name']
+      },
+      {
+        key: 'wellType',
+        name: '井型',
+        coreKey: 'well_type',
+        aliases: ['井型', 'wellType', 'well_type']
+      },
+      {
+        key: 'isFractured',
+        name: '是否压裂',
+        coreKey: 'is_fractured',
+        aliases: ['是否压裂', 'isFractured', 'is_fractured']
+      },
+      {
+        key: 'flowPath',
+        name: '流动路径',
+        coreKey: 'flow_path',
+        aliases: ['流动路径', 'flowPath', 'flow_path']
+      },
+      {
+        key: 'originalFormationPressure',
+        name: '原始地层压力',
+        coreKey: 'original_formation_pressure',
+        aliases: ['原始地层压力', 'originalFormationPressure', 'original_formation_pressure']
+      },
+      {
+        key: 'formationTemperature',
+        name: '地层温度',
+        coreKey: 'formation_temperature',
+        aliases: ['地层温度', 'formationTemperature', 'formation_temperature']
+      },
+      {
+        key: 'fracturingSegment',
+        name: '压裂段数',
+        coreKey: 'fracturing_segment',
+        aliases: ['压裂段数', 'fracturingSegment', 'fracturing_segment']
+      },
+      {
+        key: 'horizontalSectionOfGasWellLength',
+        name: '水平段长度',
+        coreKey: 'horizontal_section_length',
+        aliases: ['水平段长度', 'horizontalSectionOfGasWellLength', 'horizontal_section_length']
+      },
+      {
+        key: 'singleWellOriginalGasInplace',
+        name: '单井控制储量',
+        coreKey: 'single_well_original_gas_inplace',
+        aliases: ['单井控制储量', 'singleWellOriginalGasInplace', 'single_well_original_gas_inplace']
+      }
+    ],
     keys: [
       'wellName',
       'wellType',
@@ -358,7 +475,10 @@ const isImportableData = computed(() =>
   Boolean(importConfig.value.schema && importConfig.value.importFields?.length)
 )
 const useDarkImportButton = computed(() =>
-  effectiveDataType.value === 'deliverability' || isStaticPressureView.value
+  effectiveDataType.value === 'deliverability' ||
+  effectiveDataType.value === 'wellcompletion' ||
+  effectiveDataType.value === 'otherdata' ||
+  isStaticPressureView.value
 )
 const tabTitle = computed(() => `${props.wellName} ${config.value.title}`.trim())
 const getStaticPressureTabTitle = tab => `${props.wellName} ${tab.label}`.trim()
@@ -721,11 +841,31 @@ const loadData = async () => {
         props.wellName
       )
     } else if (dataType === 'wellcompletion') {
-      response = await dataManagementApi.getWellCompletion(
-        props.projectId,
-        props.gasReservoirId,
-        props.wellName
+      const targetWellNames = props.wellName ? [props.wellName] : props.wellNames
+      const responses = await Promise.allSettled(
+        targetWellNames.map(wellName =>
+          dataManagementApi.getWellCompletion(
+            props.projectId,
+            props.gasReservoirId,
+            wellName,
+            { silentError: true }
+          )
+        )
       )
+      if (sequence !== loadSequence) return
+      const failures = responses.filter(result => result.status === 'rejected')
+      if (responses.length > 0 && failures.length === responses.length) {
+        throw failures[0].reason
+      }
+      failures.forEach(result => {
+        console.warn('部分井的完井数据加载失败', result.reason)
+      })
+      const results = responses
+        .filter(result => result.status === 'fulfilled')
+        .map(result => getItems(result.value))
+      rows.value = results.flatMap(result => result.items)
+      responseFields.value = results.find(result => result.fields.length)?.fields || []
+      return
     } else if (dataType === 'logging') {
       response = await dataManagementApi.getLogInterpretation(
         props.projectId,
@@ -909,6 +1049,7 @@ watch(
 
     <div class="data-toolbar">
       <el-button
+        v-if="isImportableData"
         size="small"
         class="import-button"
         :class="{ 'import-button--dark': useDarkImportButton }"
