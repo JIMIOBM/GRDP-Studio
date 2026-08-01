@@ -396,6 +396,15 @@ export const dataManagementApi = {
       wellName,
       'staticpressuredata',
       options
+    ),
+
+  getCalculatedStaticPressure: (projectId, gasReservoirId, wellName, options = {}) =>
+    dataManagementApi.getWellData(
+      projectId,
+      gasReservoirId,
+      wellName,
+      'achievetherecoverstaticpressuredata',
+      options
     )
 }
 

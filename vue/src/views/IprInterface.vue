@@ -34,7 +34,24 @@ const WELL_GROUPS = [
 
 const WELL_DATA_NODES = [
   { type: 'well-data-deliverability', label: '产能测试', dataType: 'deliverability' },
-  { type: 'well-data-static-pressure', label: '静压数据', dataType: 'staticPressure' },
+  {
+    type: 'well-data-static-pressure',
+    label: '静压数据',
+    dataType: 'staticPressure',
+    defaultExpanded: true,
+    children: [
+      {
+        type: 'well-data-calculated-static-pressure',
+        label: '计算静压',
+        dataType: 'calculatedStaticPressure'
+      },
+      {
+        type: 'well-data-measured-static-pressure',
+        label: '实测静压',
+        dataType: 'measuredStaticPressure'
+      }
+    ]
+  },
   { type: 'well-data-pvt-group', label: 'PVT性质' }
 ]
 
@@ -580,11 +597,17 @@ const createWellDataNodes = (wellName, wellId) =>
     ...item,
     id: `${wellId || wellName}-${item.type}`,
     wellName,
-    defaultExpanded: false,
+    defaultExpanded: item.defaultExpanded || false,
     // PVT 性质挂在每口井的“数据管理”下面，而不是作为井的同级节点。
     children: item.type === 'well-data-pvt-group'
       ? createStaticPvtPropertyNodes(wellName, wellId)
-      : []
+      : (item.children || []).map(child => ({
+          ...child,
+          id: `${wellId || wellName}-${item.type}-${child.type}`,
+          wellName,
+          defaultExpanded: false,
+          children: []
+        }))
   }))
 
 const createEmptyWell = (wellName, wellId) => ({ //创建一口空井
@@ -647,8 +670,9 @@ const ensureWell = (wellName, wellId) => { //确保井存在
           groupItem.children.push(dataNode)
           return
         }
-        if (dataNode.type === 'well-data-pvt-group') {
+        if (dataNode.children.length) {
           existingNode.children = dataNode.children
+          existingNode.defaultExpanded = dataNode.defaultExpanded
         }
       })
     }
@@ -3368,7 +3392,7 @@ const handleCommand = ({ group, name }) => { // 接收顶部菜单栏的点击�
 
     currentView.value = 'well-data-table'
     currentViewNode.value = {
-      wellName: activeWellName,
+      wellName: supportsProjectScope ? '' : activeWellName,
       dataType
     }
     return
