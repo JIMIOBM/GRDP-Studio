@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { dataManagementApi } from '@/api/docker'
+import WellDataImportDialog from './WellDataImportDialog.vue'
 
 const props = defineProps({
   dataType: {
@@ -25,6 +26,21 @@ const props = defineProps({
     required: true
   }
 })
+
+const STATIC_PRESSURE_TABS = [
+  { dataType: 'calculatedStaticPressure', label: '计算静压' },
+  { dataType: 'measuredStaticPressure', label: '实测静压' }
+]
+
+const isStaticPressureDataType = dataType =>
+  dataType === 'staticPressure' ||
+  STATIC_PRESSURE_TABS.some(tab => tab.dataType === dataType)
+
+const activeStaticPressureType = ref(
+  props.dataType === 'measuredStaticPressure'
+    ? 'measuredStaticPressure'
+    : 'calculatedStaticPressure'
+)
 
 const DATA_CONFIG = {
   wellhead: {
@@ -143,15 +159,15 @@ const DATA_CONFIG = {
     keys: [
       'wellName',
       'productivityWellTestDate',
+      'reserviorPressure',
       'productivityWellTestType',
       'testPointNumber',
-      'reserviorPressure',
       'testDailyGasProduction',
       'testBottomHoleFlowingPressure'
     ]
   },
-  staticPressure: {
-    title: '静压数据',
+  measuredStaticPressure: {
+    title: '实测静压',
     schema: 'core_static_pressure_data',
     importFields: [
       {
@@ -180,9 +196,22 @@ const DATA_CONFIG = {
     keys: [
       'wellName',
       'date',
-      'reserviorPressure',
-      'cumulativeGasProduction',
-      'cumulativeWaterProduction'
+      'reserviorPressure'
+    ]
+  },
+  calculatedStaticPressure: {
+    title: '计算静压',
+    fields: {
+      calculatedBottomHolePressure: {
+        name_cn: '计算井底压力',
+        unit_label: 'MPa',
+        displayDecimal: 4
+      }
+    },
+    keys: [
+      'wellName',
+      'date',
+      'calculatedBottomHolePressure'
     ]
   },
   otherdata: {
@@ -288,7 +317,7 @@ const FALLBACK_FIELDS = {
 
 const loading = ref(false)
 const importing = ref(false)
-const importFileInput = ref(null)
+const importDialogVisible = ref(false)
 const rows = ref([])
 const responseFields = ref([])
 let loadSequence = 0
@@ -317,11 +346,39 @@ const setCachedProductionData = (cacheKey, data) => {
   })
 }
 
-const config = computed(() => DATA_CONFIG[props.dataType] || DATA_CONFIG.wellhead)
+const isStaticPressureView = computed(() => isStaticPressureDataType(props.dataType))
+const effectiveDataType = computed(() =>
+  isStaticPressureView.value ? activeStaticPressureType.value : props.dataType
+)
+const config = computed(() => DATA_CONFIG[effectiveDataType.value] || DATA_CONFIG.wellhead)
+const importConfig = computed(() =>
+  isStaticPressureView.value ? DATA_CONFIG.measuredStaticPressure : config.value
+)
 const isImportableData = computed(() =>
-  props.dataType === 'deliverability' || props.dataType === 'staticPressure'
+  Boolean(importConfig.value.schema && importConfig.value.importFields?.length)
+)
+const useDarkImportButton = computed(() =>
+  effectiveDataType.value === 'deliverability' || isStaticPressureView.value
 )
 const tabTitle = computed(() => `${props.wellName} ${config.value.title}`.trim())
+const getStaticPressureTabTitle = tab => `${props.wellName} ${tab.label}`.trim()
+
+const selectStaticPressureType = dataType => {
+  if (activeStaticPressureType.value === dataType) return
+  activeStaticPressureType.value = dataType
+}
+
+const dataTemplateRows = computed(() => {
+  const importFields = importConfig.value.importFields || []
+  return [
+    importFields.map(field => field.name),
+    importFields.map(field => field.key === 'wellName' ? props.wellName : '')
+  ]
+})
+
+const dataTemplateFileName = computed(() =>
+  `${isStaticPressureView.value ? '静压' : config.value.title}数据模板.csv`
+)
 
 const fields = computed(() => {
   const fieldMap = new Map(
@@ -337,12 +394,16 @@ const fields = computed(() => {
       const customField = config.value.fields?.[key] || {}
       const fallbackField = FALLBACK_FIELDS[key] || { name_cn: key, unit_label: '' }
 
-      return {
+      const field = {
         key,
         ...apiField,
         ...customField,
         ...fallbackField
       }
+
+      return isImportableData.value || effectiveDataType.value === 'calculatedStaticPressure'
+        ? { ...field, ...customField }
+        : field
     })
 })
 
@@ -387,6 +448,36 @@ const normalizeHeader = (value) =>
     .replace(/\s+/g, '')
     .toLowerCase()
 
+const isEmptyImportCell = value =>
+  value === null || value === undefined || String(value).trim() === ''
+
+const isZeroImportCell = value =>
+  !isEmptyImportCell(value) &&
+  Number.isFinite(Number(value)) &&
+  Number(value) === 0
+
+const cleanImportTable = (sourceRows, options = {}) => {
+  let table = sourceRows.map(row => [...row])
+
+  if (options.removeEmptyRows) {
+    table = table.filter(row => row.some(value => !isEmptyImportCell(value)))
+  }
+  if (!table.length) return table
+
+  const columnCount = Math.max(...table.map(row => row.length))
+  table = table.map(row =>
+    Array.from({ length: columnCount }, (_, index) => row[index] ?? '')
+  )
+
+  if (options.removeEmptyColumns) {
+    const keptIndexes = Array.from({ length: columnCount }, (_, index) => index)
+      .filter(index => table.some(row => !isEmptyImportCell(row[index])))
+    table = table.map(row => keptIndexes.map(index => row[index]))
+  }
+
+  return table
+}
+
 const normalizeExcelDate = (XLSX, value) => {
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
     const year = value.getFullYear()
@@ -408,18 +499,21 @@ const normalizeExcelDate = (XLSX, value) => {
   return `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`
 }
 
-const parseImportWorkbook = async (file) => {
+const parseImportWorkbook = async (file, options = {}) => {
   const XLSX = await import('xlsx')
   const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true })
   const worksheet = workbook.Sheets[workbook.SheetNames[0]]
   if (!worksheet) throw new Error('Excel 中没有可读取的工作表')
 
-  const table = XLSX.utils.sheet_to_json(worksheet, {
-    header: 1,
-    raw: true,
-    defval: ''
-  })
-  const importFields = config.value.importFields || []
+  const table = cleanImportTable(
+    XLSX.utils.sheet_to_json(worksheet, {
+      header: 1,
+      raw: true,
+      defval: ''
+    }),
+    options
+  )
+  const importFields = importConfig.value.importFields || []
   const aliases = new Map()
   importFields.forEach(field => {
     field.aliases.forEach(alias => aliases.set(normalizeHeader(alias), field))
@@ -447,16 +541,51 @@ const parseImportWorkbook = async (file) => {
 
   const requiredFields = importFields.filter(isRequiredField)
   const dateField = importFields.find(field => field.date)
-  const dataRows = table.slice(headerIndex + 1).flatMap((sourceRow, offset) => {
+  let sourceDataRows = table.slice(headerIndex + 1)
+
+  if (options.removeZeroColumns && sourceDataRows.length) {
+    columnFields = columnFields.map((field, columnIndex) => {
+      if (!field || !field.optional) return field
+      const values = sourceDataRows.map(row => row[columnIndex])
+      const nonEmptyValues = values.filter(value => !isEmptyImportCell(value))
+      return nonEmptyValues.length && nonEmptyValues.every(isZeroImportCell)
+        ? null
+        : field
+    })
+  }
+
+  const dataRows = sourceDataRows.flatMap((sourceRow, offset) => {
     const row = {}
     columnFields.forEach((field, columnIndex) => {
       if (!field) return
       const sourceValue = sourceRow[columnIndex]
+      if (
+        options.fillEmptyWithZero &&
+        !field.date &&
+        field.key !== 'wellName' &&
+        isEmptyImportCell(sourceValue)
+      ) {
+        row[field.key] = 0
+        return
+      }
       row[field.key] = field.date ? normalizeExcelDate(XLSX, sourceValue) : sourceValue
     })
 
     if (Object.values(row).every(value => value === '' || value === null || value === undefined)) {
       return []
+    }
+
+    if (options.removeZeroRows) {
+      const numericValues = Object.entries(row)
+        .filter(([key, value]) =>
+          key !== 'wellName' &&
+          key !== 'date' &&
+          key !== 'productivityWellTestDate' &&
+          !isEmptyImportCell(value) &&
+          Number.isFinite(Number(value))
+        )
+        .map(([, value]) => value)
+      if (numericValues.length && numericValues.every(isZeroImportCell)) return []
     }
 
     const missingFields = requiredFields.filter(field => {
@@ -489,8 +618,9 @@ const parseImportWorkbook = async (file) => {
   })
   if (!dataRows.length) throw new Error('Excel 中没有有效数据行')
 
+  const retainedKeys = new Set(columnFields.filter(Boolean).map(field => field.key))
   const includedFields = importFields.filter(
-    field => foundKeys.has(field.key) || (field.key === 'wellName' && props.wellName)
+    field => retainedKeys.has(field.key) || (field.key === 'wellName' && props.wellName)
   )
   const normalizedRows = [
     includedFields.map(field => field.name),
@@ -498,11 +628,11 @@ const parseImportWorkbook = async (file) => {
   ]
   const normalizedSheet = XLSX.utils.aoa_to_sheet(normalizedRows)
   const normalizedWorkbook = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(normalizedWorkbook, normalizedSheet, config.value.title)
+  XLSX.utils.book_append_sheet(normalizedWorkbook, normalizedSheet, importConfig.value.title)
   const buffer = XLSX.write(normalizedWorkbook, { bookType: 'xlsx', type: 'array' })
   const normalizedFile = new File(
     [buffer],
-    `${config.value.title}-${Date.now()}.xlsx`,
+    `${importConfig.value.title}-${Date.now()}.xlsx`,
     { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }
   )
 
@@ -515,17 +645,20 @@ const parseImportWorkbook = async (file) => {
 
 const chooseImportFile = () => {
   if (!isImportableData.value || importing.value) return
-  importFileInput.value?.click()
+  importDialogVisible.value = true
 }
 
-const importExcel = async (event) => {
-  const file = event.target.files?.[0]
-  event.target.value = ''
+const importExcel = async ({ file, options }) => {
   if (!file) return
 
   importing.value = true
   try {
-    const parsed = await parseImportWorkbook(file)
+    const extension = file.name.split('.').pop()?.toLowerCase()
+    if (!['xlsx', 'xls', 'csv'].includes(extension)) {
+      throw new Error('仅支持 .xlsx、.xls、.csv 表格文件')
+    }
+
+    const parsed = await parseImportWorkbook(file, options)
     const uploadResponse = await dataManagementApi.uploadExcel(parsed.file)
     const filePath =
       uploadResponse?.data?.filepath ||
@@ -535,18 +668,18 @@ const importExcel = async (event) => {
 
     await dataManagementApi.importCoreData(
       props.gasReservoirId,
-      config.value.schema,
+      importConfig.value.schema,
       filePath,
       parsed.mappings
     )
-    ElMessage.success(`成功导入 ${parsed.rowCount} 条${config.value.title}`)
+    ElMessage.success(`成功导入 ${parsed.rowCount} 条${importConfig.value.title}`)
     await loadData()
   } catch (error) {
     ElMessage.error(
       error.response?.data?.message ||
       error.response?.data?.msg ||
       error.message ||
-      `${config.value.title}导入失败`
+      `${importConfig.value.title}导入失败`
     )
   } finally {
     importing.value = false
@@ -578,29 +711,30 @@ const loadData = async () => {
 
   try {
     let response
-    if (props.dataType === 'wellhead') {
+    const dataType = effectiveDataType.value
+    if (dataType === 'wellhead') {
       response = await dataManagementApi.getWellHead(props.projectId, props.gasReservoirId)
-    } else if (props.dataType === 'deviation') {
+    } else if (dataType === 'deviation') {
       response = await dataManagementApi.getWellDeviation(
         props.projectId,
         props.gasReservoirId,
         props.wellName
       )
-    } else if (props.dataType === 'wellcompletion') {
+    } else if (dataType === 'wellcompletion') {
       response = await dataManagementApi.getWellCompletion(
         props.projectId,
         props.gasReservoirId,
         props.wellName
       )
-    } else if (props.dataType === 'logging') {
+    } else if (dataType === 'logging') {
       response = await dataManagementApi.getLogInterpretation(
         props.projectId,
         props.gasReservoirId,
         props.wellName
       )
-    } else if (props.dataType === 'otherdata') {
+    } else if (dataType === 'otherdata') {
       response = await dataManagementApi.getOtherData(props.projectId, props.gasReservoirId)
-    } else if (props.dataType === 'productiondata') {
+    } else if (dataType === 'productiondata') {
       const targetWellNames = props.wellName ? [props.wellName] : props.wellNames
 
       const results = await Promise.all(
@@ -632,35 +766,80 @@ const loadData = async () => {
       rows.value = results.flatMap(result => result.items)
       responseFields.value = results.find(result => result.fields.length)?.fields || []
       return
-    } else if (props.dataType === 'deliverability') {
+    } else if (dataType === 'deliverability') {
       const targetWellNames = props.wellName ? [props.wellName] : props.wellNames
-      const responses = await Promise.all(
+      const responses = await Promise.allSettled(
         targetWellNames.map(wellName =>
           dataManagementApi.getDeliverabilityTest(
             props.projectId,
             props.gasReservoirId,
-            wellName
+            wellName,
+            { silentError: true }
           )
         )
       )
       if (sequence !== loadSequence) return
-      const results = responses.map(getItems)
+      const failures = responses.filter(result => result.status === 'rejected')
+      if (responses.length > 0 && failures.length === responses.length) {
+        throw failures[0].reason
+      }
+      failures.forEach(result => {
+        console.warn('部分井的产能测试数据加载失败', result.reason)
+      })
+      const results = responses
+        .filter(result => result.status === 'fulfilled')
+        .map(result => getItems(result.value))
       rows.value = results.flatMap(result => result.items)
       responseFields.value = results.find(result => result.fields.length)?.fields || []
       return
-    } else {
+    } else if (
+      dataType === 'measuredStaticPressure' ||
+      dataType === 'calculatedStaticPressure'
+    ) {
       const targetWellNames = props.wellName ? [props.wellName] : props.wellNames
-      const responses = await Promise.all(
+      const isCalculated = dataType === 'calculatedStaticPressure'
+      const getPressureData = isCalculated
+        ? dataManagementApi.getCalculatedStaticPressure
+        : dataManagementApi.getStaticPressure
+      const responses = await Promise.allSettled(
         targetWellNames.map(wellName =>
-          dataManagementApi.getStaticPressure(
+          getPressureData(
             props.projectId,
             props.gasReservoirId,
-            wellName
-          )
+            wellName,
+            { silentError: true }
+          ).then(response => ({ response, wellName }))
         )
       )
       if (sequence !== loadSequence) return
-      const results = responses.map(getItems)
+      const failures = responses.filter(result => result.status === 'rejected')
+      if (responses.length > 0 && failures.length === responses.length) {
+        throw failures[0].reason
+      }
+      failures.forEach(result => {
+        console.warn('部分井的静压数据加载失败', result.reason)
+      })
+      const results = responses
+        .filter(result => result.status === 'fulfilled')
+        .map(result => {
+          const { response, wellName } = result.value
+          const parsed = getItems(response)
+          return {
+            ...parsed,
+            items: parsed.items.map(row => ({
+              ...row,
+              wellName: row.wellName || wellName,
+              ...(isCalculated
+                ? {
+                    calculatedBottomHolePressure:
+                      row.calculatedBottomHolePressure ??
+                      row.calculateBottomHolePressure ??
+                      row.reserviorPressure
+                  }
+                : {})
+            }))
+          }
+        })
       rows.value = results.flatMap(result => result.items)
       responseFields.value = results.find(result => result.fields.length)?.fields || []
       return
@@ -670,7 +849,7 @@ const loadData = async () => {
 
     const result = getItems(response)
 
-    const finalItems = (props.dataType === 'wellhead' || props.dataType === 'otherdata')
+    const finalItems = (dataType === 'wellhead' || dataType === 'otherdata')
       ? result.items.filter(item => !props.wellName || String(item?.wellName) === String(props.wellName))
       : result.items
 
@@ -687,7 +866,25 @@ const loadData = async () => {
 }
 
 watch(
-  () => [props.dataType, props.wellName, props.wellNames, props.projectId, props.gasReservoirId],
+  () => props.dataType,
+  dataType => {
+    if (dataType === 'measuredStaticPressure') {
+      activeStaticPressureType.value = 'measuredStaticPressure'
+    } else if (dataType === 'staticPressure' || dataType === 'calculatedStaticPressure') {
+      activeStaticPressureType.value = 'calculatedStaticPressure'
+    }
+  },
+  { immediate: true }
+)
+
+watch(
+  () => [
+    effectiveDataType.value,
+    props.wellName,
+    props.wellNames,
+    props.projectId,
+    props.gasReservoirId
+  ],
   loadData,
   { immediate: true }
 )
@@ -696,18 +893,30 @@ watch(
 <template>
   <section class="well-data-content">
     <div class="data-tabs">
-      <div class="data-tab active">{{ tabTitle }}</div>
+      <template v-if="isStaticPressureView">
+        <div
+          v-for="tab in STATIC_PRESSURE_TABS"
+          :key="tab.dataType"
+          class="data-tab data-tab--selectable"
+          :class="{ active: activeStaticPressureType === tab.dataType }"
+          @click="selectStaticPressureType(tab.dataType)"
+        >
+          {{ getStaticPressureTabTitle(tab) }}
+        </div>
+      </template>
+      <div v-else class="data-tab active">{{ tabTitle }}</div>
     </div>
 
     <div class="data-toolbar">
-      <el-button size="small" :loading="importing" @click="chooseImportFile">导入</el-button>
-      <input
-        ref="importFileInput"
-        class="hidden-file-input"
-        type="file"
-        accept=".xlsx,.xls"
-        @change="importExcel"
-      />
+      <el-button
+        size="small"
+        class="import-button"
+        :class="{ 'import-button--dark': useDarkImportButton }"
+        :loading="importing"
+        @click="chooseImportFile"
+      >
+        导入
+      </el-button>
     </div>
 
     <div class="data-table-wrap">
@@ -733,6 +942,13 @@ watch(
         </el-table-column>
       </el-table>
     </div>
+
+    <WellDataImportDialog
+      v-model="importDialogVisible"
+      :data-template-rows="dataTemplateRows"
+      :data-template-file-name="dataTemplateFileName"
+      @confirm="importExcel"
+    />
   </section>
 </template>
 
@@ -769,6 +985,10 @@ watch(
   color: #303133;
 }
 
+.data-tab--selectable {
+  cursor: pointer;
+}
+
 .data-toolbar {
   display: flex;
   flex: 0 0 39px;
@@ -777,8 +997,15 @@ watch(
   border-bottom: 1px solid #ebeef5;
 }
 
-.hidden-file-input {
-  display: none;
+.import-button--dark {
+  --el-button-bg-color: #000;
+  --el-button-border-color: #000;
+  --el-button-text-color: #fff;
+  --el-button-hover-bg-color: #000;
+  --el-button-hover-border-color: #000;
+  --el-button-hover-text-color: #fff;
+  --el-button-active-bg-color: #000;
+  --el-button-active-border-color: #000;
 }
 
 .data-table-wrap {
