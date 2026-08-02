@@ -12,7 +12,7 @@ const props = defineProps({
   projectId: { type: [Number, String], required: true }
 })
 
-const emit = defineEmits(['result-tab-change'])
+const emit = defineEmits(['result-tab-change', 'calculated'])
 
 const DEFAULT_GAS_CORRECTION_METHOD = 'Wichert-Aziz 修正方法'
 const DEFAULT_DEVIATION_FACTOR_METHOD = 'Dranchuk-Abu-Kassem 方法'
@@ -644,6 +644,31 @@ const handleCalculate = async () => {
     viscosityCurveSeries.value = calculatedSeries
     selectedViscositySourceRow.value = calculatedSeries[0]?.sourceRow ?? null
     activeCurve.value = '曲线1'
+    const rowsByPressure = new Map()
+    ;[
+      ...calculatedCurveOneSeries.flatMap(series => series.items),
+      ...calculatedCurveTwoSeries.flatMap(series => series.items),
+      ...calculatedCurveThreeSeries.flatMap(series => series.items),
+      ...calculatedSeries.flatMap(series => series.items)
+    ].forEach(item => {
+      const pressure = Number(item?.pressure)
+      if (!Number.isFinite(pressure)) return
+      rowsByPressure.set(pressure, {
+        ...(rowsByPressure.get(pressure) || {}),
+        ...item,
+        pressure
+      })
+    })
+    emit('calculated', {
+      inputRows: props.importedRows.map(row => [...row]),
+      resultRows: [...rowsByPressure.values()].sort((left, right) => left.pressure - right.pressure),
+      settings: {
+        gasCorrectionMethod: gasCorrectionMethod.value,
+        deviationFactorMethod: deviationFactorMethod.value,
+        viscosityMethod: viscosityMethod.value,
+        reservoirTemperature: calculationTemperature
+      }
+    })
     ElMessage.success(`${calculatedSeries.length} 条天然气数据计算完成`)
   } catch (error) {
     ElMessage.error(

@@ -2,21 +2,29 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
-import { dataManagementApi, toolboxApi } from '@/api/docker'
+import { waterPvtApi } from '@/api/waterPvt'
 
 const props = defineProps({
   wellName: { type: String, required: true },
-  projectId: { type: [Number, String], required: true }
+  projectId: { type: [Number, String], required: true },
+  gasRows: { type: Array, default: () => [] },
+  importedRows: { type: Array, default: () => [] },
+  importedResultRows: { type: Array, default: () => [] }
 })
 
+const emit = defineEmits(['result-tab-change', 'calculated'])
+
 const SOURCE_FALLBACK_COLUMNS = [
-  { key: 'A', label: '井号' },
-  { key: 'B', label: '天然气类型' },
-  { key: 'C', label: '天然气比重(dless)' },
-  { key: 'D', label: 'H₂S摩尔百分含量(%)' },
-  { key: 'E', label: 'CO₂摩尔百分含量(%)' },
-  { key: 'F', label: 'N₂摩尔百分含量(%)' }
+  { key: 'gasType', label: '天然气类型' },
+  { key: 'relativeDensity', label: '天然气比重(dless)' },
+  { key: 'h2sContent', label: 'H₂S摩尔百分含量(%)' },
+  { key: 'co2Content', label: 'CO₂摩尔百分含量(%)' },
+  { key: 'nitrogenContent', label: 'N₂摩尔百分含量(%)' }
 ]
+const waterTableColumns = ['序号', ...SOURCE_FALLBACK_COLUMNS.map(column => column.label)]
+const waterGridTemplateColumns = computed(
+  () => `48px repeat(${SOURCE_FALLBACK_COLUMNS.length}, minmax(145px, 1fr))`
+)
 
 const CURVE_OPTIONS = [
   {
@@ -96,20 +104,14 @@ const reservoirTemperature = ref(119.85)
 const sourceLoading = ref(false)
 const analysisLoading = ref(false)
 const sourceRows = ref([])
-const sourceFields = ref([])
 const curveResults = ref({})
-const toolFields = ref([])
 const chartEl = ref(null)
 let chart = null
-let sourceSequence = 0
-let analysisSequence = 0
 let calculationSequence = 0
 
 // 左侧计算、重置状态及已创建的工具箱实例 ID。
 const calculating = ref(false)
 const calculationMode = ref('')
-const calculationToolId = ref(null)
-const calculationToolPromise = ref(null)
 const calculationResult = ref({
   gasSolubilityInWater: '',
   volumeFactor: '',
@@ -151,34 +153,9 @@ const applyCalculationResult = (result, { syncInput = false } = {}) => {
     viscosity: formatCalculationOutput(result?.output?.viscosity),
     density: formatCalculationOutput(result?.output?.density)
   }
-  collectFields(result?.fields)
 }
 
-// 确保计算按钮使用的工具箱实例只创建一次，并缓存后端返回的 ID。
-const ensureCalculationToolId = async () => {
-  if (calculationToolId.value !== null && calculationToolId.value !== undefined) {
-    return calculationToolId.value
-  }
-  if (calculationToolPromise.value) return calculationToolPromise.value
-
-  calculationToolPromise.value = toolboxApi
-    .create('WaterPVT_GasSolubilityInWater', Number(props.projectId), { silentError: true })
-    .then((response) => {
-      const created = unwrapResponse(response)
-      if (created?.id === null || created?.id === undefined || created?.id === '') {
-        throw new Error('工具箱接口未返回计算 ID')
-      }
-      calculationToolId.value = created.id
-      return created.id
-    })
-    .finally(() => {
-      calculationToolPromise.value = null
-    })
-
-  return calculationToolPromise.value
-}
-
-// 提交三个输入参数进行后端计算，再回读工具箱详情并更新结果组件。
+// 提交三个地层水输入参数，由本地后端按压力序列聚合五项 PVT 结果。
 const handleCalculate = async () => {
   if (calculating.value) return
 
@@ -200,16 +177,69 @@ const handleCalculate = async () => {
   calculating.value = true
   calculationMode.value = 'point'
   try {
-    const id = await ensureCalculationToolId()
-    await toolboxApi.calculate(id, {
-      pressure: calculationPressure,
+    const request = {
+      projectId: Number(props.projectId),
+      originalPressure: calculationPressure,
       temperature: calculationTemperature,
-      salinity: calculationSalinity
-    })
-    const result = unwrapResponse(await toolboxApi.getResult(id))
+      salinity: calculationSalinity,
+      pressureStart: 5,
+      pressureEnd: 200,
+      pressureStep: 5,
+      volumeFactorMethod: ['McCain方法', 'Standing方法'].indexOf(volumeFactorMethod.value),
+      compressibilityMethod: ['Meehan方法', 'Dodson-Standing方法'].indexOf(compressibilityMethod.value)
+    }
+    const [curveOneResponse, curveTwoResponse, curveThreeResponse, curveFourResponse] =
+      await Promise.all([
+        waterPvtApi.calculateCurveOne(request),
+        waterPvtApi.calculateCurveTwo(request),
+        waterPvtApi.calculateCurveThree(request),
+        waterPvtApi.calculateViscosityCurve(request)
+      ])
     if (sequence !== calculationSequence) return
-    applyCalculationResult(result)
-    curveResults.value = {}
+
+    const curveOne = unwrapResponse(curveOneResponse)
+    const curveTwo = unwrapResponse(curveTwoResponse)
+    const curveThree = unwrapResponse(curveThreeResponse)
+    const curveFour = unwrapResponse(curveFourResponse)
+    const resultSets = [
+      curveOne?.items,
+      curveTwo?.items,
+      curveThree?.items,
+      curveFour?.items
+    ]
+    if (resultSets.some(items => !Array.isArray(items) || !items.length)) {
+      throw new Error('地层水曲线接口未返回完整数据')
+    }
+
+    curveResults.value = {
+      曲线1: { rows: curveOne.items },
+      曲线2: { rows: curveTwo.items },
+      曲线3: { rows: curveThree.items },
+      曲线4: { rows: curveFour.items }
+    }
+    const pointRows = mergeSeriesRows(resultSets)
+    const nearestPoint = pointRows.reduce((nearest, row) =>
+      Math.abs(Number(row.pressure) - calculationPressure) <
+      Math.abs(Number(nearest?.pressure ?? Number.POSITIVE_INFINITY) - calculationPressure)
+        ? row
+        : nearest
+    , null)
+    applyCalculationResult({
+      input: {
+        pressure: calculationPressure,
+        temperature: calculationTemperature,
+        salinity: calculationSalinity
+      },
+      output: nearestPoint || {}
+    })
+    emit('calculated', {
+      inputRows: [[calculationSalinity, calculationPressure, calculationTemperature]],
+      resultRows: pointRows,
+      settings: {
+        volumeFactorMethod: volumeFactorMethod.value,
+        compressibilityMethod: compressibilityMethod.value
+      }
+    })
     ElMessage.success('地层水性质计算完成')
   } catch (error) {
     if (sequence !== calculationSequence) return
@@ -222,87 +252,50 @@ const handleCalculate = async () => {
   }
 }
 
-// 重置后端工具箱实例，回读默认输入和输出并刷新左侧表单。
-const handleReset = async () => {
+// 与天然气模块一致，重置页面参数和已生成的曲线，不修改已导入基础数据。
+const handleReset = () => {
   if (calculating.value) return
-
-  const sequence = ++calculationSequence
-  calculating.value = true
-  calculationMode.value = 'reset'
-  try {
-    const id = await ensureCalculationToolId()
-    await toolboxApi.reset(id)
-    const result = unwrapResponse(await toolboxApi.getResult(id))
-    if (sequence !== calculationSequence) return
-    applyCalculationResult(result, { syncInput: true })
-    curveResults.value = {}
-    ElMessage.success('地层水性质参数已重置')
-  } catch (error) {
-    if (sequence !== calculationSequence) return
-    initialPressure.value = DEFAULT_CALCULATION_INPUT.pressure
-    reservoirTemperature.value = DEFAULT_CALCULATION_INPUT.temperature
-    salinity.value = DEFAULT_CALCULATION_INPUT.salinity
-    Object.keys(calculationResult.value).forEach((key) => {
-      calculationResult.value[key] = ''
-    })
-    ElMessage.error(error.response?.data?.message || error.message || '地层水性质重置失败')
-  } finally {
-    if (sequence === calculationSequence) {
-      calculating.value = false
-      calculationMode.value = ''
-    }
-  }
-}
-
-// 将 Excel 单元格形式的接口数据转换为可直接供表格使用的行对象
-const normalizeExcelRows = (payload) => {
-  const items = Array.isArray(payload?.items)
-    ? payload.items
-    : Array.isArray(payload?.rows)
-      ? payload.rows
-      : Array.isArray(payload)
-        ? payload
-        : []
-
-  return items.map((item, index) => {
-    if (!Array.isArray(item?.excelCells)) return { ...item, _rowKey: item?.id ?? index }
-    // 按 Excel 列号把同一行中的单元格合并为一个对象
-    return item.excelCells.reduce((row, cell) => {
-      row[cell.column || cell.location] = cell.value
-      return row
-    }, { _rowKey: item.location ?? index })
+  calculationSequence += 1
+  initialPressure.value = DEFAULT_CALCULATION_INPUT.pressure
+  reservoirTemperature.value = DEFAULT_CALCULATION_INPUT.temperature
+  salinity.value = DEFAULT_CALCULATION_INPUT.salinity
+  volumeFactorMethod.value = 'McCain方法'
+  compressibilityMethod.value = 'Meehan方法'
+  Object.keys(calculationResult.value).forEach((key) => {
+    calculationResult.value[key] = ''
   })
+  curveResults.value = {}
+  activeCurve.value = '曲线1'
+  analysisTableCollapsed.value = false
 }
 
-// 优先使用接口字段元数据生成基础数据表列，缺失时使用预设列
-const sourceColumns = computed(() => {
-  if (!sourceFields.value.length) return SOURCE_FALLBACK_COLUMNS
-  return sourceFields.value.map((field, index) => {
-    const key = field.name || field.column || String.fromCharCode(65 + index)
-    const name = field.name_cn || field.label || key
+const filteredSourceRows = computed(() => sourceRows.value)
+const waterDataCells = computed(() => {
+  const rowCount = 27
+  const columnCount = waterTableColumns.length
+  return Array.from({ length: rowCount * columnCount }, (_, cellIndex) => {
+    const rowIndex = Math.floor(cellIndex / columnCount)
+    const columnIndex = cellIndex % columnCount
+    const row = filteredSourceRows.value[rowIndex]
+    const value = columnIndex === 0
+      ? String(rowIndex + 1)
+      : row?.[columnIndex - 1]
     return {
-      key,
-      label: field.unit_label ? `${name}(${field.unit_label})` : name
+      key: `${rowIndex}-${columnIndex}`,
+      value: value ?? '',
+      columnIndex,
+      imported: columnIndex > 0 && value !== undefined && value !== null && value !== ''
     }
   })
 })
-
-// 根据当前井名筛选基础数据，页面只展示一口井的数据
-const filteredSourceRows = computed(() => {
-  const wellName = String(props.wellName || '').trim()
-  return sourceRows.value.filter(row => {
-    const value = row.wellName ?? row.well ?? row.wellId ?? row.A
-    return String(value ?? '').trim() === wellName
-  })
-})
-
-// 按字段映射
-const fieldMetadata = computed(() =>
-  new Map(toolFields.value.filter(field => field?.name).map(field => [field.name, field]))
-)
 
 // 取得当前曲线对应的输入、输出数据行
 const activeRows = computed(() => curveResults.value[activeCurve.value]?.rows || [])
+const activeCurveHasData = computed(() =>
+  activeCurveOption.value.series.some(series =>
+    activeRows.value.some(row => Number.isFinite(Number(row?.[series.key])))
+  )
+)
 
 // 生成分析表列
 const analysisColumns = computed(() => [
@@ -314,79 +307,51 @@ const analysisColumns = computed(() => [
     label: `${series.name}(${series.unit})`
   }))
 ])
+const waterAnalysisTableColumns = computed(() => [
+  '序号',
+  ...analysisColumns.value.map(column => column.label)
+])
+const waterAnalysisGridTemplateColumns = computed(
+  () => `48px repeat(${waterAnalysisTableColumns.value.length - 1}, minmax(0, 1fr))`
+)
+const waterAnalysisDataCells = computed(() => {
+  const columns = analysisColumns.value
+  const columnCount = waterAnalysisTableColumns.value.length
+  const rowCount = Math.max(25, activeRows.value.length)
+  return Array.from({ length: rowCount * columnCount }, (_, cellIndex) => {
+    const rowIndex = Math.floor(cellIndex / columnCount)
+    const columnIndex = cellIndex % columnCount
+    const row = activeRows.value[rowIndex]
+    return {
+      key: `${activeCurve.value}-${rowIndex}-${columnIndex}`,
+      value: columnIndex === 0
+        ? String(rowIndex + 1)
+        : (row ? formatValue(row, columns[columnIndex - 1].key) : ''),
+      columnIndex
+    }
+  })
+})
 
 // 输出固定两位小数
 const formatValue = (row, key) => {
   const value = row?.[key]
   if (value === null || value === undefined || value === '') return ''
   if (!Number.isFinite(Number(value))) return value
-  if (OUTPUT_KEYS.has(key)) return Number(value).toFixed(2)
-
-  const field = fieldMetadata.value.get(key)
-  if (field?.isScientificNotation) return Number(value).toExponential(field.displayDecimal ?? 2)
-  return Number(value).toFixed(field?.displayDecimal ?? (key === 'temperature' || key === 'salinity' ? 2 : 4))
+  if (key === 'isothermalCompressionCoefficient') return Number(value).toExponential(6)
+  if (OUTPUT_KEYS.has(key)) return Number(value).toFixed(6)
+  return Number(value).toFixed(key === 'temperature' || key === 'salinity' ? 2 : 4)
 }
 
-// 将曲线输出值统一格式化为两位小数
-const formatOutputValue = (value) =>
-  Number.isFinite(Number(value)) ? Number(value).toFixed(2) : ''
-
-// 从原平台 Excel 接口加载基础数据
-const loadSourceData = async () => {
-  const sequence = ++sourceSequence
-  sourceLoading.value = true
-  try {
-    const payload = unwrapResponse(await dataManagementApi.getFormationWaterSource())
-    if (sequence !== sourceSequence) return
-    sourceRows.value = normalizeExcelRows(payload)
-    sourceFields.value = Array.isArray(payload?.fields) ? payload.fields : []
-  } catch (error) {
-    if (sequence !== sourceSequence) return
-    sourceRows.value = []
-    sourceFields.value = []
-    ElMessage.error(error.response?.data?.message || error.message || '地层水性质数据加载失败')
-  } finally {
-    if (sequence === sourceSequence) sourceLoading.value = false
-  }
+const formatOutputValue = (value, key) => {
+  if (!Number.isFinite(Number(value))) return ''
+  return key === 'isothermalCompressionCoefficient'
+    ? Number(value).toExponential(6)
+    : Number(value).toFixed(6)
 }
 
-// 合并不同工具箱结果中的字段元数据，按字段名去重
-const collectFields = (fields) => {
-  if (!Array.isArray(fields)) return
-  const merged = new Map(toolFields.value.map(field => [field?.name, field]))
-  fields.forEach(field => {
-    if (field?.name) merged.set(field.name, field)
-  })
-  toolFields.value = [...merged.values()]
-}
-
-// 从工具箱结果中提取指定输出序列，统一转换为压力数据行
-const extractRows = (result, series) => {
-  const collections = [
-    result?.items,
-    result?.rows,
-    result?.points,
-    result?.output?.items,
-    result?.output?.rows,
-    result?.output?.points
-  ].find(Array.isArray)
-
-  if (collections) {
-    return collections.map(item => ({
-      pressure: item?.pressure ?? item?.input?.pressure,
-      temperature: item?.temperature ?? item?.input?.temperature ?? result?.input?.temperature,
-      salinity: item?.salinity ?? item?.input?.salinity ?? result?.input?.salinity,
-      [series.key]: item?.[series.key] ?? item?.output?.[series.key]
-    })).filter(row => Number.isFinite(Number(row.pressure)))
-  }
-
-  const pressure = result?.input?.pressure ?? Number(initialPressure.value)
-  return [{
-    pressure,
-    temperature: result?.input?.temperature ?? Number(reservoirTemperature.value),
-    salinity: result?.input?.salinity ?? Number(salinity.value),
-    [series.key]: result?.output?.[series.key]
-  }]
+// 地层水模块右侧数据列表与天然气模块共用天然气组成数据。
+const loadSourceData = () => {
+  sourceRows.value = props.gasRows.map(row => [...row])
 }
 
 // 按压力合并同一曲线中的多个输出序列，并按压力升序排列。
@@ -401,53 +366,10 @@ const mergeSeriesRows = (seriesResults) => {
   return [...rowsByPressure.values()].sort((left, right) => left.pressure - right.pressure)
 }
 
-// 按需加载当前曲线的工具箱结果
-const loadActiveCurve = async ({ force = false } = {}) => {
-  const curve = activeCurveOption.value
-  if (!force && curveResults.value[curve.name]) {
-    await nextTick()
-    renderChart()
-    return
-  }
-  if (analysisLoading.value) return
-
-  const sequence = ++analysisSequence
-  analysisLoading.value = true
-  try {
-    // 每个算法严格只创建一次实例并读取一次结果
-    // 并行加载当前曲线包含的一个或多个输出序列
-    const seriesResults = await Promise.all(curve.series.map(async series => {
-      const id = series.key === 'gasSolubilityInWater'
-        ? await ensureCalculationToolId()
-        : unwrapResponse(
-            await toolboxApi.create(series.algorithm, Number(props.projectId))
-          )?.id
-      if (id === null || id === undefined || id === '') throw new Error(`${series.algorithm} 未返回工具箱 id`)
-      const result = unwrapResponse(await toolboxApi.getResult(id))
-      collectFields(result?.fields)
-      return extractRows(result, series)
-    }))
-
-    if (sequence !== analysisSequence) return
-    curveResults.value = {
-      ...curveResults.value,
-      [curve.name]: {
-        rows: mergeSeriesRows(seriesResults)
-      }
-    }
-    await nextTick()
-    renderChart()
-  } catch (error) {
-    if (sequence !== analysisSequence) return
-    ElMessage.error(error.response?.data?.message || error.message || '地层水性质曲线加载失败')
-  } finally {
-    if (sequence === analysisSequence) {
-      analysisLoading.value = false
-      if (activeCurve.value !== curve.name && !curveResults.value[activeCurve.value]) {
-        loadActiveCurve()
-      }
-    }
-  }
+// 曲线数据由“计算”或“结果数据导入”一次性写入，切换曲线只负责重绘。
+const loadActiveCurve = async () => {
+  await nextTick()
+  renderChart()
 }
 
 const chartOption = computed(() => {
@@ -459,28 +381,52 @@ const chartOption = computed(() => {
         name: `${series.name}(${series.unit})`,
         position: index === 0 ? 'left' : 'right',
         nameLocation: 'middle',
-        nameGap: index === 0 ? 52 : 62,
-        axisLine: { show: true },
-        // 所有输出坐标轴刻度统一保留两位小数。
-        axisLabel: { formatter: value => Number(value).toFixed(2) },
-        splitLine: { show: index === 0, lineStyle: { color: '#e8edf2' } }
+        nameGap: 44,
+        axisLabel: {
+          formatter: value => series.key === 'isothermalCompressionCoefficient'
+            ? Number(value).toExponential(2)
+            : Number(value).toFixed(4)
+        },
+        minorTick: { show: index === 0 },
+        minorSplitLine: {
+          show: index === 0,
+          lineStyle: { color: '#f1f5fb' }
+        },
+        splitLine: {
+          show: index === 0,
+          lineStyle: { color: '#dce5f2' }
+        }
       }))
     : {
         type: 'value',
         name: `${curve.series[0].name}(${curve.series[0].unit})`,
         nameLocation: 'middle',
-        nameGap: 54,
-        axisLine: { show: true },
-        // 单 Y 轴曲线同样固定显示两位小数
-        axisLabel: { formatter: value => Number(value).toFixed(2) },
-        splitLine: { lineStyle: { color: '#e8edf2' } }
+        nameGap: 44,
+        axisLabel: {
+          formatter: value => curve.series[0].key === 'isothermalCompressionCoefficient'
+            ? Number(value).toExponential(2)
+            : Number(value).toFixed(4)
+        },
+        minorTick: { show: true },
+        minorSplitLine: { show: true, lineStyle: { color: '#f1f5fb' } },
+        splitLine: { lineStyle: { color: '#dce5f2' } }
       }
 
   return {
     animation: false,
-    color: ['#1677ff', '#ef7d00'],
+    color: curve.series.map(() => '#1677ff'),
+    title: {
+      text: `${curve.title}随压力变化曲线`,
+      left: 'center',
+      top: 8,
+      textStyle: { fontSize: 14, fontWeight: 600, color: '#333' }
+    },
     tooltip: {
       trigger: 'axis',
+      axisPointer: {
+        type: 'line',
+        lineStyle: { color: '#d936d0', type: 'solid', width: 1 }
+      },
       // 组合压力和各输出序列，生成统一保留两位小数的提示内容
       formatter: (params) => {
         const items = Array.isArray(params) ? params : [params]
@@ -489,44 +435,58 @@ const chartOption = computed(() => {
         items.forEach(item => {
           const series = curve.series.find(entry => entry.name === item.seriesName)
           if (!series) return
-          lines.push(`${item.marker}${series.name}：${formatOutputValue(item.value?.[1])} ${series.unit}`)
+          lines.push(`${item.marker}${series.name}：${formatOutputValue(item.value?.[1], series.key)} ${series.unit}`)
         })
         return lines.join('<br/>')
       }
     },
     legend: {
       show: curve.series.length > 1,
-      top: 10
+      type: 'scroll',
+      top: 30,
+      left: 62,
+      right: 92,
+      data: curve.series.map(series => series.name)
     },
     grid: {
-      left: 86,
-      right: hasRightAxis ? 96 : 36,
-      top: curve.series.length > 1 ? 52 : 30,
-      bottom: 58
+      left: 62,
+      right: 92,
+      top: curve.series.length > 1 ? 70 : 44,
+      bottom: 56
     },
     xAxis: {
       type: 'value',
+      min: 5,
       name: '压力 P(MPa)',
       nameLocation: 'middle',
       nameGap: 34,
-      min: value => Math.min(0, value.min),
-      axisLine: { show: true },
-      splitLine: { lineStyle: { color: '#e8edf2' } }
+      minorTick: { show: true },
+      minorSplitLine: { show: true, lineStyle: { color: '#f1f5fb' } },
+      splitLine: { show: true, lineStyle: { color: '#dce5f2' } }
     },
     yAxis,
-    series: curve.series.map(series => ({
-      name: series.name,
-      type: 'line',
-      yAxisIndex: series.yAxisIndex || 0,
-      showSymbol: true,
-      symbolSize: 7,
-      smooth: activeRows.value.length > 2,
-      connectNulls: false,
-      // 过滤无效输出，并转换为 ECharts 所需的 [压力, 输出值] 数据点
-      data: activeRows.value
-        .filter(row => Number.isFinite(Number(row[series.key])))
-        .map(row => [Number(row.pressure), Number(row[series.key])])
-    }))
+    series: curve.series.map(series => {
+      const isCurveTwoDensity = curve.name === '曲线2' && series.key === 'density'
+      return {
+        name: series.name,
+        type: 'line',
+        yAxisIndex: series.yAxisIndex || 0,
+        showSymbol: false,
+        symbol: 'none',
+        smooth: true,
+        connectNulls: false,
+        itemStyle: { color: '#1677ff' },
+        lineStyle: {
+          color: '#1677ff',
+          width: 1.5,
+          type: isCurveTwoDensity ? 'dashed' : 'solid'
+        },
+        // 过滤无效输出，并转换为 ECharts 所需的 [压力, 输出值] 数据点
+        data: activeRows.value
+          .filter(row => Number.isFinite(Number(row[series.key])))
+          .map(row => [Number(row.pressure), Number(row[series.key])])
+      }
+    })
   }
 })
 
@@ -557,12 +517,9 @@ const showAnalysis = async () => {
   loadActiveCurve()
 }
 
-// 清除当前曲线缓存并重新向工具箱获取最新结果
+// 使用当前三项输入重新计算全部四类曲线。
 const reloadActiveCurve = () => {
-  const nextResults = { ...curveResults.value }
-  delete nextResults[activeCurve.value]
-  curveResults.value = nextResults
-  loadActiveCurve({ force: true })
+  handleCalculate()
 }
 
 // 浏览器尺寸变化时同步调整 ECharts 画布尺寸
@@ -576,23 +533,58 @@ watch(activeCurve, async () => {
   loadActiveCurve()
 })
 
-// 监听当前井变化，清除旧井曲线缓存并重新加载基础数据
-watch(() => props.wellName, () => {
-  analysisSequence += 1
+watch(() => props.gasRows, () => {
   curveResults.value = {}
   loadSourceData()
-  // 页面初始化时预先取得计算 ID，点击“计算”时可直接调用 calc 接口。
-  void ensureCalculationToolId().catch((error) => {
-    console.warn('地层水工具箱计算 ID 初始化失败，将在点击计算时重试', error)
-  })
+}, { immediate: true, deep: true })
+
+watch(
+  () => props.importedRows,
+  (rows) => {
+    const firstRow = rows?.[0]
+    if (!firstRow) return
+    salinity.value = Number(firstRow[0])
+    initialPressure.value = Number(firstRow[1])
+    reservoirTemperature.value = Number(firstRow[2])
+  },
+  { immediate: true, deep: true }
+)
+
+watch(
+  () => props.importedResultRows,
+  (rows) => {
+    if (!Array.isArray(rows) || !rows.length) return
+    // 节点页面首次打开时直接恢复已保存的四类曲线，避免刷新后要求重复计算。
+    const items = rows.map(row => ({
+      pressure: Number(row.pressure),
+      temperature: Number(row.temperature),
+      salinity: Number(row.salinity),
+      gasSolubilityInWater: Number(row.gasSolubilityInWater),
+      volumeFactor: Number(row.volumeFactor),
+      density: Number(row.density),
+      isothermalCompressionCoefficient: Number(row.isothermalCompressionCoefficient),
+      viscosity: Number(row.viscosity)
+    }))
+    curveResults.value = {
+      曲线1: { rows: items },
+      曲线2: { rows: items },
+      曲线3: { rows: items },
+      曲线4: { rows: items }
+    }
+    activeCurve.value = '曲线1'
+    loadActiveCurve()
+  },
+  { immediate: true, deep: true }
+)
+
+watch(activeResultTab, (value) => {
+  emit('result-tab-change', value)
 }, { immediate: true })
 
 window.addEventListener('resize', handleResize)
 
 // 组件卸载时终止旧请求结果写入，并移除事件和图表实例
 onBeforeUnmount(() => {
-  sourceSequence += 1
-  analysisSequence += 1
   calculationSequence += 1
   window.removeEventListener('resize', handleResize)
   chart?.dispose()
@@ -655,44 +647,65 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <div class="water-parameter-section">
-          <div class="water-section-heading">
-            <span>地层水计算结果</span>
-            <span class="water-section-rule"></span>
-          </div>
+<!--        <div class="water-parameter-section">-->
+<!--          <div class="water-section-heading">-->
+<!--            <span>地层水计算结果</span>-->
+<!--            <span class="water-section-rule"></span>-->
+<!--          </div>-->
 
-          <label class="water-field-group water-result-field">
-            <span>天然气在地层水中的溶解度(dless)</span>
-            <input v-model="calculationResult.gasSolubilityInWater" type="text" readonly />
-          </label>
+<!--          <label class="water-field-group water-result-field">-->
+<!--            <span>天然气在地层水中的溶解度(dless)</span>-->
+<!--            <input v-model="calculationResult.gasSolubilityInWater" type="text" readonly />-->
+<!--          </label>-->
 
-          <label class="water-field-group water-result-field">
-            <span>地层水体积系数(dless)</span>
-            <input v-model="calculationResult.volumeFactor" type="text" readonly />
-          </label>
+<!--          <label class="water-field-group water-result-field">-->
+<!--            <span>地层水体积系数(dless)</span>-->
+<!--            <input v-model="calculationResult.volumeFactor" type="text" readonly />-->
+<!--          </label>-->
 
-          <label class="water-field-group water-result-field">
-            <span>地层水等温压缩系数(MPa⁻¹)</span>
-            <input v-model="calculationResult.isothermalCompressionCoefficient" type="text" readonly />
-          </label>
+<!--          <label class="water-field-group water-result-field">-->
+<!--            <span>地层水等温压缩系数(MPa⁻¹)</span>-->
+<!--            <input v-model="calculationResult.isothermalCompressionCoefficient" type="text" readonly />-->
+<!--          </label>-->
 
-          <label class="water-field-group water-result-field">
-            <span>地层水粘度(mPa·s)</span>
-            <input v-model="calculationResult.viscosity" type="text" readonly />
-          </label>
+<!--          <label class="water-field-group water-result-field">-->
+<!--            <span>地层水粘度(mPa·s)</span>-->
+<!--            <input v-model="calculationResult.viscosity" type="text" readonly />-->
+<!--          </label>-->
 
-          <label class="water-field-group water-result-field">
-            <span>地层水密度(kg/m³)</span>
-            <input v-model="calculationResult.density" type="text" readonly />
-          </label>
-        </div>
+<!--          <label class="water-field-group water-result-field">-->
+<!--            <span>地层水密度(kg/m³)</span>-->
+<!--            <input v-model="calculationResult.density" type="text" readonly />-->
+<!--          </label>-->
+<!--        </div>-->
 
       </aside>
 
-      <div class="water-data-table">
-        <el-table v-loading="sourceLoading" :data="filteredSourceRows" border height="100%" empty-text="当前井暂无数据" :row-key="row => row._rowKey">
-          <el-table-column v-for="column in sourceColumns" :key="column.key" :prop="column.key" :label="column.label" min-width="145" show-overflow-tooltip/>
-        </el-table>
+      <div
+        v-loading="sourceLoading"
+        class="water-data-grid"
+        aria-label="地层水性质数据表格"
+        :style="{ gridTemplateColumns: waterGridTemplateColumns }"
+      >
+        <div
+          v-for="column in waterTableColumns"
+          :key="column"
+          class="water-grid-cell header"
+        >
+          {{ column }}
+        </div>
+        <div
+          v-for="cell in waterDataCells"
+          :key="cell.key"
+          class="water-grid-cell"
+          :class="{
+            imported: cell.imported,
+            numeric: cell.columnIndex > 1,
+            'row-index': cell.columnIndex === 0
+          }"
+        >
+          {{ cell.value }}
+        </div>
       </div>
     </div>
 
@@ -704,7 +717,7 @@ onBeforeUnmount(() => {
           <div class="water-analysis-panel-heading">
             <span>图表数据</span>
             <div class="water-analysis-heading-actions">
-              <el-button size="small" :loading="analysisLoading" @click="reloadActiveCurve">重新获取</el-button>
+              <el-button size="small" :loading="calculating" @click="reloadActiveCurve">重新计算</el-button>
               <button class="water-analysis-toggle" type="button" title="收起图表数据" @click="analysisTableCollapsed = true">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="#777">
                   <path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z" />
@@ -712,12 +725,30 @@ onBeforeUnmount(() => {
               </button>
             </div>
           </div>
-          <div class="water-analysis-table-body">
-            <el-table v-loading="analysisLoading" :data="activeRows" border height="100%" empty-text="暂无分析数据">
-              <el-table-column v-for="column in analysisColumns" :key="column.key" :prop="column.key" :label="column.label" min-width="150" show-overflow-tooltip>
-                <template #default="{ row }">{{ formatValue(row, column.key) }}</template>
-              </el-table-column>
-            </el-table>
+          <div
+            v-loading="analysisLoading"
+            class="water-analysis-grid"
+            aria-label="地层水分析数据表格"
+            :style="{ gridTemplateColumns: waterAnalysisGridTemplateColumns }"
+          >
+            <div
+              v-for="column in waterAnalysisTableColumns"
+              :key="column"
+              class="water-analysis-grid-cell header"
+            >
+              {{ column }}
+            </div>
+            <div
+              v-for="cell in waterAnalysisDataCells"
+              :key="cell.key"
+              class="water-analysis-grid-cell"
+              :class="{
+                numeric: cell.value !== '',
+                'row-index': cell.columnIndex === 0
+              }"
+            >
+              {{ cell.value }}
+            </div>
           </div>
         </div>
       </aside>
@@ -729,7 +760,14 @@ onBeforeUnmount(() => {
             <span>{{ curve.name }}</span>
           </label>
         </div>
-        <div ref="chartEl" class="water-chart"></div>
+        <div class="water-chart">
+          <div class="water-chart-plot-shell">
+            <div ref="chartEl" class="water-chart-plot"></div>
+            <div v-if="!activeCurveHasData" class="water-chart-empty">
+              暂无计算结果
+            </div>
+          </div>
+        </div>
       </section>
     </div>
 
@@ -828,11 +866,55 @@ onBeforeUnmount(() => {
   }
 }
 
-.water-data-table {
+.water-data-grid {
   flex: 1;
   min-width: 0;
-  border: 1px solid #d4d7db;
+  display: grid;
+  grid-template-rows: 36px repeat(27, minmax(30px, 1fr));
+  margin: 0;
   overflow: hidden;
+  border: 1px solid #d4d7db;
+}
+
+.water-grid-cell {
+  min-width: 0;
+  border-right: 1px solid #d4d7db;
+  border-bottom: 1px solid #d4d7db;
+  background: #fff;
+  padding: 0 8px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  color: #333;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  &.imported {
+    background: #fbfdff;
+  }
+
+  &.numeric {
+    justify-content: flex-end;
+    font-variant-numeric: tabular-nums;
+  }
+
+  &.header {
+    justify-content: center;
+    padding: 0 8px;
+    background: #f4f4f4;
+    color: #333;
+    font-size: inherit;
+    font-weight: 400;
+    text-align: center;
+  }
+
+  &.row-index {
+    justify-content: center;
+    padding: 0 6px;
+    background: #f4f4f4;
+    color: #333;
+  }
 }
 
 .water-analysis-panel {
@@ -883,9 +965,55 @@ onBeforeUnmount(() => {
   gap: 6px;
 }
 
-.water-analysis-table-body {
+.water-analysis-grid {
   flex: 1;
+  min-width: 0;
   min-height: 0;
+  display: grid;
+  grid-template-rows: 42px;
+  grid-auto-rows: max(30px, calc((100% - 42px) / 25));
+  overflow: auto;
+}
+
+.water-analysis-grid-cell {
+  min-width: 0;
+  border-right: 1px solid #d4d7db;
+  border-bottom: 1px solid #d4d7db;
+  background: #fff;
+
+  &.numeric {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding: 0 8px;
+    box-sizing: border-box;
+    font-variant-numeric: tabular-nums;
+  }
+
+  &.header {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 6px;
+    box-sizing: border-box;
+    background: #f4f4f4;
+    color: #333;
+    font-size: inherit;
+    font-weight: 400;
+    line-height: 1.35;
+    text-align: center;
+    white-space: nowrap;
+  }
+
+  &.row-index {
+    justify-content: center;
+    padding: 0 6px;
+    background: #f4f4f4;
+    color: #333;
+  }
 }
 
 .water-analysis-toggle {
@@ -966,7 +1094,33 @@ onBeforeUnmount(() => {
 .water-chart {
   flex: 1;
   min-height: 0;
-  width: 100%;
+  display: flex;
+  padding: 8px;
+  box-sizing: border-box;
+}
+
+.water-chart-plot-shell {
+  flex: 1;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+}
+
+.water-chart-plot {
+  position: absolute;
+  inset: 0;
+}
+
+.water-chart-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: #999;
+  z-index: 1;
+  pointer-events: none;
 }
 
 .water-result-tabs {

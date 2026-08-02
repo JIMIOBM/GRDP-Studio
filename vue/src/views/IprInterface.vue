@@ -18,9 +18,10 @@ import PvtPropertiesContent from '@/views/DataManagement/PvtPropertiesContent.vu
 import WellDataTableContent from '@/views/DataManagement/WellDataTableContent.vue'
 import { NODETYPE } from '@/constants/nodeType'
 import { analyticMethodApi, dataManagementApi, dynamicBalanceApi, materialBalanceApi, nodeApi, notifyApi, projectApi, typicalCurveApi, waterInvasionApi } from '@/api/docker'
+import { ensurePvtSourceRecord, getPvtRecord, getPvtRecords } from '@/utils/pvtRecords'
 
-const PROJECT_ID = 1
-const GAS_RESERVOIR_ID = 1
+const PROJECT_ID = 4
+const GAS_RESERVOIR_ID = 3
 const FLOW_BALANCE_NODE_TYPE = NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure
 
 const WELL_GROUPS = [
@@ -107,6 +108,8 @@ const activeNodeId = ref('')  // 当前左侧树选中的节点 ID. 用于高亮
 const activeNode = ref(null)  // 当前选中的完整节点对象
 const currentView = ref(null)  // currentView.value = 'water-invasion'，即确定右侧部分区域所显示的界面
 const currentViewNode = ref(null)  // 传给右侧内容组件的节点对象
+// 切换不同 PVT 编号时保留当前性质页签，地层水计算生成新节点后仍停留在地层水页面。
+const lastPvtPropertyTab = ref('天然气性质')
 const wellKeyword = ref('')
 const sideTreeCollapsed = ref(false)
 const waterInvasionRunning = ref(false)  //用于判断水侵分析是否正在运行
@@ -583,14 +586,14 @@ const findWattenbargerNodeByWell = (root, wellName) => {
   return visit(root)
 }
 
-// 当前先静态创建两个 PVT 性质节点；pvtIndex 用来加载各自的初始数据。
-const createStaticPvtPropertyNodes = (wellName, wellId) =>
-  [1, 2].map(index => ({
-    id: `${wellId || wellName}-well-data-pvt-${index}`,
-    label: `PVT性质 ${index}`,
+// 左侧 PVT 子节点完全由持久化记录生成，刷新页面后编号和历史记录保持一致。
+const createPvtPropertyNodes = (wellName, wellId) =>
+  getPvtRecords(PROJECT_ID, GAS_RESERVOIR_ID, wellName).map(record => ({
+    id: `${wellId || wellName}-well-data-pvt-${record.index}`,
+    label: `PVT性质${record.index}`,
     type: 'well-data-pvt',
     wellName,
-    pvtIndex: index,
+    pvtIndex: record.index,
     children: []
   }))
 
@@ -602,7 +605,7 @@ const createWellDataNodes = (wellName, wellId) =>
     defaultExpanded: item.defaultExpanded || false,
     // PVT 性质挂在每口井的“数据管理”下面，而不是作为井的同级节点。
     children: item.type === 'well-data-pvt-group'
-      ? createStaticPvtPropertyNodes(wellName, wellId)
+      ? createPvtPropertyNodes(wellName, wellId)
       : (item.children || []).map(child => ({
           ...child,
           id: `${wellId || wellName}-${item.type}-${child.type}`,
@@ -672,7 +675,10 @@ const ensureWell = (wellName, wellId) => { //确保井存在
           groupItem.children.push(dataNode)
           return
         }
-        if (dataNode.children.length) {
+        if (dataNode.type === 'well-data-pvt-group') {
+          existingNode.children = createPvtPropertyNodes(wellName, wellItem.id)
+          existingNode.defaultExpanded = existingNode.children.length > 0
+        } else if (dataNode.children.length) {
           existingNode.children = dataNode.children
           existingNode.defaultExpanded = dataNode.defaultExpanded
         }
@@ -1282,6 +1288,97 @@ const refreshOtherDataNodes = async () => {  //加载其他数据（x-1到x-5）
   }
 }
 
+const getPvtSourceItems = payload => {
+  const data = normalizePayload(payload)
+  if (Array.isArray(data)) return data
+  if (Array.isArray(data?.items)) return data.items
+  if (Array.isArray(data?.rows)) return data.rows
+  return []
+}
+
+const normalizePvtGasType = value => {
+  const index = Number(value)
+  if ([0, 1, 2].includes(index)) return ['干气', '湿气', '凝析气'][index]
+  return value ?? ''
+}
+
+const toPvtGasRow = item => [
+  normalizePvtGasType(item?.gasType ?? item?.naturalGasType),
+  item?.specificGravity ?? item?.relativeDensity ?? '',
+  item?.hydrogenSulfide ?? item?.h2sContent ?? item?.h2SMoleFraction ?? '',
+  item?.carbonDioxide ?? item?.co2Content ?? item?.co2MoleFraction ?? '',
+  item?.nitrogen ?? item?.nitrogenContent ?? item?.n2MoleFraction ?? ''
+]
+
+const refreshPvtNodesForWell = wellName => {
+  const well = ensureWell(wellName, `well-${wellName}`)
+  const dataGroup = well?.children.find(item => item.type === 'data-management')
+  const pvtGroup = dataGroup?.children.find(item => item.type === 'well-data-pvt-group')
+  if (!pvtGroup) return
+  // 替换子节点数组，确保 Vue 在计算完成的同一轮更新中渲染新增编号。
+  pvtGroup.children = [...createPvtPropertyNodes(wellName, well.id)]
+  pvtGroup.defaultExpanded = pvtGroup.children.length > 0
+}
+
+// 顶部 PVT 入口只负责汇总显示，并为每口井补齐首条 PVT 记录。
+const loadAllPvtProperties = async () => {
+  const response = await dataManagementApi.getGasProperties(PROJECT_ID, GAS_RESERVOIR_ID)
+  const rows = getPvtSourceItems(response)
+    .filter(item => item?.wellName)
+    .map(item => ({
+      wellName: String(item.wellName),
+      values: toPvtGasRow(item)
+    }))
+
+  rows.forEach(({ wellName, values }) => {
+    ensureWell(wellName, `well-${wellName}`)
+    ensurePvtSourceRecord(PROJECT_ID, GAS_RESERVOIR_ID, wellName, [values])
+    refreshPvtNodesForWell(wellName)
+  })
+  return rows
+}
+
+const handlePvtRecordSaved = ({ record, created, kind }) => {
+  if (!record?.wellName) return
+  if (kind === 'water') lastPvtPropertyTab.value = '地层水性质'
+  refreshPvtNodesForWell(record.wellName)
+  if (!created) return
+
+  const well = getWellGroup()?.children.find(item => item.wellName === record.wellName)
+  const pvtGroup = well?.children
+    .find(item => item.type === 'data-management')?.children
+    .find(item => item.type === 'well-data-pvt-group')
+  const node = pvtGroup?.children.find(item => Number(item.pvtIndex) === Number(record.index))
+  if (node) {
+    // 新编号计算完成后立即选中新节点；节点 ID 改变会重建页面并加载刚保存的曲线。
+    activeNodeId.value = node.id
+    activeNode.value = node
+    currentView.value = 'pvt-properties'
+    currentViewNode.value = {
+      ...node,
+      initialPropertyTab: lastPvtPropertyTab.value
+    }
+  }
+}
+
+const handlePvtPropertyTabChange = tabName => {
+  lastPvtPropertyTab.value = tabName
+}
+
+const getPvtInitialPropertyTab = node => {
+  const record = getPvtRecord(
+    PROJECT_ID,
+    GAS_RESERVOIR_ID,
+    node?.wellName,
+    node?.pvtIndex
+  )
+  if (record?.lastCalculatedKind === 'water') return '地层水性质'
+  if (record?.lastCalculatedKind === 'gas') return '天然气性质'
+  // 兼容修复前已经保存、尚未记录性质类型的地层水结果。
+  if (record?.waterResultRows?.length) return '地层水性质'
+  return lastPvtPropertyTab.value
+}
+
 const refreshWaterInvasionNodes = async (wellName = '') => {  //加载已有水侵分析节点
   try {
     const res = await nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, NODETYPE.NodeType_WaterInvasionAnalysis)
@@ -1712,6 +1809,7 @@ const waitForMaterialBalanceResult = async (wellName, gasReservoirType, maxRetri
       }
     } catch {
       // 首次创建期间查询接口可能短暂不可用，继续下一次查询。
+      ElMessage.error(error.message || '物质平衡计算失败')
     }
   }
   return latestResult
@@ -3298,7 +3396,10 @@ const handleSelect = async (node) => { // 点击左侧树节点
 
   if (node.type === 'well-data-pvt') {
     currentView.value = 'pvt-properties'
-    currentViewNode.value = node
+    currentViewNode.value = {
+      ...node,
+      initialPropertyTab: getPvtInitialPropertyTab(node)
+    }
     return
   }
 
@@ -3368,7 +3469,7 @@ const handleSelect = async (node) => { // 点击左侧树节点
   if (node.type === NODETYPE.NodeType_Well) return
 }
 
-const handleCommand = ({ group, name }) => { // 接收顶部菜单栏的点击事件
+const handleCommand = async ({ group, name }) => { // 接收顶部菜单栏的点击事件
   const dataViewByName = {
     井头数据: 'wellhead',
     井斜数据: 'deviation',
@@ -3401,14 +3502,16 @@ const handleCommand = ({ group, name }) => { // 接收顶部菜单栏的点击�
   }
 
   if (name === 'PVT性质') {
-    if (!selectedWellName.value) {
-      ElMessage.warning('请先在左侧选择一口井')
-      return
-    }
-
-    currentView.value = 'pvt-properties'
-    currentViewNode.value = {
-      wellName: selectedWellName.value
+    try {
+      const aggregateRows = await loadAllPvtProperties()
+      currentView.value = 'pvt-properties'
+      currentViewNode.value = {
+        id: 'all-pvt-properties',
+        aggregate: true,
+        aggregateRows
+      }
+    } catch (error) {
+      ElMessage.error(error.response?.data?.message || error.message || 'PVT性质数据加载失败')
     }
     return
   }
@@ -3514,6 +3617,11 @@ onBeforeUnmount(() => {
           :project-id="PROJECT_ID"
           :gas-reservoir-id="GAS_RESERVOIR_ID"
           :pvt-index="currentViewNode?.pvtIndex"
+          :aggregate-rows="currentViewNode?.aggregateRows || []"
+          :aggregate-mode="Boolean(currentViewNode?.aggregate)"
+          :initial-property-tab="currentViewNode?.initialPropertyTab || lastPvtPropertyTab"
+          @record-saved="handlePvtRecordSaved"
+          @property-tab-change="handlePvtPropertyTabChange"
         />
         <WellDataTableContent v-if="currentView === 'well-data-table'"
           :data-type="currentViewNode?.dataType" :well-name="currentViewNode?.wellName"

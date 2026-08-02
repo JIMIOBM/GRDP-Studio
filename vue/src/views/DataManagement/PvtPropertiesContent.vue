@@ -5,23 +5,34 @@ import NaturalGasProperties from './NaturalGasProperties.vue'
 import FormationWaterProperties from './FormationWaterProperties.vue'
 import RockProperties from './RockProperties.vue'
 import NaturalGasImportDialog from './NaturalGasImportDialog.vue'
+import FormationWaterImportDialog from './FormationWaterImportDialog.vue'
 import RockImportDialog from './RockImportDialog.vue'
+import { getPvtRecord, savePvtCalculation } from '@/utils/pvtRecords'
 
 const props = defineProps({
-  wellName: { type: String, required: true },
+  wellName: { type: String, default: '' },
   projectId: { type: [Number, String], required: true },
   gasReservoirId: { type: [Number, String], required: true },
-  pvtIndex: { type: [Number, String], required: true }
+  pvtIndex: { type: [Number, String], default: 1 },
+  aggregateMode: { type: Boolean, default: false },
+  aggregateRows: { type: Array, default: () => [] },
+  initialPropertyTab: { type: String, default: '天然气性质' }
 })
 
-// 当前阶段使用静态挂载：每口井的 PVT 性质 1、2 各自只有一条基础气体数据。
-const STATIC_PVT_GAS_ROWS = {
-  1: [['干气', 0.58, 0.02, 1.2, 0.8]],
-  2: [['湿气', 0.65, 0.03, 1.5, 0.9]]
-}
+const emit = defineEmits(['record-saved', 'property-tab-change'])
+// 每个性质编号使用独立快照初始化输入与结果，切换旧节点不会读取当前节点的状态。
+const storedRecord = getPvtRecord(
+  props.projectId,
+  props.gasReservoirId,
+  props.wellName,
+  props.pvtIndex
+)
 
 const createInitialGasRows = () =>
-  (STATIC_PVT_GAS_ROWS[Number(props.pvtIndex)] || []).map(row => [...row])
+  (storedRecord?.gasRows || []).map(row => [...row])
+
+const createInitialWaterRows = () =>
+  (storedRecord?.waterRows || [[25000, 40, 119.85]]).map(row => [...row])
 
 const propertyTabs = [
   { name: '天然气性质', component: NaturalGasProperties },
@@ -29,21 +40,40 @@ const propertyTabs = [
   { name: '岩石性质', component: RockProperties }
 ]
 
-const activePropertyTab = ref('天然气性质')
+const activePropertyTab = ref(
+  propertyTabs.some(tab => tab.name === props.initialPropertyTab)
+    ? props.initialPropertyTab
+    : '天然气性质'
+)
 const activeGasResultTab = ref('数据列表')
 const gasImportKind = computed(() =>
   activeGasResultTab.value === '结果分析图' ? 'result' : 'data'
 )
+const activeWaterResultTab = ref('数据列表')
 const importDialogVisible = ref(false)
 
-const rockImportDialogVisible = ref(false)        // ← 新增
+const rockImportDialogVisible = ref(false)
+const waterImportDialogVisible = ref(false)
 const importedGasRows = ref(createInitialGasRows())
-const importedGasResultRows = ref([])
+const importedGasResultRows = ref(storedRecord?.gasResultRows || [])
 const importedRockRows = ref([])
 
 const handleGasResultTabChange = (tabName) => {
   activeGasResultTab.value = tabName
 }
+
+const handlePropertyTabChange = tabName => {
+  activePropertyTab.value = tabName
+  emit('property-tab-change', tabName)
+}
+const importedWaterRows = ref(createInitialWaterRows())
+const importedWaterResultRows = ref(storedRecord?.waterResultRows || [])
+const activeGasImportKind = computed(
+  () => activeGasResultTab.value === '结果分析图' ? 'result' : 'data'
+)
+const activeWaterImportKind = computed(
+  () => activeWaterResultTab.value === '结果分析图' ? 'result' : 'data'
+)
 
 const handleSave = () => {
   ElMessage.success(`${activePropertyTab.value}参数已保存`)
@@ -52,6 +82,10 @@ const handleSave = () => {
 const handleImport = () => {
   if (activePropertyTab.value === '天然气性质') {
     importDialogVisible.value = true
+    return
+  }
+  if (activePropertyTab.value === '地层水性质') {
+    waterImportDialogVisible.value = true
     return
   }
   if (activePropertyTab.value === '岩石性质') {
@@ -81,6 +115,25 @@ const GAS_RESULT_IMPORT_COLUMNS = [
   '天然气压缩系数(MPa⁻¹)',
   '天然气粘度(mPa·s)'
 ]
+
+const WATER_IMPORT_COLUMNS = [
+  '地层水矿化度(mg/L)',
+  '原始地层压力(MPa)',
+  '地层温度(℃)'
+]
+
+const WATER_RESULT_IMPORT_COLUMNS = [
+  '压力(MPa)',
+  '温度(℃)',
+  '地层水矿化度(mg/L)',
+  '天然气在水中的溶解度(dless)',
+  '地层水体积系数(dless)',
+  '地层水密度(kg/m³)',
+  '地层水等温压缩系数(MPa⁻¹)',
+  '地层水粘度(mPa·s)'
+]
+
+const aggregateColumns = ['井口名', ...GAS_IMPORT_COLUMNS]
 
 const normalizeHeader = (value) => String(value ?? '')
   .trim()
@@ -331,14 +384,152 @@ const firstSheet = workbook.Sheets[workbook.SheetNames[0]]
     ElMessage.error(error.message || '岩石性质数据导入失败')
   }
 }
+
+const parseWaterDataImportRows = (rows, options) => {
+  assertStrictHeaders(rows, WATER_IMPORT_COLUMNS, '地层水数据模板')
+  const dataRows = rows.slice(1).filter(row =>
+    row.some(value => !isEmptyCell(value))
+  )
+  if (!dataRows.length) throw new Error('地层水数据模板中没有可导入的数据行')
+  if (dataRows.length > 1) {
+    throw new Error('每次 PVT 性质只能导入 1 条地层水基础数据，请删除多余数据行')
+  }
+
+  return dataRows.map((row, rowIndex) =>
+    WATER_IMPORT_COLUMNS.map((column, columnIndex) => {
+      let value = row[columnIndex] ?? ''
+      if (options.fillEmptyWithZero && isEmptyCell(value)) value = 0
+      if (isEmptyCell(value) || !Number.isFinite(Number(value))) {
+        throw new Error(`地层水数据模板第 ${rowIndex + 2} 行：${column}必须填写数字`)
+      }
+      const numericValue = Number(value)
+      if (columnIndex === 0 && numericValue < 0) {
+        throw new Error(`地层水数据模板第 ${rowIndex + 2} 行：地层水矿化度不能小于 0`)
+      }
+      if (columnIndex === 1 && numericValue <= 0) {
+        throw new Error(`地层水数据模板第 ${rowIndex + 2} 行：原始地层压力必须大于 0`)
+      }
+      return numericValue
+    })
+  )
+}
+
+const parseWaterResultImportRows = (rows) => {
+  assertStrictHeaders(rows, WATER_RESULT_IMPORT_COLUMNS, '地层水结果数据模板')
+  const dataRows = rows.slice(1).filter(row =>
+    row.some(value => !isEmptyCell(value))
+  )
+  if (!dataRows.length) throw new Error('地层水结果数据模板中没有可导入的数据行')
+
+  return dataRows.map((row, rowIndex) => {
+    const values = WATER_RESULT_IMPORT_COLUMNS.map((column, columnIndex) => {
+      const value = row[columnIndex] ?? ''
+      if (isEmptyCell(value) || !Number.isFinite(Number(value))) {
+        throw new Error(`地层水结果数据模板第 ${rowIndex + 2} 行：${column}必须填写数字`)
+      }
+      return Number(value)
+    })
+    return {
+      pressure: values[0],
+      temperature: values[1],
+      salinity: values[2],
+      gasSolubilityInWater: values[3],
+      volumeFactor: values[4],
+      density: values[5],
+      isothermalCompressionCoefficient: values[6],
+      viscosity: values[7]
+    }
+  })
+}
+
+const handleWaterImport = async ({ file, options, kind }) => {
+  try {
+    const extension = file.name.split('.').pop()?.toLowerCase()
+    if (!['xlsx', 'xls', 'csv'].includes(extension)) {
+      throw new Error('仅支持 .xlsx、.xls、.csv 表格文件')
+    }
+
+    const XLSX = await import('xlsx')
+    const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' })
+    const firstSheet = workbook.Sheets[workbook.SheetNames[0]]
+    const sourceRows = XLSX.utils.sheet_to_json(firstSheet, {
+      header: 1,
+      raw: true,
+      defval: ''
+    })
+    const expectedColumns = kind === 'result'
+      ? WATER_RESULT_IMPORT_COLUMNS
+      : WATER_IMPORT_COLUMNS
+    const rows = cleanImportRows(sourceRows, options, expectedColumns)
+    if (!rows.length) throw new Error('文件中没有可导入的数据')
+
+    if (kind === 'result') {
+      const parsedRows = parseWaterResultImportRows(rows)
+      importedWaterResultRows.value = parsedRows
+      ElMessage.success(`成功导入 ${parsedRows.length} 条地层水结果数据`)
+      return
+    }
+
+    const parsedRows = parseWaterDataImportRows(rows, options)
+    importedWaterRows.value = parsedRows
+    ElMessage.success(`成功导入 ${parsedRows.length} 条地层水性质数据`)
+  } catch (error) {
+    ElMessage.error(error.message || '地层水性质数据导入失败')
+  }
+}
+
+const persistCalculation = (kind, payload) => {
+  // 计算成功后立即写入当前编号；输入变化时存储层返回新编号并保留旧快照。
+  const result = savePvtCalculation({
+    projectId: props.projectId,
+    gasReservoirId: props.gasReservoirId,
+    wellName: props.wellName,
+    currentIndex: props.pvtIndex,
+    kind,
+    inputRows: payload.inputRows,
+    resultRows: payload.resultRows,
+    settings: payload.settings
+  })
+
+  if (kind === 'gas') {
+    importedGasRows.value = result.record.gasRows
+    importedGasResultRows.value = result.record.gasResultRows
+  } else {
+    importedWaterRows.value = result.record.waterRows
+    importedWaterResultRows.value = result.record.waterResultRows
+  }
+  emit('record-saved', { ...result, kind })
+}
 </script>
 
 <template>
   <section class="pvt-properties">
+    <template v-if="aggregateMode">
+      <div class="aggregate-table-wrap">
+        <table class="aggregate-table">
+          <thead>
+            <tr>
+              <th v-for="column in aggregateColumns" :key="column">{{ column }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in aggregateRows" :key="row.wellName">
+              <td>{{ row.wellName }}</td>
+              <td v-for="(value, index) in row.values" :key="index">{{ value }}</td>
+            </tr>
+            <tr v-if="!aggregateRows.length">
+              <td :colspan="aggregateColumns.length" class="aggregate-empty">暂无 PVT 性质数据</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </template>
+
+    <template v-else>
     <header class="pvt-toolbar">
       <nav class="property-tabs" aria-label="PVT 性质分类">
         <button v-for="tab in propertyTabs" :key="tab.name" type="button" class="property-tab"
-          :class="{ active: activePropertyTab === tab.name }" @click="activePropertyTab = tab.name">
+          :class="{ active: activePropertyTab === tab.name }" @click="handlePropertyTabChange(tab.name)">
           {{ tab.name }}
         </button>
       </nav>
@@ -355,10 +546,19 @@ const firstSheet = workbook.Sheets[workbook.SheetNames[0]]
       :imported-result-rows="importedGasResultRows"
       :project-id="projectId"
       @result-tab-change="handleGasResultTabChange"
+      @calculated="persistCalculation('gas', $event)"
     />
-    <FormationWaterProperties v-else-if="activePropertyTab === '地层水性质'" :well-name="wellName" :project-id="projectId" />
-    <RockProperties v-else-if="activePropertyTab === '岩石性质'" :imported-rows="importedRockRows"
-      :project-id="projectId" />
+    <FormationWaterProperties
+      v-else-if="activePropertyTab === '地层水性质'"
+      :well-name="wellName"
+      :project-id="projectId"
+      :gas-rows="importedGasRows"
+      :imported-rows="importedWaterRows"
+      :imported-result-rows="importedWaterResultRows"
+      @result-tab-change="activeWaterResultTab = $event"
+      @calculated="persistCalculation('water', $event)"
+    />
+    <RockProperties v-else :imported-rows="importedRockRows" :project-id="projectId" />
 
     <NaturalGasImportDialog
       v-model="importDialogVisible"
@@ -367,6 +567,12 @@ const firstSheet = workbook.Sheets[workbook.SheetNames[0]]
     />
 
     <RockImportDialog v-model="rockImportDialogVisible" @confirm="handleRockImport" />
+    <FormationWaterImportDialog
+      v-model="waterImportDialogVisible"
+      :import-kind="activeWaterImportKind"
+      @confirm="handleWaterImport"
+    />
+    </template>
   </section>
 </template>
 
@@ -393,6 +599,41 @@ const firstSheet = workbook.Sheets[workbook.SheetNames[0]]
   justify-content: space-between;
   padding: 7px 11px 0;
   box-sizing: border-box;
+}
+
+.aggregate-table-wrap {
+  flex: 1;
+  min-height: 0;
+  padding: 0 12px 12px;
+  overflow: auto;
+}
+
+.aggregate-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+
+  th,
+  td {
+    height: 34px;
+    padding: 0 10px;
+    border: 1px solid #d7dce3;
+    text-align: center;
+    word-break: break-word;
+  }
+
+  th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: #f3f6fa;
+    font-weight: 600;
+  }
+}
+
+.aggregate-empty {
+  height: 90px !important;
+  color: #909399;
 }
 
 .property-tabs {
