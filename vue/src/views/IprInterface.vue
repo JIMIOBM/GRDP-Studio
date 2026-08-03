@@ -18,7 +18,7 @@ import PvtPropertiesContent from '@/views/DataManagement/PvtPropertiesContent.vu
 import WellDataTableContent from '@/views/DataManagement/WellDataTableContent.vue'
 import { NODETYPE } from '@/constants/nodeType'
 import { analyticMethodApi, dataManagementApi, dynamicBalanceApi, materialBalanceApi, nodeApi, notifyApi, projectApi, typicalCurveApi, waterInvasionApi } from '@/api/docker'
-import { createOrReusePvtRecord, getPvtRecord, getPvtRecords } from '@/utils/pvtRecords'
+import { createOrReusePvtRecord, ensureInitialPvtRecord, getPvtRecord, getPvtRecords } from '@/utils/pvtRecords'
 
 const PROJECT_ID = 4
 const GAS_RESERVOIR_ID = 3
@@ -1321,17 +1321,39 @@ const refreshPvtNodesForWell = wellName => {
   pvtGroup.defaultExpanded = pvtGroup.children.length > 0
 }
 
-// 首次新增性质1时，只提取接口中当前井口的第一条天然气基础数据。
-const loadFirstPvtGasRow = async wellName => {
-  const response = await dataManagementApi.getGasProperties(
-    PROJECT_ID,
-    GAS_RESERVOIR_ID,
-    { silentError: true }
-  )
-  const source = getPvtSourceItems(response).find(
-    item => String(item?.wellName ?? '') === String(wellName)
-  )
-  return source ? [toPvtGasRow(source)] : []
+const initializePvtRecords = async () => {
+  const wellNames = getAllWellNames()
+  if (!wellNames.length) return
+
+  let sourceItems = []
+  try {
+    const response = await dataManagementApi.getGasProperties(
+      PROJECT_ID,
+      GAS_RESERVOIR_ID,
+      { silentError: true }
+    )
+    sourceItems = getPvtSourceItems(response)
+  } catch (error) {
+    console.warn('PVT性质1基础数据加载失败', error)
+  }
+
+  // 按接口顺序为每口井选取第一条数据，并在项目树加载时补齐性质1。
+  const firstSourceByWell = new Map()
+  sourceItems.forEach(item => {
+    const wellName = String(item?.wellName ?? '')
+    if (wellName && !firstSourceByWell.has(wellName)) firstSourceByWell.set(wellName, item)
+  })
+
+  wellNames.forEach(wellName => {
+    const source = firstSourceByWell.get(String(wellName))
+    ensureInitialPvtRecord(
+      PROJECT_ID,
+      GAS_RESERVOIR_ID,
+      wellName,
+      source ? [toPvtGasRow(source)] : []
+    )
+    refreshPvtNodesForWell(wellName)
+  })
 }
 
 const handlePvtPropertyTabChange = tabName => {
@@ -3182,6 +3204,7 @@ const openAGNode = async (node) => {
 
 const initTree = async () => {
   await refreshProjectTree()
+  await initializePvtRecords()
 }
 
 const loadWellChildren = async (node, force = false) => {
@@ -3486,15 +3509,10 @@ const handleCommand = async ({ group, name }) => { // 接收顶部菜单栏的�
     }
 
     try {
-      const existingRecords = getPvtRecords(PROJECT_ID, GAS_RESERVOIR_ID, activeWellName)
-      const initialGasRows = existingRecords.length
-        ? []
-        : await loadFirstPvtGasRow(activeWellName)
       const { record } = createOrReusePvtRecord(
         PROJECT_ID,
         GAS_RESERVOIR_ID,
-        activeWellName,
-        initialGasRows
+        activeWellName
       )
 
       refreshPvtNodesForWell(activeWellName)

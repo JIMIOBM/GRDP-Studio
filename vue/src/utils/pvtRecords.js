@@ -47,6 +47,39 @@ export const getPvtRecord = (projectId, gasReservoirId, wellName, index) =>
   getPvtRecords(projectId, gasReservoirId, wellName)
     .find(record => Number(record.index) === Number(index)) || null
 
+// 项目树首次加载时为每口井补齐性质1，已有编号和历史结果不做覆盖。
+export const ensureInitialPvtRecord = (
+  projectId,
+  gasReservoirId,
+  wellName,
+  initialGasRows = []
+) => {
+  const store = readStore(projectId, gasReservoirId)
+  const records = Array.isArray(store[wellName]) ? store[wellName] : []
+  const initialRecord = records.find(record => Number(record.index) === 1)
+
+  if (initialRecord) {
+    const hasSavedResult = initialRecord.gasResultRows?.length || initialRecord.waterResultRows?.length
+    // 仅填充尚未使用的空白性质1，避免覆盖已有导入数据或历史计算结果。
+    if (!initialRecord.gasRows?.length && !hasSavedResult && initialGasRows.length) {
+      initialRecord.gasRows = clone(initialGasRows)
+      initialRecord.updatedAt = new Date().toISOString()
+    }
+    // 性质1是系统初始记录，即使接口无数据，后续新增也必须从性质2开始。
+    if (initialRecord.status === 'draft') initialRecord.status = 'data-ready'
+    store[wellName] = records
+    writeStore(projectId, gasReservoirId, store)
+    return clone(initialRecord)
+  }
+
+  const record = createRecord(wellName, 1, initialGasRows)
+  record.status = 'data-ready'
+  records.push(record)
+  store[wellName] = records.sort((left, right) => Number(left.index) - Number(right.index))
+  writeStore(projectId, gasReservoirId, store)
+  return clone(record)
+}
+
 // 顶部按钮是新增编号的唯一入口；最新记录仍为空白草稿时直接复用。
 export const createOrReusePvtRecord = (
   projectId,

@@ -283,7 +283,7 @@ export const dataManagementApi = {
       }
     }),
 
-  // 获取气藏内井口天然气性质，首次创建单井 PVT性质1 时按井名取第一条。
+  // 获取气藏内井口天然气性质，项目树初始化时按井名取第一条填充 PVT性质1。
   getGasProperties: (projectId, gasReservoirId, options = {}) =>
     dockerRequest.get(
       `/projects/${projectId}/gasreservoirs/${gasReservoirId}/summary/gasproperty`,
