@@ -266,19 +266,28 @@ const handleCalculate = async () => {
   }
 
   const buildCurveRequest = row => {
-    const projectId = Number(props.projectId)
-    
-    if (!Number.isFinite(projectId) || projectId <= 0) {
-      throw new Error(`项目 ID 无效: ${props.projectId} (转换为 ${projectId})`)
-    }
-    
-    return {
-      projectId,
-      porosityStart: 5,
-      porosityEnd: 40,
-      porosityStep: 2
-    }
+  const projectId = Number(props.projectId)
+  const porosityValue = Number(row.porosity)
+
+  if (!Number.isFinite(projectId) || projectId <= 0) {
+    throw new Error(`项目 ID 无效`)
   }
+  if (!Number.isFinite(porosityValue) || porosityValue <= 0) {
+    throw new Error(`孔隙度值无效`)
+  }
+
+  const range = Math.max(5, porosityValue * 0.2)
+  const start = Math.max(0.1, porosityValue - range)
+  const end = Math.min(50, porosityValue + range)
+  const step = Math.max(0.1, range / 10)
+
+  return {
+    projectId,
+    porosityStart: Number(start.toFixed(2)),
+    porosityEnd: Number(end.toFixed(2)),
+    porosityStep: Number(step.toFixed(2))
+  }
+}
 
   calculating.value = true
   try {
@@ -474,6 +483,7 @@ onBeforeUnmount(() => {
           <div class="rock-analysis-expanded">
             <div class="rock-analysis-panel-heading">
               <span>图表数据</span>
+              <div class="rock-analysis-heading-actions">
               <select v-if="activeCurve === '曲线1' && curveOneSeries.length" v-model="selectedCurveOneSourceRow"
                 class="rock-analysis-series-select" aria-label="选择曲线1图表数据">
                 <option v-for="curve in curveOneSeries" :key="curve.sourceRow" :value="curve.sourceRow">
@@ -491,6 +501,7 @@ onBeforeUnmount(() => {
                   <path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z" />
                 </svg>
               </button>
+              </div>
             </div>
             <div class="rock-analysis-grid" aria-label="岩石分析数据表格"
               :style="{ gridTemplateColumns: analysisGridTemplateColumns }">
@@ -810,6 +821,13 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   color: #111;
+}
+
+.rock-analysis-heading-actions {
+  min-width: 0;
+  display: flex;          
+  align-items: center;     
+  gap: 6px;                
 }
 
 .rock-parameter-panel {
