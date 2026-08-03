@@ -7,19 +7,17 @@ import RockProperties from './RockProperties.vue'
 import NaturalGasImportDialog from './NaturalGasImportDialog.vue'
 import FormationWaterImportDialog from './FormationWaterImportDialog.vue'
 import RockImportDialog from './RockImportDialog.vue'
-import { getPvtRecord, savePvtCalculation } from '@/utils/pvtRecords'
+import { getPvtRecord, savePvtCalculation, savePvtImport } from '@/utils/pvtRecords'
 
 const props = defineProps({
   wellName: { type: String, default: '' },
   projectId: { type: [Number, String], required: true },
   gasReservoirId: { type: [Number, String], required: true },
   pvtIndex: { type: [Number, String], default: 1 },
-  aggregateMode: { type: Boolean, default: false },
-  aggregateRows: { type: Array, default: () => [] },
   initialPropertyTab: { type: String, default: '天然气性质' }
 })
 
-const emit = defineEmits(['record-saved', 'property-tab-change'])
+const emit = defineEmits(['property-tab-change'])
 // 每个性质编号使用独立快照初始化输入与结果，切换旧节点不会读取当前节点的状态。
 const storedRecord = getPvtRecord(
   props.projectId,
@@ -132,8 +130,6 @@ const WATER_RESULT_IMPORT_COLUMNS = [
   '地层水等温压缩系数(MPa⁻¹)',
   '地层水粘度(mPa·s)'
 ]
-
-const aggregateColumns = ['井口名', ...GAS_IMPORT_COLUMNS]
 
 const normalizeHeader = (value) => String(value ?? '')
   .trim()
@@ -305,12 +301,14 @@ const handleGasImport = async ({ file, options, kind }) => {
     if (kind === 'result') {
       const parsedResultRows = parseResultImportRows(rows)
       importedGasResultRows.value = parsedResultRows
+      persistImportedData('gas', 'result', parsedResultRows)
       ElMessage.success(`成功导入 ${parsedResultRows.length} 条天然气结果数据`)
       return
     }
 
     const parsedRows = parseDataImportRows(rows, options)
     importedGasRows.value = parsedRows
+    persistImportedData('gas', 'data', parsedRows)
     ElMessage.success(`成功导入 ${parsedRows.length} 条天然气性质数据`)
   } catch (error) {
     ElMessage.error(error.message || '天然气性质数据导入失败')
@@ -466,20 +464,35 @@ const handleWaterImport = async ({ file, options, kind }) => {
     if (kind === 'result') {
       const parsedRows = parseWaterResultImportRows(rows)
       importedWaterResultRows.value = parsedRows
+      persistImportedData('water', 'result', parsedRows)
       ElMessage.success(`成功导入 ${parsedRows.length} 条地层水结果数据`)
       return
     }
 
     const parsedRows = parseWaterDataImportRows(rows, options)
     importedWaterRows.value = parsedRows
+    persistImportedData('water', 'data', parsedRows)
     ElMessage.success(`成功导入 ${parsedRows.length} 条地层水性质数据`)
   } catch (error) {
     ElMessage.error(error.message || '地层水性质数据导入失败')
   }
 }
 
+const persistImportedData = (kind, importKind, rows) => {
+  const record = savePvtImport({
+    projectId: props.projectId,
+    gasReservoirId: props.gasReservoirId,
+    wellName: props.wellName,
+    currentIndex: props.pvtIndex,
+    kind,
+    importKind,
+    rows
+  })
+  return record
+}
+
 const persistCalculation = (kind, payload) => {
-  // 计算成功后立即写入当前编号；输入变化时存储层返回新编号并保留旧快照。
+  // 参数变化后的计算结果直接覆盖当前编号。
   const result = savePvtCalculation({
     projectId: props.projectId,
     gasReservoirId: props.gasReservoirId,
@@ -498,34 +511,11 @@ const persistCalculation = (kind, payload) => {
     importedWaterRows.value = result.record.waterRows
     importedWaterResultRows.value = result.record.waterResultRows
   }
-  emit('record-saved', { ...result, kind })
 }
 </script>
 
 <template>
   <section class="pvt-properties">
-    <template v-if="aggregateMode">
-      <div class="aggregate-table-wrap">
-        <table class="aggregate-table">
-          <thead>
-            <tr>
-              <th v-for="column in aggregateColumns" :key="column">{{ column }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="row in aggregateRows" :key="row.wellName">
-              <td>{{ row.wellName }}</td>
-              <td v-for="(value, index) in row.values" :key="index">{{ value }}</td>
-            </tr>
-            <tr v-if="!aggregateRows.length">
-              <td :colspan="aggregateColumns.length" class="aggregate-empty">暂无 PVT 性质数据</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </template>
-
-    <template v-else>
     <header class="pvt-toolbar">
       <nav class="property-tabs" aria-label="PVT 性质分类">
         <button v-for="tab in propertyTabs" :key="tab.name" type="button" class="property-tab"
@@ -545,6 +535,7 @@ const persistCalculation = (kind, payload) => {
       :imported-rows="importedGasRows"
       :imported-result-rows="importedGasResultRows"
       :project-id="projectId"
+      :initial-settings="storedRecord?.gasSettings || {}"
       @result-tab-change="handleGasResultTabChange"
       @calculated="persistCalculation('gas', $event)"
     />
@@ -555,6 +546,7 @@ const persistCalculation = (kind, payload) => {
       :gas-rows="importedGasRows"
       :imported-rows="importedWaterRows"
       :imported-result-rows="importedWaterResultRows"
+      :initial-settings="storedRecord?.waterSettings || {}"
       @result-tab-change="activeWaterResultTab = $event"
       @calculated="persistCalculation('water', $event)"
     />
@@ -572,7 +564,6 @@ const persistCalculation = (kind, payload) => {
       :import-kind="activeWaterImportKind"
       @confirm="handleWaterImport"
     />
-    </template>
   </section>
 </template>
 
@@ -599,41 +590,6 @@ const persistCalculation = (kind, payload) => {
   justify-content: space-between;
   padding: 7px 11px 0;
   box-sizing: border-box;
-}
-
-.aggregate-table-wrap {
-  flex: 1;
-  min-height: 0;
-  padding: 0 12px 12px;
-  overflow: auto;
-}
-
-.aggregate-table {
-  width: 100%;
-  border-collapse: collapse;
-  table-layout: fixed;
-
-  th,
-  td {
-    height: 34px;
-    padding: 0 10px;
-    border: 1px solid #d7dce3;
-    text-align: center;
-    word-break: break-word;
-  }
-
-  th {
-    position: sticky;
-    top: 0;
-    z-index: 1;
-    background: #f3f6fa;
-    font-weight: 600;
-  }
-}
-
-.aggregate-empty {
-  height: 90px !important;
-  color: #909399;
 }
 
 .property-tabs {

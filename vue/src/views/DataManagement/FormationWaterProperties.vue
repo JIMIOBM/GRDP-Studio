@@ -9,7 +9,8 @@ const props = defineProps({
   projectId: { type: [Number, String], required: true },
   gasRows: { type: Array, default: () => [] },
   importedRows: { type: Array, default: () => [] },
-  importedResultRows: { type: Array, default: () => [] }
+  importedResultRows: { type: Array, default: () => [] },
+  initialSettings: { type: Object, default: () => ({}) }
 })
 
 const emit = defineEmits(['result-tab-change', 'calculated'])
@@ -96,8 +97,8 @@ const DEFAULT_CALCULATION_INPUT = {
 const activeResultTab = ref('数据列表')
 const activeCurve = ref('曲线1')
 const analysisTableCollapsed = ref(false)
-const volumeFactorMethod = ref('McCain方法')
-const compressibilityMethod = ref('Meehan方法')
+const volumeFactorMethod = ref(props.initialSettings.volumeFactorMethod || 'McCain方法')
+const compressibilityMethod = ref(props.initialSettings.compressibilityMethod || 'Meehan方法')
 const salinity = ref(25000)
 const initialPressure = ref(40)
 const reservoirTemperature = ref(119.85)

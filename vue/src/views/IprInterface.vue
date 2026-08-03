@@ -18,7 +18,7 @@ import PvtPropertiesContent from '@/views/DataManagement/PvtPropertiesContent.vu
 import WellDataTableContent from '@/views/DataManagement/WellDataTableContent.vue'
 import { NODETYPE } from '@/constants/nodeType'
 import { analyticMethodApi, dataManagementApi, dynamicBalanceApi, materialBalanceApi, nodeApi, notifyApi, projectApi, typicalCurveApi, waterInvasionApi } from '@/api/docker'
-import { ensurePvtSourceRecord, getPvtRecord, getPvtRecords } from '@/utils/pvtRecords'
+import { createOrReusePvtRecord, getPvtRecord, getPvtRecords } from '@/utils/pvtRecords'
 
 const PROJECT_ID = 4
 const GAS_RESERVOIR_ID = 3
@@ -1297,6 +1297,7 @@ const getPvtSourceItems = payload => {
 }
 
 const normalizePvtGasType = value => {
+  if (value === null || value === undefined || value === '') return ''
   const index = Number(value)
   if ([0, 1, 2].includes(index)) return ['干气', '湿气', '凝析气'][index]
   return value ?? ''
@@ -1315,50 +1316,22 @@ const refreshPvtNodesForWell = wellName => {
   const dataGroup = well?.children.find(item => item.type === 'data-management')
   const pvtGroup = dataGroup?.children.find(item => item.type === 'well-data-pvt-group')
   if (!pvtGroup) return
-  // 替换子节点数组，确保 Vue 在计算完成的同一轮更新中渲染新增编号。
+  // 替换子节点数组，确保顶部新增编号后左侧目录立即更新。
   pvtGroup.children = [...createPvtPropertyNodes(wellName, well.id)]
   pvtGroup.defaultExpanded = pvtGroup.children.length > 0
 }
 
-// 顶部 PVT 入口只负责汇总显示，并为每口井补齐首条 PVT 记录。
-const loadAllPvtProperties = async () => {
-  const response = await dataManagementApi.getGasProperties(PROJECT_ID, GAS_RESERVOIR_ID)
-  const rows = getPvtSourceItems(response)
-    .filter(item => item?.wellName)
-    .map(item => ({
-      wellName: String(item.wellName),
-      values: toPvtGasRow(item)
-    }))
-
-  rows.forEach(({ wellName, values }) => {
-    ensureWell(wellName, `well-${wellName}`)
-    ensurePvtSourceRecord(PROJECT_ID, GAS_RESERVOIR_ID, wellName, [values])
-    refreshPvtNodesForWell(wellName)
-  })
-  return rows
-}
-
-const handlePvtRecordSaved = ({ record, created, kind }) => {
-  if (!record?.wellName) return
-  if (kind === 'water') lastPvtPropertyTab.value = '地层水性质'
-  refreshPvtNodesForWell(record.wellName)
-  if (!created) return
-
-  const well = getWellGroup()?.children.find(item => item.wellName === record.wellName)
-  const pvtGroup = well?.children
-    .find(item => item.type === 'data-management')?.children
-    .find(item => item.type === 'well-data-pvt-group')
-  const node = pvtGroup?.children.find(item => Number(item.pvtIndex) === Number(record.index))
-  if (node) {
-    // 新编号计算完成后立即选中新节点；节点 ID 改变会重建页面并加载刚保存的曲线。
-    activeNodeId.value = node.id
-    activeNode.value = node
-    currentView.value = 'pvt-properties'
-    currentViewNode.value = {
-      ...node,
-      initialPropertyTab: lastPvtPropertyTab.value
-    }
-  }
+// 首次新增性质1时，只提取接口中当前井口的第一条天然气基础数据。
+const loadFirstPvtGasRow = async wellName => {
+  const response = await dataManagementApi.getGasProperties(
+    PROJECT_ID,
+    GAS_RESERVOIR_ID,
+    { silentError: true }
+  )
+  const source = getPvtSourceItems(response).find(
+    item => String(item?.wellName ?? '') === String(wellName)
+  )
+  return source ? [toPvtGasRow(source)] : []
 }
 
 const handlePvtPropertyTabChange = tabName => {
@@ -1366,6 +1339,8 @@ const handlePvtPropertyTabChange = tabName => {
 }
 
 const getPvtInitialPropertyTab = node => {
+  // 性质1来源于井口天然气基础数据，点击时固定从天然气性质页签打开。
+  if (Number(node?.pvtIndex) === 1) return '天然气性质'
   const record = getPvtRecord(
     PROJECT_ID,
     GAS_RESERVOIR_ID,
@@ -3502,16 +3477,48 @@ const handleCommand = async ({ group, name }) => { // 接收顶部菜单栏的�
   }
 
   if (name === 'PVT性质') {
+    const activeWellName = activeNode.value?.wellName || (
+      activeNode.value?.type === NODETYPE.NodeType_Well ? activeNode.value.label : ''
+    )
+    if (!activeWellName) {
+      ElMessage.warning('请先选择一口井')
+      return
+    }
+
     try {
-      const aggregateRows = await loadAllPvtProperties()
+      const existingRecords = getPvtRecords(PROJECT_ID, GAS_RESERVOIR_ID, activeWellName)
+      const initialGasRows = existingRecords.length
+        ? []
+        : await loadFirstPvtGasRow(activeWellName)
+      const { record } = createOrReusePvtRecord(
+        PROJECT_ID,
+        GAS_RESERVOIR_ID,
+        activeWellName,
+        initialGasRows
+      )
+
+      refreshPvtNodesForWell(activeWellName)
+      const well = getWellGroup()?.children.find(item => item.wellName === activeWellName)
+      const pvtGroup = well?.children
+        .find(item => item.type === 'data-management')?.children
+        .find(item => item.type === 'well-data-pvt-group')
+      const node = pvtGroup?.children.find(
+        item => Number(item.pvtIndex) === Number(record.index)
+      )
+      if (!node) throw new Error('PVT性质节点创建失败')
+
+      // 创建或复用后立即进入该编号的数据列表；实例键确保复用草稿时也重置页面页签。
+      lastPvtPropertyTab.value = '天然气性质'
+      activeNodeId.value = node.id
+      activeNode.value = node
       currentView.value = 'pvt-properties'
       currentViewNode.value = {
-        id: 'all-pvt-properties',
-        aggregate: true,
-        aggregateRows
+        ...node,
+        initialPropertyTab: '天然气性质',
+        viewInstanceKey: `${node.id}-${Date.now()}`
       }
     } catch (error) {
-      ElMessage.error(error.response?.data?.message || error.message || 'PVT性质数据加载失败')
+      ElMessage.error(error.response?.data?.message || error.message || 'PVT性质节点创建失败')
     }
     return
   }
@@ -3612,15 +3619,12 @@ onBeforeUnmount(() => {
       <main class="content-area">
         <PvtPropertiesContent
           v-if="currentView === 'pvt-properties'"
-          :key="currentViewNode?.id || currentViewNode?.wellName"
+          :key="currentViewNode?.viewInstanceKey || currentViewNode?.id || currentViewNode?.wellName"
           :well-name="currentViewNode?.wellName"
           :project-id="PROJECT_ID"
           :gas-reservoir-id="GAS_RESERVOIR_ID"
           :pvt-index="currentViewNode?.pvtIndex"
-          :aggregate-rows="currentViewNode?.aggregateRows || []"
-          :aggregate-mode="Boolean(currentViewNode?.aggregate)"
           :initial-property-tab="currentViewNode?.initialPropertyTab || lastPvtPropertyTab"
-          @record-saved="handlePvtRecordSaved"
           @property-tab-change="handlePvtPropertyTabChange"
         />
         <WellDataTableContent v-if="currentView === 'well-data-table'"

@@ -9,7 +9,8 @@ const props = defineProps({
   importedRows: { type: Array, default: () => [] },
   // importedResultRows 来自“结果分析图”导入，用于直接回填四条曲线，不再请求后端计算。
   importedResultRows: { type: Array, default: () => [] },
-  projectId: { type: [Number, String], required: true }
+  projectId: { type: [Number, String], required: true },
+  initialSettings: { type: Object, default: () => ({}) }
 })
 
 const emit = defineEmits(['result-tab-change', 'calculated'])
@@ -22,10 +23,16 @@ const DEFAULT_TEMPERATURE = '39.35'
 const activeResultTab = ref('数据列表')
 const activeCurve = ref('曲线1')
 const analysisTableCollapsed = ref(false)
-const gasCorrectionMethod = ref(DEFAULT_GAS_CORRECTION_METHOD)
-const deviationFactorMethod = ref(DEFAULT_DEVIATION_FACTOR_METHOD)
-const viscosityMethod = ref(DEFAULT_VISCOSITY_METHOD)
-const reservoirTemperature = ref(DEFAULT_TEMPERATURE)
+const gasCorrectionMethod = ref(
+  props.initialSettings.gasCorrectionMethod || DEFAULT_GAS_CORRECTION_METHOD
+)
+const deviationFactorMethod = ref(
+  props.initialSettings.deviationFactorMethod || DEFAULT_DEVIATION_FACTOR_METHOD
+)
+const viscosityMethod = ref(props.initialSettings.viscosityMethod || DEFAULT_VISCOSITY_METHOD)
+const reservoirTemperature = ref(
+  props.initialSettings.reservoirTemperature ?? DEFAULT_TEMPERATURE
+)
 const calculating = ref(false)
 // 每个数组代表一种图表，数组元素代表不同来源行的一组 series。
 // 目前业务只允许一条基础数据，保留 series 结构可让图表与表格切换逻辑保持统一。
@@ -735,7 +742,8 @@ watch(
     activeCurve.value = '曲线1'
     scheduleRenderChart()
   },
-  { deep: true }
+  // 首次打开历史编号时直接恢复已保存结果，不重新调用计算接口。
+  { immediate: true, deep: true }
 )
 
 watch(activeResultTab, (value) => {

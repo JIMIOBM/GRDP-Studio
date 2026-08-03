@@ -32,6 +32,7 @@ const createRecord = (wellName, index, gasRows = []) => ({
   gasSettings: {},
   waterSettings: {},
   lastCalculatedKind: '',
+  status: gasRows.length ? 'data-ready' : 'draft',
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString()
 })
@@ -46,34 +47,75 @@ export const getPvtRecord = (projectId, gasReservoirId, wellName, index) =>
   getPvtRecords(projectId, gasReservoirId, wellName)
     .find(record => Number(record.index) === Number(index)) || null
 
-export const ensurePvtSourceRecord = (
+// 顶部按钮是新增编号的唯一入口；最新记录仍为空白草稿时直接复用。
+export const createOrReusePvtRecord = (
   projectId,
   gasReservoirId,
   wellName,
-  gasRows
+  initialGasRows = []
 ) => {
   const store = readStore(projectId, gasReservoirId)
   const records = Array.isArray(store[wellName]) ? store[wellName] : []
-  let firstRecord = records.find(record => Number(record.index) === 1)
+  const sortedRecords = [...records].sort(
+    (left, right) => Number(left.index) - Number(right.index)
+  )
+  const latestRecord = sortedRecords[sortedRecords.length - 1]
 
-  if (!firstRecord) {
-    // 汇总接口首次返回该井时只创建 PVT性质1，不覆盖已有计算记录。
-    firstRecord = createRecord(wellName, 1, gasRows)
-    records.push(firstRecord)
-  } else if (!firstRecord.gasResultRows?.length && !firstRecord.waterResultRows?.length) {
-    firstRecord.gasRows = clone(gasRows)
-    firstRecord.updatedAt = new Date().toISOString()
+  if (latestRecord?.status === 'draft') {
+    return { record: clone(latestRecord), created: false, reused: true }
   }
 
-  store[wellName] = records
+  const nextIndex = sortedRecords.reduce(
+    (maximum, record) => Math.max(maximum, Number(record.index) || 0),
+    0
+  ) + 1
+  const record = createRecord(wellName, nextIndex, initialGasRows)
+  records.push(record)
+  store[wellName] = records.sort((left, right) => Number(left.index) - Number(right.index))
   writeStore(projectId, gasReservoirId, store)
-  return clone(firstRecord)
+  return { record: clone(record), created: true, reused: false }
 }
 
-const sameInput = (left, right) =>
-  JSON.stringify(left || []) === JSON.stringify(right || [])
+// 导入成功后立即更新指定编号，保证未计算时刷新页面也能恢复导入内容。
+export const savePvtImport = ({
+  projectId,
+  gasReservoirId,
+  wellName,
+  currentIndex,
+  kind,
+  importKind,
+  rows
+}) => {
+  const store = readStore(projectId, gasReservoirId)
+  const records = Array.isArray(store[wellName]) ? store[wellName] : []
+  let record = records.find(item => Number(item.index) === Number(currentIndex))
 
-// 同一输入重复计算覆盖当前编号；已有结果且输入改变时创建下一个编号。
+  if (!record) {
+    record = createRecord(wellName, Number(currentIndex) || 1)
+    records.push(record)
+  }
+
+  const inputKey = kind === 'water' ? 'waterRows' : 'gasRows'
+  const resultKey = kind === 'water' ? 'waterResultRows' : 'gasResultRows'
+  if (importKind === 'result') {
+    record[resultKey] = clone(rows)
+    record.lastCalculatedKind = kind
+    record.status = 'calculated'
+  } else {
+    record[inputKey] = clone(rows)
+    // 基础数据变化后清空同类旧结果，避免展示与输入不匹配的曲线。
+    record[resultKey] = []
+    record.lastCalculatedKind = kind
+    record.status = 'data-ready'
+  }
+
+  record.updatedAt = new Date().toISOString()
+  store[wellName] = records.sort((left, right) => Number(left.index) - Number(right.index))
+  writeStore(projectId, gasReservoirId, store)
+  return clone(record)
+}
+
+// 计算只覆盖当前编号，参数变化不再触发新节点。
 export const savePvtCalculation = ({
   projectId,
   gasReservoirId,
@@ -96,34 +138,15 @@ export const savePvtCalculation = ({
   const inputKey = kind === 'water' ? 'waterRows' : 'gasRows'
   const resultKey = kind === 'water' ? 'waterResultRows' : 'gasResultRows'
   const settingsKey = kind === 'water' ? 'waterSettings' : 'gasSettings'
-  const alreadyCalculated = Boolean(
-    record.gasResultRows?.length || record.waterResultRows?.length
-  )
-  const inputChanged = !sameInput(record[inputKey], inputRows)
-  let created = false
-
-  if (alreadyCalculated && inputChanged) {
-    // 新记录复制另一类基础输入，但不复制旧曲线，避免新旧结果混用。
-    const nextIndex = records.reduce(
-      (maximum, item) => Math.max(maximum, Number(item.index) || 0),
-      0
-    ) + 1
-    record = createRecord(wellName, nextIndex, record.gasRows || [])
-    record.waterRows = clone(records.find(
-      item => Number(item.index) === Number(currentIndex)
-    )?.waterRows || defaultWaterRows())
-    records.push(record)
-    created = true
-  }
 
   record[inputKey] = clone(inputRows)
   record[resultKey] = clone(resultRows)
   record[settingsKey] = clone(settings)
   record.lastCalculatedKind = kind
+  record.status = 'calculated'
   record.updatedAt = new Date().toISOString()
-  // 先完成持久化再通知树更新，保证新页面挂载时可以立即读取完整结果。
   store[wellName] = records.sort((left, right) => Number(left.index) - Number(right.index))
   writeStore(projectId, gasReservoirId, store)
 
-  return { record: clone(record), created }
+  return { record: clone(record), created: false }
 }

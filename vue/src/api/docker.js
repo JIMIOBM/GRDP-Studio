@@ -283,7 +283,7 @@ export const dataManagementApi = {
       }
     }),
 
-  // 获取全部井口的天然气 PVT 基础性质，用于顶部汇总和首条编号初始化。
+  // 获取气藏内井口天然气性质，首次创建单井 PVT性质1 时按井名取第一条。
   getGasProperties: (projectId, gasReservoirId, options = {}) =>
     dockerRequest.get(
       `/projects/${projectId}/gasreservoirs/${gasReservoirId}/summary/gasproperty`,
