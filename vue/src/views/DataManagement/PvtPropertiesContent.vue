@@ -18,7 +18,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['property-tab-change'])
-// 每个性质编号使用独立快照初始化输入与结果，切换旧节点不会读取当前节点的状态。
+// 每个性质编号使用独立快照初始化输入与结果，切换旧节点不会读取当前节点的状态
 const storedRecord = getPvtRecord(
   props.projectId,
   props.gasReservoirId,
@@ -93,7 +93,6 @@ const handleImport = () => {
   ElMessage.info(`${activePropertyTab.value}导入功能暂未接入`)
 }
 
-// “数据列表”模板只描述气体类型与组成，不包含计算结果。
 const GAS_IMPORT_COLUMNS = [
   '天然气类型',
   '天然气比重(dless)',
@@ -102,7 +101,6 @@ const GAS_IMPORT_COLUMNS = [
   'N₂摩尔百分含量(%)'
 ]
 
-// “结果分析图”模板包含压力、温度及曲线 1～4 的全部 Y 轴字段。
 const GAS_RESULT_IMPORT_COLUMNS = [
   '压力(MPa)',
   '温度(℃)',
@@ -384,7 +382,7 @@ const firstSheet = workbook.Sheets[workbook.SheetNames[0]]
 }
 
 const parseWaterDataImportRows = (rows, options) => {
-  assertStrictHeaders(rows, WATER_IMPORT_COLUMNS, '地层水数据模板')
+  assertStrictHeaders(rows, GAS_IMPORT_COLUMNS, '地层水数据模板')
   const dataRows = rows.slice(1).filter(row =>
     row.some(value => !isEmptyCell(value))
   )
@@ -394,19 +392,10 @@ const parseWaterDataImportRows = (rows, options) => {
   }
 
   return dataRows.map((row, rowIndex) =>
-    WATER_IMPORT_COLUMNS.map((column, columnIndex) => {
+      GAS_IMPORT_COLUMNS.map((column, columnIndex) => {
       let value = row[columnIndex] ?? ''
       if (options.fillEmptyWithZero && isEmptyCell(value)) value = 0
-      if (isEmptyCell(value) || !Number.isFinite(Number(value))) {
-        throw new Error(`地层水数据模板第 ${rowIndex + 2} 行：${column}必须填写数字`)
-      }
       const numericValue = Number(value)
-      if (columnIndex === 0 && numericValue < 0) {
-        throw new Error(`地层水数据模板第 ${rowIndex + 2} 行：地层水矿化度不能小于 0`)
-      }
-      if (columnIndex === 1 && numericValue <= 0) {
-        throw new Error(`地层水数据模板第 ${rowIndex + 2} 行：原始地层压力必须大于 0`)
-      }
       return numericValue
     })
   )
@@ -457,7 +446,7 @@ const handleWaterImport = async ({ file, options, kind }) => {
     })
     const expectedColumns = kind === 'result'
       ? WATER_RESULT_IMPORT_COLUMNS
-      : WATER_IMPORT_COLUMNS
+      : GAS_IMPORT_COLUMNS
     const rows = cleanImportRows(sourceRows, options, expectedColumns)
     if (!rows.length) throw new Error('文件中没有可导入的数据')
 
@@ -492,7 +481,7 @@ const persistImportedData = (kind, importKind, rows) => {
 }
 
 const persistCalculation = (kind, payload) => {
-  // 参数变化后的计算结果直接覆盖当前编号。
+  // 参数变化后的计算结果直接覆盖当前编号
   const result = savePvtCalculation({
     projectId: props.projectId,
     gasReservoirId: props.gasReservoirId,
