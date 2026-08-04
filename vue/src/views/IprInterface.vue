@@ -20,8 +20,8 @@ import { NODETYPE } from '@/constants/nodeType'
 import { analyticMethodApi, dataManagementApi, dynamicBalanceApi, materialBalanceApi, nodeApi, notifyApi, projectApi, typicalCurveApi, waterInvasionApi } from '@/api/docker'
 import { createOrReusePvtRecord, ensureInitialPvtRecord, getPvtRecord, getPvtRecords } from '@/utils/pvtRecords'
 
-const PROJECT_ID = 4
-const GAS_RESERVOIR_ID = 3
+const PROJECT_ID = 1
+const GAS_RESERVOIR_ID = 1
 const FLOW_BALANCE_NODE_TYPE = NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure
 
 const WELL_GROUPS = [
@@ -37,6 +37,7 @@ const WELL_DATA_NODES = [
   { type: 'well-data-deliverability', label: '产能测试', dataType: 'deliverability' },
   { type: 'well-data-wellcompletion', label: '完井数据', dataType: 'wellcompletion' },
   { type: 'well-data-otherdata', label: '其他数据', dataType: 'otherdata' },
+  { type: 'well-data-productiondata', label: '注采数据', dataType: 'productiondata' },
   {
     type: 'well-data-static-pressure',
     label: '静压数据',
@@ -3484,7 +3485,7 @@ const handleCommand = async ({ group, name }) => { // 接收顶部菜单栏的�
     const activeWellName =
       activeNode.value?.wellName ||
       (activeNode.value?.type === NODETYPE.NodeType_Well ? activeNode.value.label : '')
-    const supportsProjectScope = ['deliverability', 'staticPressure', 'wellcompletion', 'otherdata'].includes(dataType)
+    const supportsProjectScope = ['deliverability', 'staticPressure', 'wellcompletion', 'otherdata', 'productiondata'].includes(dataType)
 
     if (!supportsProjectScope && !activeWellName) {
       ElMessage.warning('请先在左侧选择一口井')

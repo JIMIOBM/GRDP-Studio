@@ -347,6 +347,100 @@ const DATA_CONFIG = {
   },
   productiondata: {
     title: '注采数据',
+    schema: 'core_production_data',
+    importFields: [
+      {
+        key: 'wellName',
+        name: '井名',
+        coreKey: 'well_name',
+        aliases: ['井名', 'wellName', 'well_name']
+      },
+      {
+        key: 'date',
+        name: '日期',
+        coreKey: 'date',
+        aliases: ['日期', 'date'],
+        date: true
+      },
+      {
+        key: 'wellHeadTubingPressure',
+        name: '井口油压',
+        coreKey: 'well_head_tubing_pressure',
+        aliases: ['井口油压', 'wellHeadTubingPressure', 'well_head_tubing_pressure']
+      },
+      {
+        key: 'wellHeadCasingPressure',
+        name: '井口套压',
+        coreKey: 'well_head_casing_pressure',
+        aliases: ['井口套压', 'wellHeadCasingPressure', 'well_head_casing_pressure']
+      },
+      {
+        key: 'wellHeadTubingTemperature',
+        name: '井口油温',
+        coreKey: 'well_head_tubing_temperature',
+        aliases: ['井口油温', 'wellHeadTubingTemperature', 'well_head_tubing_temperature']
+      },
+      {
+        key: 'wellHeadCasingTemperature',
+        name: '井口套温',
+        coreKey: 'well_head_casing_temperature',
+        aliases: ['井口套温', 'wellHeadCasingTemperature', 'well_head_casing_temperature']
+      },
+      {
+        key: 'dailyGasProduction',
+        name: '气产量',
+        coreKey: 'daily_gas_production',
+        aliases: ['气产量', 'dailyGasProduction', 'daily_gas_production']
+      },
+      {
+        key: 'dailyWaterProduction',
+        name: '水产量',
+        coreKey: 'daily_water_production',
+        aliases: ['水产量', 'dailyWaterProduction', 'daily_water_production']
+      },
+      {
+        key: 'measuredBottomHolePressure',
+        name: '井底压力（实测）',
+        coreKey: 'measured_bottom_hole_pressure',
+        aliases: ['井底压力（实测）', 'measuredBottomHolePressure', 'measured_bottom_hole_pressure'],
+        optional: true
+      },
+      {
+        key: 'cumulativeGasProduction',
+        name: '累产气量',
+        coreKey: 'cumulative_gas_production',
+        aliases: ['累产气量', 'cumulativeGasProduction', 'cumulative_gas_production'],
+        optional: true
+      },
+      {
+        key: 'cumulativeWaterProduction',
+        name: '累产水量',
+        coreKey: 'cumulative_water_production',
+        aliases: ['累产水量', 'cumulativeWaterProduction', 'cumulative_water_production'],
+        optional: true
+      },
+      {
+        key: 'waterGasRatio',
+        name: '水气比',
+        coreKey: 'water_gas_ratio',
+        aliases: ['水气比', 'waterGasRatio', 'water_gas_ratio'],
+        optional: true
+      },
+      {
+        key: 'liquidGasRatio',
+        name: '液气比',
+        coreKey: 'liquid_gas_ratio',
+        aliases: ['液气比', 'liquidGasRatio', 'liquid_gas_ratio'],
+        optional: true
+      },
+      {
+        key: 'calculatedBottomHolePressure',
+        name: '井底压力（计算）',
+        coreKey: 'calculated_bottom_hole_pressure',
+        aliases: ['井底压力（计算）', 'calculatedBottomHolePressure', 'calculated_bottom_hole_pressure'],
+        optional: true
+      }
+    ],
     keys: [
       'date',
       'wellHeadTubingPressure',
@@ -478,6 +572,7 @@ const useDarkImportButton = computed(() =>
   effectiveDataType.value === 'deliverability' ||
   effectiveDataType.value === 'wellcompletion' ||
   effectiveDataType.value === 'otherdata' ||
+  effectiveDataType.value === 'productiondata' ||
   isStaticPressureView.value
 )
 const tabTitle = computed(() => `${props.wellName} ${config.value.title}`.trim())
