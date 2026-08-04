@@ -4,6 +4,7 @@ import com.grdp.studio.common.ApiResponse;
 import com.grdp.studio.rockpvt.dto.RockCurveOneResponse;
 import com.grdp.studio.rockpvt.dto.RockCurveRequest;
 import com.grdp.studio.rockpvt.dto.RockCurveTwoResponse;
+import com.grdp.studio.rockpvt.dto.RockSingleRequest;
 import com.grdp.studio.rockpvt.service.RockPvtService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -40,5 +41,28 @@ public class RockPvtController {
             @RequestHeader(value = "Process-Env", required = false) String processEnv
     ) {
         return ApiResponse.success(rockPvtService.calculateCurveTwo(request, token, cookie, processEnv));
+    }
+
+    @PostMapping("/calculate-one")
+    public ApiResponse<?> calculateOne(
+
+            @Valid @RequestBody RockSingleRequest request,
+
+            @RequestHeader(value = "token", required = false) String token,
+
+            @RequestHeader(value = "Cookie", required = false) String cookie,
+
+            @RequestHeader(value = "Process-Env", required = false) String processEnv
+
+    ){
+
+        return ApiResponse.success(
+                rockPvtService.calculateSingle(
+                        request,
+                        token,
+                        cookie,
+                        processEnv
+                )
+        );
     }
 }

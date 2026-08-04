@@ -91,7 +91,7 @@ const interpolateDataPoints = (items) => {
   })).sort((a, b) => a.x - b.x)
 
   const interpolatedPoints = []
-  const step = 0.5
+  const step = 1
 
   for (let i = 0; i < rawPoints.length - 1; i++) {
     const start = rawPoints[i]
@@ -334,10 +334,42 @@ const handleCalculate = async () => {
 
   calculating.value = true
   try {
-    const [curveOneResponse, curveTwoResponse] = await Promise.all([
-      rockPvtApi.calculateCurveOne(curveRequest),
-      rockPvtApi.calculateCurveTwo(curveRequest)
-    ])
+   const [
+  curveOneResponse,
+  curveTwoResponse,
+  pointOneResponse,
+  pointTwoResponse
+] = await Promise.all([
+
+  // 曲线
+  rockPvtApi.calculateCurveOne(curveRequest),
+
+  rockPvtApi.calculateCurveTwo(curveRequest),
+
+
+  // 单点计算
+  rockPvtApi.calculateSingle({
+
+    projectId,
+
+    porosity: porosityValue,
+
+    rockType: 0
+
+  }),
+
+
+  rockPvtApi.calculateSingle({
+
+    projectId,
+
+    porosity: porosityValue,
+
+    rockType: 1
+
+  })
+
+])
 
     const curveOneResult = unwrapResponse(curveOneResponse)
     const curveOneItems = Array.isArray(curveOneResult?.items) ? curveOneResult.items : []
@@ -358,52 +390,45 @@ const handleCalculate = async () => {
       items: curveTwoItems
     }]
 
-    const interpolateValue = (items, targetPorosity) => {
+    // const interpolateValue = (items, targetPorosity) => {
 
-      const points = items
-        .map(item => ({
-          x: Number(item.porosity),
-          y: Number(item.compressibilityFactor)
-        }))
-        .sort((a, b) => a.x - b.x)
-
-
-      for (let i = 0; i < points.length - 1; i++) {
-
-        const p1 = points[i]
-        const p2 = points[i + 1]
+    //   const points = items
+    //     .map(item => ({
+    //       x: Number(item.porosity),
+    //       y: Number(item.compressibilityFactor)
+    //     }))
+    //     .sort((a, b) => a.x - b.x)
 
 
-        if (targetPorosity >= p1.x && targetPorosity <= p2.x) {
+    //   for (let i = 0; i < points.length - 1; i++) {
 
-          const ratio =
-            (targetPorosity - p1.x) / (p2.x - p1.x)
-
-
-          return p1.y + ratio * (p2.y - p1.y)
-        }
-      }
-
-      return null
-    }
-
-    const matchedItem1 = interpolateValue(curveOneItems, porosityValue)
-    const matchedItem2 = interpolateValue(curveTwoItems, porosityValue)
-
-    console.log('输入孔隙度:', porosityValue)
-
-console.log(
-  '原始曲线数据:',
-  curveOneItems
-)
-
-console.log(
-  '插值结果:',
-  matchedItem1
-)
+    //     const p1 = points[i]
+    //     const p2 = points[i + 1]
 
 
+    //     if (targetPorosity >= p1.x && targetPorosity <= p2.x) {
 
+    //       const ratio =
+    //         (targetPorosity - p1.x) / (p2.x - p1.x)
+
+
+    //       return p1.y + ratio * (p2.y - p1.y)
+    //     }
+    //   }
+
+    //   return null
+    // }
+
+    const pointOneResult = unwrapResponse(pointOneResponse)
+const pointTwoResult = unwrapResponse(pointTwoResponse)
+
+
+const matchedItem1 =
+    Number(pointOneResult.compressibilityFactor)
+
+
+const matchedItem2 =
+    Number(pointTwoResult.compressibilityFactor)
     outputData.value = {
       porosity: porosityValue,
       cementedCompressibility: matchedItem1,

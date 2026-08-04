@@ -1,6 +1,7 @@
 package com.grdp.studio.rockpvt.service;
 
 import com.grdp.studio.rockpvt.dto.RockCurveRequest;
+import com.grdp.studio.rockpvt.dto.RockSingleRequest;
 import jakarta.validation.Valid;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
@@ -123,6 +124,88 @@ public class RockPvtService {
         }
 
         return new RockCurveTwoResponse(toolboxId, List.copyOf(points));
+    }
+
+    public Map<String, Object> calculateSingle(
+            RockSingleRequest request,
+            String token,
+            String cookie,
+            String processEnv
+    ) {
+
+        Map<String, String> headers = forwardedHeaders(
+                token,
+                cookie,
+                processEnv,
+                request.projectId()
+        );
+
+
+        String algorithm;
+
+        if (request.rockType() == 0) {
+
+            algorithm = CEMENTED_SANDSTONE_ALGORITHM;
+
+        } else {
+
+            algorithm = CARBONATE_ALGORITHM;
+
+        }
+
+
+        // 创建工具箱
+        long toolboxId = createToolbox(
+                algorithm,
+                request.projectId(),
+                headers
+        );
+
+
+        Map<String, Object> input;
+
+
+        if (request.rockType() == 0) {
+
+            input = Map.of(
+                    "rockType",
+                    0,
+                    "porosity",
+                    request.porosity()
+            );
+
+        } else {
+
+            input = Map.of(
+                    "porosity",
+                    request.porosity()
+            );
+
+        }
+
+
+
+        // 调用原平台计算一次
+        JsonNode result =
+                calculateAndGetResult(
+                        toolboxId,
+                        input,
+                        headers
+                );
+
+
+        double compressibilityFactor =
+                extractCompressibility(result);
+
+
+
+        return Map.of(
+                "porosity",
+                request.porosity(),
+
+                "compressibilityFactor",
+                compressibilityFactor
+        );
     }
 
     // ========== 三步法核心 ==========
@@ -253,4 +336,6 @@ public class RockPvtService {
 
         return headers;
     }
+
+
     }

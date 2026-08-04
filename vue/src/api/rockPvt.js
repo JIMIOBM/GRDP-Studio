@@ -10,5 +10,10 @@ export const rockPvtApi = {
     request.post('/pvt/rock/curve-two', data, {
       timeout: 600000,
       headers: { 'Process-Env': 'prod' }
+    }),
+  calculateSingle: (data) =>
+    request.post('/pvt/rock/calculate-one', data, {
+      timeout: 600000,
+      headers: { 'Process-Env': 'prod' }
     })
 }
