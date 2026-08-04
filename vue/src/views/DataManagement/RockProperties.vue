@@ -91,7 +91,7 @@ const interpolateDataPoints = (items) => {
   })).sort((a, b) => a.x - b.x)
 
   const interpolatedPoints = []
-  const step = 0.1
+  const step = 0.5
 
   for (let i = 0; i < rawPoints.length - 1; i++) {
     const start = rawPoints[i]
@@ -323,7 +323,7 @@ const handleCalculate = async () => {
 
   const start = 5
   const end = 50
-  const step = 0.1
+  const step = 0.5
 
   const curveRequest = {
     projectId,
