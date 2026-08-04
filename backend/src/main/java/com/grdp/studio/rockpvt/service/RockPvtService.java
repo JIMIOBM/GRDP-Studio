@@ -10,7 +10,6 @@ import com.grdp.studio.rockpvt.dto.RockCurveOnePoint;
 import com.grdp.studio.rockpvt.dto.RockCurveOneResponse;
 import com.grdp.studio.rockpvt.dto.RockCurveTwoPoint;
 import com.grdp.studio.rockpvt.dto.RockCurveTwoResponse;
-import com.grdp.studio.rockpvt.dto.RockCurveRequest;
 import com.grdp.studio.integration.OriginalPlatformClient;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Service;

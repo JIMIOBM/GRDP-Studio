@@ -6,8 +6,7 @@ import FormationWaterProperties from './FormationWaterProperties.vue'
 import RockProperties from './RockProperties.vue'
 import NaturalGasImportDialog from './NaturalGasImportDialog.vue'
 import FormationWaterImportDialog from './FormationWaterImportDialog.vue'
-import RockImportDialog from './RockImportDialog.vue'
-import { getPvtRecord, savePvtCalculation, savePvtImport } from '@/utils/pvtRecords'
+import { getPvtRecord, savePvtCalculation } from '@/utils/pvtRecords'
 
 const props = defineProps({
   wellName: { type: String, default: '' },
@@ -494,11 +493,11 @@ const persistCalculation = (kind, payload) => {
   })
 
   if (kind === 'gas') {
-    importedGasRows.value = result.record.gasRows
-    importedGasResultRows.value = result.record.gasResultRows
+    importedGasRows.value = result?.gasRows || []
+    importedGasResultRows.value = result?.gasResultRows || []
   } else {
-    importedWaterRows.value = result.record.waterRows
-    importedWaterResultRows.value = result.record.waterResultRows
+    importedWaterRows.value = result?.waterRows || [[25000, 40, 119.85]]
+    importedWaterResultRows.value = result?.waterResultRows || []
   }
 }
 </script>
