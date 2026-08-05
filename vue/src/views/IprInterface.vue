@@ -18,10 +18,10 @@ import PvtPropertiesContent from '@/views/DataManagement/PvtPropertiesContent.vu
 import WellDataTableContent from '@/views/DataManagement/WellDataTableContent.vue'
 import { NODETYPE } from '@/constants/nodeType'
 import { analyticMethodApi, dataManagementApi, dynamicBalanceApi, materialBalanceApi, nodeApi, notifyApi, projectApi, typicalCurveApi, waterInvasionApi } from '@/api/docker'
-import { createOrReusePvtRecord, ensureInitialPvtRecord, getPvtRecord, getPvtRecords } from '@/utils/pvtRecords'
+import { createOrReusePvtRecord, ensureInitialPvtRecord, getPvtRecords } from '@/utils/pvtRecords'
 
-const PROJECT_ID = 1
-const GAS_RESERVOIR_ID = 1
+const PROJECT_ID = 4
+const GAS_RESERVOIR_ID = 3
 const FLOW_BALANCE_NODE_TYPE = NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure
 
 const WELL_GROUPS = [
@@ -109,7 +109,7 @@ const activeNodeId = ref('')  // 当前左侧树选中的节点 ID. 用于高亮
 const activeNode = ref(null)  // 当前选中的完整节点对象
 const currentView = ref(null)  // currentView.value = 'water-invasion'，即确定右侧部分区域所显示的界面
 const currentViewNode = ref(null)  // 传给右侧内容组件的节点对象
-// 切换不同 PVT 编号时保留当前性质页签，地层水计算生成新节点后仍停留在地层水页面。
+// 记录当前性质页签，仅用于组件内部切换；点击编号节点时始终重置为天然气性质。
 const lastPvtPropertyTab = ref('天然气性质')
 const wellKeyword = ref('')
 const sideTreeCollapsed = ref(false)
@@ -1361,21 +1361,7 @@ const handlePvtPropertyTabChange = tabName => {
   lastPvtPropertyTab.value = tabName
 }
 
-const getPvtInitialPropertyTab = node => {
-  // 性质1来源于井口天然气基础数据，点击时固定从天然气性质页签打开。
-  if (Number(node?.pvtIndex) === 1) return '天然气性质'
-  const record = getPvtRecord(
-    PROJECT_ID,
-    GAS_RESERVOIR_ID,
-    node?.wellName,
-    node?.pvtIndex
-  )
-  if (record?.lastCalculatedKind === 'water') return '地层水性质'
-  if (record?.lastCalculatedKind === 'gas') return '天然气性质'
-  // 兼容修复前已经保存、尚未记录性质类型的地层水结果。
-  if (record?.waterResultRows?.length) return '地层水性质'
-  return lastPvtPropertyTab.value
-}
+const getPvtInitialPropertyTab = () => '天然气性质'
 
 const refreshWaterInvasionNodes = async (wellName = '') => {  //加载已有水侵分析节点
   try {
@@ -3397,7 +3383,9 @@ const handleSelect = async (node) => { // 点击左侧树节点
     currentView.value = 'pvt-properties'
     currentViewNode.value = {
       ...node,
-      initialPropertyTab: getPvtInitialPropertyTab(node)
+      initialPropertyTab: getPvtInitialPropertyTab(),
+      // 重复点击同一编号时也重新挂载组件，确保页签回到天然气性质。
+      viewInstanceKey: `${node.id}-${Date.now()}`
     }
     return
   }

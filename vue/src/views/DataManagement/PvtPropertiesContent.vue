@@ -6,7 +6,7 @@ import FormationWaterProperties from './FormationWaterProperties.vue'
 import RockProperties from './RockProperties.vue'
 import NaturalGasImportDialog from './NaturalGasImportDialog.vue'
 import FormationWaterImportDialog from './FormationWaterImportDialog.vue'
-import { getPvtRecord, savePvtCalculation } from '@/utils/pvtRecords'
+import { getPvtRecord, savePvtCalculation, savePvtImport } from '@/utils/pvtRecords'
 
 const props = defineProps({
   wellName: { type: String, default: '' },
@@ -65,9 +65,6 @@ const handlePropertyTabChange = tabName => {
 }
 const importedWaterRows = ref(createInitialWaterRows())
 const importedWaterResultRows = ref(storedRecord?.waterResultRows || [])
-const activeGasImportKind = computed(
-  () => activeGasResultTab.value === '结果分析图' ? 'result' : 'data'
-)
 const activeWaterImportKind = computed(
   () => activeWaterResultTab.value === '结果分析图' ? 'result' : 'data'
 )
@@ -109,12 +106,6 @@ const GAS_RESULT_IMPORT_COLUMNS = [
   '天然气密度(kg/m³)',
   '天然气压缩系数(MPa⁻¹)',
   '天然气粘度(mPa·s)'
-]
-
-const WATER_IMPORT_COLUMNS = [
-  '地层水矿化度(mg/L)',
-  '原始地层压力(MPa)',
-  '地层温度(℃)'
 ]
 
 const WATER_RESULT_IMPORT_COLUMNS = [
@@ -380,26 +371,6 @@ const firstSheet = workbook.Sheets[workbook.SheetNames[0]]
   }
 }
 
-const parseWaterDataImportRows = (rows, options) => {
-  assertStrictHeaders(rows, GAS_IMPORT_COLUMNS, '地层水数据模板')
-  const dataRows = rows.slice(1).filter(row =>
-    row.some(value => !isEmptyCell(value))
-  )
-  if (!dataRows.length) throw new Error('地层水数据模板中没有可导入的数据行')
-  if (dataRows.length > 1) {
-    throw new Error('每次 PVT 性质只能导入 1 条地层水基础数据，请删除多余数据行')
-  }
-
-  return dataRows.map((row, rowIndex) =>
-      GAS_IMPORT_COLUMNS.map((column, columnIndex) => {
-      let value = row[columnIndex] ?? ''
-      if (options.fillEmptyWithZero && isEmptyCell(value)) value = 0
-      const numericValue = Number(value)
-      return numericValue
-    })
-  )
-}
-
 const parseWaterResultImportRows = (rows) => {
   assertStrictHeaders(rows, WATER_RESULT_IMPORT_COLUMNS, '地层水结果数据模板')
   const dataRows = rows.slice(1).filter(row =>
@@ -449,18 +420,19 @@ const handleWaterImport = async ({ file, options, kind }) => {
     const rows = cleanImportRows(sourceRows, options, expectedColumns)
     if (!rows.length) throw new Error('文件中没有可导入的数据')
 
-    if (kind === 'result') {
-      const parsedRows = parseWaterResultImportRows(rows)
-      importedWaterResultRows.value = parsedRows
-      persistImportedData('water', 'result', parsedRows)
-      ElMessage.success(`成功导入 ${parsedRows.length} 条地层水结果数据`)
+    if (kind === 'data') {
+      // 地层水数据列表使用当前编号的天然气五列基础数据。
+      const parsedRows = parseDataImportRows(rows, options)
+      importedGasRows.value = parsedRows
+      persistImportedData('gas', 'data', parsedRows)
+      ElMessage.success(`成功导入 ${parsedRows.length} 条地层水基础数据`)
       return
     }
 
-    const parsedRows = parseWaterDataImportRows(rows, options)
-    importedWaterRows.value = parsedRows
-    persistImportedData('water', 'data', parsedRows)
-    ElMessage.success(`成功导入 ${parsedRows.length} 条地层水性质数据`)
+    const parsedResultRows = parseWaterResultImportRows(rows)
+    importedWaterResultRows.value = parsedResultRows
+    persistImportedData('water', 'result', parsedResultRows)
+    ElMessage.success(`成功导入 ${parsedResultRows.length} 条地层水结果数据`)
   } catch (error) {
     ElMessage.error(error.message || '地层水性质数据导入失败')
   }
@@ -481,7 +453,7 @@ const persistImportedData = (kind, importKind, rows) => {
 
 const persistCalculation = (kind, payload) => {
   // 参数变化后的计算结果直接覆盖当前编号
-  const result = savePvtCalculation({
+  const { record } = savePvtCalculation({
     projectId: props.projectId,
     gasReservoirId: props.gasReservoirId,
     wellName: props.wellName,
@@ -492,12 +464,13 @@ const persistCalculation = (kind, payload) => {
     settings: payload.settings
   })
 
+  // 保存函数返回记录包装对象，必须读取 record 才能用本次输入刷新表单。
   if (kind === 'gas') {
-    importedGasRows.value = result?.gasRows || []
-    importedGasResultRows.value = result?.gasResultRows || []
+    importedGasRows.value = record?.gasRows || []
+    importedGasResultRows.value = record?.gasResultRows || []
   } else {
-    importedWaterRows.value = result?.waterRows || [[25000, 40, 119.85]]
-    importedWaterResultRows.value = result?.waterResultRows || []
+    importedWaterRows.value = record?.waterRows || [[25000, 40, 119.85]]
+    importedWaterResultRows.value = record?.waterResultRows || []
   }
 }
 </script>

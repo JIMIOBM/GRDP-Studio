@@ -473,7 +473,7 @@ const chartOption = computed(() => {
         type: 'line',
         yAxisIndex: series.yAxisIndex || 0,
         showSymbol: false,
-        symbol: 'none',
+        // 与天然气曲线一致：常态隐藏圆点，悬停到邻近数据时显示圆形标记。
         smooth: true,
         connectNulls: false,
         itemStyle: { color: '#1677ff' },

@@ -91,16 +91,36 @@ const downloadTemplate = async (kind) => {
     const { default: ExcelJS } = await import('exceljs')
     const workbook = new ExcelJS.Workbook()
     const worksheet = workbook.addWorksheet('地层水数据')
-    worksheet.addRow([
-      '地层水矿化度(mg/L)',
-      '原始地层压力(MPa)',
-      '地层温度(℃)'
-    ])
+    const headers = [
+      '天然气类型',
+      '天然气比重(dless)',
+      'H₂S摩尔百分含量(%)',
+      'CO₂摩尔百分含量(%)',
+      'N₂摩尔百分含量(%)'
+    ]
+    worksheet.addRow(headers)
     worksheet.views = [{ state: 'frozen', ySplit: 1 }]
-    worksheet.columns = [{ width: 25 }, { width: 23 }, { width: 18 }]
+    worksheet.columns = [
+      { width: 18 },
+      { width: 22 },
+      { width: 24 },
+      { width: 24 },
+      { width: 24 }
+    ]
     const headerRow = worksheet.getRow(1)
     headerRow.font = { bold: true }
     headerRow.alignment = { vertical: 'middle', horizontal: 'center' }
+
+    // 地层水页面的基础模板使用天然气五列数据，并限制天然气类型取值。
+    worksheet.dataValidations.add('A2', {
+      type: 'list',
+      allowBlank: true,
+      formulae: ['"干气,湿气,凝析气"'],
+      showErrorMessage: true,
+      errorStyle: 'stop',
+      errorTitle: '天然气类型不正确',
+      error: '天然气类型只能选择：干气、湿气或凝析气'
+    })
     const buffer = await workbook.xlsx.writeBuffer()
     triggerDownload(
       new Blob([buffer], {
