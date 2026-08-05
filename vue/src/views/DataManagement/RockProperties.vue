@@ -100,10 +100,13 @@ const interpolateDataPoints = (items) => {
     interpolatedPoints.push([start.x, start.y])
 
     const distance = end.x - start.x
+
+    if (distance === 0) continue
+
     const numInterpolated = Math.floor(distance / step)
 
     for (let j = 1; j <= numInterpolated; j++) {
-      const ratio = (j * step) / distance
+      const ratio = (j * step) / distance  // 现在安全了
       const interpX = start.x + j * step
       const interpY = start.y + ratio * (end.y - start.y)
 
@@ -120,8 +123,8 @@ const interpolateDataPoints = (items) => {
   interpolatedPoints.push([lastPoint.x, lastPoint.y])
 
   return interpolatedPoints.map(point => [
-    point[0],
-    Number(point[1]).toExponential(6)
+    Number(point[0]),
+    Number(point[1])
   ])
 }
 
@@ -136,9 +139,9 @@ const renderChart = () => {
 
   let chartSeries = []
   const items =
-  activeCurve.value === '胶结砂岩'
-    ? curveOneSeries.value[0]?.items || []
-    : curveTwoSeries.value[0]?.items || []
+    activeCurve.value === '胶结砂岩'
+      ? curveOneSeries.value[0]?.items || []
+      : curveTwoSeries.value[0]?.items || []
 
   if (items.length > 0) {
     const curveColor = curveColors[0]
@@ -154,30 +157,41 @@ const renderChart = () => {
     })
 
     const currentCompressibility =
-  activeCurve.value === '胶结砂岩'
-    ? outputData.value?.cementedCompressibility
-    : outputData.value?.carbonateCompressibility
+      activeCurve.value === '胶结砂岩'
+        ? outputData.value?.cementedCompressibility
+        : outputData.value?.carbonateCompressibility
 
 
-if (outputData.value?.porosity && currentCompressibility) {
+    if (
+      Number.isFinite(Number(outputData.value?.porosity)) &&
+      Number.isFinite(Number(currentCompressibility))
+    ) {
 
-  const x = Number(outputData.value.porosity)
-  const y = Number(currentCompressibility)
+      const x = Number(outputData.value.porosity)
+      const y = Number(currentCompressibility)
 
-  if (Number.isFinite(x) && Number.isFinite(y)) {
 
-    chartSeries.push({
-      name: '输出点',
-      type: 'scatter',
-      symbolSize: 8,
-      itemStyle: { color: curveColor },
-      data: [[x, y]]
-    })
+      if (Number.isFinite(x) && Number.isFinite(y)) {
 
+        chartSeries.push({
+          name: '输出点',
+          type: 'scatter',
+          symbolSize: 8,
+          itemStyle: { color: curveColor },
+          data: [[x, y]]
+        })
+
+      }
+    }
   }
-}
-  }
+  const allY = chartSeries
+    .filter(s => s.name === '压缩系数曲线')
+    .flatMap(s => s.data.map(p => Number(p[1])))
+  const yMin = allY.length > 0 ? Math.min(...allY) : 0
+  const yMax = allY.length > 0 ? Math.max(...allY) : 1
+  const yPad = Math.max((yMax - yMin) * 0.1, Math.abs(yMax) * 0.05, 1e-10)
 
+  chart.clear()
   chart.setOption({
     animation: false,
     color: [curveColors[0]],
@@ -260,20 +274,24 @@ if (outputData.value?.porosity && currentCompressibility) {
     },
     xAxis: {
       type: 'value',
-      name: '岩石孔隙度 φ(%)', nameLocation: 'middle', nameGap: 34,
-      min: 0, max: 50,
+      min: 0,
+      // max: 50,
       interval: 5,
-      splitLine: { show: true, lineStyle: { color: '#dce5f2' } }
+      name: '岩石孔隙度 φ(%)'
     },
-    yAxis: [{
-      type: 'value',
-      name: activeCurveOption.value.yAxisLabel,
-      nameLocation: 'middle', nameGap: 44,
-      axisLabel: { formatter: v => Number(v).toExponential(2) },
-      splitLine: { lineStyle: { color: '#dce5f2' } }
-    }],
+   yAxis: [{
+  type: 'log',
+  name: activeCurveOption.value.yAxisLabel,
+  nameLocation: 'middle', nameGap: 44,
+  min: yMin > 0 ? yMin * 0.5 : 1e-4,
+  axisLabel: {
+    formatter: v => Number(v).toExponential(1)
+  },
+  splitLine: { lineStyle: { color: '#dce5f2' } }
+}],
     series: chartSeries
-  }, true)
+  })
+
 
   requestAnimationFrame(() => {
     if (chart && element.clientWidth > 0 && element.clientHeight > 0) {
@@ -303,10 +321,10 @@ const handleCalculate = async () => {
   if (calculating.value) return
 
   const porosityValue = Number(porosity.value)
-  
-  if (!Number.isFinite(porosityValue) || porosityValue < 5 || porosityValue > 50) {
+
+  if (!Number.isFinite(porosityValue) || porosityValue < 0 || porosityValue > 50) {
     ElMessage({
-      message: `invoke algorithm error: 岩石孔隙度 取值范围 [5, 50]`,
+      message: `invoke algorithm error: 岩石孔隙度 取值范围 [0, 50]`,
       type: 'error',
       duration: 3000,
       showClose: true,
@@ -321,7 +339,7 @@ const handleCalculate = async () => {
     return
   }
 
-  const start = 5
+  const start = 0
   const end = 50
   const step = 0.5
 
@@ -334,42 +352,28 @@ const handleCalculate = async () => {
 
   calculating.value = true
   try {
-   const [
-  curveOneResponse,
-  curveTwoResponse,
-  pointOneResponse,
-  pointTwoResponse
-] = await Promise.all([
+    const [
+      curveOneResponse,
+      curveTwoResponse,
+      pointOneResponse,
+      pointTwoResponse
+    ] = await Promise.all([
 
-  // 曲线
-  rockPvtApi.calculateCurveOne(curveRequest),
+      rockPvtApi.calculateCurveOne(curveRequest),
+      rockPvtApi.calculateCurveTwo(curveRequest),
 
-  rockPvtApi.calculateCurveTwo(curveRequest),
+      rockPvtApi.calculateSingle({
+        projectId,
+        porosity: porosityValue,
+        rockType: 0
+      }),
 
-
-  // 单点计算
-  rockPvtApi.calculateSingle({
-
-    projectId,
-
-    porosity: porosityValue,
-
-    rockType: 0
-
-  }),
-
-
-  rockPvtApi.calculateSingle({
-
-    projectId,
-
-    porosity: porosityValue,
-
-    rockType: 1
-
-  })
-
-])
+      rockPvtApi.calculateSingle({
+        projectId,
+        porosity: porosityValue,
+        rockType: 1
+      })
+    ])
 
     const curveOneResult = unwrapResponse(curveOneResponse)
     const curveOneItems = Array.isArray(curveOneResult?.items) ? curveOneResult.items : []
@@ -390,45 +394,16 @@ const handleCalculate = async () => {
       items: curveTwoItems
     }]
 
-    // const interpolateValue = (items, targetPorosity) => {
-
-    //   const points = items
-    //     .map(item => ({
-    //       x: Number(item.porosity),
-    //       y: Number(item.compressibilityFactor)
-    //     }))
-    //     .sort((a, b) => a.x - b.x)
-
-
-    //   for (let i = 0; i < points.length - 1; i++) {
-
-    //     const p1 = points[i]
-    //     const p2 = points[i + 1]
-
-
-    //     if (targetPorosity >= p1.x && targetPorosity <= p2.x) {
-
-    //       const ratio =
-    //         (targetPorosity - p1.x) / (p2.x - p1.x)
-
-
-    //       return p1.y + ratio * (p2.y - p1.y)
-    //     }
-    //   }
-
-    //   return null
-    // }
-
     const pointOneResult = unwrapResponse(pointOneResponse)
-const pointTwoResult = unwrapResponse(pointTwoResponse)
+    const pointTwoResult = unwrapResponse(pointTwoResponse)
 
 
-const matchedItem1 =
-    Number(pointOneResult.compressibilityFactor)
+    const matchedItem1 =
+      Number(pointOneResult.compressibilityFactor)
 
 
-const matchedItem2 =
-    Number(pointTwoResult.compressibilityFactor)
+    const matchedItem2 =
+      Number(pointTwoResult.compressibilityFactor)
     outputData.value = {
       porosity: porosityValue,
       cementedCompressibility: matchedItem1,
