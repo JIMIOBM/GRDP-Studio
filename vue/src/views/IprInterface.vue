@@ -20,8 +20,8 @@ import { NODETYPE } from '@/constants/nodeType'
 import { analyticMethodApi, dataManagementApi, dynamicBalanceApi, materialBalanceApi, nodeApi, notifyApi, projectApi, typicalCurveApi, waterInvasionApi } from '@/api/docker'
 import { createOrReusePvtRecord, ensureInitialPvtRecord, getPvtRecords } from '@/utils/pvtRecords'
 
-const PROJECT_ID = 4
-const GAS_RESERVOIR_ID = 3
+const PROJECT_ID = 1
+const GAS_RESERVOIR_ID = 1
 const FLOW_BALANCE_NODE_TYPE = NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure
 
 const WELL_GROUPS = [

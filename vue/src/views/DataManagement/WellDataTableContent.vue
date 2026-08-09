@@ -533,6 +533,19 @@ const rows = ref([])
 const responseFields = ref([])
 let loadSequence = 0
 
+const paginationEnabled = computed(() => effectiveDataType.value === 'productiondata')
+const currentPage = ref(1)
+const pageSize = 200
+const pagedRows = computed(() => {
+  if (!paginationEnabled.value) return rows.value
+  const start = (currentPage.value - 1) * pageSize
+  return rows.value.slice(start, start + pageSize)
+})
+const totalPages = computed(() => Math.ceil(rows.value.length / pageSize))
+const handlePageChange = page => {
+  currentPage.value = page
+}
+
 const productionDataCache = new Map()
 
 const getProductionCacheKey = (projectId, gasReservoirId, wellName) =>
@@ -1000,6 +1013,7 @@ const loadData = async () => {
       if (sequence !== loadSequence) return
       rows.value = results.flatMap(result => result.items)
       responseFields.value = results.find(result => result.fields.length)?.fields || []
+      currentPage.value = 1
       return
     } else if (dataType === 'deliverability') {
       const targetWellNames = props.wellName ? [props.wellName] : props.wellNames
@@ -1090,6 +1104,7 @@ const loadData = async () => {
 
     rows.value = finalItems
     responseFields.value = result.fields
+    currentPage.value = 1
   } catch (error) {
     if (sequence !== loadSequence) return
     rows.value = []
@@ -1158,13 +1173,17 @@ watch(
     <div class="data-table-wrap">
       <el-table
         v-loading="loading"
-        :data="rows"
+        :data="pagedRows"
         border
         height="100%"
         empty-text="暂无数据"
         row-key="id"
       >
-        <el-table-column type="index" label="序号" width="64" fixed />
+        <el-table-column type="index" label="序号" width="64" fixed>
+          <template #default="{ $index }">
+            {{ (currentPage - 1) * pageSize + $index + 1 }}
+          </template>
+        </el-table-column>
         <el-table-column
           v-for="field in fields"
           :key="field.key"
@@ -1177,6 +1196,17 @@ watch(
           </template>
         </el-table-column>
       </el-table>
+    </div>
+
+    <div v-if="paginationEnabled && totalPages > 1" class="data-pagination">
+      <el-pagination
+        v-model:current-page="currentPage"
+        :page-size="pageSize"
+        :total="rows.length"
+        layout="total, prev, pager, next, jumper"
+        background
+        @current-change="handlePageChange"
+      />
     </div>
 
     <WellDataImportDialog
@@ -1248,6 +1278,16 @@ watch(
   flex: 1;
   min-height: 0;
   padding: 0 1px 1px;
+}
+
+.data-pagination {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  flex: 0 0 auto;
+  padding: 8px 10px;
+  border-top: 1px solid #ebeef5;
+  background: #fff;
 }
 
 :deep(.el-table) {
