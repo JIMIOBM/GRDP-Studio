@@ -15,10 +15,15 @@ import TransientContent from '@/views/WellControlInventory/TransientContent.vue'
 import DynamicBalanceContent from '@/views/WellControlInventory/DynamicBalanceContent.vue'
 import AGContent from '@/views/WellControlInventory/AGContent.vue'
 import PvtPropertiesContent from '@/views/DataManagement/PvtPropertiesContent.vue'
+import RelativePermeabilityContent from '@/views/DataManagement/RelativePermeabilityContent.vue'
 import WellDataTableContent from '@/views/DataManagement/WellDataTableContent.vue'
 import { NODETYPE } from '@/constants/nodeType'
 import { analyticMethodApi, dataManagementApi, dynamicBalanceApi, materialBalanceApi, nodeApi, notifyApi, projectApi, typicalCurveApi, waterInvasionApi } from '@/api/docker'
 import { createOrReusePvtRecord, ensureInitialPvtRecord, getPvtRecords } from '@/utils/pvtRecords'
+import {
+  getNextRelativePermeabilityIndex,
+  getRelativePermeabilityRecords
+} from '@/utils/relativePermeabilityRecords'
 
 const PROJECT_ID = 1
 const GAS_RESERVOIR_ID = 1
@@ -56,7 +61,8 @@ const WELL_DATA_NODES = [
       }
     ]
   },
-  { type: 'well-data-pvt-group', label: 'PVT性质' }
+  { type: 'well-data-pvt-group', label: 'PVT性质' },
+  { type: 'well-data-relative-permeability-group', label: '相渗数据' }
 ]
 
 const NODE_GROUP_BY_TYPE = {
@@ -598,6 +604,16 @@ const createPvtPropertyNodes = (wellName, wellId) =>
     children: []
   }))
 
+const createRelativePermeabilityNodes = (wellName, wellId) =>
+  getRelativePermeabilityRecords(PROJECT_ID, GAS_RESERVOIR_ID, wellName).map(record => ({
+    id: `${wellId || wellName}-well-data-relative-permeability-${record.index}`,
+    label: `相渗数据${record.index}`,
+    type: 'well-data-relative-permeability',
+    wellName,
+    relativePermeabilityIndex: record.index,
+    children: []
+  }))
+
 const createWellDataNodes = (wellName, wellId) =>
   WELL_DATA_NODES.map(item => ({
     ...item,
@@ -607,7 +623,9 @@ const createWellDataNodes = (wellName, wellId) =>
     // PVT 性质挂在每口井的“数据管理”下面，而不是作为井的同级节点。
     children: item.type === 'well-data-pvt-group'
       ? createPvtPropertyNodes(wellName, wellId)
-      : (item.children || []).map(child => ({
+      : item.type === 'well-data-relative-permeability-group'
+        ? createRelativePermeabilityNodes(wellName, wellId)
+        : (item.children || []).map(child => ({
           ...child,
           id: `${wellId || wellName}-${item.type}-${child.type}`,
           wellName,
@@ -678,6 +696,9 @@ const ensureWell = (wellName, wellId) => { //确保井存在
         }
         if (dataNode.type === 'well-data-pvt-group') {
           existingNode.children = createPvtPropertyNodes(wellName, wellItem.id)
+          existingNode.defaultExpanded = existingNode.children.length > 0
+        } else if (dataNode.type === 'well-data-relative-permeability-group') {
+          existingNode.children = createRelativePermeabilityNodes(wellName, wellItem.id)
           existingNode.defaultExpanded = existingNode.children.length > 0
         } else if (dataNode.children.length) {
           existingNode.children = dataNode.children
@@ -1320,6 +1341,34 @@ const refreshPvtNodesForWell = wellName => {
   // 替换子节点数组，确保顶部新增编号后左侧目录立即更新。
   pvtGroup.children = [...createPvtPropertyNodes(wellName, well.id)]
   pvtGroup.defaultExpanded = pvtGroup.children.length > 0
+}
+
+const refreshRelativePermeabilityNodesForWell = wellName => {
+  const well = ensureWell(wellName, `well-${wellName}`)
+  const dataGroup = well?.children.find(item => item.type === 'data-management')
+  const relativeGroup = dataGroup?.children.find(
+    item => item.type === 'well-data-relative-permeability-group'
+  )
+  if (!relativeGroup) return []
+
+  relativeGroup.children = [...createRelativePermeabilityNodes(wellName, well.id)]
+  relativeGroup.defaultExpanded = relativeGroup.children.length > 0
+  return relativeGroup.children
+}
+
+const handleRelativePermeabilityImported = record => {
+  const wellName = record?.wellName || currentViewNode.value?.wellName
+  if (!wellName) return
+
+  const nodes = refreshRelativePermeabilityNodesForWell(wellName)
+  const node = nodes.find(
+    item => Number(item.relativePermeabilityIndex) === Number(record?.index)
+  )
+  if (!node) return
+
+  activeNodeId.value = node.id
+  activeNode.value = node
+  currentViewNode.value = node
 }
 
 const initializePvtRecords = async () => {
@@ -3390,6 +3439,12 @@ const handleSelect = async (node) => { // 点击左侧树节点
     return
   }
 
+  if (node.type === 'well-data-relative-permeability') {
+    currentView.value = 'relative-permeability'
+    currentViewNode.value = node
+    return
+  }
+
   if (node.dataType) {
     currentView.value = 'well-data-table'
     currentViewNode.value = {
@@ -3530,6 +3585,25 @@ const handleCommand = async ({ group, name }) => { // 接收顶部菜单栏的�
     return
   }
 
+  if (name === '相渗数据') {
+    if (!selectedWellName.value) {
+      ElMessage.warning('请先在左侧选择一口井')
+      return
+    }
+
+    currentView.value = 'relative-permeability'
+    currentViewNode.value = {
+      wellName: selectedWellName.value,
+      relativePermeabilityIndex: getNextRelativePermeabilityIndex(
+        PROJECT_ID,
+        GAS_RESERVOIR_ID,
+        selectedWellName.value
+      ),
+      viewInstanceKey: `relative-permeability-new-${selectedWellName.value}-${Date.now()}`
+    }
+    return
+  }
+
   switch (name) {
     case '水侵分析':
       runWaterInvasionForSelectedWell()
@@ -3633,6 +3707,15 @@ onBeforeUnmount(() => {
           :pvt-index="currentViewNode?.pvtIndex"
           :initial-property-tab="currentViewNode?.initialPropertyTab || lastPvtPropertyTab"
           @property-tab-change="handlePvtPropertyTabChange"
+        />
+        <RelativePermeabilityContent
+          v-if="currentView === 'relative-permeability'"
+          :key="currentViewNode?.viewInstanceKey || currentViewNode?.id || `${currentViewNode?.wellName}-${currentViewNode?.relativePermeabilityIndex}`"
+          :well-name="currentViewNode?.wellName"
+          :project-id="PROJECT_ID"
+          :gas-reservoir-id="GAS_RESERVOIR_ID"
+          :relative-permeability-index="currentViewNode?.relativePermeabilityIndex"
+          @imported="handleRelativePermeabilityImported"
         />
         <WellDataTableContent v-if="currentView === 'well-data-table'"
           :data-type="currentViewNode?.dataType" :well-name="currentViewNode?.wellName"
