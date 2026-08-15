@@ -14,7 +14,7 @@ const DEFAULT_POROSITY = '25'
 
 const activeCurve = ref('胶结砂岩')
 const activeParamTab = ref('input')
-const activeContentTab = ref('chart')
+const activeContentTab = ref('table')
 const paramsCollapsed = ref(false)
 const porosity = ref(DEFAULT_POROSITY)
 const calculating = ref(false)
@@ -72,6 +72,25 @@ const dataListRows = computed(() =>
     porosity: Number(item.porosity).toFixed(2),
     compressibilityFactor: Number(item.compressibilityFactor).toExponential(4)
   }))
+)
+
+const dataListDisplayRows = computed(() => {
+  if (dataListRows.value.length) return dataListRows.value
+  return Array.from({ length: 25 }, (_, index) => ({
+    index: index + 1,
+    porosity: '',
+    compressibilityFactor: ''
+  }))
+})
+
+const dataListCells = computed(() =>
+  dataListDisplayRows.value.flatMap((row, rowIndex) =>
+    dataListColumns.map((column, columnIndex) => ({
+      key: `${rowIndex}-${column.prop}`,
+      value: row[column.prop] ?? '',
+      columnIndex
+    }))
+  )
 )
 
 const unwrapResponse = (response) =>
@@ -565,11 +584,16 @@ onBeforeUnmount(() => {
 
       <div v-show="activeContentTab === 'chart'" ref="chartEl" class="chart-instance"></div>
 
-      <div v-if="activeContentTab === 'table' && currentCurveItems.length > 0" class="data-list-panel">
-        <el-table :data="dataListRows" size="small" height="100%" border stripe>
-          <el-table-column v-for="column in dataListColumns" :key="column.prop" :prop="column.prop"
-            :label="column.label" :width="column.width" :min-width="column.minWidth" sortable />
-        </el-table>
+      <div v-show="activeContentTab === 'table'" class="data-list-panel">
+        <div class="rock-data-grid" aria-label="岩石性质数据列表">
+          <div v-for="column in dataListColumns" :key="column.prop" class="rock-data-grid-cell header">
+            {{ column.label }}
+          </div>
+          <div v-for="cell in dataListCells" :key="cell.key" class="rock-data-grid-cell"
+            :class="{ numeric: cell.columnIndex > 0 && cell.value !== '', 'row-index': cell.columnIndex === 0 }">
+            {{ cell.value }}
+          </div>
+        </div>
       </div>
 
       <div v-if="currentCurveItems.length > 0" class="bottom-chart-tabs">
@@ -886,6 +910,59 @@ onBeforeUnmount(() => {
   width: 100%;
   overflow: hidden;
   background: #fff;
+}
+
+.rock-data-grid {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 70px minmax(140px, 1fr) minmax(180px, 1.4fr);
+  grid-template-rows: 36px repeat(25, minmax(30px, 1fr));
+  margin: 0;
+  overflow: auto;
+  border: 1px solid #d4d7db;
+}
+
+.rock-data-grid-cell {
+  min-width: 0;
+  border-right: 1px solid #d4d7db;
+  border-bottom: 1px solid #d4d7db;
+  background: #fff;
+  padding: 0 8px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  color: #333;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  &.header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 8px;
+    box-sizing: border-box;
+    background: #f4f4f4;
+    color: #333;
+    font-size: inherit;
+    font-weight: 400;
+    text-align: center;
+    white-space: nowrap;
+  }
+
+  &.numeric {
+    justify-content: flex-end;
+    font-variant-numeric: tabular-nums;
+  }
+
+  &.row-index {
+    justify-content: center;
+    padding: 0 6px;
+    background: #f4f4f4;
+    color: #333;
+  }
 }
 
 .bottom-chart-tabs {

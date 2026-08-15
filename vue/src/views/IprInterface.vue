@@ -1,9 +1,21 @@
 <script setup>
+/**
+ * 顶部菜单栏板块对应关系：
+ *
+ * 本页面主要负责“解析融合”页签下的：
+ * 1. 数据管理
+ * 2. 井控库存
+ *
+ * “单井产能”已经拆分到 SingleWellProductivityInterface.vue。
+ * 用户点击顶部“单井产能”板块的命令时，本页面只负责路由跳转，
+ * 不再在 IprInterface.vue 内渲染单井产能的业务界面。
+ */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Delete } from '@element-plus/icons-vue'
 import RibbonMenu from '@/components/RibbonMenu.vue'
-import TreeNode from '@/views/TreeNode.vue'
+import WorkspaceSidebar from '@/components/WorkspaceSidebar.vue'
 import WaterInvasionContent from '@/views/WellControlInventory/WaterInvasionContent.vue'
 import MaterialBalanceContent from '@/views/WellControlInventory/MaterialBalanceContent.vue'
 import FlowBalanceContent from '@/views/WellControlInventory/FlowBalanceContent.vue'
@@ -24,9 +36,19 @@ import {
   getNextRelativePermeabilityIndex,
   getRelativePermeabilityRecords
 } from '@/utils/relativePermeabilityRecords'
+import {
+  workspaceActiveNodeId,
+  workspacePendingCommand,
+  workspaceSelectedWellName,
+  workspaceTreeCollapsed,
+  workspaceTreeData,
+  workspaceTreeHydrated,
+  workspaceTreeKeyword
+} from '@/utils/workspaceTreeState'
 
-const PROJECT_ID = 1
-const GAS_RESERVOIR_ID = 1
+const PROJECT_ID = 6
+const GAS_RESERVOIR_ID = 3
+const router = useRouter()
 const FLOW_BALANCE_NODE_TYPE = NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure
 
 const WELL_GROUPS = [
@@ -105,20 +127,29 @@ const NODE_LABEL_BY_TYPE = {
   [NODETYPE.NodeType_TypicalCurveAG]: 'AG'
 }
 
-const treeData = ref([
-  { id: 'g-well', label: '井', children: [] },
-  { id: 'g-reservoir', label: '库', children: [{ id: 'res-1', label: '项目 1', type: 'reservoir' }] },
-  { id: 'g-group', label: '库群', children: [{ id: 'grp-1', label: '项目 1', type: 'group' }] }
-])
-
-const activeNodeId = ref('')  // 当前左侧树选中的节点 ID. 用于高亮显示
+const treeData = workspaceTreeData
+const activeNodeId = workspaceActiveNodeId  // 当前左侧树选中的节点 ID. 用于高亮显示
 const activeNode = ref(null)  // 当前选中的完整节点对象
 const currentView = ref(null)  // currentView.value = 'water-invasion'，即确定右侧部分区域所显示的界面
 const currentViewNode = ref(null)  // 传给右侧内容组件的节点对象
+const WELL_CONTROL_VIEWS = new Set([
+  'water-invasion',
+  'analytic-method',
+  'material-balance',
+  'flow-balance',
+  'blasingame',
+  'npi',
+  'transient',
+  'wattenbarger',
+  'dynamic-balance',
+  'Agarwal-Gardner'
+])
+const isWellControlView = computed(() => WELL_CONTROL_VIEWS.has(currentView.value))
+const isPvtView = computed(() => currentView.value === 'pvt-properties')
 // 记录当前性质页签，仅用于组件内部切换；点击编号节点时始终重置为天然气性质。
 const lastPvtPropertyTab = ref('天然气性质')
-const wellKeyword = ref('')
-const sideTreeCollapsed = ref(false)
+const wellKeyword = workspaceTreeKeyword
+const sideTreeCollapsed = workspaceTreeCollapsed
 const waterInvasionRunning = ref(false)  //用于判断水侵分析是否正在运行
 const analyticMethodRunning = ref(false)
 const materialBalanceRunning = ref(false)
@@ -140,7 +171,7 @@ const ANALYTIC_METHOD_LOG_POLL_INTERVAL = 500
 const ANALYTIC_METHOD_COMPLETE_PATTERN = /\[\s*产量不稳定分析-解析法\s*\]\s*[:：]\s*完成/
 const BLASINGAME_FITTING_REGRESSION_ERROR = '计算动态储量错误:参与回归分析的数据点数必须大于0'
 const AG_FITTING_REGRESSION_ERROR = '计算AG节点错误:参与回归分析的数据点数必须大于0'
-const selectedWellName = ref('')
+const selectedWellName = workspaceSelectedWellName
 const projectWellNames = computed(() =>
   getWellGroup()?.children
     .map(item => item.wellName || item.label)
@@ -153,10 +184,6 @@ const treeContextMenu = ref({
   node: null
 })
 const loadingWellChildren = new Set()
-
-const toggleSideTree = () => {
-  sideTreeCollapsed.value = !sideTreeCollapsed.value
-}  //当前选中的井名
 
 const filteredTreeData = computed(() => {   //搜索井名，控制左侧树搜索
   const keyword = wellKeyword.value.trim().toLowerCase()
@@ -3239,8 +3266,10 @@ const openAGNode = async (node) => {
 }
 
 const initTree = async () => {
+  if (workspaceTreeHydrated.value) return
   await refreshProjectTree()
   await initializePvtRecords()
+  workspaceTreeHydrated.value = true
 }
 
 const loadWellChildren = async (node, force = false) => {
@@ -3511,7 +3540,28 @@ const handleSelect = async (node) => { // 点击左侧树节点
   if (node.type === NODETYPE.NodeType_Well) return
 }
 
-const handleCommand = async ({ group, name }) => { // 接收顶部菜单栏的点击事件
+const handleCommand = async ({ group, name, parent }) => { // 接收顶部菜单栏的点击事件
+  // 顶部菜单栏“单井产能”板块：跳转到独立的单井产能工作台。
+  if (group === '单井产能') {
+    const activeWellName = selectedWellName.value || activeNode.value?.wellName || (
+      activeNode.value?.type === NODETYPE.NodeType_Well ? activeNode.value.label : ''
+    )
+    if (!activeWellName) {
+      ElMessage.warning('请先在左侧选择一口井')
+      return
+    }
+
+    await router.push({
+      name: 'SingleWellProductivity',
+      query: {
+        module: parent || name,
+        method: parent ? name : '',
+        well: activeWellName
+      }
+    })
+    return
+  }
+
   const dataViewByName = {
     井头数据: 'wellhead',
     井斜数据: 'deviation',
@@ -3526,6 +3576,7 @@ const handleCommand = async ({ group, name }) => { // 接收顶部菜单栏的�
 
   if (dataType) {
     const activeWellName =
+      selectedWellName.value ||
       activeNode.value?.wellName ||
       (activeNode.value?.type === NODETYPE.NodeType_Well ? activeNode.value.label : '')
     const supportsProjectScope = ['deliverability', 'staticPressure', 'wellcompletion', 'otherdata', 'productiondata'].includes(dataType)
@@ -3544,7 +3595,7 @@ const handleCommand = async ({ group, name }) => { // 接收顶部菜单栏的�
   }
 
   if (name === 'PVT性质') {
-    const activeWellName = activeNode.value?.wellName || (
+    const activeWellName = selectedWellName.value || activeNode.value?.wellName || (
       activeNode.value?.type === NODETYPE.NodeType_Well ? activeNode.value.label : ''
     )
     if (!activeWellName) {
@@ -3655,10 +3706,21 @@ const handleRefreshTree = () => {
   refreshProjectTree()
 }
 
-onMounted(() => {
-  initTree()
+onMounted(async () => {
   window.addEventListener('click', closeTreeContextMenu)
   window.addEventListener('resize', closeTreeContextMenu)
+
+  try {
+    await initTree()
+  } catch (error) {
+    console.error('工作台目录初始化失败', error)
+  }
+
+  const pendingCommand = workspacePendingCommand.value
+  if (pendingCommand) {
+    workspacePendingCommand.value = null
+    await handleCommand(pendingCommand)
+  }
 })
 
 onBeforeUnmount(() => {
@@ -3668,36 +3730,35 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
+  <!--
+    顶部菜单栏对应板块：数据管理、井控库存。
+    单井产能板块通过 handleCommand 跳转到独立页面，不在本模板内渲染。
+  -->
   <div class="ipr-container">
     <!--    顶部菜单栏目-->
     <RibbonMenu @command="handleCommand" />
 
 
     <div class="ipr-main">
-      <!--      左侧菜单栏-->
-      <aside class="side-panel" :class="{ collapsed: sideTreeCollapsed }">
-        <button v-if="sideTreeCollapsed" class="side-collapsed-tab" type="button"
-          title="&#x5C55;&#x5F00;&#x76EE;&#x5F55;" @click="toggleSideTree">
-          &#x76EE;&#x5F55;
-        </button>
-
-        <div v-show="!sideTreeCollapsed" class="side-search">
-          <el-input v-model="wellKeyword" size="small" clearable placeholder="&#x641C;&#x7D22;&#x4E95;&#x540D;" />
-          <button class="side-toggle" type="button" title="&#x6536;&#x8D77;&#x76EE;&#x5F55;" @click="toggleSideTree">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="#777">
-              <path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z" />
-            </svg>
-          </button>
-        </div>
-
-        <div v-show="!sideTreeCollapsed" class="side-tree">
-          <TreeNode v-for="node in filteredTreeData" :key="node.id" :node="node" :active-id="activeNodeId"
-            @select="handleSelect" @expand="handleNodeExpand" @node-contextmenu="handleNodeContextMenu" />
-        </div>
-      </aside>
+      <!-- 公共左侧目录：与单井产能工作台共用 WorkspaceSidebar.vue。 -->
+      <WorkspaceSidebar
+        v-model:keyword="wellKeyword"
+        v-model:collapsed="sideTreeCollapsed"
+        :nodes="filteredTreeData"
+        :active-id="activeNodeId"
+        @select="handleSelect"
+        @expand="handleNodeExpand"
+        @node-contextmenu="handleNodeContextMenu"
+      />
 
       <!--     右侧的主要内容区域-->
-      <main class="content-area">
+      <main
+        class="content-area"
+        :class="{
+          'well-control-theme': isWellControlView,
+          'pvt-yellow-theme': isPvtView
+        }"
+      >
         <PvtPropertiesContent
           v-if="currentView === 'pvt-properties'"
           :key="currentViewNode?.viewInstanceKey || currentViewNode?.id || currentViewNode?.wellName"
@@ -3767,8 +3828,6 @@ onBeforeUnmount(() => {
 
 <style lang="scss" scoped>
 $accent-yellow: #f4d000;
-$border: #e0e0e0;
-
 .ipr-container {
   height: 100vh;
   display: flex;
@@ -3783,84 +3842,210 @@ $border: #e0e0e0;
   min-height: 0;
 }
 
-.side-panel {
-  width: 230px;
-  min-width: 230px;
-  display: flex;
-  flex-direction: column;
-  border-right: 1px solid $border;
-  background-color: #fff;
-  position: relative;
-  transition: width 0.16s ease, min-width 0.16s ease;
-
-  &.collapsed {
-    width: 22px;
-    min-width: 22px;
-    border-right: 0;
-  }
-
-  .side-search {
-    padding: 6px 6px 4px;
-    border-bottom: 1px solid $border;
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-  }
-
-  .side-tree {
-    flex: 1;
-    overflow-y: auto;
-    padding: 6px 4px;
-  }
-}
-
-.side-toggle {
-  width: 20px;
-  height: 20px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  border-radius: 2px;
-  flex-shrink: 0;
-
-  &:hover {
-    background: #eef4ff;
-  }
-}
-
-.side-collapsed-tab {
-  width: 22px;
-  height: 54px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: #333;
-  cursor: pointer;
-  writing-mode: vertical-rl;
-  text-orientation: mixed;
-  font-size: 13px;
-  line-height: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-
-  &:hover {
-    background: #eef4ff;
-    color: #1677ff;
-  }
-}
-
 .content-area {
   flex: 1;
   background-color: #fff;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+
+/* 井控库存统一黄黑主题：仅覆盖界面交互色，图表序列颜色保持各组件原配置。 */
+.content-area.well-control-theme {
+  --theme-accent: #f2c811;
+  --theme-accent-soft: #fff8d8;
+  --theme-accent-pale: #fff3b0;
+  --theme-ink: #202020;
+  --el-color-primary: #303133;
+  --el-color-primary-light-3: #5d5e60;
+  --el-color-primary-light-5: #858689;
+  --el-color-primary-light-7: #b4b5b7;
+  --el-color-primary-light-8: #d2d3d4;
+  --el-color-primary-light-9: #eeeeef;
+  --el-color-primary-dark-2: #111;
+
+  :deep(.dynamic-result-tabs) {
+    border-bottom-color: transparent;
+  }
+
+  :deep(.dynamic-result-tab) {
+    background: #f4d000;
+    color: var(--theme-ink);
+    border-bottom-color: transparent;
+    box-shadow: none;
+  }
+
+  :deep(.dynamic-result-tab.active) {
+    background: #f4d000;
+    color: var(--theme-ink);
+    border-bottom-color: transparent;
+    box-shadow: none;
+  }
+
+  :deep(.chart-tab:hover),
+  :deep(.result-tabs button:hover),
+  :deep(.bottom-chart-tab:hover) {
+    background: var(--theme-accent-soft);
+    color: var(--theme-ink);
+  }
+
+  :deep(.chart-tab.active),
+  :deep(.result-tabs button.active) {
+    background: #fff;
+    color: var(--theme-ink);
+    border-bottom-color: var(--theme-accent);
+    box-shadow: inset 0 -3px 0 var(--theme-accent);
+  }
+
+  :deep(.bottom-chart-tab.active) {
+    background: #fff;
+    color: var(--theme-ink);
+    border-top-color: var(--theme-accent);
+    box-shadow: inset 0 3px 0 var(--theme-accent);
+  }
+
+  /* 物质平衡、Wattenbarger 使用 chart-tab 作为底部内容切换页签。 */
+  :deep(.chart-area > .chart-tabs:last-child .chart-tab.active) {
+    background: #fff;
+    color: var(--theme-ink);
+    border-top-color: var(--theme-accent);
+    border-bottom-color: transparent;
+    box-shadow: inset 0 3px 0 var(--theme-accent);
+  }
+
+  :deep(.panel-toggle:hover),
+  :deep(.panel-collapsed-tab:hover) {
+    background: var(--theme-accent-soft);
+    color: var(--theme-ink);
+  }
+
+  :deep(.params-resizer:hover) {
+    background: rgba(242, 200, 17, 0.28);
+  }
+
+  :deep(.el-radio__input.is-checked .el-radio__inner),
+  :deep(.el-checkbox__input.is-checked .el-checkbox__inner),
+  :deep(.el-checkbox__input.is-indeterminate .el-checkbox__inner) {
+    background-color: #303133;
+    border-color: #303133;
+  }
+
+  :deep(.el-radio__input.is-checked + .el-radio__label),
+  :deep(.el-checkbox__input.is-checked + .el-checkbox__label) {
+    color: #303133;
+  }
+
+  :deep(.el-button--primary) {
+    --el-button-bg-color: #252525;
+    --el-button-border-color: #252525;
+    --el-button-hover-bg-color: #050505;
+    --el-button-hover-border-color: #050505;
+    --el-button-active-bg-color: #303133;
+    --el-button-active-border-color: #303133;
+  }
+}
+
+/* PVT 性质统一黄黑主题：只调整界面交互色，不覆盖图表中的数据系列颜色。 */
+.content-area.pvt-yellow-theme {
+  --theme-accent: #f2c811;
+  --theme-accent-soft: #fff8d8;
+  --theme-accent-pale: #fff3b0;
+  --theme-ink: #202020;
+  --el-color-primary: #303133;
+  --el-color-primary-light-3: #5d5e60;
+  --el-color-primary-light-5: #858689;
+  --el-color-primary-light-7: #b4b5b7;
+  --el-color-primary-light-8: #d2d3d4;
+  --el-color-primary-light-9: #eeeeef;
+  --el-color-primary-dark-2: #111;
+
+  :deep(.dynamic-result-tabs) {
+    border-bottom-color: transparent;
+  }
+
+  :deep(.property-tab:hover),
+  :deep(.gas-result-tab:hover),
+  :deep(.water-result-tab:hover),
+  :deep(.chart-tab:hover),
+  :deep(.bottom-chart-tab:hover),
+  :deep(.param-tab:hover),
+  :deep(.gas-analysis-toggle:hover),
+  :deep(.water-analysis-toggle:hover),
+  :deep(.panel-toggle:hover),
+  :deep(.gas-analysis-collapsed-tab:hover),
+  :deep(.water-analysis-collapsed-tab:hover),
+  :deep(.panel-collapsed-tab:hover) {
+    background: var(--theme-accent-soft);
+    color: var(--theme-ink);
+  }
+
+  :deep(.property-tab.active) {
+    background: #f4d000;
+    color: var(--theme-ink);
+    border-color: #d6b20d;
+    border-bottom-color: transparent;
+    box-shadow: none;
+  }
+
+  :deep(.gas-result-tab.active),
+  :deep(.water-result-tab.active),
+  :deep(.chart-tab.active),
+  :deep(.param-tab.active) {
+    background: #fff;
+    color: var(--theme-ink);
+    border-color: #dcdfe6;
+    border-bottom-color: var(--theme-accent);
+    box-shadow: inset 0 -3px 0 var(--theme-accent);
+  }
+
+  :deep(.dynamic-result-tab),
+  :deep(.dynamic-result-tab.active) {
+    background: #f4d000;
+    color: var(--theme-ink);
+    border-bottom-color: transparent;
+    box-shadow: none;
+  }
+
+  :deep(.bottom-chart-tab.active) {
+    background: #fff;
+    color: var(--theme-ink);
+    border-top-color: var(--theme-accent);
+    box-shadow: inset 0 3px 0 var(--theme-accent);
+  }
+
+  :deep(input[type='radio']),
+  :deep(input[type='checkbox']) {
+    accent-color: #303133;
+  }
+
+  :deep(.el-radio__input.is-checked .el-radio__inner),
+  :deep(.el-checkbox__input.is-checked .el-checkbox__inner),
+  :deep(.el-checkbox__input.is-indeterminate .el-checkbox__inner) {
+    background-color: #303133;
+    border-color: #303133;
+  }
+
+  :deep(.el-radio__input.is-checked + .el-radio__label),
+  :deep(.el-checkbox__input.is-checked + .el-checkbox__label) {
+    color: #303133;
+  }
+
+  :deep(input:focus),
+  :deep(select:focus),
+  :deep(textarea:focus) {
+    border-color: #b99500;
+    box-shadow: 0 0 0 2px rgba(242, 200, 17, 0.16);
+    outline: none;
+  }
+
+  :deep(.el-button--primary) {
+    --el-button-bg-color: #252525;
+    --el-button-border-color: #252525;
+    --el-button-hover-bg-color: #050505;
+    --el-button-hover-border-color: #050505;
+    --el-button-active-bg-color: #303133;
+    --el-button-active-border-color: #303133;
+  }
 }
 
 :global(.tree-context-menu) {

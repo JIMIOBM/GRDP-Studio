@@ -9,6 +9,11 @@ const routes = [
 
   // 解析融合工作台（图一界面）—— 独立全屏布局
   { path: '/ipr', name: 'IprInterface', component: () => import('@/views/IprInterface.vue') },
+  {
+    path: '/single-well-productivity',
+    name: 'SingleWellProductivity',
+    component: () => import('@/views/SingleWellProductivityInterface.vue')
+  },
 
   // 前台布局
   {

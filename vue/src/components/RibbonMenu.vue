@@ -39,7 +39,7 @@ const defaultTabs = [
       {
         title: '单井产能',
         columns: [
-          { type: 'large', label: '产能试井', dropdown: true, dropdownItems: ['二项式', '指数式'] },
+          { type: 'large', label: '产能试井', dropdown: true, dropdownItems: ['回压试井', '等时试井', '修正等时', '一点法'] },
           { type: 'large', label: '产能系数', dropdown: true, dropdownItems: ['二项式', '指数式'] },
           { type: 'large', label: '理论计算', dropdown: true, dropdownItems: ['稳定流', '不稳定流'] },
           { type: 'large', label: '动态产能', dropdown: true, dropdownItems: ['稳定流', '不稳定流'] },
@@ -251,9 +251,9 @@ const switchTab = (idx) => { //切换页签
   activeTab.value = idx
 }
 
-const onItemClick = (groupTitle, label) => { //点击菜单项
+const onItemClick = (groupTitle, label, parent = '') => { //点击菜单项
   if (!label) return
-  emit('command', {group: groupTitle, name: label})
+  emit('command', {group: groupTitle, name: label, parent})
 }
 
 
@@ -361,7 +361,7 @@ const getIcon = (label) => iconMap[normalizeIconKey(iconAliases[label] || label)
                     class="ribbon-dropdown-item"
                     v-for="item in col.dropdownItems"
                     :key="item"
-                    @click="onItemClick(group.title, item)"
+                    @click="onItemClick(group.title, item, col.label)"
                 >
                   <img
                       v-if="getIcon(item)"
@@ -432,6 +432,8 @@ const getIcon = (label) => iconMap[normalizeIconKey(iconAliases[label] || label)
 <style lang="scss" scoped>
 $tab-bg: #2d2d2d;
 $accent-yellow: #f4d000;
+$accent-soft: #fff8d8;
+$accent-border: #d6b20d;
 $ribbon-bg: #ffffff;
 $group-label-bg: #ececec;
 $divider: #d9d9d9;
@@ -467,8 +469,8 @@ $square-border: #c2c2c2;
     }
 
     &.active {
-      background-color: $accent-yellow;
-      color: #1a1a1a;
+      background: $accent-yellow;
+      color: #202020;
     }
   }
 }
@@ -530,7 +532,7 @@ $square-border: #c2c2c2;
     line-height: 16px;
 
     &:hover .check-label {
-      color: #4084d9;
+      color: #202020;
     }
 
     .checkbox {
@@ -576,8 +578,8 @@ $square-border: #c2c2c2;
 
       &:hover,
       &:focus-visible {
-        border-color: #4084d9;
-        background-color: #eaf3ff;
+        border-color: $accent-border;
+        background-color: $accent-soft;
         outline: none;
       }
     }
@@ -604,8 +606,19 @@ $square-border: #c2c2c2;
   cursor: pointer;
 
   &:hover {
-    background-color: #f0f6ff;
-    outline: 1px solid #cfe0fb;
+    background-color: $accent-soft;
+    outline: 1px solid #ead36c;
+  }
+
+  /* 下拉栏目打开后保持白底，不把“已打开”误表现为选中背景。 */
+  &[aria-describedby] {
+    background-color: transparent;
+    outline: none;
+  }
+
+  &.el-tooltip__trigger:hover {
+    background-color: transparent;
+    outline: none;
   }
 
   &.passive {
@@ -668,8 +681,8 @@ $square-border: #c2c2c2;
 
     &:hover,
     &:focus-visible {
-      border-color: #4084d9;
-      background-color: #eaf3ff;
+      border-color: $accent-border;
+      background-color: $accent-soft;
       outline: none;
     }
   }
@@ -725,8 +738,8 @@ $square-border: #c2c2c2;
     white-space: nowrap;
 
     &:hover {
-      background-color: #f0f6ff;
-      color: #4084d9;
+      background-color: #fff8d8;
+      color: #202020;
     }
 
     .d-checkbox {

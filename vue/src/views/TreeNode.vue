@@ -11,11 +11,18 @@ const props = defineProps({
 const emit = defineEmits(['select', 'node-contextmenu', 'expand'])
 
 const expanded = ref(props.node.defaultExpanded ?? props.defaultExpanded)
+if (typeof props.node.expanded === 'boolean') {
+  expanded.value = props.node.expanded
+} else {
+  props.node.expanded = expanded.value
+}
 const hasChildren = () => props.node.children && props.node.children.length > 0
 
 const toggle = () => {
   if (!hasChildren()) return
   expanded.value = !expanded.value
+  // 展开状态写回公共树节点，跨工作台重新渲染时保持原状。
+  props.node.expanded = expanded.value
   if (expanded.value) emit('expand', props.node)
 }
 

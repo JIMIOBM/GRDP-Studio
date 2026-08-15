@@ -131,6 +131,10 @@ const DATA_CONFIG = {
         optional: true
       }
     ],
+    fields: {
+      topMeasuredDepth: { name_cn: '顶部测量深度', unit_label: 'm', displayDecimal: 2 },
+      bottomMeasuredDepth: { name_cn: '底部测量深度', unit_label: 'm', displayDecimal: 2 }
+    },
     keys: [
       'wellName',
       'date',
@@ -145,6 +149,10 @@ const DATA_CONFIG = {
   },
   logging: {
     title: '测井数据',
+    fields: {
+      topMeasuredDepth: { name_cn: '储层顶部深度', unit_label: 'm' },
+      bottomMeasuredDepth: { name_cn: '储层底部深度', unit_label: 'm' }
+    },
     keys: [
       'wellName',
       'interpretationNumber',
@@ -473,8 +481,6 @@ const FALLBACK_FIELDS = {
   yDeviation: { name_cn: 'Y方向偏移量', unit_label: 'm' },
   interpretationNumber: { name_cn: '解释序号', unit_label: '' },
   stratigraphy: { name_cn: '层位', unit_label: '' },
-  topMeasuredDepth: { name_cn: '储层顶部深度', unit_label: 'm' },
-  bottomMeasuredDepth: { name_cn: '储层底部深度', unit_label: 'm' },
   thickness: { name_cn: '储层厚度', unit_label: 'm' },
   porosity: { name_cn: '储层孔隙度', unit_label: '%' },
   permeability: { name_cn: '储层渗透率', unit_label: 'mD' },
@@ -499,7 +505,6 @@ const FALLBACK_FIELDS = {
   testDailyOilProduction: { name_cn: '测试油产量', unit_label: 'm³/d', displayDecimal: 2 },
   testBottomHoleFlowingPressure: { name_cn: '测试流压', unit_label: 'MPa', displayDecimal: 4 },
   equivalentTestDailyGasProduction: { name_cn: '折算测试气产量', unit_label: '10⁴m³/d', displayDecimal: 4 },
-  date: { name_cn: '日期', unit_label: '' },
   cumulativeGasProduction: { name_cn: '累产气量', unit_label: '10⁸m³', displayDecimal: 4 },
   cumulativeWaterProduction: { name_cn: '累产水量', unit_label: '10⁴m³', displayDecimal: 4 },
   cumulativeOilProduction: { name_cn: '累产油量', unit_label: '10⁴m³', displayDecimal: 4 },
@@ -519,8 +524,6 @@ const FALLBACK_FIELDS = {
   dailyGasProduction: { name_cn: '气产量', unit_label: '10⁴m³/d' },
   dailyWaterProduction: { name_cn: '水产量', unit_label: 'm³/d' },
   measuredBottomHolePressure: { name_cn: '井底压力（实测）', unit_label: '' },
-  cumulativeGasProduction: { name_cn: '累产气量', unit_label: '10⁸m³' },
-  cumulativeWaterProduction: { name_cn: '累产水量', unit_label: '10⁴m³' },
   waterGasRatio: { name_cn: '水气比', unit_label: 'm³/10⁴m³' },
   liquidGasRatio: { name_cn: '液气比', unit_label: 'm³/10⁴m³' },
   calculatedBottomHolePressure: { name_cn: '井底压力（计算）', unit_label: '' }
@@ -1247,12 +1250,20 @@ watch(
 }
 
 .data-tab.active {
-  background: #ffd800;
-  color: #303133;
+  background: #fff;
+  color: #202020;
+  font-weight: 600;
+  box-shadow: inset 0 -3px 0 #f2c811;
 }
 
 .data-tab--selectable {
   cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.data-tab--selectable:hover:not(.active) {
+  background: #fff8d8;
+  color: #202020;
 }
 
 .data-toolbar {
@@ -1264,11 +1275,11 @@ watch(
 }
 
 .import-button--dark {
-  --el-button-bg-color: #000;
-  --el-button-border-color: #000;
+  --el-button-bg-color: #252525;
+  --el-button-border-color: #252525;
   --el-button-text-color: #fff;
-  --el-button-hover-bg-color: #000;
-  --el-button-hover-border-color: #000;
+  --el-button-hover-bg-color: #050505;
+  --el-button-hover-border-color: #050505;
   --el-button-hover-text-color: #fff;
   --el-button-active-bg-color: #000;
   --el-button-active-border-color: #000;

@@ -27,12 +27,14 @@ const TABLE_COLUMNS = [
 ]
 
 const activeCurve = ref('曲线1')
+const analysisTableCollapsed = ref(false)
 const rows = ref([])
 const importing = ref(false)
 const importDialogVisible = ref(false)
 const chartEl = ref(null)
 let chart = null
 let chartFrame = null
+let chartResizeTimer = null
 
 const pageTitle = computed(() =>
   `${props.wellName} 相渗数据${props.relativePermeabilityIndex || 1}`.trim()
@@ -205,10 +207,22 @@ const renderChart = () => {
 
   chart.setOption({
     animation: false,
-    color: [activeCurve.value === '曲线1' ? '#1677ff' : '#e5484d'],
+    color: ['#1677ff'],
+    title: {
+      text: activeCurve.value === '曲线1'
+        ? '气相/油相相对渗透率随含水饱和度变化曲线'
+        : '水相相对渗透率随含水饱和度变化曲线',
+      left: 'center',
+      top: 8,
+      textStyle: { fontSize: 14, fontWeight: 600, color: '#333' }
+    },
+    grid: { left: 62, right: 92, top: 44, bottom: 56 },
     tooltip: {
       trigger: 'axis',
-      axisPointer: { type: 'cross' },
+      axisPointer: {
+        type: 'line',
+        lineStyle: { color: '#d936d0', type: 'solid', width: 1 }
+      },
       formatter: params => {
         const items = Array.isArray(params) ? params : [params]
         if (!items.length) return ''
@@ -218,28 +232,48 @@ const renderChart = () => {
         ].join('<br/>')
       }
     },
-    grid: { left: 84, right: 42, top: 28, bottom: 66 },
     xAxis: {
       type: 'value',
       name: '含水饱和度 Sw(%)',
       nameLocation: 'middle',
-      nameGap: 36,
+      nameGap: 34,
       min: 0,
-      splitLine: { lineStyle: { color: '#e2e8f0' } }
+      minorTick: { show: true },
+      minorSplitLine: { show: true, lineStyle: { color: '#f1f5fb' } },
+      splitLine: { show: true, lineStyle: { color: '#dce5f2' } }
     },
-    yAxis: {
-      type: 'value',
-      name: '气相/油相相对渗透率、水相相对渗透率',
-      nameLocation: 'middle',
-      nameGap: 52,
-      min: 0,
-      splitLine: { lineStyle: { color: '#e2e8f0' } }
-    },
+    yAxis: [
+      {
+        type: 'value',
+        name: '气相/油相相对渗透率',
+        nameLocation: 'middle',
+        nameGap: 44,
+        position: 'left',
+        min: 0,
+        axisLabel: { formatter: value => Number(value).toFixed(4) },
+        minorTick: { show: true },
+        minorSplitLine: { show: true, lineStyle: { color: '#f1f5fb' } },
+        splitLine: { lineStyle: { color: '#dce5f2' } }
+      },
+      {
+        type: 'value',
+        name: '水相相对渗透率',
+        nameLocation: 'middle',
+        nameGap: 44,
+        position: 'right',
+        min: 0,
+        axisLabel: { formatter: value => Number(value).toFixed(4) },
+        splitLine: { show: false }
+      }
+    ],
     series: [{
       name: activeCurve.value === '曲线1' ? '气相/油相相对渗透率' : '水相相对渗透率',
       type: 'line',
-      showSymbol: true,
-      symbolSize: 5,
+      yAxisIndex: activeCurve.value === '曲线1' ? 0 : 1,
+      showSymbol: false,
+      smooth: true,
+      lineStyle: { color: '#1677ff', width: 1.5 },
+      itemStyle: { color: '#1677ff' },
       data: rows.value.map(row => [
         row.waterSaturation,
         activeCurve.value === '曲线1'
@@ -255,12 +289,23 @@ const scheduleChart = async () => {
   await nextTick()
   if (chartFrame !== null) cancelAnimationFrame(chartFrame)
   chartFrame = requestAnimationFrame(() => {
-    chartFrame = null
-    renderChart()
+    chartFrame = requestAnimationFrame(() => {
+      chartFrame = null
+      renderChart()
+    })
   })
 }
 
 watch([activeCurve, rows], scheduleChart, { deep: true })
+watch(analysisTableCollapsed, () => {
+  // 与天然气结果分析图保持一致：折叠动画开始、结束后各重绘一次。
+  scheduleChart()
+  if (chartResizeTimer !== null) clearTimeout(chartResizeTimer)
+  chartResizeTimer = setTimeout(() => {
+    chartResizeTimer = null
+    scheduleChart()
+  }, 180)
+})
 watch(
   () => [
     props.projectId,
@@ -273,13 +318,14 @@ watch(
 )
 
 const handleResize = () => {
-  chart?.resize()
+  scheduleChart()
 }
 window.addEventListener('resize', handleResize)
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize)
   if (chartFrame !== null) cancelAnimationFrame(chartFrame)
+  if (chartResizeTimer !== null) clearTimeout(chartResizeTimer)
   disposeChart()
 })
 </script>
@@ -290,36 +336,61 @@ onBeforeUnmount(() => {
       <div class="relative-title">{{ pageTitle }}</div>
     </header>
 
-    <div class="relative-workspace">
-      <aside class="relative-data-panel">
-        <div class="data-actions">
-          <el-button
-            size="small"
-            class="import-button"
-            :loading="importing"
-            @click="chooseImportFile"
-          >
-            导入
-          </el-button>
-        </div>
+    <div class="relative-workspace" :class="{ 'table-collapsed': analysisTableCollapsed }">
+      <aside class="relative-data-panel" :class="{ collapsed: analysisTableCollapsed }">
+        <button
+          v-if="analysisTableCollapsed"
+          class="relative-collapsed-tab"
+          type="button"
+          title="展开图表数据"
+          @click="analysisTableCollapsed = false"
+        >
+          图表数据
+        </button>
 
-        <div class="relative-table-wrap">
-          <table class="relative-table">
-            <thead>
-              <tr>
-                <th class="index-column"></th>
-                <th v-for="column in TABLE_COLUMNS" :key="column.key">{{ column.label }}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="(row, index) in visibleRows" :key="index">
-                <td class="index-column">{{ String(index + 1).padStart(2, '0') }}</td>
-                <td>{{ row?.waterSaturation ?? '' }}</td>
-                <td>{{ row?.gasRelativePermeability ?? '' }}</td>
-                <td>{{ row?.waterRelativePermeability ?? '' }}</td>
-              </tr>
-            </tbody>
-          </table>
+        <div v-else class="relative-data-expanded">
+          <div class="relative-data-heading">
+            <span>图表数据</span>
+            <div class="relative-heading-actions">
+              <button
+                type="button"
+                class="relative-import-button"
+                :disabled="importing"
+                @click="chooseImportFile"
+              >
+                {{ importing ? '导入中...' : '导入' }}
+              </button>
+              <button
+                class="relative-data-toggle"
+                type="button"
+                title="收起图表数据"
+                @click="analysisTableCollapsed = true"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="#777" aria-hidden="true">
+                  <path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z" />
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="relative-table-wrap">
+            <table class="relative-table">
+              <thead>
+                <tr>
+                  <th class="index-column">序号</th>
+                  <th v-for="column in TABLE_COLUMNS" :key="column.key">{{ column.label }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(row, index) in visibleRows" :key="index">
+                  <td class="index-column">{{ String(index + 1).padStart(2, '0') }}</td>
+                  <td>{{ row?.waterSaturation ?? '' }}</td>
+                  <td>{{ row?.gasRelativePermeability ?? '' }}</td>
+                  <td>{{ row?.waterRelativePermeability ?? '' }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </aside>
 
@@ -327,16 +398,18 @@ onBeforeUnmount(() => {
         <div class="curve-selector" role="radiogroup" aria-label="相渗曲线">
           <label>
             <input v-model="activeCurve" type="radio" value="曲线1" />
-            <span>曲线 1</span>
+            <span>曲线1</span>
           </label>
           <label>
             <input v-model="activeCurve" type="radio" value="曲线2" />
-            <span>曲线 2</span>
+            <span>曲线2</span>
           </label>
         </div>
-        <div class="relative-chart-wrap">
-          <div ref="chartEl" class="relative-chart"></div>
-          <div v-if="!rows.length" class="chart-empty">暂无相渗数据</div>
+        <div class="relative-chart-body">
+          <div class="relative-chart-wrap">
+            <div ref="chartEl" class="relative-chart"></div>
+            <div v-if="!rows.length" class="chart-empty">暂无相渗数据</div>
+          </div>
         </div>
       </section>
     </div>
@@ -380,37 +453,130 @@ onBeforeUnmount(() => {
 }
 
 .relative-workspace {
-  display: grid;
   flex: 1;
-  grid-template-columns: minmax(520px, 46%) minmax(420px, 1fr);
   min-height: 0;
+  display: flex;
+  gap: 0;
+  padding: 10px 12px;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 .relative-data-panel {
+  width: 760px;
+  flex: 0 0 760px;
+  height: 100%;
   display: flex;
-  flex-direction: column;
+  min-height: 0;
+  align-self: stretch;
+  position: relative;
+  transition: width 0.16s ease, flex-basis 0.16s ease;
+
+  &.collapsed {
+    width: 34px;
+    flex-basis: 34px;
+    border: 1px solid #d4d7db;
+    border-right: 0;
+    box-sizing: border-box;
+    background: #fff;
+  }
+}
+
+.relative-data-expanded {
+  flex: 1;
   min-width: 0;
   min-height: 0;
-  border-right: 1px solid #dcdfe6;
-}
-
-.data-actions {
   display: flex;
-  flex: 0 0 39px;
-  align-items: center;
-  padding: 0 10px;
-  border-bottom: 1px solid #ebeef5;
+  flex-direction: column;
+  border: 1px solid #d4d7db;
+  border-right: 0;
+  background: #fff;
+  overflow: hidden;
 }
 
-.import-button {
-  --el-button-bg-color: #000;
-  --el-button-border-color: #000;
-  --el-button-text-color: #fff;
-  --el-button-hover-bg-color: #000;
-  --el-button-hover-border-color: #000;
-  --el-button-hover-text-color: #fff;
-  --el-button-active-bg-color: #000;
-  --el-button-active-border-color: #000;
+.relative-data-heading {
+  height: 36px;
+  flex: 0 0 36px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-sizing: border-box;
+  border-bottom: 1px solid #e2e6ea;
+  color: #222;
+  font-weight: 400;
+}
+
+.relative-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.relative-import-button {
+  height: 26px;
+  min-width: 54px;
+  padding: 0 12px;
+  border: 1px solid #777;
+  border-radius: 4px;
+  background: #fff;
+  color: #222;
+  font: inherit;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    border-color: #333;
+    background: #f5f5f5;
+  }
+
+  &:disabled {
+    border-color: #c8c8c8;
+    background: #f3f3f3;
+    color: #999;
+    cursor: not-allowed;
+  }
+}
+
+.relative-data-toggle {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+
+  &:hover {
+    background: #fff8d8;
+  }
+}
+
+.relative-collapsed-tab {
+  width: 100%;
+  height: 76px;
+  padding: 8px 0 0;
+  border: 0;
+  border-bottom: 1px solid #e2e6ea;
+  background: #fff;
+  color: #222;
+  cursor: pointer;
+  font: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  box-sizing: border-box;
+  writing-mode: vertical-rl;
+  text-orientation: upright;
+  line-height: 1.05;
+
+  &:hover {
+    background: #fff8d8;
+    color: #202020;
+    box-shadow: inset -2px 0 0 #f2c811;
+  }
 }
 
 .relative-table-wrap {
@@ -421,75 +587,105 @@ onBeforeUnmount(() => {
 
 .relative-table {
   width: 100%;
-  min-width: 520px;
+  min-width: 720px;
   border-collapse: collapse;
   table-layout: fixed;
 
   th,
   td {
-    height: 32px;
+    height: 30px;
     box-sizing: border-box;
-    border-right: 1px solid #d9dee7;
-    border-bottom: 1px solid #d9dee7;
-    padding: 0 10px;
-    text-align: center;
+    border-right: 1px solid #d4d7db;
+    border-bottom: 1px solid #d4d7db;
+    padding: 0 8px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
   }
 
   th {
     position: sticky;
     top: 0;
     z-index: 1;
-    background: #f4f6f9;
-    color: #303133;
-    font-weight: 600;
+    height: 42px;
+    padding: 4px 6px;
+    background: #f4f4f4;
+    color: #333;
+    font-weight: 400;
+    line-height: 1.35;
+    text-align: center;
+    white-space: nowrap;
   }
 
   td {
     color: #3f4650;
   }
 
-  tbody tr:hover td {
-    background: #f6faff;
-  }
 }
 
 .index-column {
-  width: 58px;
-  background: #fafafa;
-  color: #606266;
+  width: 52px;
+  background: #f4f4f4;
+  color: #333;
+  text-align: center !important;
 }
 
 .relative-chart-panel {
   display: flex;
+  flex: 1;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
+  border: 1px solid #d4d7db;
+  background: #fff;
 }
 
 .curve-selector {
   display: flex;
-  flex: 0 0 46px;
+  height: 36px;
+  flex: 0 0 36px;
   align-items: center;
-  gap: 16px;
-  padding: 0 20px;
+  gap: 20px;
+  padding: 0 14px;
+  box-sizing: border-box;
+  border-bottom: 1px solid #e2e6ea;
+  background: #fafbfc;
 
   label {
     display: inline-flex;
     align-items: center;
     gap: 6px;
+    color: #222;
     cursor: pointer;
+    white-space: nowrap;
   }
+
+  input {
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    accent-color: #303133;
+  }
+}
+
+.relative-chart-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  padding: 8px;
+  box-sizing: border-box;
 }
 
 .relative-chart-wrap {
   position: relative;
   flex: 1;
+  min-width: 0;
   min-height: 0;
 }
 
 .relative-chart {
-  width: 100%;
-  height: 100%;
+  position: absolute;
+  inset: 0;
 }
 
 .chart-empty {
@@ -498,13 +694,15 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #909399;
+  color: #999;
+  z-index: 1;
   pointer-events: none;
 }
 
-@media (max-width: 1100px) {
-  .relative-workspace {
-    grid-template-columns: minmax(480px, 46%) minmax(360px, 1fr);
+@media (max-width: 1280px) {
+  .relative-data-panel:not(.collapsed) {
+    width: 46%;
+    flex-basis: 46%;
   }
 }
 </style>
