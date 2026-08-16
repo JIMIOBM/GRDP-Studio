@@ -12,11 +12,12 @@
  * 页面路由：/single-well-productivity
  * 该页面与 IprInterface.vue 相互独立；其他菜单板块仍返回 IprInterface.vue。
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import RibbonMenu from '@/components/RibbonMenu.vue'
 import WorkspaceSidebar from '@/components/WorkspaceSidebar.vue'
+import BinomialPressureContent from '@/views/WellControlInventory/BinomialPressureContent.vue'
 import { wellApi } from '@/api/docker'
 import { getPvtRecords } from '@/utils/pvtRecords'
 import {
@@ -77,11 +78,12 @@ const activeModule = ref(
 const activeMethod = ref('')
 const selectedPvtTable = ref('')
 const selectedDataTable = ref('')
-const maximumFormationPressure = ref('56.34')
+const maximumFormationPressure = ref('50')
 const formationTemperature = ref('120')
 const calculationMethod = ref('拟压力')
 const calculationResult = ref('二项式')
 const activeContentTab = ref('chart')
+const pressureContentRef = ref(null)
 
 const activeModuleConfig = computed(
   () => MODULES.find(item => item.name === activeModule.value) || MODULES[0]
@@ -115,6 +117,17 @@ const dataTableOptions = computed(() => selectedWellName.value
 )
 
 const testTitle = computed(() => `产能试井-${activeMethod.value}`)
+const pressureTestType = computed(() => ({
+  '回压试井': 'back-pressure',
+  '等时试井': 'isochronal',
+  '修正等时': 'modified-isochronal',
+  '一点法': 'one-point'
+}[activeMethod.value] || 'back-pressure'))
+const usesPressureBinomial = computed(() =>
+  activeModule.value === '产能试井' &&
+  calculationMethod.value === '压力法' &&
+  calculationResult.value === '二项式'
+)
 
 const normalizeWells = payload => {
   const source = payload?.data?.wells ?? payload?.wells ?? []
@@ -213,7 +226,7 @@ const handleSidebarSelect = node => {
   }
 }
 
-const handleCalculate = () => {
+const handleCalculate = async () => {
   if (!selectedPvtTable.value) {
     ElMessage.warning('请选择PVT表')
     return
@@ -222,7 +235,12 @@ const handleCalculate = () => {
     ElMessage.warning('请选择数据表')
     return
   }
-  ElMessage.info(`${testTitle.value}计算功能待接入`)
+  if (!usesPressureBinomial.value) {
+    ElMessage.info('当前仅接入压力法二项式计算')
+    return
+  }
+  await nextTick()
+  pressureContentRef.value?.analyze?.()
 }
 
 const toggleParamsPanel = () => {
@@ -343,6 +361,22 @@ onMounted(() => {
             </aside>
 
             <div class="result-output-panel" :aria-label="`${testTitle}结果区域`">
+              <BinomialPressureContent
+                v-if="usesPressureBinomial && selectedDataTable"
+                :key="`${selectedWellName}-${activeMethod}-${selectedDataTable}`"
+                ref="pressureContentRef"
+                embedded
+                auto-select-data
+                :well-names="wells.map(item => item.wellName)"
+                :initial-well-name="selectedWellName"
+                :initial-test-type="pressureTestType"
+                :external-formation-pressure="Number(maximumFormationPressure)"
+                :external-temperature="Number(formationTemperature)"
+                :project-id="PROJECT_ID"
+                :gas-reservoir-id="GAS_RESERVOIR_ID"
+              />
+
+              <template v-else>
               <div v-show="activeContentTab === 'table'" class="result-table-panel">
                 <el-table
                   :data="resultGridRows"
@@ -386,6 +420,7 @@ onMounted(() => {
                   结果分析图
                 </button>
               </div>
+              </template>
             </div>
           </section>
         </template>
