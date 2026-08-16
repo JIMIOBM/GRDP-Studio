@@ -229,37 +229,10 @@ const renderChart = () => {
     grid: { left: 62, right: 92, top: chartSeries.length > 1 ? 70 : 44, bottom: 56 },
     tooltip: {
       trigger: 'axis',
-      triggerOn: 'mousemove',
-      confine: true,
       axisPointer: {
         type: 'line',
-        axis: 'x',
-        snap: false,
-        z: 100,
-        lineStyle: {
-          color: '#1677ff',
-          type: 'dashed',
-          width: 1
-        },
-        label: {
-          show: true,
-          backgroundColor: '#1677ff',
-          color: '#fff',
-          fontSize: 11,
-          padding: [3, 6],
-          borderRadius: 3,
-          formatter: params => Number(params.value).toFixed(1) + '%'
-        }
+        lineStyle: { color: '#d936d0', type: 'solid', width: 1 }
       },
-      backgroundColor: 'rgba(255, 255, 255, 0.98)',
-      borderColor: '#e4e7ed',
-      borderWidth: 1,
-      padding: [12, 16],
-      textStyle: {
-        color: '#303133',
-        fontSize: 13
-      },
-      extraCssText: 'box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1); border-radius: 6px;',
       formatter: function (params) {
         const items = Array.isArray(params) ? params : [params]
         const item = items.find(i => i && i.value)
@@ -275,41 +248,37 @@ const renderChart = () => {
         if (!Number.isFinite(numX) || !Number.isFinite(numY)) return ''
 
         return [
-          '<div style="padding: 4px 0; line-height: 1.8;">',
-          '  <div>',
-          '    <span style="color: #909399;">孔隙度：</span>',
-          '    <strong style="color: #303133; font-size: 14px;">' + numX.toFixed(1) + '</strong>',
-          '    <span style="color: #909399;"> %</span>',
-          '  </div>',
-          '  <div style="margin-top: 4px; border-top: 1px solid #ebeef5; padding-top: 4px;">',
-          '    ' + (item.marker || '') + '',
-          '    <span style="color: #909399;">压缩系数：</span>',
-          '    <strong style="color: #303133; font-size: 14px;">' + numY.toExponential(4) + '</strong>',
-          '    <span style="color: #909399;"> MPa⁻¹</span>',
-          '  </div>',
-          '</div>'
-        ].join('')
+          `孔隙度：${numX.toFixed(1)} %`,
+          `${item.marker}${item.seriesName}：${numY.toExponential(4)} MPa⁻¹`
+        ].join('<br/>')
       }
     },
     xAxis: {
       type: 'value',
       min: 0,
-      // max: 50,
       interval: 5,
-      name: '岩石孔隙度 φ(%)'
+      name: '岩石孔隙度 φ(%)',
+      nameLocation: 'middle',
+      nameGap: 34,
+      minorTick: { show: true },
+      minorSplitLine: { show: true, lineStyle: { color: '#f1f5fb' } },
+      splitLine: { show: true, lineStyle: { color: '#dce5f2' } }
     },
-   yAxis: [{
-  type: 'log',
-  name: activeCurveOption.value.yAxisLabel,
-  nameLocation: 'middle', nameGap: 44,
-  min: yMin > 0 ? yMin * 0.5 : 1e-4,
-  axisLabel: {
-    formatter: v => Number(v).toExponential(1)
-  },
-  splitLine: { lineStyle: { color: '#dce5f2' } }
-}],
+    yAxis: [{
+      type: 'log',
+      name: activeCurveOption.value.yAxisLabel,
+      nameLocation: 'middle',
+      nameGap: 44,
+      min: yMin > 0 ? yMin * 0.5 : 1e-4,
+      axisLabel: {
+        formatter: v => Number(v).toExponential(1)
+      },
+      minorTick: { show: true },
+      minorSplitLine: { show: true, lineStyle: { color: '#f1f5fb' } },
+      splitLine: { show: true, lineStyle: { color: '#dce5f2' } }
+    }],
     series: chartSeries
-  })
+  }, true)
 
 
   requestAnimationFrame(() => {
@@ -559,10 +528,10 @@ onBeforeUnmount(() => {
       </div>
 
       <div v-show="!paramsCollapsed" class="param-tabs">
-        <div class="param-tab" :class="{ active: activeParamTab === 'input' }" @click="activeParamTab = 'input'">
+        <div class="rock-param-tab" :class="{ active: activeParamTab === 'input' }" @click="activeParamTab = 'input'">
           输入
         </div>
-        <div v-if="hasOutputResults" class="param-tab" :class="{ active: activeParamTab === 'output' }"
+        <div v-if="hasOutputResults" class="rock-param-tab" :class="{ active: activeParamTab === 'output' }"
           @click="activeParamTab = 'output'">
           输出
         </div>
@@ -582,7 +551,12 @@ onBeforeUnmount(() => {
           :class="{ active: activeCurve === curve.name }" @click="activeCurve = curve.name">{{ curve.name }}</button>
       </div>
 
-      <div v-show="activeContentTab === 'chart'" ref="chartEl" class="chart-instance"></div>
+      <div v-show="activeContentTab === 'chart'" class="rock-chart">
+        <div class="rock-chart-plot-shell">
+          <div ref="chartEl" class="chart-instance"></div>
+          <div v-if="currentCurveItems.length === 0" class="rock-chart-empty">暂无计算结果</div>
+        </div>
+      </div>
 
       <div v-show="activeContentTab === 'table'" class="data-list-panel">
         <div class="rock-data-grid" aria-label="岩石性质数据列表">
@@ -616,51 +590,71 @@ onBeforeUnmount(() => {
   min-height: 0;
   display: flex;
   gap: 0;
+  padding: 10px 12px;
+  box-sizing: border-box;
   overflow: hidden;
   background: #fff;
 }
 
 /* ─── 左侧参数面板 ─── */
 .params-panel {
-  flex-shrink: 0;
   width: 260px;
+  flex: 0 0 260px;
   height: 100%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   position: relative;
   transition: width 0.18s ease, flex-basis 0.18s ease;
-  border-right: 1px solid #e4e7ed;
+  box-sizing: border-box;
+  border: 1px solid #d4d7db;
+  border-right: 0;
+  background: #fff;
+  overflow: hidden;
 
   &.collapsed {
-    width: 22px !important;
-    min-width: 22px !important;
-    border-right: none;
-    background: #fafbfc;
+    width: 34px !important;
+    min-width: 34px !important;
+    flex-basis: 34px;
+    background: #fff;
   }
 }
 
 .panel-collapsed-tab {
-  writing-mode: vertical-lr;
-  text-orientation: upright;
-  padding: 20px 4px;
+  width: 100%;
+  height: 76px;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid #e2e6ea;
+  background: #fff;
+  color: #222;
   cursor: pointer;
-  font-size: 13px;
-  color: #606266;
-  letter-spacing: 3px;
-  user-select: none;
+  font: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding-top: 8px;
+  box-sizing: border-box;
+  writing-mode: vertical-rl;
+  text-orientation: upright;
+  line-height: 1.05;
+  letter-spacing: 0;
 
   &:hover {
+    background: #eef4ff;
     color: #409eff;
   }
 }
 
 .panel-head {
-  height: 40px;
+  height: 36px;
+  flex: 0 0 36px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 14px;
-  border-bottom: 1px solid #ebeef5;
+  padding: 0 12px;
+  box-sizing: border-box;
+  border-bottom: 1px solid #e2e6ea;
   font-size: 14px;
   font-weight: 500;
   color: #303133;
@@ -683,15 +677,10 @@ onBeforeUnmount(() => {
 
 .panel-body {
   flex: 1;
-  overflow-y: auto;
-  padding: 4px 12px 14px;
-}
-
-.panel-body {
-  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 12px 14px;
-  /* ← 改为与天然气一致 */
+  box-sizing: border-box;
 }
 
 .parameter-section+.parameter-section {
@@ -797,7 +786,7 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 
-.param-tab {
+.rock-param-tab {
   flex: 1;
   display: flex;
   align-items: center;
@@ -809,11 +798,6 @@ onBeforeUnmount(() => {
 
   &:last-child {
     border-right: none;
-  }
-
-  &:hover {
-    background-color: #eef4ff;
-    color: #1f6fd6;
   }
 
   &.active {
@@ -831,47 +815,56 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  border: 1px solid #d4d7db;
+  background: #fff;
 }
 
 .dynamic-result-tabs {
-  height: 38px;
+  height: 34px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  padding: 0 18px;
-  border-bottom: 1px solid #ebeef5;
-  background: #fafbfc;
+  border-bottom: 1px solid #e4e7ed;
+  background: #fafafa;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .dynamic-result-tab {
-  height: 28px;
-  padding: 0 16px;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  background: #fff;
-  color: #303133;
-  font-size: 13px;
+  height: 34px;
+  max-width: 340px;
+  border: 0;
+  border-right: 1px solid #e4e7ed;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: #409eff;
+  font-size: 14px;
   font-weight: 600;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
   cursor: default;
-  outline: none;
+  white-space: nowrap;
+
+  &.active {
+    border-bottom-color: #409eff;
+    background: #fff;
+  }
 }
 
 .dynamic-result-tab-text {
-  white-space: nowrap;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 420px;
-  display: inline-block;
+  white-space: nowrap;
 }
 
 .chart-tabs {
-  height: 36px;
-  flex-shrink: 0;
+  height: 34px;
   display: flex;
-  align-items: flex-end;
-  padding-left: 8px;
   border-bottom: 1px solid #e4e7ed;
-  background: #fff;
+  flex-shrink: 0;
+  background: #fafafa;
 }
 
 .chart-tab {
@@ -883,8 +876,6 @@ onBeforeUnmount(() => {
   cursor: pointer;
   border-bottom: 2px solid transparent;
   white-space: nowrap;
-  height: 34px;
-  line-height: 32px;
 
   &:hover {
     color: #409eff;
@@ -898,10 +889,37 @@ onBeforeUnmount(() => {
   }
 }
 
-.chart-instance {
+.rock-chart {
   flex: 1;
   min-height: 0;
+  display: flex;
+  padding: 8px;
+  box-sizing: border-box;
+}
+
+.rock-chart-plot-shell {
+  flex: 1;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+}
+
+.chart-instance {
+  position: absolute;
+  inset: 0;
   width: 100%;
+}
+
+.rock-chart-empty {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: #999;
+  pointer-events: none;
 }
 
 .data-list-panel {

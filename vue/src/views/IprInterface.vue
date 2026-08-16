@@ -39,6 +39,7 @@ import {
 import {
   workspaceActiveNodeId,
   workspacePendingCommand,
+  workspacePendingNode,
   workspaceSelectedWellName,
   workspaceTreeCollapsed,
   workspaceTreeData,
@@ -3720,6 +3721,12 @@ onMounted(async () => {
   if (pendingCommand) {
     workspacePendingCommand.value = null
     await handleCommand(pendingCommand)
+  }
+
+  const pendingNode = workspacePendingNode.value
+  if (pendingNode) {
+    workspacePendingNode.value = null
+    await handleSelect(pendingNode)
   }
 })
 

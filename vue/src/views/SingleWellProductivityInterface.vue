@@ -22,6 +22,7 @@ import { getPvtRecords } from '@/utils/pvtRecords'
 import {
   workspaceActiveNodeId,
   workspacePendingCommand,
+  workspacePendingNode,
   workspaceSelectedWellName,
   workspaceTreeCollapsed,
   workspaceTreeData,
@@ -206,11 +207,22 @@ const selectWell = wellName => {
   selectedDataTable.value = ''
 }
 
-const handleSidebarSelect = node => {
+const handleSidebarSelect = async node => {
   workspaceActiveNodeId.value = node?.id || ''
   if (node?.wellName) {
     selectWell(node.wellName)
   }
+
+  if (!node) return
+
+  const isWorkspaceGroup = WORKSPACE_GROUPS.some(group => group.id === node.type)
+  const isWellNode = node.wellName && node.label === node.wellName
+  const isRootNode = ['g-well', 'g-reservoir', 'g-group'].includes(node.id)
+
+  if (isWorkspaceGroup || isWellNode || isRootNode) return
+
+  workspacePendingNode.value = node
+  await router.push({ name: 'IprInterface' })
 }
 
 const handleCalculate = () => {

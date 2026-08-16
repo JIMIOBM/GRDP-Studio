@@ -20,8 +20,13 @@ const TABLE_COLUMNS = [
   { key: 'waterSaturation', label: '含水饱和度', aliases: ['含水饱和度', '含水饱和度(%)', 'Sw', 'waterSaturation'] },
   {
     key: 'gasRelativePermeability',
-    label: '气相/油相相对渗透率',
-    aliases: ['气相/油相相对渗透率', '气相相对渗透率', '油相相对渗透率', 'Krg', 'Kro', 'gasRelativePermeability']
+    label: '气相相对渗透率',
+    aliases: ['气相相对渗透率', '气相相对渗透率(dless)', 'Krg', 'gasRelativePermeability']
+  },
+  {
+    key: 'oilRelativePermeability',
+    label: '油相相对渗透率',
+    aliases: ['油相相对渗透率', '油相相对渗透率(dless)', 'Kro', 'oilRelativePermeability']
   },
   { key: 'waterRelativePermeability', label: '水相相对渗透率', aliases: ['水相相对渗透率', '水相相对渗透率(dless)', 'Krw', 'waterRelativePermeability'] }
 ]
@@ -49,6 +54,12 @@ const visibleRows = computed(() => {
   const rowCount = Math.max(27, rows.value.length)
   return Array.from({ length: rowCount }, (_, index) => rows.value[index] || null)
 })
+
+const visibleTableColumns = computed(() => [
+  TABLE_COLUMNS[0],
+  activeCurve.value === '曲线1' ? TABLE_COLUMNS[1] : TABLE_COLUMNS[2],
+  TABLE_COLUMNS[3]
+])
 
 const normalizeHeader = value =>
   String(value ?? '')
@@ -145,8 +156,9 @@ const parseWorkbook = async (file, options = {}) => {
     const rowNumber = headerIndex + offset + 2
     return [{
       waterSaturation: validateNumber(values[0], rowNumber, '含水饱和度'),
-      gasRelativePermeability: validateNumber(values[1], rowNumber, '气相/油相相对渗透率'),
-      waterRelativePermeability: validateNumber(values[2], rowNumber, '水相相对渗透率')
+      gasRelativePermeability: validateNumber(values[1], rowNumber, '气相相对渗透率'),
+      oilRelativePermeability: validateNumber(values[2], rowNumber, '油相相对渗透率'),
+      waterRelativePermeability: validateNumber(values[3], rowNumber, '水相相对渗透率')
     }]
   })
 
@@ -165,7 +177,13 @@ const loadStoredRows = () => {
     props.wellName,
     props.relativePermeabilityIndex
   )
-  rows.value = Array.isArray(record?.rows) ? record.rows : []
+  rows.value = Array.isArray(record?.rows)
+    ? record.rows.map(row => ({
+        ...row,
+        // 兼容旧版三列表格；重新导入四列数据后将使用独立油相数据。
+        oilRelativePermeability: row.oilRelativePermeability ?? row.gasRelativePermeability
+      }))
+    : []
 }
 
 const handleImport = async ({ file, options }) => {
@@ -204,19 +222,32 @@ const renderChart = () => {
     disposeChart()
     chart = echarts.init(element)
   }
+  const hasChartData = rows.value.length > 0
+  const curveColor = '#1677ff'
 
   chart.setOption({
     animation: false,
-    color: ['#1677ff'],
+    color: [curveColor, curveColor],
     title: {
       text: activeCurve.value === '曲线1'
-        ? '气相/油相相对渗透率随含水饱和度变化曲线'
-        : '水相相对渗透率随含水饱和度变化曲线',
+        ? '气相与水相相对渗透率随含水饱和度变化曲线'
+        : '油相与水相相对渗透率随含水饱和度变化曲线',
       left: 'center',
       top: 8,
       textStyle: { fontSize: 14, fontWeight: 600, color: '#333' }
     },
-    grid: { left: 62, right: 92, top: 44, bottom: 56 },
+    legend: {
+      show: hasChartData,
+      type: 'scroll',
+      top: 30,
+      left: 62,
+      right: 92,
+      data: [
+        activeCurve.value === '曲线1' ? '气相相对渗透率' : '油相相对渗透率',
+        '水相相对渗透率'
+      ]
+    },
+    grid: { left: 62, right: 92, top: hasChartData ? 70 : 44, bottom: 56 },
     tooltip: {
       trigger: 'axis',
       axisPointer: {
@@ -245,7 +276,9 @@ const renderChart = () => {
     yAxis: [
       {
         type: 'value',
-        name: '气相/油相相对渗透率',
+        name: activeCurve.value === '曲线1'
+          ? '气相相对渗透率'
+          : '油相相对渗透率',
         nameLocation: 'middle',
         nameGap: 44,
         position: 'left',
@@ -266,21 +299,33 @@ const renderChart = () => {
         splitLine: { show: false }
       }
     ],
-    series: [{
-      name: activeCurve.value === '曲线1' ? '气相/油相相对渗透率' : '水相相对渗透率',
-      type: 'line',
-      yAxisIndex: activeCurve.value === '曲线1' ? 0 : 1,
-      showSymbol: false,
-      smooth: true,
-      lineStyle: { color: '#1677ff', width: 1.5 },
-      itemStyle: { color: '#1677ff' },
-      data: rows.value.map(row => [
-        row.waterSaturation,
-        activeCurve.value === '曲线1'
-          ? row.gasRelativePermeability
-          : row.waterRelativePermeability
-      ])
-    }]
+    series: [
+      {
+        name: activeCurve.value === '曲线1' ? '气相相对渗透率' : '油相相对渗透率',
+        type: 'line',
+        yAxisIndex: 0,
+        showSymbol: false,
+        smooth: true,
+        lineStyle: { color: curveColor, width: 1.5, type: 'solid' },
+        itemStyle: { color: curveColor },
+        data: rows.value.map(row => [
+          row.waterSaturation,
+          activeCurve.value === '曲线1'
+            ? row.gasRelativePermeability
+            : row.oilRelativePermeability
+        ])
+      },
+      {
+        name: '水相相对渗透率',
+        type: 'line',
+        yAxisIndex: 1,
+        showSymbol: false,
+        smooth: true,
+        lineStyle: { color: curveColor, width: 1.5, type: 'dashed' },
+        itemStyle: { color: curveColor },
+        data: rows.value.map(row => [row.waterSaturation, row.waterRelativePermeability])
+      }
+    ]
   }, true)
   chart.resize()
 }
@@ -378,15 +423,15 @@ onBeforeUnmount(() => {
               <thead>
                 <tr>
                   <th class="index-column">序号</th>
-                  <th v-for="column in TABLE_COLUMNS" :key="column.key">{{ column.label }}</th>
+                  <th v-for="column in visibleTableColumns" :key="column.key">{{ column.label }}</th>
                 </tr>
               </thead>
               <tbody>
                 <tr v-for="(row, index) in visibleRows" :key="index">
                   <td class="index-column">{{ String(index + 1).padStart(2, '0') }}</td>
-                  <td>{{ row?.waterSaturation ?? '' }}</td>
-                  <td>{{ row?.gasRelativePermeability ?? '' }}</td>
-                  <td>{{ row?.waterRelativePermeability ?? '' }}</td>
+                  <td v-for="column in visibleTableColumns" :key="column.key">
+                    {{ row?.[column.key] ?? '' }}
+                  </td>
                 </tr>
               </tbody>
             </table>

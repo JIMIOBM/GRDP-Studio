@@ -14,5 +14,7 @@ export const workspaceTreeKeyword = ref('')
 export const workspaceTreeCollapsed = ref(false)
 // 单井产能跳回 IPR 工作台时携带首次点击的顶部菜单命令。
 export const workspacePendingCommand = ref(null)
+// 单井产能通过公共左侧目录跳回 IPR 时，携带本次点击的具体树节点。
+export const workspacePendingNode = ref(null)
 // 仅真实的 IPR 项目树加载完成后置为 true；单井产能的临时井列表不算初始化完成。
 export const workspaceTreeHydrated = ref(false)
