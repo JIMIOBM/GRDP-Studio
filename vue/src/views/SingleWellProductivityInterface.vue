@@ -12,7 +12,7 @@
  * 页面路由：/single-well-productivity
  * 该页面与 IprInterface.vue 相互独立；其他菜单板块仍返回 IprInterface.vue。
  */
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import RibbonMenu from '@/components/RibbonMenu.vue'
@@ -81,10 +81,18 @@ const selectedPvtTable = ref('')
 const selectedDataTable = ref('')
 const maximumFormationPressure = ref('50')
 const formationTemperature = ref('120')
+const onePointAlpha = ref('0.25')
 const calculationMethod = ref('拟压力')
 const calculationResult = ref('二项式')
 const activeContentTab = ref('chart')
 const pressureContentRef = ref(null)
+const calculationOutput = ref(null)
+
+const scientific = value => {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return ''
+  return number === 0 ? '0.0000' : number.toExponential(4).replace('e', 'E')
+}
 
 const activeModuleConfig = computed(
   () => MODULES.find(item => item.name === activeModule.value) || MODULES[0]
@@ -105,12 +113,32 @@ const sidebarTreeData = computed(() => {
   )
 })
 
-const pvtTableOptions = computed(() =>
+const availablePvtRecords = computed(() =>
   selectedWellName.value
     ? getPvtRecords(PROJECT_ID, GAS_RESERVOIR_ID, selectedWellName.value)
-      .map(record => `PVT性质${record.index}`)
     : []
 )
+
+const pvtTableOptions = computed(() => {
+  return availablePvtRecords.value.map(record => `PVT性质${record.index}`)
+})
+
+const selectedPvtRecord = computed(() => {
+  if (!selectedWellName.value || !selectedPvtTable.value) return null
+  const index = Number(String(selectedPvtTable.value).match(/(\d+)$/)?.[1])
+  return availablePvtRecords.value.find(record => Number(record.index) === index) || null
+})
+
+watch(selectedPvtRecord, record => {
+  const firstResult = record?.gasResultRows?.[0]
+  const pvtTemperature = Number(
+    record?.gasSettings?.temperature ??
+    record?.gasSettings?.formationTemperature ??
+    record?.gasSettings?.reservoirTemperature ??
+    (Array.isArray(firstResult) ? firstResult[1] : firstResult?.temperature)
+  )
+  if (Number.isFinite(pvtTemperature)) formationTemperature.value = String(pvtTemperature)
+}, { immediate: true })
 
 const dataTableOptions = computed(() => selectedWellName.value
   ? [`${selectedWellName.value}-产能测试数据`]
@@ -124,10 +152,16 @@ const pressureTestType = computed(() => ({
   '修正等时': 'modified-isochronal',
   '一点法': 'one-point'
 }[activeMethod.value] || 'back-pressure'))
-const usesPressureBinomial = computed(() =>
+const pressureCalculationMethod = computed(() => ({
+  '拟压力': 'pseudo-pressure',
+  '压力平方方法': 'pressure-squared',
+  '压力法': 'pressure'
+}[calculationMethod.value] || 'pressure'))
+const usesPressureCalculation = computed(() =>
   activeModule.value === '产能试井' &&
-  calculationMethod.value === '压力法' &&
-  calculationResult.value === '二项式'
+  (calculationMethod.value === '压力法' || activeMethod.value === '一点法') &&
+  (calculationResult.value === '二项式' ||
+    (activeMethod.value === '一点法' && calculationResult.value === '指数式'))
 )
 
 const normalizeWells = payload => {
@@ -247,12 +281,13 @@ const handleCalculate = async () => {
     ElMessage.warning('请选择数据表')
     return
   }
-  if (!usesPressureBinomial.value) {
-    ElMessage.info('当前仅接入压力法二项式计算')
+  if (!usesPressureCalculation.value) {
+    ElMessage.info('当前仅接入一点法三种压力形式及其他试井的压力法二项式计算')
     return
   }
+  calculationOutput.value = null
   await nextTick()
-  pressureContentRef.value?.analyze?.()
+  await pressureContentRef.value?.analyze?.()
 }
 
 const toggleParamsPanel = () => {
@@ -354,6 +389,11 @@ onMounted(() => {
                   <input v-model="formationTemperature" inputmode="decimal" />
                 </label>
 
+                <label v-if="activeMethod === '一点法'" class="field-group">
+                  <span>产能系数（α）</span>
+                  <input v-model="onePointAlpha" inputmode="decimal" />
+                </label>
+
                 <fieldset class="radio-group">
                   <legend>计算方法</legend>
                   <label><input v-model="calculationMethod" type="radio" value="拟压力" />拟压力</label>
@@ -368,14 +408,36 @@ onMounted(() => {
                 </fieldset>
 
                   <button type="button" class="calculate-button" @click="handleCalculate">计算</button>
+                  <div v-if="calculationOutput" class="calculation-output">
+                    <template v-if="calculationOutput.calculationResultType === 'exponential'">
+                      <label class="field-group">
+                        <span>产能系数 C</span>
+                        <input :value="scientific(calculationOutput.productivityCoefficient)" readonly />
+                      </label>
+                      <label class="field-group">
+                        <span>产能指数 n</span>
+                        <input :value="Number(calculationOutput.productivityExponent).toFixed(4)" readonly />
+                      </label>
+                    </template>
+                    <template v-else>
+                      <label class="field-group">
+                        <span>达西渗流系数 A</span>
+                        <input :value="scientific(calculationOutput.darcyCoefficient)" readonly />
+                      </label>
+                      <label class="field-group">
+                        <span>非达西高速流系数 B</span>
+                        <input :value="scientific(calculationOutput.nonDarcyCoefficient)" readonly />
+                      </label>
+                    </template>
+                  </div>
                 </div>
               </template>
             </aside>
 
             <div class="result-output-panel" :aria-label="`${testTitle}结果区域`">
               <BinomialPressureContent
-                v-if="usesPressureBinomial && selectedDataTable"
-                :key="`${selectedWellName}-${activeMethod}-${selectedDataTable}`"
+                v-if="usesPressureCalculation && selectedDataTable"
+                :key="`${selectedWellName}-${activeMethod}-${selectedDataTable}-${calculationResult}`"
                 ref="pressureContentRef"
                 embedded
                 auto-select-data
@@ -384,8 +446,14 @@ onMounted(() => {
                 :initial-test-type="pressureTestType"
                 :external-formation-pressure="Number(maximumFormationPressure)"
                 :external-temperature="Number(formationTemperature)"
+                :external-one-point-alpha="Number(onePointAlpha)"
+                :external-calculation-method="pressureCalculationMethod"
+                :external-calculation-result="calculationResult === '指数式' ? 'exponential' : 'binomial'"
+                :pvt-result-rows="selectedPvtRecord?.gasResultRows || []"
+                :pvt-record="selectedPvtRecord"
                 :project-id="PROJECT_ID"
                 :gas-reservoir-id="GAS_RESERVOIR_ID"
+                @result-change="calculationOutput = $event"
               />
 
               <template v-else>
@@ -694,6 +762,10 @@ $accent-soft: #fff8d8;
   transition: background-color 0.15s ease;
 
   &:hover { background: #050505; }
+}
+
+.calculation-output {
+  margin-top: 10px;
 }
 
 .result-output-panel {
