@@ -18,8 +18,14 @@ import { ElMessage } from 'element-plus'
 import RibbonMenu from '@/components/RibbonMenu.vue'
 import WorkspaceSidebar from '@/components/WorkspaceSidebar.vue'
 import BinomialPressureContent from '@/views/WellControlInventory/BinomialPressureContent.vue'
+import ModifiedIsochronalContent from '@/views/SingleWellProductivity/ModifiedIsochronalContent.vue'
+import { NODETYPE } from '@/constants/nodeType'
 import { wellApi } from '@/api/docker'
 import { getPvtRecords } from '@/utils/pvtRecords'
+import {
+  getRememberedModifiedIsochronalWells,
+  rememberModifiedIsochronalNode
+} from '@/utils/productivityRecords'
 import {
   workspaceActiveNodeId,
   workspacePendingCommand,
@@ -31,7 +37,10 @@ import {
 } from '@/utils/workspaceTreeState'
 
 const PROJECT_ID = 6
-const GAS_RESERVOIR_ID = 3
+const GAS_RESERVOIR_ID = 1
+// 用户指定的原平台修正等时结果接口：/productivityevaluation/6/4/20
+const MODIFIED_ISOCHRONAL_PROJECT_ID = 6
+const MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID = 4
 
 const route = useRoute()
 const router = useRouter()
@@ -79,7 +88,7 @@ const activeModule = ref(
 const activeMethod = ref('')
 const selectedPvtTable = ref('')
 const selectedDataTable = ref('')
-const maximumFormationPressure = ref('50')
+const maximumFormationPressure = ref('56.34')
 const formationTemperature = ref('120')
 const onePointAlpha = ref('0.25')
 const calculationMethod = ref('拟压力')
@@ -190,12 +199,67 @@ const selectModule = (moduleName, method = '') => {
   })
 }
 
+const ensureModifiedIsochronalNode = (wellName, { activate = true, persist = true } = {}) => {
+  const wellGroup = workspaceTreeData.value.find(node => node.id === 'g-well')
+  const wellNode = wellGroup?.children?.find(node =>
+    (node.wellName || node.label) === wellName
+  )
+  if (!wellNode) return null
+
+  const productivityGroup = wellNode.children?.find(node =>
+    node.type === 'single-well-productivity' || node.label === '单井产能'
+  )
+  if (!productivityGroup) return null
+
+  let testGroup = productivityGroup.children?.find(node =>
+    node.type === 'productivity-test' || node.label === '产能试井'
+  )
+  if (!testGroup) {
+    testGroup = {
+      id: `${wellNode.id}-single-well-productivity-productivity-test`,
+      label: '产能试井',
+      type: 'productivity-test',
+      wellName,
+      children: []
+    }
+    productivityGroup.children = [...(productivityGroup.children || []), testGroup]
+  }
+
+  let resultNode = testGroup.children?.find(node =>
+    node.type === NODETYPE.NodeType_ProductivityEvaluationModifiedIsochronalWellTest ||
+    node.label === '修正等时'
+  )
+  if (!resultNode) {
+    resultNode = {
+      id: `${wellNode.id}-modified-isochronal`,
+      label: '修正等时',
+      type: NODETYPE.NodeType_ProductivityEvaluationModifiedIsochronalWellTest,
+      wellName,
+      projectId: MODIFIED_ISOCHRONAL_PROJECT_ID,
+      gasReservoirId: MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID,
+      pNodeType: NODETYPE.NodeType_ProductivityEvaluationByPseudoPressure,
+      children: []
+    }
+    testGroup.children = [...(testGroup.children || []), resultNode]
+  }
+
+  wellNode.expanded = true
+  productivityGroup.expanded = true
+  testGroup.expanded = true
+  if (persist) rememberModifiedIsochronalNode(PROJECT_ID, GAS_RESERVOIR_ID, wellName)
+  if (activate) workspaceActiveNodeId.value = resultNode.id
+  return resultNode
+}
+
 const handleCommand = async ({ group, name, parent }) => {
   // 顶部菜单栏“单井产能”板块：留在当前独立页面并切换功能模块/计算方法。
   if (group === '单井产能') {
     if (!selectedWellName.value) {
       ElMessage.warning('请先在左侧选择一口井')
       return
+    }
+    if (parent === '产能试井' && name === '修正等时') {
+      ensureModifiedIsochronalNode(selectedWellName.value)
     }
     selectModule(parent || name, parent ? name : '')
     return
@@ -262,6 +326,20 @@ const handleSidebarSelect = async node => {
 
   if (!node) return
 
+  if (
+    node.type === NODETYPE.NodeType_ProductivityEvaluationModifiedIsochronalWellTest ||
+    (node.label === '修正等时' && node.resultId)
+  ) {
+    activeModule.value = '产能试井'
+    activeMethod.value = '修正等时'
+    activeContentTab.value = 'chart'
+    await router.replace({
+      name: 'SingleWellProductivity',
+      query: { module: '产能试井', method: '修正等时', well: node.wellName }
+    })
+    return
+  }
+
   const isWorkspaceGroup = WORKSPACE_GROUPS.some(group => group.id === node.type)
   const isWellNode = node.wellName && node.label === node.wellName
   const isRootNode = ['g-well', 'g-reservoir', 'g-group'].includes(node.id)
@@ -294,11 +372,18 @@ const toggleParamsPanel = () => {
   paramsCollapsed.value = !paramsCollapsed.value
 }
 
-onMounted(() => {
+onMounted(async () => {
+  await loadWells()
+  getRememberedModifiedIsochronalWells(PROJECT_ID, GAS_RESERVOIR_ID).forEach(wellName => {
+    ensureModifiedIsochronalNode(wellName, { activate: false, persist: false })
+  })
   if (selectedWellName.value) {
-    selectModule(activeModule.value, String(route.query.method || ''))
+    const method = String(route.query.method || '')
+    if (activeModule.value === '产能试井' && method === '修正等时') {
+      ensureModifiedIsochronalNode(selectedWellName.value)
+    }
+    selectModule(activeModule.value, method)
   }
-  loadWells()
 })
 </script>
 
@@ -326,7 +411,22 @@ onMounted(() => {
             </div>
           </div>
 
-          <section class="test-workspace">
+          <ModifiedIsochronalContent
+            v-if="activeMethod === '修正等时'"
+            :project-id="MODIFIED_ISOCHRONAL_PROJECT_ID"
+            :gas-reservoir-id="MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID"
+            :well-name="selectedWellName"
+            :pvt-table-options="pvtTableOptions"
+            :data-table-options="dataTableOptions"
+            v-model:selected-pvt-table="selectedPvtTable"
+            v-model:selected-data-table="selectedDataTable"
+            v-model:maximum-formation-pressure="maximumFormationPressure"
+            v-model:formation-temperature="formationTemperature"
+            v-model:calculation-method="calculationMethod"
+            v-model:calculation-result="calculationResult"
+          />
+
+          <section v-else class="test-workspace">
             <aside class="parameter-panel" :class="{ collapsed: paramsCollapsed }">
               <button
                 v-if="paramsCollapsed"

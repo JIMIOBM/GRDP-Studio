@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { ArrowDown, ArrowRight, Folder, Document } from '@element-plus/icons-vue'
 
 const props = defineProps({
@@ -16,6 +16,10 @@ if (typeof props.node.expanded === 'boolean') {
 } else {
   props.node.expanded = expanded.value
 }
+
+watch(() => props.node.expanded, value => {
+  if (typeof value === 'boolean') expanded.value = value
+})
 const hasChildren = () => props.node.children && props.node.children.length > 0
 
 const toggle = () => {
