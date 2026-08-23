@@ -224,6 +224,19 @@ export const wellApi = {
         dockerRequest.get(`/projectanalysis/${projectId}/${gasReservoirId}/wells`)
 }
 
+/* ===== 单井产能 - 产能试井 ===== */
+export const productivityEvaluationApi = {
+  /**
+   * 获取产能评价结果。原平台返回 input/inputItems、output/evaluation、
+   * chartItems 与 iprChartItems，前端据此同时还原输入、输出、数据表和曲线。
+   */
+  getResult: (projectId, gasReservoirId, resultId, options = {}) =>
+    dockerRequest.get(
+      `/projectanalysis/productivityevaluation/${encodeURIComponent(projectId)}/${encodeURIComponent(gasReservoirId)}/${encodeURIComponent(resultId)}`,
+      options
+    )
+}
+
 /* ===== 数据管理 ===== */
 export const dataManagementApi = {
   uploadExcel: (file, options = {}) => {

@@ -32,6 +32,7 @@ import WellDataTableContent from '@/views/DataManagement/WellDataTableContent.vu
 import { NODETYPE } from '@/constants/nodeType'
 import { analyticMethodApi, dataManagementApi, dynamicBalanceApi, materialBalanceApi, nodeApi, notifyApi, projectApi, typicalCurveApi, waterInvasionApi } from '@/api/docker'
 import { createOrReusePvtRecord, ensureInitialPvtRecord, getPvtRecords } from '@/utils/pvtRecords'
+import { hasRememberedModifiedIsochronalNode } from '@/utils/productivityRecords'
 import {
   getNextRelativePermeabilityIndex,
   getRelativePermeabilityRecords
@@ -47,10 +48,10 @@ import {
   workspaceTreeKeyword
 } from '@/utils/workspaceTreeState'
 
-const PROJECT_ID = 6
+const PROJECT_ID = 4
 const GAS_RESERVOIR_ID = 3
-const router = useRouter()
 const FLOW_BALANCE_NODE_TYPE = NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure
+const router = useRouter()
 
 const WELL_GROUPS = [
   { id: 'data-management', label: '数据管理' },
@@ -662,6 +663,26 @@ const createWellDataNodes = (wellName, wellId) =>
         }))
   }))
 
+const createRememberedProductivityNodes = (wellName, wellId) => {
+  if (!hasRememberedModifiedIsochronalNode(PROJECT_ID, GAS_RESERVOIR_ID, wellName)) return []
+  const baseId = wellId || wellName
+  return [{
+    id: `${baseId}-single-well-productivity-productivity-test`,
+    label: '产能试井',
+    type: 'productivity-test',
+    wellName,
+    defaultExpanded: true,
+    children: [{
+      id: `${baseId}-modified-isochronal`,
+      label: '修正等时',
+      type: NODETYPE.NodeType_ProductivityEvaluationModifiedIsochronalWellTest,
+      wellName,
+      pNodeType: NODETYPE.NodeType_ProductivityEvaluationByPseudoPressure,
+      children: []
+    }]
+  }]
+}
+
 const createEmptyWell = (wellName, wellId) => ({ //创建一口空井
   id: wellId || `well-${wellName}`,
   label: wellName,
@@ -676,7 +697,9 @@ const createEmptyWell = (wellName, wellId) => ({ //创建一口空井
     defaultExpanded: false,
     children: group.id === 'data-management'
       ? createWellDataNodes(wellName, wellId)
-      : []
+      : group.id === 'single-well-productivity'
+        ? createRememberedProductivityNodes(wellName, wellId)
+        : []
   }))
 })
 
@@ -731,6 +754,23 @@ const ensureWell = (wellName, wellId) => { //确保井存在
         } else if (dataNode.children.length) {
           existingNode.children = dataNode.children
           existingNode.defaultExpanded = dataNode.defaultExpanded
+        }
+      })
+    } else if (group.id === 'single-well-productivity') {
+      createRememberedProductivityNodes(wellName, wellItem.id).forEach(productivityNode => {
+        const existingNode = groupItem.children.find(item =>
+          item.type === productivityNode.type || item.label === productivityNode.label
+        )
+        if (!existingNode) {
+          groupItem.children.push(productivityNode)
+        } else {
+          existingNode.children = existingNode.children || []
+          productivityNode.children.forEach(child => {
+            if (!existingNode.children.some(item => item.type === child.type || item.label === child.label)) {
+              existingNode.children.push(child)
+            }
+          })
+          existingNode.defaultExpanded = productivityNode.defaultExpanded
         }
       })
     }
@@ -3458,6 +3498,18 @@ const handleSelect = async (node) => { // 点击左侧树节点
 
   if (isWellMenuGroup) return
 
+  if (node.type === NODETYPE.NodeType_ProductivityEvaluationModifiedIsochronalWellTest) {
+    await router.push({
+      name: 'SingleWellProductivity',
+      query: {
+        module: '产能试井',
+        method: '修正等时',
+        well: nodeWellName
+      }
+    })
+    return
+  }
+
   if (node.type === 'well-data-pvt') {
     currentView.value = 'pvt-properties'
     currentViewNode.value = {
@@ -3721,12 +3773,6 @@ onMounted(async () => {
   if (pendingCommand) {
     workspacePendingCommand.value = null
     await handleCommand(pendingCommand)
-  }
-
-  const pendingNode = workspacePendingNode.value
-  if (pendingNode) {
-    workspacePendingNode.value = null
-    await handleSelect(pendingNode)
   }
 })
 
