@@ -12,7 +12,8 @@ const props = defineProps({
   wellName: { type: String, required: true },
   projectId: { type: [Number, String], required: true },
   gasReservoirId: { type: [Number, String], required: true },
-  relativePermeabilityIndex: { type: [Number, String], default: 1 }
+  relativePermeabilityIndex: { type: [Number, String], default: 1 },
+  draft: { type: Boolean, default: false }
 })
 const emit = defineEmits(['imported'])
 
@@ -42,7 +43,9 @@ let chartFrame = null
 let chartResizeTimer = null
 
 const pageTitle = computed(() =>
-  `${props.wellName} 相渗数据${props.relativePermeabilityIndex || 1}`.trim()
+  props.draft
+    ? `${props.wellName} 相渗数据`.trim()
+    : `${props.wellName} 相渗数据${props.relativePermeabilityIndex || 1}`.trim()
 )
 
 const dataTemplateRows = computed(() => [TABLE_COLUMNS.map(column => column.label)])

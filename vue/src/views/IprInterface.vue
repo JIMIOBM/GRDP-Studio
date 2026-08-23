@@ -3458,6 +3458,21 @@ const handleSelect = async (node) => { // 点击左侧树节点
 
   if (isWellMenuGroup) return
 
+  if (node.type === 'well-data-relative-permeability-group') {
+    currentView.value = 'relative-permeability'
+    currentViewNode.value = {
+      ...node,
+      relativePermeabilityIndex: getNextRelativePermeabilityIndex(
+        PROJECT_ID,
+        GAS_RESERVOIR_ID,
+        nodeWellName
+      ),
+      draft: true,
+      viewInstanceKey: `relative-permeability-new-${nodeWellName}-${Date.now()}`
+    }
+    return
+  }
+
   if (node.type === 'well-data-pvt') {
     currentView.value = 'pvt-properties'
     currentViewNode.value = {
@@ -3651,6 +3666,7 @@ const handleCommand = async ({ group, name, parent }) => { // 接收顶部菜单
         GAS_RESERVOIR_ID,
         selectedWellName.value
       ),
+      draft: true,
       viewInstanceKey: `relative-permeability-new-${selectedWellName.value}-${Date.now()}`
     }
     return
@@ -3783,6 +3799,7 @@ onBeforeUnmount(() => {
           :project-id="PROJECT_ID"
           :gas-reservoir-id="GAS_RESERVOIR_ID"
           :relative-permeability-index="currentViewNode?.relativePermeabilityIndex"
+          :draft="Boolean(currentViewNode?.draft)"
           @imported="handleRelativePermeabilityImported"
         />
         <WellDataTableContent v-if="currentView === 'well-data-table'"
