@@ -48,8 +48,8 @@ import {
   workspaceTreeKeyword
 } from '@/utils/workspaceTreeState'
 
-const PROJECT_ID = 4
-const GAS_RESERVOIR_ID = 3
+const PROJECT_ID = 6
+const GAS_RESERVOIR_ID = 1
 const FLOW_BALANCE_NODE_TYPE = NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure
 const router = useRouter()
 
@@ -774,6 +774,23 @@ const ensureWell = (wellName, wellId) => { //确保井存在
         }
       })
     }
+    
+    if (group.id === 'wellbore-capacity') {
+      const pvtModelGroup = groupItem.children.find(item => item.type === 'wellbore-pvt-group')
+      if (!pvtModelGroup) {
+        groupItem.children.push({
+          type: 'wellbore-pvt-group',
+          label: 'PVT模型',
+          id: `${wellItem.id}-wellbore-pvt-group`,
+          wellName,
+          defaultExpanded: false,
+          children: createPvtModelNodes(wellName, wellItem.id)
+        })
+      } else {
+        pvtModelGroup.children = createPvtModelNodes(wellName, wellItem.id)
+        pvtModelGroup.defaultExpanded = pvtModelGroup.children.length > 0
+      }
+    }
   })
 
   return wellItem
@@ -1409,6 +1426,26 @@ const refreshPvtNodesForWell = wellName => {
   // 替换子节点数组，确保顶部新增编号后左侧目录立即更新。
   pvtGroup.children = [...createPvtPropertyNodes(wellName, well.id)]
   pvtGroup.defaultExpanded = pvtGroup.children.length > 0
+}
+
+
+const createPvtModelNodes = (wellName, wellId) =>
+  getPvtRecords(PROJECT_ID, GAS_RESERVOIR_ID, wellName).map(record => ({
+    id: `${wellId || wellName}-wellbore-pvt-${record.index}`,
+    label: `PVT模型${record.index}`,
+    type: 'wellbore-pvt',
+    wellName,
+    pvtIndex: record.index,
+    children: []
+  }))
+
+const refreshPvtModelNodesForWell = wellName => {
+  const well = ensureWell(wellName, `well-${wellName}`)
+  const wellboreGroup = well?.children.find(item => item.type === 'wellbore-capacity')
+  const pvtModelGroup = wellboreGroup?.children.find(item => item.type === 'wellbore-pvt-group')
+  if (!pvtModelGroup) return
+  pvtModelGroup.children = [...createPvtModelNodes(wellName, well.id)]
+  pvtModelGroup.defaultExpanded = pvtModelGroup.children.length > 0
 }
 
 const refreshRelativePermeabilityNodesForWell = wellName => {
@@ -3515,7 +3552,6 @@ const handleSelect = async (node) => { // 点击左侧树节点
     currentViewNode.value = {
       ...node,
       initialPropertyTab: getPvtInitialPropertyTab(),
-      // 重复点击同一编号时也重新挂载组件，确保页签回到天然气性质。
       viewInstanceKey: `${node.id}-${Date.now()}`
     }
     return
@@ -3647,7 +3683,7 @@ const handleCommand = async ({ group, name, parent }) => { // 接收顶部菜单
     return
   }
 
-  if (name === 'PVT性质') {
+    if (name === 'PVT性质') {
     const activeWellName = selectedWellName.value || activeNode.value?.wellName || (
       activeNode.value?.type === NODETYPE.NodeType_Well ? activeNode.value.label : ''
     )
@@ -3673,7 +3709,6 @@ const handleCommand = async ({ group, name, parent }) => { // 接收顶部菜单
       )
       if (!node) throw new Error('PVT性质节点创建失败')
 
-      // 创建或复用后立即进入该编号的数据列表；实例键确保复用草稿时也重置页面页签。
       lastPvtPropertyTab.value = '天然气性质'
       activeNodeId.value = node.id
       activeNode.value = node
@@ -3685,6 +3720,47 @@ const handleCommand = async ({ group, name, parent }) => { // 接收顶部菜单
       }
     } catch (error) {
       ElMessage.error(error.response?.data?.message || error.message || 'PVT性质节点创建失败')
+    }
+    return
+  }
+
+  if (name === 'PVT模型') {
+    const activeWellName = selectedWellName.value || activeNode.value?.wellName || (
+      activeNode.value?.type === NODETYPE.NodeType_Well ? activeNode.value.label : ''
+    )
+    if (!activeWellName) {
+      ElMessage.warning('请先选择一口井')
+      return
+    }
+
+    try {
+      const { record } = createOrReusePvtRecord(
+        PROJECT_ID,
+        GAS_RESERVOIR_ID,
+        activeWellName
+      )
+
+      refreshPvtModelNodesForWell(activeWellName)
+      const well = getWellGroup()?.children.find(item => item.wellName === activeWellName)
+      const pvtModelGroup = well?.children
+        .find(item => item.type === 'wellbore-capacity')?.children
+        .find(item => item.type === 'wellbore-pvt-group')
+      const node = pvtModelGroup?.children.find(
+        item => Number(item.pvtIndex) === Number(record.index)
+      )
+      if (!node) throw new Error('PVT模型节点创建失败')
+
+      lastPvtPropertyTab.value = '天然气性质'
+      activeNodeId.value = node.id
+      activeNode.value = node
+      currentView.value = 'pvt-properties'
+      currentViewNode.value = {
+        ...node,
+        initialPropertyTab: '天然气性质',
+        viewInstanceKey: `${node.id}-${Date.now()}`
+      }
+    } catch (error) {
+      ElMessage.error(error.response?.data?.message || error.message || 'PVT模型节点创建失败')
     }
     return
   }

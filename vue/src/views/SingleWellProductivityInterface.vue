@@ -36,8 +36,8 @@ import {
   workspaceTreeKeyword
 } from '@/utils/workspaceTreeState'
 
-const PROJECT_ID = 4
-const GAS_RESERVOIR_ID = 3
+const PROJECT_ID = 6
+const GAS_RESERVOIR_ID = 1
 // 用户指定的原平台修正等时结果接口：/productivityevaluation/6/4/20
 const MODIFIED_ISOCHRONAL_PROJECT_ID = 6
 const MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID = 4
