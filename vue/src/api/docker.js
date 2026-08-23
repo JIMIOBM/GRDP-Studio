@@ -107,6 +107,16 @@ export const analyticMethodApi = {
     })
 }
 
+/* ===== 单井产能 - 产能试井算法 ===== */
+export const productivityTestApi = {
+  calculateIsochronal: (data, options = {}) =>
+    dockerRequest.post(
+      '/algorithms/productivity/isochronal-seepage-coefficient',
+      data,
+      options
+    )
+}
+
 /* ===== 通知日志 ===== */
 export const notifyApi = {
   getLogs: (params) =>

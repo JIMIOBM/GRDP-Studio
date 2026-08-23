@@ -167,10 +167,7 @@ const pressureCalculationMethod = computed(() => ({
   '压力法': 'pressure'
 }[calculationMethod.value] || 'pressure'))
 const usesPressureCalculation = computed(() =>
-  activeModule.value === '产能试井' &&
-  (calculationMethod.value === '压力法' || activeMethod.value === '一点法') &&
-  (calculationResult.value === '二项式' ||
-    (activeMethod.value === '一点法' && calculationResult.value === '指数式'))
+  activeModule.value === '产能试井' && Boolean(activeMethod.value)
 )
 
 const normalizeWells = payload => {
@@ -357,10 +354,6 @@ const handleCalculate = async () => {
   }
   if (!selectedDataTable.value) {
     ElMessage.warning('请选择数据表')
-    return
-  }
-  if (!usesPressureCalculation.value) {
-    ElMessage.info('当前仅接入一点法三种压力形式及其他试井的压力法二项式计算')
     return
   }
   calculationOutput.value = null

@@ -52,6 +52,7 @@ const TEST_TYPES = [
   { value: 'isochronal', label: '等时' },
   { value: 'modified-isochronal', label: '修正等时' }
 ]
+const ATMOSPHERIC_PRESSURE_MPA = 0.101325
 const normalizeCalculationMethod = value => ({
   '拟压力': 'pseudo-pressure',
   '压力平方方法': 'pressure-squared',
@@ -94,7 +95,6 @@ const productivityTableOptions = computed(() => TEST_TYPES.map(item => ({
   label: `${selectedWellName.value || '当前井'} ${item.label}试井数据`,
   hasData: sourceRows.value.some(row => row.testType === item.value)
 })))
-const showsStablePoint = computed(() => activeTestType.value === 'isochronal')
 const resultEmptyText = computed(() => {
   const chartName = activeChart.value === 'ipr' ? 'IPR曲线' : '结果分析图'
   return hasMethodData.value
@@ -267,7 +267,7 @@ const extractExactPseudoPressure = response => {
 }
 
 const loadExactPseudoPressureRows = async payload => {
-  const pressures = new Set([Number(payload.formationPressure)])
+  const pressures = new Set([Number(payload.formationPressure), ATMOSPHERIC_PRESSURE_MPA])
   payload.points.forEach(point => {
     pressures.add(Number.isFinite(point.recoveryPressure)
       ? point.recoveryPressure
@@ -296,12 +296,6 @@ const loadExactPseudoPressureRows = async payload => {
     rows.push({ pressure, pseudoPressure })
   }
   return rows
-}
-
-const toBoolean = (value) => {
-  if (typeof value === 'boolean') return value
-  if (typeof value === 'number') return value !== 0
-  return ['true', '1', 'yes', 'y', '是', '稳定'].includes(String(value || '').trim().toLowerCase())
 }
 
 const normalizePressure = (value) => {
@@ -390,8 +384,7 @@ const normalizeSourceRow = (row, index) => ({
   temperature: toNumber(readField(row, [
     'formationTemperature', 'reservoirTemperature', 'gasReservoirTemperature',
     'temperature', '地层温度', '气藏温度'
-  ])),
-  stabilized: toBoolean(readField(row, ['stabilized', 'isStabilized', 'stable', '稳定点']))
+  ]))
 })
 
 const createBlankRow = (sequence) => ({
@@ -401,8 +394,7 @@ const createBlankRow = (sequence) => ({
   recoveryPressure: null,
   flowRate: null,
   equivalentFlowRate: null,
-  flowingPressure: null,
-  stabilized: false
+  flowingPressure: null
 })
 
 const applySourceRows = () => {
@@ -410,8 +402,7 @@ const applySourceRows = () => {
   hasMethodData.value = matching.length > 0
   inputRows.value = matching.map((row, index) => ({
     ...row,
-    sequence: row.sequence ?? index + 1,
-    stabilized: Boolean(row.stabilized)
+    sequence: row.sequence ?? index + 1
   }))
   if (!inputRows.value.length) {
     const count = activeTestType.value === 'one-point' ? 1 : 4
@@ -527,8 +518,7 @@ const buildPayload = () => ({
       : Number(row.flowingPressure),
     recoveryPressure: row.recoveryPressure === '' || row.recoveryPressure === null
       ? null
-      : Number(row.recoveryPressure),
-    stabilized: Boolean(row.stabilized)
+      : Number(row.recoveryPressure)
   })),
   migrationPoints: activeTestType.value === 'one-point'
     ? sourceRows.value
@@ -537,8 +527,7 @@ const buildPayload = () => ({
         sequence: Number(row.sequence || index + 1),
         flowRate: row.flowRate,
         flowingPressure: row.flowingPressure,
-        recoveryPressure: row.recoveryPressure,
-        stabilized: false
+        recoveryPressure: row.recoveryPressure
       }))
     : null
 })
@@ -576,8 +565,7 @@ const normalizeAnalysisPoint = (point, index) => ({
   ])),
   sourcePressure: normalizePressure(readField(point, [
     'sourcePressure', 'source_pressure', 'recoveryPressure', 'formationPressure', 'reservoirPressure'
-  ])),
-  stabilized: toBoolean(readField(point, ['stabilized', 'isStabilized', 'stable']))
+  ]))
 })
 
 const normalizeLinePoint = point => ({
@@ -687,18 +675,25 @@ const exponentialAnalysisAxisName = method => ({
 const coefficientEquation = (method, darcy, nonDarcy) =>
   `${pressureExpression(method)} = ${darcy.toPrecision(6)} × qsc + ${nonDarcy.toPrecision(6)} × qsc²`
 
+const exponentialEquation = (method, coefficient, exponent) =>
+  `qsc = ${coefficient.toPrecision(6)} × [${pressureExpression(method)}]^${exponent.toPrecision(6)}`
+
+const solveBinomialFlowRate = (drawdown, darcy, nonDarcy) => {
+  if (!Number.isFinite(drawdown) || drawdown <= 0) return 0
+  if (nonDarcy > 1e-12) {
+    return (-darcy + Math.sqrt(darcy ** 2 + 4 * nonDarcy * drawdown)) / (2 * nonDarcy)
+  }
+  return darcy > 1e-12 ? drawdown / darcy : 0
+}
+
 const createIprCurve = (pressure, darcy, nonDarcy, method = 'pressure', pvtCurve = []) => {
   if (![pressure, darcy, nonDarcy].every(Number.isFinite)) return []
   return Array.from({ length: 41 }, (_, index) => {
-    const flowingPressure = pressure * (40 - index) / 40
+    const minimumPressure = Math.min(pressure, ATMOSPHERIC_PRESSURE_MPA)
+    const flowingPressure = pressure - (pressure - minimumPressure) * index / 40
     const drawdown = pressurePotential(pressure, method, pvtCurve) -
       pressurePotential(flowingPressure, method, pvtCurve)
-    let flowRate = 0
-    if (nonDarcy > 1e-12) {
-      flowRate = (-darcy + Math.sqrt(darcy ** 2 + 4 * nonDarcy * drawdown)) / (2 * nonDarcy)
-    } else if (darcy > 1e-12) {
-      flowRate = drawdown / darcy
-    }
+    const flowRate = solveBinomialFlowRate(drawdown, darcy, nonDarcy)
     return { flowRate, flowingPressure }
   })
 }
@@ -706,7 +701,8 @@ const createIprCurve = (pressure, darcy, nonDarcy, method = 'pressure', pvtCurve
 const createExponentialIprCurve = (pressure, coefficient, exponent, method = 'pressure', pvtCurve = []) => {
   if (![pressure, coefficient, exponent].every(Number.isFinite)) return []
   return Array.from({ length: 41 }, (_, index) => {
-    const flowingPressure = pressure * (40 - index) / 40
+    const minimumPressure = Math.min(pressure, ATMOSPHERIC_PRESSURE_MPA)
+    const flowingPressure = pressure - (pressure - minimumPressure) * index / 40
     const drawdown = pressurePotential(pressure, method, pvtCurve) -
       pressurePotential(flowingPressure, method, pvtCurve)
     return {
@@ -732,6 +728,8 @@ const normalizeLocalPoints = (points, fallbackPressure, minimum, method = 'press
       return {
         sequence: Number(point.sequence || index + 1),
         flowRate,
+        flowingPressure,
+        recoveryPressure,
         equivalentFlowRate: point.equivalentFlowRate === null || point.equivalentFlowRate === ''
           ? null
           : Number(point.equivalentFlowRate),
@@ -742,8 +740,7 @@ const normalizeLocalPoints = (points, fallbackPressure, minimum, method = 'press
           pressurePotential(recoveryPressure, method, pvtCurve) -
           pressurePotential(flowingPressure, method, pvtCurve)
         ) / flowRate,
-        sourcePressure: recoveryPressure,
-        stabilized: Boolean(point.stabilized)
+        sourcePressure: recoveryPressure
       }
     })
     .sort((left, right) => left.sequence - right.sequence)
@@ -772,6 +769,49 @@ const regressLocalPoints = (points) => {
   }, 0)
   const rSquared = total <= 1e-12 ? 1 : Math.max(0, Math.min(1, 1 - residual / total))
   return { darcyCoefficient, nonDarcyCoefficient, rSquared, transientDarcyCoefficient: null }
+}
+
+const regressExponentialPoints = points => {
+  const logarithmicPoints = points.map(point => {
+    if (!Number.isFinite(point.potentialDifference) || point.potentialDifference <= 0) {
+      throw new Error('压力函数差必须大于 0')
+    }
+    return {
+      ...point,
+      logDrawdown: Math.log(point.potentialDifference),
+      logFlowRate: Math.log(point.flowRate)
+    }
+  })
+  const meanX = logarithmicPoints.reduce((sum, point) => sum + point.logDrawdown, 0) /
+    logarithmicPoints.length
+  const meanY = logarithmicPoints.reduce((sum, point) => sum + point.logFlowRate, 0) /
+    logarithmicPoints.length
+  const sxx = logarithmicPoints.reduce(
+    (sum, point) => sum + (point.logDrawdown - meanX) ** 2,
+    0
+  )
+  if (sxx <= 1e-12) throw new Error('测试点的压力函数差不能全部相同')
+  const sxy = logarithmicPoints.reduce(
+    (sum, point) => sum + (point.logDrawdown - meanX) * (point.logFlowRate - meanY),
+    0
+  )
+  const productivityExponent = sxy / sxx
+  const productivityCoefficient = Math.exp(meanY - productivityExponent * meanX)
+  if (![productivityCoefficient, productivityExponent].every(Number.isFinite) ||
+      productivityCoefficient <= 0 || productivityExponent <= 0) {
+    throw new Error('测试点不能得到有效的指数式系数，请检查压力与产量数据')
+  }
+  const total = logarithmicPoints.reduce(
+    (sum, point) => sum + (point.logFlowRate - meanY) ** 2,
+    0
+  )
+  const residual = logarithmicPoints.reduce((sum, point) => {
+    const predicted = Math.log(productivityCoefficient) +
+      productivityExponent * point.logDrawdown
+    return sum + (point.logFlowRate - predicted) ** 2
+  }, 0)
+  const rSquared = total <= 1e-12 ? 1 : Math.max(0, Math.min(1, 1 - residual / total))
+  return { productivityCoefficient, productivityExponent, rSquared }
 }
 
 const solveOnePointExponent = (alpha, potentialRatio) => {
@@ -878,6 +918,79 @@ const calculateLocally = (payload) => {
     }
   }
 
+  if (payload.calculationResultType === 'exponential') {
+    const {
+      productivityCoefficient,
+      productivityExponent,
+      rSquared
+    } = regressExponentialPoints(points)
+    const atmosphericPressure = Math.min(maximumPressure, ATMOSPHERIC_PRESSURE_MPA)
+    const maximumPotential = pressurePotential(maximumPressure, selectedCalculationMethod, pvtCurve) -
+      pressurePotential(atmosphericPressure, selectedCalculationMethod, pvtCurve)
+    aofRate = productivityCoefficient * maximumPotential ** productivityExponent
+    if (!Number.isFinite(aofRate) || aofRate <= 0) {
+      throw new Error('指数式计算未得到有效的无阻流量')
+    }
+    analysisPoints = points.map(point => ({
+      ...point,
+      transformedPressure: point.potentialDifference
+    }))
+    const minimumRate = Math.min(...points.map(point => point.flowRate))
+    const maximumRate = Math.max(...points.map(point => point.flowRate), aofRate)
+    const lineStart = Math.max(minimumRate / 1.25, Number.MIN_VALUE)
+    const lineEnd = maximumRate * 1.02
+    const rateRatio = lineEnd / lineStart
+    const regressionLine = Array.from({ length: 41 }, (_, index) => {
+      const flowRate = lineStart * rateRatio ** (index / 40)
+      return {
+        flowRate,
+        transformedPressure: (flowRate / productivityCoefficient) ** (1 / productivityExponent)
+      }
+    })
+    const makeIprCurve = pressure => createExponentialIprCurve(
+      pressure,
+      productivityCoefficient,
+      productivityExponent,
+      selectedCalculationMethod,
+      pvtCurve
+    )
+    const iprCurve = makeIprCurve(maximumPressure)
+    const iprCurves = []
+    for (let pressure = 5; pressure <= maximumPressure + 1e-12; pressure += 5) {
+      iprCurves.push({ formationPressure: pressure, points: makeIprCurve(pressure) })
+    }
+    if (!iprCurves.length || Math.abs(iprCurves[iprCurves.length - 1].formationPressure - maximumPressure) > 1e-12) {
+      iprCurves.push({ formationPressure: maximumPressure, points: iprCurve })
+    }
+    return {
+      wellName: payload.wellName,
+      testType: payload.testType,
+      methodName: methodName.value,
+      calculationMethod: selectedCalculationMethod,
+      calculationResultType: 'exponential',
+      formationPressure: maximumPressure,
+      productivityCoefficient,
+      productivityExponent,
+      aofRate,
+      rSquared,
+      reliability: rSquared >= 0.9
+        ? '分析结果可靠性较高'
+        : rSquared >= 0.7
+          ? '分析结果可靠性一般'
+          : '分析结果可靠性偏低',
+      equation: exponentialEquation(
+        selectedCalculationMethod,
+        productivityCoefficient,
+        productivityExponent
+      ),
+      analysisPoints,
+      regressionLine,
+      transientLine: [],
+      iprCurve,
+      iprCurves
+    }
+  }
+
   if (payload.testType === 'one-point') {
     const point = points[0]
     const alpha = Number(payload.onePointAlpha)
@@ -923,24 +1036,30 @@ const calculateLocally = (payload) => {
       throw new Error('一点法迁移计算未得到有效的二项式系数')
     }
     coefficients.transientDarcyCoefficient = null
+  } else if (payload.testType === 'isochronal') {
+    const stablePoint = points[points.length - 1]
+    const transientPoints = points.slice(0, -1)
+    if (transientPoints.length < 2) throw new Error('等时试井至少需要 3 个测试点')
+    const transientCoefficients = regressLocalPoints(transientPoints)
+    const stableDarcy = stablePoint.transformedPressure -
+      transientCoefficients.nonDarcyCoefficient * stablePoint.flowRate
+    if (stableDarcy < 0) throw new Error('等时试井测试点不匹配，计算得到的达西系数 A 小于 0')
+    coefficients = {
+      ...transientCoefficients,
+      darcyCoefficient: stableDarcy,
+      transientDarcyCoefficient: transientCoefficients.darcyCoefficient
+    }
   } else {
     coefficients = regressLocalPoints(points)
-    if (payload.testType === 'isochronal') {
-      const stabilizedPoint = [...points].reverse().find(point => point.stabilized)
-      if (stabilizedPoint) {
-        const stableDarcy = stabilizedPoint.transformedPressure -
-          coefficients.nonDarcyCoefficient * stabilizedPoint.flowRate
-        if (stableDarcy < 0) throw new Error('稳定点与等时测试点不匹配，计算得到的达西系数 A 小于 0')
-        coefficients = {
-          ...coefficients,
-          darcyCoefficient: stableDarcy,
-          transientDarcyCoefficient: coefficients.darcyCoefficient
-        }
-      }
-    }
   }
 
   const { darcyCoefficient, nonDarcyCoefficient, rSquared, transientDarcyCoefficient } = coefficients
+  if (!Number.isFinite(aofRate)) {
+    const atmosphericPressure = Math.min(maximumPressure, ATMOSPHERIC_PRESSURE_MPA)
+    const maximumPotential = pressurePotential(maximumPressure, selectedCalculationMethod, pvtCurve) -
+      pressurePotential(atmosphericPressure, selectedCalculationMethod, pvtCurve)
+    aofRate = solveBinomialFlowRate(maximumPotential, darcyCoefficient, nonDarcyCoefficient)
+  }
   const maximumRate = payload.testType === 'one-point' && Number.isFinite(aofRate)
     ? aofRate
     : Math.max(...analysisPoints.map(point => point.flowRate), 1)
@@ -995,17 +1114,19 @@ const calculateLocally = (payload) => {
   }
 }
 
-const normalizeCalculationResult = (response) => {
+const normalizeCalculationResult = (response, pvtResultRows = props.pvtResultRows) => {
   const payload = getCalculationPayload(response)
   const selectedCalculationMethod = normalizeCalculationMethod(
     readField(payload, ['calculationMethod', 'calculation_method', 'pressureMethod']) || calculationMethod.value
   )
-  const pvtCurve = normalizePvtCurve(props.pvtResultRows)
+  let pvtCurve = normalizePvtCurve(pvtResultRows)
   const darcyCoefficient = toNumber(readField(payload, [
-    'darcyCoefficient', 'darcy_coefficient', 'coefficientA', 'coefficient_a', 'darcyFlowCoefficient', 'A', 'a'
+    'darcyCoefficient', 'darcy_coefficient', 'darcySeepageCoefficient',
+    'coefficientA', 'coefficient_a', 'darcyFlowCoefficient', 'A', 'a'
   ]))
   const nonDarcyCoefficient = toNumber(readField(payload, [
-    'nonDarcyCoefficient', 'non_darcy_coefficient', 'coefficientB', 'coefficient_b',
+    'nonDarcyCoefficient', 'non_darcy_coefficient', 'nonDarcySeepageCoefficient',
+    'coefficientB', 'coefficient_b',
     'nonDarcyFlowCoefficient', 'B', 'b'
   ]))
   const resultPressure = normalizePressure(readField(payload, [
@@ -1015,7 +1136,49 @@ const normalizeCalculationResult = (response) => {
     'rSquared', 'r_squared', 'coefficientOfDetermination', 'determinationCoefficient', 'r2', 'R2'
   ]))
 
-  let analysisPoints = validPointList(
+  const pseudoPressureRows = readField(payload, [
+    'wellTestPseudoPressures', 'well_test_pseudo_pressures'
+  ])
+  if (selectedCalculationMethod === 'pseudo-pressure' && Array.isArray(pseudoPressureRows)) {
+    const calculatedRows = pseudoPressureRows.flatMap((point, index) => {
+      const sequence = toNumber(readField(point, ['index', 'sequence', 'testPointNumber'])) ?? index + 1
+      const sourceRow = inputRows.value.find(row => Number(row.sequence) === Number(sequence)) || inputRows.value[index]
+      return [
+        {
+          pressure: toNumber(sourceRow?.recoveryPressure) ?? resultPressure,
+          pseudoPressure: toNumber(readField(point, [
+            'reserviorPressure', 'reservoirPressure', 'recoveryPseudoPressure'
+          ]))
+        },
+        {
+          pressure: toNumber(sourceRow?.flowingPressure),
+          pseudoPressure: toNumber(readField(point, [
+            'testFlowPressure', 'flowingPressure', 'flowingPseudoPressure'
+          ]))
+        }
+      ]
+    }).filter(row => Number.isFinite(row.pressure) && Number.isFinite(row.pseudoPressure))
+    if (calculatedRows.length) pvtCurve = normalizePvtCurve([...pvtResultRows, ...calculatedRows])
+  }
+  let analysisPoints = (Array.isArray(pseudoPressureRows) ? pseudoPressureRows : [])
+    .map((point, index) => {
+      const sequence = toNumber(readField(point, ['index', 'sequence', 'testPointNumber'])) ?? index + 1
+      const sourceRow = inputRows.value.find(row => Number(row.sequence) === Number(sequence)) || inputRows.value[index]
+      return {
+        sequence,
+        flowRate: toNumber(readField(point, [
+          'dailyGasProduction', 'flowRate', 'gasRate', 'qsc'
+        ])) ?? toNumber(sourceRow?.flowRate),
+        transformedPressure: toNumber(readField(point, [
+          'regularizedPressure', 'regularized_pressure', 'transformedPressure'
+        ])),
+        sourcePressure: normalizePressure(readField(point, [
+          'reserviorPressure', 'reservoirPressure', 'sourcePressure'
+        ])) ?? toNumber(sourceRow?.recoveryPressure)
+      }
+    })
+    .filter(point => Number.isFinite(point.flowRate) && Number.isFinite(point.transformedPressure))
+  if (!analysisPoints.length) analysisPoints = validPointList(
     readField(payload, ['analysisPoints', 'analysis_points', 'dataPoints', 'testPoints', 'points']),
     normalizeAnalysisPoint
   ).filter(point => Number.isFinite(point.transformedPressure))
@@ -1035,8 +1198,7 @@ const normalizeCalculationResult = (response) => {
                 pressurePotential(flowingPressure, selectedCalculationMethod, pvtCurve)
               ) / flowRate
             : null,
-          sourcePressure,
-          stabilized: Boolean(row.stabilized)
+          sourcePressure
         }
       })
       .filter(point => Number.isFinite(point.flowRate) && Number.isFinite(point.transformedPressure))
@@ -1054,10 +1216,27 @@ const normalizeCalculationResult = (response) => {
     ]
   }
 
-  const transientLine = validPointList(
+  let transientLine = validPointList(
     readField(payload, ['transientLine', 'transient_line', 'isochronalLine', 'unstableLine']),
     normalizeLinePoint
   ).filter(point => Number.isFinite(point.transformedPressure))
+  const transientIntercept = toNumber(readField(payload, [
+    'intercept', 'isochronalIntercept', 'transientIntercept'
+  ]))
+  if (
+    !transientLine.length &&
+    activeTestType.value === 'isochronal' &&
+    [transientIntercept, nonDarcyCoefficient].every(Number.isFinite)
+  ) {
+    const maximumRate = Math.max(1, ...analysisPoints.map(point => point.flowRate)) * 1.08
+    transientLine = [
+      { flowRate: 0, transformedPressure: transientIntercept },
+      {
+        flowRate: maximumRate,
+        transformedPressure: transientIntercept + nonDarcyCoefficient * maximumRate
+      }
+    ]
+  }
 
   let iprCurve = validPointList(
     readField(payload, ['iprCurve', 'ipr_curve', 'curve', 'iprPoints']),
@@ -1071,6 +1250,15 @@ const normalizeCalculationResult = (response) => {
       selectedCalculationMethod,
       pvtCurve
     )
+  }
+  let aofRate = toNumber(readField(payload, [
+    'aofRate', 'aof_rate', 'openFlowCapacity', 'open_flow_capacity'
+  ]))
+  if (!Number.isFinite(aofRate) && [darcyCoefficient, nonDarcyCoefficient].every(Number.isFinite)) {
+    const atmosphericPressure = Math.min(resultPressure, ATMOSPHERIC_PRESSURE_MPA)
+    const maximumPotential = pressurePotential(resultPressure, selectedCalculationMethod, pvtCurve) -
+      pressurePotential(atmosphericPressure, selectedCalculationMethod, pvtCurve)
+    aofRate = solveBinomialFlowRate(maximumPotential, darcyCoefficient, nonDarcyCoefficient)
   }
 
   const rawIprCurves = readField(payload, ['iprCurves', 'ipr_curves', 'curveList'])
@@ -1107,6 +1295,7 @@ const normalizeCalculationResult = (response) => {
     formationPressure: resultPressure,
     darcyCoefficient,
     nonDarcyCoefficient,
+    aofRate,
     rSquared,
     reliability,
     equation,
@@ -1127,14 +1316,6 @@ const analyze = async () => {
     ElMessage.warning('请选择产能表')
     return
   }
-  if (activeTestType.value !== 'one-point' && calculationMethod.value !== 'pressure') {
-    ElMessage.info('当前仅一点法接入拟压力和压力平方方法')
-    return
-  }
-  if (calculationResultType.value === 'exponential' && activeTestType.value !== 'one-point') {
-    ElMessage.info('当前指数式仅接入一点法计算')
-    return
-  }
   calculating.value = true
   try {
     const payload = buildPayload()
@@ -1143,7 +1324,7 @@ const analyze = async () => {
       payload.pvtResultRows = [...payload.pvtResultRows, ...exactRows]
     }
     const response = { data: calculateLocally(payload) }
-    result.value = normalizeCalculationResult(response)
+    result.value = normalizeCalculationResult(response, payload.pvtResultRows)
     emit('result-change', result.value)
     activePanel.value = 'analysis'
     activeChart.value = 'analysis'
@@ -1197,7 +1378,7 @@ const renderChart = () => {
       itemStyle: { color: '#4d78c9' }
     },
     {
-      name: showsStablePoint.value ? '稳定线' : '回归线',
+      name: activeTestType.value === 'isochronal' ? '稳定线' : '回归线',
       type: 'line',
       showSymbol: false,
       data: regressionLine.map(point => [point.flowRate, point.transformedPressure]),
@@ -1502,11 +1683,6 @@ onBeforeUnmount(() => {
             <el-table-column label="测试流压(MPa)" min-width="145">
               <template #default="scope">
                 <el-input-number v-model="scope.row.flowingPressure" :controls="false" size="small" />
-              </template>
-            </el-table-column>
-            <el-table-column v-if="showsStablePoint" label="稳定点" width="90" align="center">
-              <template #default="scope">
-                <el-checkbox v-model="scope.row.stabilized" />
               </template>
             </el-table-column>
             <el-table-column label="操作" width="75" align="center">
