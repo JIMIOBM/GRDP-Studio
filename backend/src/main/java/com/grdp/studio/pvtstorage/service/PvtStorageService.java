@@ -9,6 +9,7 @@ import com.grdp.studio.pvtstorage.dto.PvtSaveResponse;
 import com.grdp.studio.pvtstorage.entity.PvtGasInputEntity;
 import com.grdp.studio.pvtstorage.entity.PvtGasResultEntity;
 import com.grdp.studio.pvtstorage.entity.PvtRockInputEntity;
+import com.grdp.studio.pvtstorage.entity.PvtRockResultEntity;
 import com.grdp.studio.pvtstorage.entity.PvtSettingsEntity;
 import com.grdp.studio.pvtstorage.entity.PvtWaterInputEntity;
 import com.grdp.studio.pvtstorage.entity.PvtWaterResultEntity;
@@ -17,6 +18,7 @@ import com.grdp.studio.pvtstorage.entity.WellPvtEntity;
 import com.grdp.studio.pvtstorage.mapper.PvtGasInputMapper;
 import com.grdp.studio.pvtstorage.mapper.PvtGasResultMapper;
 import com.grdp.studio.pvtstorage.mapper.PvtRockInputMapper;
+import com.grdp.studio.pvtstorage.mapper.PvtRockResultMapper;
 import com.grdp.studio.pvtstorage.mapper.PvtSettingsMapper;
 import com.grdp.studio.pvtstorage.mapper.PvtWaterInputMapper;
 import com.grdp.studio.pvtstorage.mapper.PvtWaterResultMapper;
@@ -33,10 +35,10 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * PVT 七表统一保存服务。
+ * PVT 八表统一保存服务。
  *
  * <p>关联链路：project_well_heads.id -> project_well_pvt.well_id
- * -> 六张 PVT 子表的 pvt_id。</p>
+ * -> 七张 PVT 子表的 pvt_id。</p>
  */
 @Service
 public class PvtStorageService {
@@ -49,6 +51,7 @@ public class PvtStorageService {
     private final PvtGasInputMapper gasInputMapper;
     private final PvtWaterInputMapper waterInputMapper;
     private final PvtRockInputMapper rockInputMapper;
+    private final PvtRockResultMapper rockResultMapper;
     private final PvtSettingsMapper settingsMapper;
     private final PvtGasResultMapper gasResultMapper;
     private final PvtWaterResultMapper waterResultMapper;
@@ -60,6 +63,7 @@ public class PvtStorageService {
             PvtGasInputMapper gasInputMapper,
             PvtWaterInputMapper waterInputMapper,
             PvtRockInputMapper rockInputMapper,
+            PvtRockResultMapper rockResultMapper,
             PvtSettingsMapper settingsMapper,
             PvtGasResultMapper gasResultMapper,
             PvtWaterResultMapper waterResultMapper,
@@ -70,6 +74,7 @@ public class PvtStorageService {
         this.gasInputMapper = gasInputMapper;
         this.waterInputMapper = waterInputMapper;
         this.rockInputMapper = rockInputMapper;
+        this.rockResultMapper = rockResultMapper;
         this.settingsMapper = settingsMapper;
         this.gasResultMapper = gasResultMapper;
         this.waterResultMapper = waterResultMapper;
@@ -146,6 +151,12 @@ public class PvtStorageService {
                                 .eq(PvtWaterResultEntity::getPvtId, pvtId)
                                 .orderByAsc(PvtWaterResultEntity::getPointNo))
                 .stream().map(PvtRecordDetail.WaterResultPoint::from).toList();
+        List<PvtRecordDetail.RockResultPoint> rockResults = rockResultMapper.selectList(
+                        new LambdaQueryWrapper<PvtRockResultEntity>()
+                                .eq(PvtRockResultEntity::getPvtId, pvtId)
+                                .orderByAsc(PvtRockResultEntity::getCurveType)
+                                .orderByAsc(PvtRockResultEntity::getPointNo))
+                .stream().map(PvtRecordDetail.RockResultPoint::from).toList();
 
         return new PvtRecordDetail(
                 PvtRecordSummary.from(pvt),
@@ -154,7 +165,8 @@ public class PvtStorageService {
                 PvtRecordDetail.RockInput.from(rockInput),
                 settings,
                 gasResults,
-                waterResults
+                waterResults,
+                rockResults
         );
     }
 
@@ -174,7 +186,7 @@ public class PvtStorageService {
         int savedRows = switch (kind) {
             case "gas" -> saveGas(pvt.getId(), section, request);
             case "water" -> saveWater(pvt.getId(), section, request);
-            case "rock" -> saveRock(pvt.getId(), request);
+            case "rock" -> saveRock(pvt.getId(), section, request);
             default -> throw new BusinessException(400, "不支持的PVT性质类型");
         };
 
@@ -201,9 +213,6 @@ public class PvtStorageService {
         }
         if (!SECTIONS.contains(section)) {
             throw new BusinessException(400, "不支持的保存区域");
-        }
-        if (kind.equals("rock") && section.equals("result")) {
-            throw new BusinessException(400, "当前七表结构没有岩石结果表，请保存岩石基础参数");
         }
     }
 
@@ -354,7 +363,7 @@ public class PvtStorageService {
         return rows.size();
     }
 
-    private int saveRock(long pvtId, PvtSaveRequest request) {
+    private int saveRock(long pvtId, String section, PvtSaveRequest request) {
         PvtSaveRequest.RockInput input = request.rockInput();
         if (input == null) {
             throw new BusinessException(400, "岩石性质中没有可保存的数据");
@@ -378,7 +387,20 @@ public class PvtStorageService {
         } else {
             rockInputMapper.updateById(entity);
         }
-        return 1;
+        if (section.equals("input")) {
+            return 1;
+        }
+
+        List<PvtSaveRequest.RockResultPoint> rows = request.rockResults();
+        if (rows == null || rows.isEmpty()) {
+            throw new BusinessException(400, "岩石结果分析图中没有可保存的数据");
+        }
+        rows.forEach(this::validateRockResult);
+        // 岩石两条曲线也作为完整快照保存，避免新旧计算点混合。
+        rockResultMapper.delete(new LambdaQueryWrapper<PvtRockResultEntity>()
+                .eq(PvtRockResultEntity::getPvtId, pvtId));
+        rows.forEach(row -> rockResultMapper.insert(toRockResultEntity(pvtId, row)));
+        return rows.size();
     }
 
     private void saveSettings(long pvtId, String kind, Map<String, Object> settings) {
@@ -449,6 +471,16 @@ public class PvtStorageService {
         return entity;
     }
 
+    private PvtRockResultEntity toRockResultEntity(long pvtId, PvtSaveRequest.RockResultPoint row) {
+        PvtRockResultEntity entity = new PvtRockResultEntity();
+        entity.setPvtId(pvtId);
+        entity.setCurveType(normalize(row.curveType()));
+        entity.setPointNo(row.pointNo());
+        entity.setPorosity(row.porosity());
+        entity.setCompressibilityFactor(row.compressibilityFactor());
+        return entity;
+    }
+
     private void validateGasResult(PvtSaveRequest.GasResultPoint row) {
         requireFinite(row.pressure(), "压力");
         requireFinite(row.temperature(), "温度");
@@ -479,6 +511,18 @@ public class PvtStorageService {
                 && row.viscosity() == null) {
             throw new BusinessException(400, "地层水结果行没有性质数据");
         }
+    }
+
+    private void validateRockResult(PvtSaveRequest.RockResultPoint row) {
+        String curveType = normalize(row.curveType());
+        if (!List.of("cemented", "carbonate").contains(curveType)) {
+            throw new BusinessException(400, "岩石曲线类型只能是cemented或carbonate");
+        }
+        if (row.pointNo() == null || row.pointNo() < 1) {
+            throw new BusinessException(400, "岩石结果点序号必须大于0");
+        }
+        requireFinite(row.porosity(), "岩石孔隙度");
+        requireFinite(row.compressibilityFactor(), "岩石压缩系数");
     }
 
     private void requireFinite(Double value, String field) {

@@ -57,6 +57,7 @@ const importedGasRows = ref(createInitialGasRows())
 const importedGasResultRows = ref(storedRecord?.gasResultRows || [])
 const currentGasSettings = ref(storedRecord?.gasSettings || {})
 const importedRockRows = ref(storedRecord?.rockRows || [])
+const importedRockResultRows = ref(storedRecord?.rockResultRows || [])
 const rockCalculationState = ref(storedRecord?.rockState || null)
 const saving = ref(false)
 
@@ -160,12 +161,12 @@ const buildWaterSavePayload = section => {
   }
 }
 
-const buildRockSavePayload = () => {
+const buildRockSavePayload = section => {
   const importedRow = firstDataRow(importedRockRows.value)
   const state = rockCalculationState.value
   const porosityValue = importedRow?.[0] ?? state?.porosity
   if (!hasValue(porosityValue)) throw new Error('岩石性质中没有可保存的数据')
-  return {
+  const payload = {
     rockInput: {
       porosity: requiredNumber(porosityValue, '岩石孔隙度'),
       rockType: state?.rockType || '胶结砂岩/碳酸盐岩',
@@ -173,10 +174,30 @@ const buildRockSavePayload = () => {
     },
     settings: state?.settings || {}
   }
+  if (section === 'result') {
+    const rows = (importedRockResultRows.value || []).filter(row =>
+      row && hasValue(row.curveType) && hasValue(row.porosity) && hasValue(row.compressibilityFactor)
+    )
+    if (!rows.length) throw new Error('岩石结果分析图中没有可保存的数据')
+    payload.rockResults = rows.map((row, index) => ({
+      curveType: String(row.curveType).trim(),
+      pointNo: Number(row.pointNo) > 0 ? Number(row.pointNo) : index + 1,
+      porosity: requiredNumber(row.porosity, '岩石孔隙度'),
+      compressibilityFactor: requiredNumber(row.compressibilityFactor, '岩石压缩系数')
+    }))
+  }
+  return payload
 }
 
 const handleRockCalculation = payload => {
-  rockCalculationState.value = payload
+  const { resultRows = [], ...state } = payload || {}
+  rockCalculationState.value = state
+  importedRockResultRows.value = resultRows
+}
+
+const handleRockResultsCleared = () => {
+  importedRockResultRows.value = []
+  rockCalculationState.value = null
 }
 
 const handleSave = async () => {
@@ -191,14 +212,14 @@ const handleSave = async () => {
     ? (activeGasResultTab.value === '结果分析图' ? 'result' : 'input')
     : propertyKind === 'water'
       ? (activeWaterResultTab.value === '结果分析图' ? 'result' : 'input')
-      : 'input'
+      : importedRockResultRows.value.length ? 'result' : 'input'
 
   try {
     const content = propertyKind === 'gas'
       ? buildGasSavePayload(section)
       : propertyKind === 'water'
         ? buildWaterSavePayload(section)
-        : buildRockSavePayload()
+        : buildRockSavePayload(section)
     saving.value = true
     const response = await pvtStorageApi.save({
       projectId: Number(props.projectId),
@@ -516,6 +537,9 @@ const firstSheet = workbook.Sheets[workbook.SheetNames[0]]
 }
 
     importedRockRows.value = parsedRows.slice(0, 27)
+    // 新导入孔隙度后，旧曲线已经失效，必须重新计算后才能保存结果。
+    importedRockResultRows.value = []
+    rockCalculationState.value = null
     ElMessage.success(`成功导入 ${importedRockRows.value.length} 条岩石性质数据`)
   } catch (error) {
     console.error('岩石导入错误详情:', error)
@@ -670,8 +694,11 @@ const persistCalculation = (kind, payload) => {
     <RockProperties
       v-else
       :imported-rows="importedRockRows"
+      :imported-result-rows="importedRockResultRows"
+      :initial-state="rockCalculationState"
       :project-id="projectId"
       @calculation-complete="handleRockCalculation"
+      @results-cleared="handleRockResultsCleared"
     />
 
     <NaturalGasImportDialog

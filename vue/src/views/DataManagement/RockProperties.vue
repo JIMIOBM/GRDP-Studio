@@ -1,15 +1,18 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
 import { rockPvtApi } from '@/api/rockPvt'
 
 const props = defineProps({
   projectId: { type: [Number, String], required: true },
-  importedRows: { type: Array, default: () => [] }
+  importedRows: { type: Array, default: () => [] },
+  importedResultRows: { type: Array, default: () => [] },
+  // 已保存的岩石计算状态用于重新进入 PVT 时恢复曲线和“结果分析图”页签。
+  initialState: { type: Object, default: null }
 })
 
-const emit = defineEmits(['calculation-complete'])
+const emit = defineEmits(['calculation-complete', 'results-cleared'])
 
 const DEFAULT_POROSITY = '25'
 
@@ -17,20 +20,31 @@ const activeCurve = ref('胶结砂岩')
 const activeParamTab = ref('input')
 const activeContentTab = ref('table')
 const paramsCollapsed = ref(false)
-const initialImportedPorosity = props.importedRows?.[0]?.[0]
+const initialImportedPorosity = props.importedRows?.[0]?.[0] ?? props.initialState?.porosity
 const porosity = ref(
   initialImportedPorosity !== undefined && initialImportedPorosity !== ''
     ? String(initialImportedPorosity)
     : DEFAULT_POROSITY
 )
 const calculating = ref(false)
-const curveOneSeries = ref([])
-const curveTwoSeries = ref([])
-const outputData = ref({})
 const curveColors = [
   '#1677ff', '#f56c6c', '#67c23a', '#e6a23c',
   '#8b5cf6', '#13c2c2', '#eb2f96', '#fa8c16'
 ]
+const createInitialCurveSeries = curveType => {
+  const items = (props.importedResultRows || [])
+    .filter(row => String(row?.curveType || '').toLowerCase() === curveType)
+    .sort((left, right) => Number(left.pointNo || 0) - Number(right.pointNo || 0))
+    .map(row => ({
+      porosity: Number(row.porosity),
+      compressibilityFactor: Number(row.compressibilityFactor)
+    }))
+    .filter(row => Number.isFinite(row.porosity) && Number.isFinite(row.compressibilityFactor))
+  return items.length ? [{ name: '数据库结果', color: curveColors[0], items }] : []
+}
+const curveOneSeries = ref(createInitialCurveSeries('cemented'))
+const curveTwoSeries = ref(createInitialCurveSeries('carbonate'))
+const outputData = ref({})
 
 const chartEl = ref(null)
 const paramsPanelEl = ref(null)
@@ -311,7 +325,7 @@ const scheduleRenderChart = async () => {
   })
 }
 
-const handleCalculate = async () => {
+const handleCalculate = async ({ silent = false } = {}) => {
   if (calculating.value) return
 
   const porosityValue = Number(porosity.value)
@@ -333,9 +347,10 @@ const handleCalculate = async () => {
     return
   }
 
-  const start = 0
-  const end = 50
-  const step = 0.5
+  // 恢复已有 PVT 时沿用数据库保存的计算范围；新计算继续使用默认范围。
+  const start = Number(props.initialState?.settings?.porosityStart ?? 0)
+  const end = Number(props.initialState?.settings?.porosityEnd ?? 50)
+  const step = Number(props.initialState?.settings?.porosityStep ?? 0.5)
 
   const curveRequest = {
     projectId,
@@ -418,15 +433,31 @@ const handleCalculate = async () => {
         porosityStart: curveRequest.porosityStart,
         porosityEnd: curveRequest.porosityEnd,
         porosityStep: curveRequest.porosityStep
-      }
+      },
+      resultRows: [
+        ...curveOneItems.map((item, index) => ({
+          curveType: 'cemented',
+          pointNo: index + 1,
+          porosity: Number(item.porosity),
+          compressibilityFactor: Number(item.compressibilityFactor)
+        })),
+        ...curveTwoItems.map((item, index) => ({
+          curveType: 'carbonate',
+          pointNo: index + 1,
+          porosity: Number(item.porosity),
+          compressibilityFactor: Number(item.compressibilityFactor)
+        }))
+      ]
     })
 
-    ElMessage.success('岩石性质计算完成')
+    if (!silent) {
+      ElMessage.success('岩石性质计算完成')
+    }
 
     await nextTick()
     scheduleRenderChart()
 
-    setTimeout(() => {
+    if (!silent) setTimeout(() => {
       if (chart) {
         chart.resize()
 
@@ -457,6 +488,7 @@ const handleReset = () => {
   activeParamTab.value = 'input'
   activeContentTab.value = 'chart'
   disposeChart()
+  emit('results-cleared')
 }
 
 watch([activeCurve, curveOneSeries, curveTwoSeries], () => {
@@ -472,6 +504,35 @@ watch(activeContentTab, async (newVal) => {
 
 const handleResize = () => scheduleRenderChart()
 window.addEventListener('resize', handleResize)
+
+onMounted(() => {
+  // 新结构优先直接恢复数据库结果，不再重复调用岩石算法。
+  if (props.importedResultRows?.length) {
+    const porosityValue = Number(porosity.value)
+    const findCurrentValue = series => series.value[0]?.items.find(
+      item => Number(item.porosity) === porosityValue
+    )?.compressibilityFactor
+    const cemented = Number(findCurrentValue(curveOneSeries))
+    const carbonate = Number(findCurrentValue(curveTwoSeries))
+    outputData.value = {
+      porosity: porosityValue,
+      cementedCompressibility: cemented,
+      cementedCompressibilityDisplay: Number.isFinite(cemented) ? cemented.toExponential(4) : '',
+      carbonateCompressibility: carbonate,
+      carbonateCompressibilityDisplay: Number.isFinite(carbonate) ? carbonate.toExponential(4) : ''
+    }
+    activeParamTab.value = 'output'
+    activeContentTab.value = 'chart'
+    scheduleRenderChart()
+    return
+  }
+
+  // 兼容旧 PVT：只有输入和 settings、尚未写入新结果表时静默重算一次，
+  // 用户下次点击保存后就会正式写入 project_well_pvt_rock_result。
+  if (props.initialState?.calculationMethod === 'RockPVT曲线计算') {
+    handleCalculate({ silent: true })
+  }
+})
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize)
@@ -561,9 +622,16 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <div class="chart-tabs">
-        <button v-for="curve in rockCurveOptions" :key="curve.name" type="button" class="chart-tab"
-          :class="{ active: activeCurve === curve.name }" @click="activeCurve = curve.name">{{ curve.name }}</button>
+      <div class="rock-curve-toolbar">
+        <label class="rock-curve-field">
+          <span>岩石类型</span>
+          <!-- 与天然气、地层水的数据列表保持一致，使用下拉框切换当前数据/曲线。 -->
+          <select v-model="activeCurve" aria-label="选择岩石类型">
+            <option v-for="curve in rockCurveOptions" :key="curve.name" :value="curve.name">
+              {{ curve.name }}
+            </option>
+          </select>
+        </label>
       </div>
 
       <div v-show="activeContentTab === 'chart'" class="rock-chart">
@@ -874,33 +942,45 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-.chart-tabs {
-  height: 34px;
+.rock-curve-toolbar {
+  min-height: 42px;
   display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 5px 12px;
+  box-sizing: border-box;
   border-bottom: 1px solid #e4e7ed;
   flex-shrink: 0;
   background: #fafafa;
 }
 
-.chart-tab {
-  border: 0;
-  border-right: 1px solid #e4e7ed;
-  background: transparent;
-  padding: 0 16px;
+.rock-curve-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   color: #555;
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
-  white-space: nowrap;
+  font-size: 13px;
 
-  &:hover {
-    color: #409eff;
+  > span {
+    white-space: nowrap;
   }
 
-  &.active {
-    color: #409eff;
-    border-bottom-color: #409eff;
+  select {
+    width: 156px;
+    height: 30px;
+    padding: 2px 28px 2px 8px;
+    box-sizing: border-box;
+    border: 1px solid #aeb6bf;
+    border-radius: 3px;
     background: #fff;
-    font-weight: 600;
+    color: #333;
+    font: inherit;
+    cursor: pointer;
+
+    &:focus-visible {
+      outline: 2px solid #409eff;
+      outline-offset: 1px;
+    }
   }
 }
 
@@ -941,19 +1021,26 @@ onBeforeUnmount(() => {
   flex: 1;
   min-height: 0;
   width: 100%;
+  display: flex;
   overflow: hidden;
   background: #fff;
 }
 
 .rock-data-grid {
   flex: 1;
+  height: 100%;
   width: 100%;
   min-width: 0;
+  min-height: 0;
   display: grid;
   grid-template-columns: 70px minmax(140px, 1fr) minmax(180px, 1.4fr);
-  grid-template-rows: 36px repeat(25, minmax(30px, 1fr));
+  /* 第一行是表头，其余数据行统一高度；超过可视区域后由表格自身滚动。 */
+  grid-template-rows: 36px;
+  grid-auto-rows: 30px;
+  align-content: start;
   margin: 0;
   overflow: auto;
+  box-sizing: border-box;
   border: 1px solid #d4d7db;
 }
 
@@ -972,6 +1059,9 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 
   &.header {
+    position: sticky;
+    top: 0;
+    z-index: 1;
     display: flex;
     align-items: center;
     justify-content: center;

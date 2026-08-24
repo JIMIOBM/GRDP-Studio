@@ -23,7 +23,8 @@ public record PvtSaveRequest(
         @Valid RockInput rockInput,
         Map<String, Object> settings,
         List<@Valid GasResultPoint> gasResults,
-        List<@Valid WaterResultPoint> waterResults
+        List<@Valid WaterResultPoint> waterResults,
+        List<@Valid RockResultPoint> rockResults
 ) {
     public record GasInput(
             @NotBlank(message = "天然气类型不能为空") String gasType,
@@ -70,6 +71,14 @@ public record PvtSaveRequest(
             Double density,
             Double isothermalCompressibility,
             Double viscosity
+    ) {
+    }
+
+    public record RockResultPoint(
+            @NotBlank(message = "岩石曲线类型不能为空") String curveType,
+            @NotNull(message = "岩石结果点序号不能为空") @Min(value = 1, message = "岩石结果点序号必须大于0") Integer pointNo,
+            @NotNull(message = "岩石孔隙度不能为空") Double porosity,
+            @NotNull(message = "岩石压缩系数不能为空") Double compressibilityFactor
     ) {
     }
 }

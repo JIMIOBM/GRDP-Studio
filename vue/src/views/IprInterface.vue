@@ -1512,6 +1512,7 @@ const toPvtEditorRecord = (detail, fallbackGasRows = []) => ({
       ]]
     : [],
   rockRows: detail?.rockInput ? [[detail.rockInput.porosity]] : [],
+  rockResultRows: detail?.rockResults || [],
   rockState: detail?.rockInput
     ? {
         porosity: detail.rockInput.porosity,

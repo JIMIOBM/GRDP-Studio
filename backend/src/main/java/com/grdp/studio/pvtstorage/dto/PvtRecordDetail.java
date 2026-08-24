@@ -3,6 +3,7 @@ package com.grdp.studio.pvtstorage.dto;
 import com.grdp.studio.pvtstorage.entity.PvtGasInputEntity;
 import com.grdp.studio.pvtstorage.entity.PvtGasResultEntity;
 import com.grdp.studio.pvtstorage.entity.PvtRockInputEntity;
+import com.grdp.studio.pvtstorage.entity.PvtRockResultEntity;
 import com.grdp.studio.pvtstorage.entity.PvtWaterInputEntity;
 import com.grdp.studio.pvtstorage.entity.PvtWaterResultEntity;
 
@@ -17,7 +18,8 @@ public record PvtRecordDetail(
         RockInput rockInput,
         Map<String, String> settings,
         List<GasResultPoint> gasResults,
-        List<WaterResultPoint> waterResults
+        List<WaterResultPoint> waterResults,
+        List<RockResultPoint> rockResults
 ) {
     public record GasInput(
             String gasType,
@@ -87,6 +89,19 @@ public record PvtRecordDetail(
                     entity.getPointNo(), entity.getPressure(), entity.getTemperature(), entity.getSalinity(),
                     entity.getGasSolubility(), entity.getVolumeFactor(), entity.getDensity(),
                     entity.getIsothermalCompressibility(), entity.getViscosity());
+        }
+    }
+
+    public record RockResultPoint(
+            String curveType,
+            Integer pointNo,
+            Double porosity,
+            Double compressibilityFactor
+    ) {
+        public static RockResultPoint from(PvtRockResultEntity entity) {
+            return new RockResultPoint(
+                    entity.getCurveType(), entity.getPointNo(), entity.getPorosity(),
+                    entity.getCompressibilityFactor());
         }
     }
 }
