@@ -5,7 +5,8 @@ import { ArrowDown, ArrowRight, Folder, Document } from '@element-plus/icons-vue
 const props = defineProps({
   node: { type: Object, required: true },
   activeId: { type: [String, Number], default: '' },
-  defaultExpanded: { type: Boolean, default: true }
+  // 所有树节点默认关闭，只有用户点击展开后才触发 expand 事件和对应接口。
+  defaultExpanded: { type: Boolean, default: false }
 })
 
 const emit = defineEmits(['select', 'node-contextmenu', 'expand'])
@@ -20,7 +21,8 @@ if (typeof props.node.expanded === 'boolean') {
 watch(() => props.node.expanded, value => {
   if (typeof value === 'boolean') expanded.value = value
 })
-const hasChildren = () => props.node.children && props.node.children.length > 0
+// lazy 节点即使尚无 children 也要显示展开箭头，首次展开时由父页面调用接口填充。
+const hasChildren = () => props.node.lazy || (props.node.children && props.node.children.length > 0)
 
 const toggle = () => {
   if (!hasChildren()) return

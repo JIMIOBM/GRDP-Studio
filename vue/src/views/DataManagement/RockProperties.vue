@@ -5,7 +5,8 @@ import { ElMessage } from 'element-plus'
 import { rockPvtApi } from '@/api/rockPvt'
 
 const props = defineProps({
-  projectId: { type: [Number, String], required: true }
+  projectId: { type: [Number, String], required: true },
+  importedRows: { type: Array, default: () => [] }
 })
 
 const emit = defineEmits(['calculation-complete'])
@@ -16,7 +17,12 @@ const activeCurve = ref('胶结砂岩')
 const activeParamTab = ref('input')
 const activeContentTab = ref('table')
 const paramsCollapsed = ref(false)
-const porosity = ref(DEFAULT_POROSITY)
+const initialImportedPorosity = props.importedRows?.[0]?.[0]
+const porosity = ref(
+  initialImportedPorosity !== undefined && initialImportedPorosity !== ''
+    ? String(initialImportedPorosity)
+    : DEFAULT_POROSITY
+)
 const calculating = ref(false)
 const curveOneSeries = ref([])
 const curveTwoSeries = ref([])
@@ -404,7 +410,16 @@ const handleCalculate = async () => {
     activeParamTab.value = 'output'
     activeContentTab.value = 'chart'
 
-    emit('calculation-complete', { porosity: porosityValue })
+    emit('calculation-complete', {
+      porosity: porosityValue,
+      rockType: '胶结砂岩/碳酸盐岩',
+      calculationMethod: 'RockPVT曲线计算',
+      settings: {
+        porosityStart: curveRequest.porosityStart,
+        porosityEnd: curveRequest.porosityEnd,
+        porosityStep: curveRequest.porosityStep
+      }
+    })
 
     ElMessage.success('岩石性质计算完成')
 

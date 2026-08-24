@@ -37,6 +37,27 @@ const createRecord = (wellName, index, gasRows = []) => ({
   updatedAt: new Date().toISOString()
 })
 
+// 为尚未保存到数据库的新编号准备页面编辑快照；左侧树不会读取这条本地草稿。
+export const createPvtDraftRecord = (
+  projectId,
+  gasReservoirId,
+  wellName,
+  index,
+  initialGasRows = []
+) => {
+  const store = readStore(projectId, gasReservoirId)
+  const records = Array.isArray(store[wellName]) ? store[wellName] : []
+  const record = createRecord(wellName, Number(index), initialGasRows)
+  const existingIndex = records.findIndex(item => Number(item.index) === Number(index))
+
+  if (existingIndex >= 0) records[existingIndex] = record
+  else records.push(record)
+
+  store[wellName] = records.sort((left, right) => Number(left.index) - Number(right.index))
+  writeStore(projectId, gasReservoirId, store)
+  return clone(record)
+}
+
 export const getPvtRecords = (projectId, gasReservoirId, wellName) => {
   const store = readStore(projectId, gasReservoirId)
   return clone(Array.isArray(store[wellName]) ? store[wellName] : [])
@@ -95,6 +116,17 @@ export const createOrReusePvtRecord = (
   const latestRecord = sortedRecords[sortedRecords.length - 1]
 
   if (latestRecord?.status === 'draft') {
+    // 顶部 PVT 按钮会从 project_gas_property 取得当前井的默认气体性质。
+    // 若最新编号还是空白草稿，则直接回填该草稿，避免页面继续显示空表。
+    if (!latestRecord.gasRows?.length && initialGasRows.length) {
+      latestRecord.gasRows = clone(initialGasRows)
+      latestRecord.status = 'data-ready'
+      latestRecord.updatedAt = new Date().toISOString()
+      store[wellName] = records.sort(
+        (left, right) => Number(left.index) - Number(right.index)
+      )
+      writeStore(projectId, gasReservoirId, store)
+    }
     return { record: clone(latestRecord), created: false, reused: true }
   }
 

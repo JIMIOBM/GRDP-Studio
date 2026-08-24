@@ -3,9 +3,9 @@ import { ref } from 'vue'
 // 两个解析融合工作台共用的目录数据与选择状态。
 // 路由切换不会销毁这些 ref，因此单井产能页面可以延续主工作台的完整目录。
 export const workspaceTreeData = ref([
-  { id: 'g-well', label: '井', children: [] },
-  { id: 'g-reservoir', label: '库', children: [{ id: 'res-1', label: '项目 1', type: 'reservoir' }] },
-  { id: 'g-group', label: '库群', children: [{ id: 'grp-1', label: '项目 1', type: 'group' }] }
+  { id: 'g-well', label: '井', expanded: false, defaultExpanded: false, children: [] },
+  { id: 'g-reservoir', label: '库', expanded: false, defaultExpanded: false, children: [{ id: 'res-1', label: '项目 1', type: 'reservoir' }] },
+  { id: 'g-group', label: '库群', expanded: false, defaultExpanded: false, children: [{ id: 'grp-1', label: '项目 1', type: 'group' }] }
 ])
 
 export const workspaceActiveNodeId = ref('')

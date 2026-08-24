@@ -31,8 +31,8 @@ import RelativePermeabilityContent from '@/views/DataManagement/RelativePermeabi
 import WellDataTableContent from '@/views/DataManagement/WellDataTableContent.vue'
 import { NODETYPE } from '@/constants/nodeType'
 import { analyticMethodApi, dataManagementApi, dynamicBalanceApi, materialBalanceApi, nodeApi, notifyApi, projectApi, typicalCurveApi, waterInvasionApi } from '@/api/docker'
-import { createOrReusePvtRecord, ensureInitialPvtRecord, getPvtRecords } from '@/utils/pvtRecords'
-import { hasRememberedModifiedIsochronalNode } from '@/utils/productivityRecords'
+import { pvtStorageApi } from '@/api/pvtStorage'
+import { createPvtDraftRecord } from '@/utils/pvtRecords'
 import {
   getNextRelativePermeabilityIndex,
   getRelativePermeabilityRecords
@@ -48,14 +48,16 @@ import {
   workspaceTreeKeyword
 } from '@/utils/workspaceTreeState'
 
+// 7
 const PROJECT_ID = 6
-const GAS_RESERVOIR_ID = 1
-const FLOW_BALANCE_NODE_TYPE = NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure
+// 4
+const GAS_RESERVOIR_ID = 3
 const router = useRouter()
+const FLOW_BALANCE_NODE_TYPE = NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure
 
 const WELL_GROUPS = [
   { id: 'data-management', label: '数据管理' },
-  { id: 'well-control-inventory', label: '井控库存' },
+  { id: 'well-control-inventory', label: '井控库存', lazy: true },
   { id: 'single-well-productivity', label: '单井产能' },
   { id: 'wellbore-capacity', label: '井筒能力' },
   { id: 'pipeline-capacity', label: '管束能力' },
@@ -71,7 +73,7 @@ const WELL_DATA_NODES = [
     type: 'well-data-static-pressure',
     label: '静压数据',
     dataType: 'staticPressure',
-    defaultExpanded: true,
+    defaultExpanded: false,
     children: [
       {
         type: 'well-data-calculated-static-pressure',
@@ -622,14 +624,18 @@ const findWattenbargerNodeByWell = (root, wellName) => {
   return visit(root)
 }
 
-// 左侧 PVT 子节点完全由持久化记录生成，刷新页面后编号和历史记录保持一致。
-const createPvtPropertyNodes = (wellName, wellId) =>
-  getPvtRecords(PROJECT_ID, GAS_RESERVOIR_ID, wellName).map(record => ({
-    id: `${wellId || wellName}-well-data-pvt-${record.index}`,
-    label: `PVT性质${record.index}`,
+// 左侧 PVT 子节点只接受数据库接口返回的 project_well_pvt 主记录。
+const createPvtPropertyNodes = (wellName, wellId, records = []) =>
+  records.map(record => ({
+    id: `${wellId || wellName}-well-data-pvt-${record.pvtId || record.pvtNo}`,
+    label: record.pvtName || `PVT性质${record.pvtNo}`,
     type: 'well-data-pvt',
     wellName,
-    pvtIndex: record.index,
+    pvtId: record.pvtId,
+    pvtIndex: record.pvtNo,
+    status: record.status,
+    sourceType: record.sourceType,
+    lastCalculatedKind: record.lastCalculatedKind,
     children: []
   }))
 
@@ -644,15 +650,15 @@ const createRelativePermeabilityNodes = (wellName, wellId) =>
   }))
 
 const createWellDataNodes = (wellName, wellId) =>
-  WELL_DATA_NODES.map(item => ({
-    ...item,
-    id: `${wellId || wellName}-${item.type}`,
-    wellName,
-    defaultExpanded: item.defaultExpanded || false,
-    // PVT 性质挂在每口井的“数据管理”下面，而不是作为井的同级节点。
-    children: item.type === 'well-data-pvt-group'
-      ? createPvtPropertyNodes(wellName, wellId)
-      : item.type === 'well-data-relative-permeability-group'
+  WELL_DATA_NODES
+    // PVT 目录本身也由数据库记录决定，不能在创建井节点时静态挂载。
+    .filter(item => item.type !== 'well-data-pvt-group')
+    .map(item => ({
+      ...item,
+      id: `${wellId || wellName}-${item.type}`,
+      wellName,
+      defaultExpanded: item.defaultExpanded || false,
+      children: item.type === 'well-data-relative-permeability-group'
         ? createRelativePermeabilityNodes(wellName, wellId)
         : (item.children || []).map(child => ({
           ...child,
@@ -661,27 +667,7 @@ const createWellDataNodes = (wellName, wellId) =>
           defaultExpanded: false,
           children: []
         }))
-  }))
-
-const createRememberedProductivityNodes = (wellName, wellId) => {
-  if (!hasRememberedModifiedIsochronalNode(PROJECT_ID, GAS_RESERVOIR_ID, wellName)) return []
-  const baseId = wellId || wellName
-  return [{
-    id: `${baseId}-single-well-productivity-productivity-test`,
-    label: '产能试井',
-    type: 'productivity-test',
-    wellName,
-    defaultExpanded: true,
-    children: [{
-      id: `${baseId}-modified-isochronal`,
-      label: '修正等时',
-      type: NODETYPE.NodeType_ProductivityEvaluationModifiedIsochronalWellTest,
-      wellName,
-      pNodeType: NODETYPE.NodeType_ProductivityEvaluationByPseudoPressure,
-      children: []
-    }]
-  }]
-}
+    }))
 
 const createEmptyWell = (wellName, wellId) => ({ //创建一口空井
   id: wellId || `well-${wellName}`,
@@ -697,9 +683,7 @@ const createEmptyWell = (wellName, wellId) => ({ //创建一口空井
     defaultExpanded: false,
     children: group.id === 'data-management'
       ? createWellDataNodes(wellName, wellId)
-      : group.id === 'single-well-productivity'
-        ? createRememberedProductivityNodes(wellName, wellId)
-        : []
+      : []
   }))
 })
 
@@ -746,50 +730,17 @@ const ensureWell = (wellName, wellId) => { //确保井存在
           return
         }
         if (dataNode.type === 'well-data-pvt-group') {
-          existingNode.children = createPvtPropertyNodes(wellName, wellItem.id)
-          existingNode.defaultExpanded = existingNode.children.length > 0
+          // PVT 子节点由异步数据库查询维护，ensureWell 不能用本地静态数据覆盖它。
+          existingNode.children = existingNode.children || []
+          existingNode.defaultExpanded = false
         } else if (dataNode.type === 'well-data-relative-permeability-group') {
           existingNode.children = createRelativePermeabilityNodes(wellName, wellItem.id)
-          existingNode.defaultExpanded = existingNode.children.length > 0
+          existingNode.defaultExpanded = false
         } else if (dataNode.children.length) {
           existingNode.children = dataNode.children
           existingNode.defaultExpanded = dataNode.defaultExpanded
         }
       })
-    } else if (group.id === 'single-well-productivity') {
-      createRememberedProductivityNodes(wellName, wellItem.id).forEach(productivityNode => {
-        const existingNode = groupItem.children.find(item =>
-          item.type === productivityNode.type || item.label === productivityNode.label
-        )
-        if (!existingNode) {
-          groupItem.children.push(productivityNode)
-        } else {
-          existingNode.children = existingNode.children || []
-          productivityNode.children.forEach(child => {
-            if (!existingNode.children.some(item => item.type === child.type || item.label === child.label)) {
-              existingNode.children.push(child)
-            }
-          })
-          existingNode.defaultExpanded = productivityNode.defaultExpanded
-        }
-      })
-    }
-
-    if (group.id === 'wellbore-capacity') {
-      const pvtModelGroup = groupItem.children.find(item => item.type === 'wellbore-pvt-group')
-      if (!pvtModelGroup) {
-        groupItem.children.push({
-          type: 'wellbore-pvt-group',
-          label: 'PVT模型',
-          id: `${wellItem.id}-wellbore-pvt-group`,
-          wellName,
-          defaultExpanded: false,
-          children: createPvtModelNodes(wellName, wellItem.id)
-        })
-      } else {
-        pvtModelGroup.children = createPvtModelNodes(wellName, wellItem.id)
-        pvtModelGroup.defaultExpanded = pvtModelGroup.children.length > 0
-      }
     }
   })
 
@@ -871,12 +822,12 @@ const addBlasingameNode = (wellName, rawNode = {}) => {
       label: '诊断曲线',
       type: NODETYPE.NodeType_TypicalCurve,
       wellName,
-      defaultExpanded: true,
+      defaultExpanded: false,
       children: []
     }
     inventoryGroup.children.push(diagnosticNode)
   } else {
-    diagnosticNode.defaultExpanded = true
+    diagnosticNode.defaultExpanded = false
     diagnosticNode.children = diagnosticNode.children || []
   }
 
@@ -918,12 +869,12 @@ const addNpiNode = (wellName, rawNode = {}) => {
       label: '诊断曲线',
       type: NODETYPE.NodeType_TypicalCurve,
       wellName,
-      defaultExpanded: true,
+      defaultExpanded: false,
       children: []
     }
     inventoryGroup.children.push(diagnosticNode)
   }
-  diagnosticNode.defaultExpanded = true
+  diagnosticNode.defaultExpanded = false
   diagnosticNode.children = diagnosticNode.children || []
 
   const id = rawNode?.nodeId || rawNode?.id || `${parentId}-npi`
@@ -959,12 +910,12 @@ const addTransientNode = (wellName, rawNode = {}) => {
       label: '诊断曲线',
       type: NODETYPE.NodeType_TypicalCurve,
       wellName,
-      defaultExpanded: true,
+      defaultExpanded: false,
       children: []
     }
     inventoryGroup.children.push(diagnosticNode)
   }
-  diagnosticNode.defaultExpanded = true
+  diagnosticNode.defaultExpanded = false
   diagnosticNode.children = diagnosticNode.children || []
 
   const id = rawNode?.nodeId || rawNode?.id || `${parentId}-transient`
@@ -1001,12 +952,12 @@ const addWattenbargerNode = (wellName, rawNode = {}) => {
       label: '诊断曲线',
       type: NODETYPE.NodeType_TypicalCurve,
       wellName,
-      defaultExpanded: true,
+      defaultExpanded: false,
       children: []
     }
     inventoryGroup.children.push(diagnosticNode)
   } else {
-    diagnosticNode.defaultExpanded = true
+    diagnosticNode.defaultExpanded = false
     diagnosticNode.children = diagnosticNode.children || []
   }
 
@@ -1049,12 +1000,12 @@ const addAGNode = (wellName, rawNode = {}) => {
       label: '诊断曲线',
       type: NODETYPE.NodeType_TypicalCurve,
       wellName,
-      defaultExpanded: true,
+      defaultExpanded: false,
       children: []
     }
     inventoryGroup.children.push(diagnosticNode)
   } else {
-    diagnosticNode.defaultExpanded = true
+    diagnosticNode.defaultExpanded = false
     diagnosticNode.children = diagnosticNode.children || []
   }
   const id = rawNode?.nodeId || rawNode?.id || `${parentId}-ag`
@@ -1418,34 +1369,60 @@ const toPvtGasRow = item => [
   item?.nitrogen ?? item?.nitrogenContent ?? item?.n2MoleFraction ?? ''
 ]
 
-const refreshPvtNodesForWell = wellName => {
-  const well = ensureWell(wellName, `well-${wellName}`)
-  const dataGroup = well?.children.find(item => item.type === 'data-management')
-  const pvtGroup = dataGroup?.children.find(item => item.type === 'well-data-pvt-group')
-  if (!pvtGroup) return
-  // 替换子节点数组，确保顶部新增编号后左侧目录立即更新。
-  pvtGroup.children = [...createPvtPropertyNodes(wellName, well.id)]
-  pvtGroup.defaultExpanded = pvtGroup.children.length > 0
+// 接口路径已经按项目和气藏筛选；这里再按返回字段（若存在）及井名精确匹配，
+// 对应 project_gas_property 的 project_id、project_gas_reservoir_id、well_name。
+const getDefaultPvtGasRows = async wellName => {
+  const response = await dataManagementApi.getGasProperties(
+    PROJECT_ID,
+    GAS_RESERVOIR_ID,
+    { silentError: true }
+  )
+  const source = getPvtSourceItems(response).find(item => {
+    const itemWellName = String(item?.wellName ?? '')
+    const itemProjectId = item?.projectId ?? item?.projectID
+    const itemGasReservoirId = item?.projectGasReservoirId ?? item?.gasReservoirId
+    const matchesProject = itemProjectId == null || Number(itemProjectId) === Number(PROJECT_ID)
+    const matchesGasReservoir = itemGasReservoirId == null ||
+      Number(itemGasReservoirId) === Number(GAS_RESERVOIR_ID)
+    return itemWellName === String(wellName) && matchesProject && matchesGasReservoir
+  })
+  return source ? [toPvtGasRow(source)] : []
 }
 
-
-const createPvtModelNodes = (wellName, wellId) =>
-  getPvtRecords(PROJECT_ID, GAS_RESERVOIR_ID, wellName).map(record => ({
-    id: `${wellId || wellName}-wellbore-pvt-${record.index}`,
-    label: `PVT模型${record.index}`,
-    type: 'wellbore-pvt',
-    wellName,
-    pvtIndex: record.index,
-    children: []
-  }))
-
-const refreshPvtModelNodesForWell = wellName => {
+const refreshPvtNodesForWell = async wellName => {
   const well = ensureWell(wellName, `well-${wellName}`)
-  const wellboreGroup = well?.children.find(item => item.type === 'wellbore-capacity')
-  const pvtModelGroup = wellboreGroup?.children.find(item => item.type === 'wellbore-pvt-group')
-  if (!pvtModelGroup) return
-  pvtModelGroup.children = [...createPvtModelNodes(wellName, well.id)]
-  pvtModelGroup.defaultExpanded = pvtModelGroup.children.length > 0
+  const dataGroup = well?.children.find(item => item.type === 'data-management')
+  if (!dataGroup) return []
+
+  const response = await pvtStorageApi.list(PROJECT_ID, GAS_RESERVOIR_ID, wellName)
+  const records = Array.isArray(response?.data) ? response.data : []
+  let pvtGroup = dataGroup.children.find(item => item.type === 'well-data-pvt-group')
+
+  if (!records.length) {
+    // 数据库没有 PVT 时连目录一起移除，同时清理旧版遗留的静态节点。
+    dataGroup.children = dataGroup.children.filter(item => item.type !== 'well-data-pvt-group')
+    return []
+  }
+
+  if (!pvtGroup) {
+    pvtGroup = {
+      id: `${well.id || wellName}-well-data-pvt-group`,
+      label: 'PVT性质',
+      type: 'well-data-pvt-group',
+      wellName,
+      defaultExpanded: false,
+      children: []
+    }
+    const relativeIndex = dataGroup.children.findIndex(
+      item => item.type === 'well-data-relative-permeability-group'
+    )
+    dataGroup.children.splice(relativeIndex >= 0 ? relativeIndex : dataGroup.children.length, 0, pvtGroup)
+  }
+
+  // 每次都整体替换，确保目录内容完全等于 project_well_pvt 查询结果。
+  pvtGroup.children = createPvtPropertyNodes(wellName, well.id, records)
+  pvtGroup.defaultExpanded = false
+  return pvtGroup.children
 }
 
 const refreshRelativePermeabilityNodesForWell = wellName => {
@@ -1457,7 +1434,7 @@ const refreshRelativePermeabilityNodesForWell = wellName => {
   if (!relativeGroup) return []
 
   relativeGroup.children = [...createRelativePermeabilityNodes(wellName, well.id)]
-  relativeGroup.defaultExpanded = relativeGroup.children.length > 0
+  relativeGroup.defaultExpanded = false
   return relativeGroup.children
 }
 
@@ -1476,46 +1453,84 @@ const handleRelativePermeabilityImported = record => {
   currentViewNode.value = node
 }
 
-const initializePvtRecords = async () => {
-  const wellNames = getAllWellNames()
-  if (!wellNames.length) return
-
-  let sourceItems = []
-  try {
-    const response = await dataManagementApi.getGasProperties(
-      PROJECT_ID,
-      GAS_RESERVOIR_ID,
-      { silentError: true }
-    )
-    sourceItems = getPvtSourceItems(response)
-  } catch (error) {
-    console.warn('PVT性质1基础数据加载失败', error)
-  }
-
-  // 按接口顺序为每口井选取第一条数据，并在项目树加载时补齐性质1。
-  const firstSourceByWell = new Map()
-  sourceItems.forEach(item => {
-    const wellName = String(item?.wellName ?? '')
-    if (wellName && !firstSourceByWell.has(wellName)) firstSourceByWell.set(wellName, item)
-  })
-
-  wellNames.forEach(wellName => {
-    const source = firstSourceByWell.get(String(wellName))
-    ensureInitialPvtRecord(
-      PROJECT_ID,
-      GAS_RESERVOIR_ID,
-      wellName,
-      source ? [toPvtGasRow(source)] : []
-    )
-    refreshPvtNodesForWell(wellName)
-  })
-}
-
 const handlePvtPropertyTabChange = tabName => {
   lastPvtPropertyTab.value = tabName
 }
 
+const handlePvtSaved = async saved => {
+  const wellName = saved?.wellName || currentViewNode.value?.wellName
+  const pvtNo = Number(saved?.pvtNo ?? currentViewNode.value?.pvtIndex)
+  if (!wellName || !Number.isFinite(pvtNo)) return
+
+  try {
+    const nodes = await refreshPvtNodesForWell(wellName)
+    const persistedNode = nodes.find(node => Number(node.pvtIndex) === pvtNo)
+    if (!persistedNode) return
+    activeNodeId.value = persistedNode.id
+    activeNode.value = persistedNode
+    currentViewNode.value = {
+      ...currentViewNode.value,
+      ...persistedNode
+    }
+  } catch (error) {
+    console.warn('PVT保存成功，但左侧目录刷新失败', error)
+  }
+}
+
 const getPvtInitialPropertyTab = () => '天然气性质'
+
+const parsePvtSettings = value => {
+  if (!value) return {}
+  if (typeof value === 'object') return value
+  try {
+    return JSON.parse(value)
+  } catch {
+    return {}
+  }
+}
+
+const toPvtEditorRecord = (detail, fallbackGasRows = []) => ({
+  wellName: detail?.record?.wellName,
+  index: detail?.record?.pvtNo,
+  gasRows: detail?.gasInput
+    ? [[
+        detail.gasInput.gasType,
+        detail.gasInput.specificGravity,
+        detail.gasInput.hydrogenSulfide,
+        detail.gasInput.carbonDioxide,
+        detail.gasInput.nitrogen,
+        detail.gasInput.condensateOilDensity
+      ]]
+    // 某个旧 PVT 可能先保存了地层水或岩石，尚未写入天然气输入表。
+    // 此时仍按井从 project_gas_property 回填基础气体性质，避免数据列表显示为空。
+    : fallbackGasRows.map(row => [...row]),
+  waterRows: detail?.waterInput
+    ? [[
+        detail.waterInput.salinity,
+        detail.waterInput.formationPressure,
+        detail.waterInput.formationTemperature
+      ]]
+    : [],
+  rockRows: detail?.rockInput ? [[detail.rockInput.porosity]] : [],
+  rockState: detail?.rockInput
+    ? {
+        porosity: detail.rockInput.porosity,
+        rockType: detail.rockInput.rockType,
+        calculationMethod: detail.rockInput.calculationMethod,
+        settings: parsePvtSettings(detail?.settings?.rock)
+      }
+    : null,
+  gasResultRows: detail?.gasResults || [],
+  waterResultRows: (detail?.waterResults || []).map(row => ({
+    ...row,
+    gasSolubilityInWater: row.gasSolubility,
+    isothermalCompressionCoefficient: row.isothermalCompressibility
+  })),
+  gasSettings: parsePvtSettings(detail?.settings?.gas),
+  waterSettings: parsePvtSettings(detail?.settings?.water),
+  lastCalculatedKind: detail?.record?.lastCalculatedKind || '',
+  status: detail?.record?.status || 'draft'
+})
 
 const refreshWaterInvasionNodes = async (wellName = '') => {  //加载已有水侵分析节点
   try {
@@ -3344,10 +3359,30 @@ const openAGNode = async (node) => {
 }
 
 const initTree = async () => {
-  if (workspaceTreeHydrated.value) return
-  await refreshProjectTree()
-  await initializePvtRecords()
-  workspaceTreeHydrated.value = true
+  if (!workspaceTreeHydrated.value) {
+    await refreshProjectTree()
+    workspaceTreeHydrated.value = true
+  }
+
+  // 清理跨页面缓存的展开状态和动态节点；接口只在用户再次展开对应分组时调用。
+  const resetLazyState = nodes => {
+    nodes.forEach(node => {
+      node.expanded = false
+      node.defaultExpanded = false
+      node.childrenLoaded = false
+      if (node.type === 'data-management') {
+        node.children = (node.children || []).filter(
+          child => child.type !== 'well-data-pvt-group'
+        )
+      }
+      if (node.type === 'well-control-inventory') {
+        node.children = []
+        node.lazy = true
+      }
+      resetLazyState(node.children || [])
+    })
+  }
+  resetLazyState(treeData.value)
 }
 
 const loadWellChildren = async (node, force = false) => {
@@ -3535,27 +3570,36 @@ const handleSelect = async (node) => { // 点击左侧树节点
 
   if (isWellMenuGroup) return
 
-  if (node.type === 'well-data-relative-permeability-group') {
-    currentView.value = 'relative-permeability'
-    currentViewNode.value = {
-      ...node,
-      relativePermeabilityIndex: getNextRelativePermeabilityIndex(
-        PROJECT_ID,
-        GAS_RESERVOIR_ID,
-        nodeWellName
-      ),
-      draft: true,
-      viewInstanceKey: `relative-permeability-new-${nodeWellName}-${Date.now()}`
-    }
+  if (node.type === 'well-data-pvt-group') {
+    // “PVT性质”只是目录：点击时仅由树组件展开或收起，不打开任何具体记录。
+    // 只有点击 PVT性质3、PVT性质4 等子节点时才查询详情并进入修改页面。
     return
   }
 
   if (node.type === 'well-data-pvt') {
-    currentView.value = 'pvt-properties'
-    currentViewNode.value = {
-      ...node,
-      initialPropertyTab: getPvtInitialPropertyTab(),
-      viewInstanceKey: `${node.id}-${Date.now()}`
+    try {
+      if (!node.pvtId) throw new Error('该PVT节点缺少数据库ID，请刷新目录后重试')
+      const response = await pvtStorageApi.getDetail(
+        node.pvtId,
+        PROJECT_ID,
+        GAS_RESERVOIR_ID,
+        nodeWellName
+      )
+      // 天然气输入尚未保存时，使用该井 project_gas_property 的原始气体性质作为默认值。
+      // 已保存的 project_well_pvt_gas_input 永远优先，不会被默认值覆盖。
+      const fallbackGasRows = response?.data?.gasInput
+        ? []
+        : await getDefaultPvtGasRows(nodeWellName)
+      currentView.value = 'pvt-properties'
+      currentViewNode.value = {
+        ...node,
+        initialRecord: toPvtEditorRecord(response?.data, fallbackGasRows),
+        initialPropertyTab: getPvtInitialPropertyTab(),
+        // 每次点击都重新读取数据库并挂载组件，确保修改的是该节点最新数据。
+        viewInstanceKey: `${node.id}-${Date.now()}`
+      }
+    } catch (error) {
+      ElMessage.error(error?.msg || error?.response?.data?.msg || error.message || 'PVT性质加载失败')
     }
     return
   }
@@ -3686,7 +3730,7 @@ const handleCommand = async ({ group, name, parent }) => { // 接收顶部菜单
     return
   }
 
-    if (name === 'PVT性质') {
+  if (name === 'PVT性质') {
     const activeWellName = selectedWellName.value || activeNode.value?.wellName || (
       activeNode.value?.type === NODETYPE.NodeType_Well ? activeNode.value.label : ''
     )
@@ -3696,22 +3740,33 @@ const handleCommand = async ({ group, name, parent }) => { // 接收顶部菜单
     }
 
     try {
-      const { record } = createOrReusePvtRecord(
+      const response = await pvtStorageApi.list(PROJECT_ID, GAS_RESERVOIR_ID, activeWellName)
+      const persistedRecords = Array.isArray(response?.data) ? response.data : []
+      const nextPvtNo = persistedRecords.reduce(
+        (maximum, record) => Math.max(maximum, Number(record.pvtNo) || 0),
+        0
+      ) + 1
+      const initialGasRows = await getDefaultPvtGasRows(activeWellName)
+      const record = createPvtDraftRecord(
         PROJECT_ID,
         GAS_RESERVOIR_ID,
-        activeWellName
+        activeWellName,
+        nextPvtNo,
+        initialGasRows
       )
 
-      refreshPvtNodesForWell(activeWellName)
-      const well = getWellGroup()?.children.find(item => item.wellName === activeWellName)
-      const pvtGroup = well?.children
-        .find(item => item.type === 'data-management')?.children
-        .find(item => item.type === 'well-data-pvt-group')
-      const node = pvtGroup?.children.find(
-        item => Number(item.pvtIndex) === Number(record.index)
-      )
-      if (!node) throw new Error('PVT性质节点创建失败')
+      // 新编号保存前只作为右侧编辑草稿存在，不提前挂到左侧数据库目录。
+      const node = {
+        id: `pvt-draft-${activeWellName}-${record.index}`,
+        label: `PVT性质${record.index}`,
+        type: 'well-data-pvt',
+        wellName: activeWellName,
+        pvtIndex: record.index,
+        draft: true,
+        children: []
+      }
 
+      // 进入待保存编号的数据列表；保存成功事件会从数据库刷新并替换为正式树节点。
       lastPvtPropertyTab.value = '天然气性质'
       activeNodeId.value = node.id
       activeNode.value = node
@@ -3723,47 +3778,6 @@ const handleCommand = async ({ group, name, parent }) => { // 接收顶部菜单
       }
     } catch (error) {
       ElMessage.error(error.response?.data?.message || error.message || 'PVT性质节点创建失败')
-    }
-    return
-  }
-
-  if (name === 'PVT模型') {
-    const activeWellName = selectedWellName.value || activeNode.value?.wellName || (
-      activeNode.value?.type === NODETYPE.NodeType_Well ? activeNode.value.label : ''
-    )
-    if (!activeWellName) {
-      ElMessage.warning('请先选择一口井')
-      return
-    }
-
-    try {
-      const { record } = createOrReusePvtRecord(
-        PROJECT_ID,
-        GAS_RESERVOIR_ID,
-        activeWellName
-      )
-
-      refreshPvtModelNodesForWell(activeWellName)
-      const well = getWellGroup()?.children.find(item => item.wellName === activeWellName)
-      const pvtModelGroup = well?.children
-        .find(item => item.type === 'wellbore-capacity')?.children
-        .find(item => item.type === 'wellbore-pvt-group')
-      const node = pvtModelGroup?.children.find(
-        item => Number(item.pvtIndex) === Number(record.index)
-      )
-      if (!node) throw new Error('PVT模型节点创建失败')
-
-      lastPvtPropertyTab.value = '天然气性质'
-      activeNodeId.value = node.id
-      activeNode.value = node
-      currentView.value = 'pvt-properties'
-      currentViewNode.value = {
-        ...node,
-        initialPropertyTab: '天然气性质',
-        viewInstanceKey: `${node.id}-${Date.now()}`
-      }
-    } catch (error) {
-      ElMessage.error(error.response?.data?.message || error.message || 'PVT模型节点创建失败')
     }
     return
   }
@@ -3782,7 +3796,6 @@ const handleCommand = async ({ group, name, parent }) => { // 接收顶部菜单
         GAS_RESERVOIR_ID,
         selectedWellName.value
       ),
-      draft: true,
       viewInstanceKey: `relative-permeability-new-${selectedWellName.value}-${Date.now()}`
     }
     return
@@ -3824,8 +3837,25 @@ const handleCommand = async ({ group, name, parent }) => { // 接收顶部菜单
   }
 }
 
-const handleNodeExpand = (node) => {
-  loadWellChildren(node)
+const handleNodeExpand = async node => {
+  const wellName = node?.wellName
+  if (!wellName) return
+
+  if (node.type === 'data-management') {
+    try {
+      await refreshPvtNodesForWell(wellName)
+    } catch (error) {
+      console.warn(`井 ${wellName} 的PVT目录加载失败`, error)
+    }
+    return
+  }
+
+  if (node.type === 'well-control-inventory') {
+    const wellNode = getWellGroup()?.children.find(
+      item => item.wellName === wellName || item.label === wellName
+    )
+    if (wellNode) await loadWellChildren(wellNode)
+  }
 }
 
 const handleRefreshTree = () => {
@@ -3853,6 +3883,12 @@ onMounted(async () => {
   if (pendingCommand) {
     workspacePendingCommand.value = null
     await handleCommand(pendingCommand)
+  }
+
+  const pendingNode = workspacePendingNode.value
+  if (pendingNode) {
+    workspacePendingNode.value = null
+    await handleSelect(pendingNode)
   }
 })
 
@@ -3899,8 +3935,10 @@ onBeforeUnmount(() => {
           :project-id="PROJECT_ID"
           :gas-reservoir-id="GAS_RESERVOIR_ID"
           :pvt-index="currentViewNode?.pvtIndex"
+          :initial-record="currentViewNode?.initialRecord"
           :initial-property-tab="currentViewNode?.initialPropertyTab || lastPvtPropertyTab"
           @property-tab-change="handlePvtPropertyTabChange"
+          @saved="handlePvtSaved"
         />
         <RelativePermeabilityContent
           v-if="currentView === 'relative-permeability'"
@@ -3909,7 +3947,6 @@ onBeforeUnmount(() => {
           :project-id="PROJECT_ID"
           :gas-reservoir-id="GAS_RESERVOIR_ID"
           :relative-permeability-index="currentViewNode?.relativePermeabilityIndex"
-          :draft="Boolean(currentViewNode?.draft)"
           @imported="handleRelativePermeabilityImported"
         />
         <WellDataTableContent v-if="currentView === 'well-data-table'"

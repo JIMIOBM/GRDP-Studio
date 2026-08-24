@@ -7,18 +7,20 @@ import RockProperties from './RockProperties.vue'
 import NaturalGasImportDialog from './NaturalGasImportDialog.vue'
 import FormationWaterImportDialog from './FormationWaterImportDialog.vue'
 import { getPvtRecord, savePvtCalculation, savePvtImport } from '@/utils/pvtRecords'
+import { pvtStorageApi } from '@/api/pvtStorage'
 
 const props = defineProps({
   wellName: { type: String, default: '' },
   projectId: { type: [Number, String], required: true },
   gasReservoirId: { type: [Number, String], required: true },
   pvtIndex: { type: [Number, String], default: 1 },
+  initialRecord: { type: Object, default: null },
   initialPropertyTab: { type: String, default: '天然气性质' }
 })
 
-const emit = defineEmits(['property-tab-change'])
+const emit = defineEmits(['property-tab-change', 'saved'])
 // 每个性质编号使用独立快照初始化输入与结果，切换旧节点不会读取当前节点的状态
-const storedRecord = getPvtRecord(
+const storedRecord = props.initialRecord || getPvtRecord(
   props.projectId,
   props.gasReservoirId,
   props.wellName,
@@ -53,7 +55,10 @@ const rockImportDialogVisible = ref(false)
 const waterImportDialogVisible = ref(false)
 const importedGasRows = ref(createInitialGasRows())
 const importedGasResultRows = ref(storedRecord?.gasResultRows || [])
-const importedRockRows = ref([])
+const currentGasSettings = ref(storedRecord?.gasSettings || {})
+const importedRockRows = ref(storedRecord?.rockRows || [])
+const rockCalculationState = ref(storedRecord?.rockState || null)
+const saving = ref(false)
 
 const handleGasResultTabChange = (tabName) => {
   activeGasResultTab.value = tabName
@@ -65,12 +70,159 @@ const handlePropertyTabChange = tabName => {
 }
 const importedWaterRows = ref(createInitialWaterRows())
 const importedWaterResultRows = ref(storedRecord?.waterResultRows || [])
+const currentWaterSettings = ref(storedRecord?.waterSettings || {})
 const activeWaterImportKind = computed(
   () => activeWaterResultTab.value === '结果分析图' ? 'result' : 'data'
 )
 
-const handleSave = () => {
-  ElMessage.success(`${activePropertyTab.value}参数已保存`)
+const hasValue = value => value !== null && value !== undefined && String(value).trim() !== ''
+
+const requiredNumber = (value, field) => {
+  if (!hasValue(value) || !Number.isFinite(Number(value))) {
+    throw new Error(`${field}必须填写有效数字`)
+  }
+  return Number(value)
+}
+
+const optionalNumber = value =>
+  hasValue(value) && Number.isFinite(Number(value)) ? Number(value) : null
+
+const firstDataRow = rows =>
+  (rows || []).find(row => Array.isArray(row) && row.some(hasValue)) || null
+
+const buildGasSavePayload = section => {
+  if (section === 'input') {
+    const row = firstDataRow(importedGasRows.value)
+    if (!row) throw new Error('天然气数据列表中没有可保存的数据')
+    if (!hasValue(row[0])) throw new Error('天然气类型不能为空')
+    return {
+      gasInput: {
+        gasType: String(row[0]).trim(),
+        specificGravity: requiredNumber(row[1], '天然气比重'),
+        hydrogenSulfide: requiredNumber(row[2], 'H₂S'),
+        carbonDioxide: requiredNumber(row[3], 'CO₂'),
+        nitrogen: requiredNumber(row[4], 'N₂'),
+        condensateOilDensity: optionalNumber(row[5])
+      }
+    }
+  }
+
+  const rows = (importedGasResultRows.value || []).filter(row =>
+    row && hasValue(row.pressure) && hasValue(row.temperature)
+  )
+  if (!rows.length) throw new Error('天然气结果分析图中没有可保存的数据')
+  return {
+    settings: currentGasSettings.value,
+    gasResults: rows.map(row => ({
+      pressure: requiredNumber(row.pressure, '压力'),
+      temperature: requiredNumber(row.temperature, '温度'),
+      deviationFactor: optionalNumber(row.deviationFactor),
+      pseudoPressure: optionalNumber(row.pseudoPressure),
+      volumeFactor: optionalNumber(row.volumeFactor),
+      density: optionalNumber(row.density),
+      compressibility: optionalNumber(row.compressibility),
+      viscosity: optionalNumber(row.viscosity)
+    }))
+  }
+}
+
+const buildWaterSavePayload = section => {
+  if (section === 'input') {
+    const row = firstDataRow(importedWaterRows.value)
+    if (!row) throw new Error('地层水数据列表中没有可保存的数据')
+    return {
+      waterInput: {
+        salinity: requiredNumber(row[0], '矿化度'),
+        formationPressure: requiredNumber(row[1], '地层压力'),
+        formationTemperature: requiredNumber(row[2], '地层温度')
+      }
+    }
+  }
+
+  const rows = (importedWaterResultRows.value || []).filter(row =>
+    row && hasValue(row.pressure) && hasValue(row.temperature) && hasValue(row.salinity)
+  )
+  if (!rows.length) throw new Error('地层水结果分析图中没有可保存的数据')
+  return {
+    settings: currentWaterSettings.value,
+    waterResults: rows.map(row => ({
+      pressure: requiredNumber(row.pressure, '压力'),
+      temperature: requiredNumber(row.temperature, '温度'),
+      salinity: requiredNumber(row.salinity, '矿化度'),
+      gasSolubility: optionalNumber(row.gasSolubilityInWater ?? row.gasSolubility),
+      volumeFactor: optionalNumber(row.volumeFactor),
+      density: optionalNumber(row.density),
+      isothermalCompressibility: optionalNumber(
+        row.isothermalCompressionCoefficient ?? row.isothermalCompressibility
+      ),
+      viscosity: optionalNumber(row.viscosity)
+    }))
+  }
+}
+
+const buildRockSavePayload = () => {
+  const importedRow = firstDataRow(importedRockRows.value)
+  const state = rockCalculationState.value
+  const porosityValue = importedRow?.[0] ?? state?.porosity
+  if (!hasValue(porosityValue)) throw new Error('岩石性质中没有可保存的数据')
+  return {
+    rockInput: {
+      porosity: requiredNumber(porosityValue, '岩石孔隙度'),
+      rockType: state?.rockType || '胶结砂岩/碳酸盐岩',
+      calculationMethod: state?.calculationMethod || '导入数据'
+    },
+    settings: state?.settings || {}
+  }
+}
+
+const handleRockCalculation = payload => {
+  rockCalculationState.value = payload
+}
+
+const handleSave = async () => {
+  if (saving.value) return
+  const kindByTab = {
+    天然气性质: 'gas',
+    地层水性质: 'water',
+    岩石性质: 'rock'
+  }
+  const propertyKind = kindByTab[activePropertyTab.value]
+  const section = propertyKind === 'gas'
+    ? (activeGasResultTab.value === '结果分析图' ? 'result' : 'input')
+    : propertyKind === 'water'
+      ? (activeWaterResultTab.value === '结果分析图' ? 'result' : 'input')
+      : 'input'
+
+  try {
+    const content = propertyKind === 'gas'
+      ? buildGasSavePayload(section)
+      : propertyKind === 'water'
+        ? buildWaterSavePayload(section)
+        : buildRockSavePayload()
+    saving.value = true
+    const response = await pvtStorageApi.save({
+      projectId: Number(props.projectId),
+      gasReservoirId: Number(props.gasReservoirId),
+      wellName: props.wellName,
+      pvtNo: Number(props.pvtIndex),
+      pvtName: `PVT性质${props.pvtIndex}`,
+      propertyKind,
+      section,
+      sourceType: section === 'result' ? 'calculation' : 'manual',
+      ...content
+    })
+    const savedRows = response?.data?.savedRows ?? 0
+    emit('saved', {
+      pvtId: response?.data?.pvtId,
+      pvtNo: Number(props.pvtIndex),
+      wellName: props.wellName
+    })
+    ElMessage.success(`${activePropertyTab.value}${section === 'result' ? '结果' : '数据'}已保存（${savedRows}条）`)
+  } catch (error) {
+    ElMessage.error(error?.msg || error?.response?.data?.msg || error.message || 'PVT数据保存失败')
+  } finally {
+    saving.value = false
+  }
 }
 
 const handleImport = () => {
@@ -468,9 +620,11 @@ const persistCalculation = (kind, payload) => {
   if (kind === 'gas') {
     importedGasRows.value = record?.gasRows || []
     importedGasResultRows.value = record?.gasResultRows || []
+    currentGasSettings.value = record?.gasSettings || {}
   } else {
     importedWaterRows.value = record?.waterRows || [[25000, 40, 119.85]]
     importedWaterResultRows.value = record?.waterResultRows || []
+    currentWaterSettings.value = record?.waterSettings || {}
   }
 }
 </script>
@@ -486,7 +640,9 @@ const persistCalculation = (kind, payload) => {
       </nav>
 
       <div class="toolbar-actions">
-        <button type="button" class="toolbar-button" @click="handleSave">保存</button>
+        <button type="button" class="toolbar-button" :disabled="saving" @click="handleSave">
+          {{ saving ? '保存中…' : '保存' }}
+        </button>
         <button type="button" class="toolbar-button" @click="handleImport">导入</button>
       </div>
     </header>
@@ -496,7 +652,7 @@ const persistCalculation = (kind, payload) => {
       :imported-rows="importedGasRows"
       :imported-result-rows="importedGasResultRows"
       :project-id="projectId"
-      :initial-settings="storedRecord?.gasSettings || {}"
+      :initial-settings="currentGasSettings"
       @result-tab-change="handleGasResultTabChange"
       @calculated="persistCalculation('gas', $event)"
     />
@@ -507,11 +663,16 @@ const persistCalculation = (kind, payload) => {
       :gas-rows="importedGasRows"
       :imported-rows="importedWaterRows"
       :imported-result-rows="importedWaterResultRows"
-      :initial-settings="storedRecord?.waterSettings || {}"
+      :initial-settings="currentWaterSettings"
       @result-tab-change="activeWaterResultTab = $event"
       @calculated="persistCalculation('water', $event)"
     />
-    <RockProperties v-else :imported-rows="importedRockRows" :project-id="projectId" />
+    <RockProperties
+      v-else
+      :imported-rows="importedRockRows"
+      :project-id="projectId"
+      @calculation-complete="handleRockCalculation"
+    />
 
     <NaturalGasImportDialog
       v-model="importDialogVisible"

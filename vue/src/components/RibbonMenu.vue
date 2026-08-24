@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, nextTick, onBeforeUnmount, onMounted, watch } from 'vue'
 
 /**
  * 顶部功能区菜单（Ribbon）组件
@@ -215,6 +215,46 @@ const normalizeRibbonTabs = (tabs) => tabs.map(tab => ({
 const tabList = computed(() => normalizeRibbonTabs(props.tabs || defaultTabs))
 const activeTab = ref(0)
 const activeTabGroups = computed(() => tabList.value[activeTab.value]?.groups || [])
+const ribbonBody = ref(null)
+const canScrollLeft = ref(false)
+const canScrollRight = ref(false)
+let ribbonResizeObserver = null
+
+const updateRibbonOverflow = () => {
+  const body = ribbonBody.value
+  if (!body) return
+
+  canScrollLeft.value = body.scrollLeft > 1
+  canScrollRight.value = body.scrollLeft + body.clientWidth < body.scrollWidth - 1
+}
+
+const scrollRibbon = (direction) => {
+  const body = ribbonBody.value
+  if (!body) return
+
+  body.scrollBy({
+    left: direction * Math.max(280, Math.round(body.clientWidth * 0.72)),
+    behavior: 'smooth'
+  })
+}
+
+onMounted(() => {
+  nextTick(updateRibbonOverflow)
+
+  if (typeof ResizeObserver !== 'undefined') {
+    ribbonResizeObserver = new ResizeObserver(updateRibbonOverflow)
+    if (ribbonBody.value) ribbonResizeObserver.observe(ribbonBody.value)
+  }
+})
+
+onBeforeUnmount(() => ribbonResizeObserver?.disconnect())
+
+watch(activeTab, () => {
+  nextTick(() => {
+    if (ribbonBody.value) ribbonBody.value.scrollLeft = 0
+    updateRibbonOverflow()
+  })
+})
 
 
 //把 ../assets/ribbon-icons/ 下面所有 svg 图标都加载进来。
@@ -277,8 +317,20 @@ const getIcon = (label) => iconMap[normalizeIconKey(iconAliases[label] || label)
     </div>
 
     <!-- 功能区主体 -->
-    <div class="ribbon-body">
-      <div class="ribbon-group" v-for="group in activeTabGroups" :key="group.title">
+    <div class="ribbon-body-wrap" :class="{ 'has-left-overflow': canScrollLeft, 'has-right-overflow': canScrollRight }">
+      <button
+          v-if="canScrollLeft"
+          class="ribbon-scroll-button ribbon-scroll-left"
+          type="button"
+          aria-label="向左查看更多功能"
+          title="向左查看更多功能"
+          @click="scrollRibbon(-1)"
+      >
+        &#8249;
+      </button>
+
+      <div ref="ribbonBody" class="ribbon-body" @scroll.passive="updateRibbonOverflow">
+        <div class="ribbon-group" v-for="group in activeTabGroups" :key="group.title">
         <div class="group-content" :class="{ 'production-group': group.title === '配产配注' }">
           <template v-for="(col, ci) in group.columns" :key="ci">
 
@@ -423,8 +475,20 @@ const getIcon = (label) => iconMap[normalizeIconKey(iconAliases[label] || label)
 
           </template>
         </div>
-        <div class="group-title">{{ group.title }}</div>
+          <div class="group-title">{{ group.title }}</div>
+        </div>
       </div>
+
+      <button
+          v-if="canScrollRight"
+          class="ribbon-scroll-button ribbon-scroll-right"
+          type="button"
+          aria-label="向右查看更多功能"
+          title="向右查看更多功能"
+          @click="scrollRibbon(1)"
+      >
+        &#8250;
+      </button>
     </div>
   </div>
 </template>
@@ -476,6 +540,39 @@ $square-border: #c2c2c2;
 }
 
 /* ===== 功能区主体 ===== */
+.ribbon-body-wrap {
+  position: relative;
+  background-color: $ribbon-bg;
+
+  &::before,
+  &::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: 4;
+    width: 42px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+  }
+
+  &::before {
+    left: 0;
+    background: linear-gradient(to right, rgba(255, 255, 255, 0.98), rgba(255, 255, 255, 0));
+  }
+
+  &::after {
+    right: 0;
+    background: linear-gradient(to left, rgba(255, 255, 255, 0.98), rgba(255, 255, 255, 0));
+  }
+
+  &.has-left-overflow::before,
+  &.has-right-overflow::after {
+    opacity: 1;
+  }
+}
+
 .ribbon-body {
   display: flex;
   align-items: stretch;
@@ -489,6 +586,40 @@ $square-border: #c2c2c2;
   &::-webkit-scrollbar {
     display: none;
   }
+}
+
+.ribbon-scroll-button {
+  position: absolute;
+  top: 50%;
+  z-index: 5;
+  width: 28px;
+  height: 48px;
+  padding: 0;
+  transform: translateY(-50%);
+  border: 1px solid #d3d3d3;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.96);
+  color: #333;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.14);
+  font-size: 26px;
+  line-height: 42px;
+  cursor: pointer;
+
+  &:hover,
+  &:focus-visible {
+    border-color: $accent-border;
+    background: $accent-soft;
+    color: #202020;
+    outline: none;
+  }
+}
+
+.ribbon-scroll-left {
+  left: 6px;
+}
+
+.ribbon-scroll-right {
+  right: 6px;
 }
 
 .ribbon-group {
@@ -709,6 +840,39 @@ $square-border: #c2c2c2;
     max-width: none;
     white-space: nowrap;
     overflow: visible;
+  }
+}
+
+/* 中小屏收紧功能区，但保留足够的文字和图标尺寸。 */
+@media (max-width: 1440px) {
+  .ribbon-group .group-content {
+    gap: 6px;
+    padding-right: 6px;
+    padding-left: 6px;
+  }
+
+  .col-checks .check-item {
+    gap: 4px;
+  }
+
+  .col-large {
+    width: 44px;
+    min-width: 44px;
+    padding-right: 3px;
+    padding-left: 3px;
+
+    .big-icon {
+      width: 32px;
+      height: 32px;
+    }
+  }
+
+  .production-group {
+    gap: 5px;
+
+    .col-large {
+      min-width: 64px;
+    }
   }
 }
 </style>
