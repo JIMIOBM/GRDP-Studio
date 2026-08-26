@@ -51,7 +51,7 @@ import {
 // 7
 const PROJECT_ID = 6
 // 4
-const GAS_RESERVOIR_ID = 3
+const GAS_RESERVOIR_ID = 1
 const router = useRouter()
 const FLOW_BALANCE_NODE_TYPE = NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure
 
@@ -3779,6 +3779,34 @@ const handleCommand = async ({ group, name, parent }) => { // 接收顶部菜单
       }
     } catch (error) {
       ElMessage.error(error.response?.data?.message || error.message || 'PVT性质节点创建失败')
+    }
+    return
+  }
+
+    if (name === 'PVT模型') {
+    if (!selectedWellName.value) {
+      ElMessage.warning('请先选择一口井')
+      return
+    }
+
+    const node = {
+      id: `pvt-model-${selectedWellName.value}-${Date.now()}`,
+      label: 'PVT模型',
+      type: 'well-data-pvt',
+      wellName: selectedWellName.value,
+      pvtIndex: 1,
+      draft: true,
+      children: []
+    }
+
+    lastPvtPropertyTab.value = '天然气性质'
+    activeNodeId.value = node.id
+    activeNode.value = node
+    currentView.value = 'pvt-properties'
+    currentViewNode.value = {
+      ...node,
+      initialPropertyTab: '天然气性质',
+      viewInstanceKey: `${node.id}-${Date.now()}`
     }
     return
   }
