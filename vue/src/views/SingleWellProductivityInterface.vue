@@ -22,10 +22,7 @@ import ModifiedIsochronalContent from '@/views/SingleWellProductivity/ModifiedIs
 import { NODETYPE } from '@/constants/nodeType'
 import { wellApi } from '@/api/docker'
 import { getPvtRecords } from '@/utils/pvtRecords'
-import {
-  getRememberedModifiedIsochronalWells,
-  rememberModifiedIsochronalNode
-} from '@/utils/productivityRecords'
+import { productivityTestsApi } from '@/api/productivityTests'
 import {
   workspaceActiveNodeId,
   workspacePendingCommand,
@@ -37,7 +34,7 @@ import {
 } from '@/utils/workspaceTreeState'
 
 const PROJECT_ID = 6
-const GAS_RESERVOIR_ID = 1
+const GAS_RESERVOIR_ID = 4
 // 用户指定的原平台修正等时结果接口：/productivityevaluation/6/4/20
 const MODIFIED_ISOCHRONAL_PROJECT_ID = 6
 const MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID = 4
@@ -80,12 +77,10 @@ if (route.query.well) selectedWellName.value = String(route.query.well)
 const sideTreeCollapsed = workspaceTreeCollapsed
 // 展开后适当加宽以容纳三种计算方式；收起形态对齐 PVT 的“图表数据”侧栏。
 const paramsCollapsed = ref(false)
-const activeModule = ref(
-  MODULES.some(item => item.name === route.query.module)
-    ? route.query.module
-    : MODULES[0].name
-)
+const activeModule = ref('')
 const activeMethod = ref('')
+const activeProductivityTestId = ref(null)
+const activeEvaluationId = ref(null)
 const selectedPvtTable = ref('')
 const selectedDataTable = ref('')
 const maximumFormationPressure = ref('56.34')
@@ -196,17 +191,17 @@ const selectModule = (moduleName, method = '') => {
   })
 }
 
-const ensureModifiedIsochronalNode = (wellName, { activate = true, persist = true } = {}) => {
+const loadModifiedIsochronalNodes = async (wellName) => {
   const wellGroup = workspaceTreeData.value.find(node => node.id === 'g-well')
   const wellNode = wellGroup?.children?.find(node =>
     (node.wellName || node.label) === wellName
   )
-  if (!wellNode) return null
+  if (!wellNode) return
 
   const productivityGroup = wellNode.children?.find(node =>
     node.type === 'single-well-productivity' || node.label === '单井产能'
   )
-  if (!productivityGroup) return null
+  if (!productivityGroup) return
 
   let testGroup = productivityGroup.children?.find(node =>
     node.type === 'productivity-test' || node.label === '产能试井'
@@ -222,30 +217,31 @@ const ensureModifiedIsochronalNode = (wellName, { activate = true, persist = tru
     productivityGroup.children = [...(productivityGroup.children || []), testGroup]
   }
 
-  let resultNode = testGroup.children?.find(node =>
-    node.type === NODETYPE.NodeType_ProductivityEvaluationModifiedIsochronalWellTest ||
-    node.label === '修正等时'
+  const response = await productivityTestsApi.list(
+    PROJECT_ID, GAS_RESERVOIR_ID, wellName, 'modified-isochronal'
   )
-  if (!resultNode) {
-    resultNode = {
-      id: `${wellNode.id}-modified-isochronal`,
-      label: '修正等时',
+  const records = response?.data ?? response ?? []
+  const otherNodes = (testGroup.children || []).filter(node =>
+    node.type !== NODETYPE.NodeType_ProductivityEvaluationModifiedIsochronalWellTest &&
+    node.type !== 'modified-isochronal-method'
+  )
+  const resultNodes = records.map(record => ({
+      id: `${wellNode.id}-modified-isochronal-${record.id}`,
+      label: `修正等时${record.testNo}`,
       type: NODETYPE.NodeType_ProductivityEvaluationModifiedIsochronalWellTest,
       wellName,
+      testId: record.id,
+      resultId: record.id,
       projectId: MODIFIED_ISOCHRONAL_PROJECT_ID,
       gasReservoirId: MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID,
-      pNodeType: NODETYPE.NodeType_ProductivityEvaluationByPseudoPressure,
+      pressureMethods: record.pressureMethods || [],
       children: []
-    }
-    testGroup.children = [...(testGroup.children || []), resultNode]
-  }
+    }))
+  testGroup.children = [...otherNodes, ...resultNodes]
 
   wellNode.expanded = true
   productivityGroup.expanded = true
   testGroup.expanded = true
-  if (persist) rememberModifiedIsochronalNode(PROJECT_ID, GAS_RESERVOIR_ID, wellName)
-  if (activate) workspaceActiveNodeId.value = resultNode.id
-  return resultNode
 }
 
 const handleCommand = async ({ group, name, parent }) => {
@@ -256,7 +252,8 @@ const handleCommand = async ({ group, name, parent }) => {
       return
     }
     if (parent === '产能试井' && name === '修正等时') {
-      ensureModifiedIsochronalNode(selectedWellName.value)
+      activeProductivityTestId.value = null
+      activeEvaluationId.value = null
     }
     selectModule(parent || name, parent ? name : '')
     return
@@ -309,32 +306,52 @@ const loadWells = async () => {
   }
 }
 
-const selectWell = wellName => {
+const selectWell = async wellName => {
   selectedWellName.value = wellName
   selectedPvtTable.value = ''
   selectedDataTable.value = ''
+  activeProductivityTestId.value = null
+  activeEvaluationId.value = null
+  try {
+    await loadModifiedIsochronalNodes(wellName)
+  } catch (error) {
+    ElMessage.warning(error?.msg || error?.message || '已保存试井记录读取失败')
+  }
 }
 
 const handleSidebarSelect = async node => {
-  workspaceActiveNodeId.value = node?.id || ''
-  if (node?.wellName) {
-    selectWell(node.wellName)
-  }
-
   if (!node) return
+  workspaceActiveNodeId.value = node.id || ''
 
-  if (
-    node.type === NODETYPE.NodeType_ProductivityEvaluationModifiedIsochronalWellTest ||
-    (node.label === '修正等时' && node.resultId)
-  ) {
+  const isModifiedIsochronalRecord =
+    node.type === NODETYPE.NodeType_ProductivityEvaluationModifiedIsochronalWellTest
+  const isProductivityTestNode = node.type === 'productivity-test' || node.label === '产能试井'
+
+  // “产能试井”仅作为目录层级，不代表一条真实试井记录。
+  if (isProductivityTestNode) return
+
+  if (isModifiedIsochronalRecord) {
+    // 该类节点本身已含有所属井和记录编号，点击时直接打开页面。
+    // 不在此处重新请求并替换整棵子树，避免点击事件进行中节点被销毁而造成界面闪回。
+    selectedWellName.value = node.wellName || selectedWellName.value
+    activeProductivityTestId.value = node.testId || node.resultId || null
+    activeEvaluationId.value = node.evaluationId || node.raw?.ProductivityEvaluationId || null
     activeModule.value = '产能试井'
     activeMethod.value = '修正等时'
     activeContentTab.value = 'chart'
-    await router.replace({
-      name: 'SingleWellProductivity',
-      query: { module: '产能试井', method: '修正等时', well: node.wellName }
-    })
+    const targetWell = selectedWellName.value
+    if (route.query.module !== '产能试井' || route.query.method !== '修正等时' ||
+        route.query.well !== targetWell) {
+      await router.replace({
+        name: 'SingleWellProductivity',
+        query: { module: '产能试井', method: '修正等时', well: targetWell }
+      })
+    }
     return
+  }
+
+  if (node.wellName) {
+    await selectWell(node.wellName)
   }
 
   const isWorkspaceGroup = WORKSPACE_GROUPS.some(group => group.id === node.type)
@@ -365,17 +382,21 @@ const toggleParamsPanel = () => {
   paramsCollapsed.value = !paramsCollapsed.value
 }
 
+const handleProductivitySaved = async saved => {
+  activeProductivityTestId.value = saved.testId
+  await loadModifiedIsochronalNodes(selectedWellName.value)
+  const wellNode = workspaceTreeData.value.find(node => node.id === 'g-well')?.children
+    ?.find(node => (node.wellName || node.label) === selectedWellName.value)
+  const savedNode = wellNode?.children?.find(node => node.type === 'single-well-productivity')
+    ?.children?.find(node => node.type === 'productivity-test')
+    ?.children?.find(node => Number(node.testId) === Number(saved.testId))
+  if (savedNode) workspaceActiveNodeId.value = savedNode.id
+}
+
 onMounted(async () => {
   await loadWells()
-  getRememberedModifiedIsochronalWells(PROJECT_ID, GAS_RESERVOIR_ID).forEach(wellName => {
-    ensureModifiedIsochronalNode(wellName, { activate: false, persist: false })
-  })
   if (selectedWellName.value) {
-    const method = String(route.query.method || '')
-    if (activeModule.value === '产能试井' && method === '修正等时') {
-      ensureModifiedIsochronalNode(selectedWellName.value)
-    }
-    selectModule(activeModule.value, method)
+    await loadModifiedIsochronalNodes(selectedWellName.value)
   }
 })
 </script>
@@ -409,14 +430,9 @@ onMounted(async () => {
             :project-id="MODIFIED_ISOCHRONAL_PROJECT_ID"
             :gas-reservoir-id="MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID"
             :well-name="selectedWellName"
-            :pvt-table-options="pvtTableOptions"
-            :data-table-options="dataTableOptions"
-            v-model:selected-pvt-table="selectedPvtTable"
-            v-model:selected-data-table="selectedDataTable"
-            v-model:maximum-formation-pressure="maximumFormationPressure"
-            v-model:formation-temperature="formationTemperature"
-            v-model:calculation-method="calculationMethod"
-            v-model:calculation-result="calculationResult"
+            :test-id="activeProductivityTestId"
+            :evaluation-id="activeEvaluationId"
+            @saved="handleProductivitySaved"
           />
 
           <section v-else class="test-workspace">
