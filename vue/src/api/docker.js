@@ -75,8 +75,8 @@ export const waterInvasionApi = {
    * @param {string[]} data.wellNames      - 井名列表
    * @param {number} data.waterGasRatioLimit - 气水比限值（-1 表示不限）
    */
-  analyze: (data) =>
-    dockerRequest.post('/projectanalysis/waterinvasionanalysis', data),
+  analyze: (data, options = {}) =>
+    dockerRequest.post('/projectanalysis/waterinvasionanalysis', data, options),
 
   deleteResult: (projectId, gasReservoirId, wellName) =>
     dockerRequest.delete(`/projectanalysis/waterinvasionanalysis/${projectId}/${gasReservoirId}`, {
@@ -125,8 +125,8 @@ export const notifyApi = {
 
 /* ===== 动态储量 - 物质平衡 ===== */
 export const materialBalanceApi = {
-  calc: (data) =>
-    dockerRequest.post('/projectanalysis/dynamicoriginalgasInplace/mb/calc', data),
+  calc: (data, options = {}) =>
+    dockerRequest.post('/projectanalysis/dynamicoriginalgasInplace/mb/calc', data, options),
 
   calcFMB: (data, options = {}) =>
     dockerRequest.post('/projectanalysis/dynamicoriginalgasInplace/fmb/calc', data, {
@@ -204,8 +204,8 @@ export const dynamicBalanceApi = {
 
 /* ===== 产量不稳定分析 - 典型曲线 ===== */
 export const typicalCurveApi = {
-  fitting: (data) =>
-    dockerRequest.post('/projectanalysis/typicalcurve/fitting', data),
+  fitting: (data, options = {}) =>
+    dockerRequest.post('/projectanalysis/typicalcurve/fitting', data, options),
 
   getResult: (projectId, gasReservoirId, nodeId, page = null, size = null, options = {}) => {
     const params = {}

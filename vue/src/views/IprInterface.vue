@@ -12,7 +12,7 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete } from '@element-plus/icons-vue'
 import RibbonMenu from '@/components/RibbonMenu.vue'
 import WorkspaceSidebar from '@/components/WorkspaceSidebar.vue'
@@ -30,7 +30,7 @@ import PvtPropertiesContent from '@/views/DataManagement/PvtPropertiesContent.vu
 import RelativePermeabilityContent from '@/views/DataManagement/RelativePermeabilityContent.vue'
 import WellDataTableContent from '@/views/DataManagement/WellDataTableContent.vue'
 import { NODETYPE } from '@/constants/nodeType'
-import { analyticMethodApi, dataManagementApi, dynamicBalanceApi, materialBalanceApi, nodeApi, notifyApi, projectApi, typicalCurveApi, waterInvasionApi } from '@/api/docker'
+import { analyticMethodApi, dataManagementApi, dynamicBalanceApi, materialBalanceApi, nodeApi, notifyApi, parametersApi, projectApi, typicalCurveApi, waterInvasionApi, wellApi } from '@/api/docker'
 import { pvtStorageApi } from '@/api/pvtStorage'
 import { createPvtDraftRecord } from '@/utils/pvtRecords'
 import {
@@ -51,7 +51,7 @@ import {
 // 7
 const PROJECT_ID = 6
 // 4
-const GAS_RESERVOIR_ID = 1
+const GAS_RESERVOIR_ID = 4
 const router = useRouter()
 const FLOW_BALANCE_NODE_TYPE = NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure
 
@@ -984,6 +984,34 @@ const addWattenbargerNode = (wellName, rawNode = {}) => {
   return wattenbargerNode
 }
 
+const findWattenbargerTreeNodeForWell = (wellName) => {
+  const wellItem = getWellGroup()?.children.find(item =>
+    item.wellName === wellName || item.label === wellName
+  )
+  const inventoryGroup = wellItem?.children?.find(item => item.type === 'well-control-inventory')
+  const diagnosticNode = inventoryGroup?.children?.find(item =>
+    item.type === NODETYPE.NodeType_TypicalCurve || item.label === '诊断曲线'
+  )
+  return diagnosticNode?.children?.find(isWattenbargerNode) || null
+}
+
+// Wattenbarger 首次计算完成后主动展开结果所在目录，并替换顶层数组引用，
+// 让使用共享工作区树的侧边栏立即收到新增节点，而不必依赖整页刷新。
+const revealWattenbargerNode = (wellName) => {
+  const wellItem = getWellGroup()?.children.find(item =>
+    item.wellName === wellName || item.label === wellName
+  )
+  const inventoryGroup = wellItem?.children?.find(item => item.type === 'well-control-inventory')
+  const diagnosticNode = inventoryGroup?.children?.find(item =>
+    item.type === NODETYPE.NodeType_TypicalCurve || item.label === '诊断曲线'
+  )
+
+  if (wellItem) wellItem.expanded = true
+  if (inventoryGroup) inventoryGroup.expanded = true
+  if (diagnosticNode) diagnosticNode.expanded = true
+  treeData.value = [...treeData.value]
+}
+
 const addAGNode = (wellName, rawNode = {}) => {
   const wellItem = ensureWell(wellName, rawNode?.wellId || rawNode?.parentId)
   const inventoryGroup = wellItem?.children.find(item => item.type === 'well-control-inventory')
@@ -1031,10 +1059,45 @@ const addAGNode = (wellName, rawNode = {}) => {
   return agNode
 }
 
-const collectWellsFromProject = (payload) => {
+const reservoirWellNames = ref(null)
+
+const extractReservoirWellNames = (response) => {
+  const payload = normalizePayload(response)
+  const wells = Array.isArray(payload?.wells)
+    ? payload.wells
+    : Array.isArray(payload?.items)
+      ? payload.items
+      : Array.isArray(payload)
+        ? payload
+        : []
+
+  return [...new Set(wells
+    .map(item => typeof item === 'string'
+      ? item
+      : item?.wellName || item?.name || item?.nodeTitle || item?.title)
+    .filter(Boolean)
+    .map(String))]
+}
+
+const loadReservoirWellNames = async () => {
+  const response = await wellApi.getWells(PROJECT_ID, GAS_RESERVOIR_ID)
+  const names = extractReservoirWellNames(response)
+  reservoirWellNames.value = new Set(names)
+  return reservoirWellNames.value
+}
+
+const ensureWellBelongsToCurrentReservoir = async (wellName) => {
+  const names = reservoirWellNames.value ?? await loadReservoirWellNames()
+  if (!names.has(String(wellName))) {
+    throw new Error(`${wellName}不属于当前气藏（ID=${GAS_RESERVOIR_ID}），已停止计算以避免井与气藏数据错配`)
+  }
+}
+
+const collectWellsFromProject = (payload, allowedWellNames = null) => {
   const wellMap = new Map()
 
   const addWell = (name, raw = null, id = '') => {
+    if (allowedWellNames && !allowedWellNames.has(String(name))) return
     if (!name || wellMap.has(name)) return
     wellMap.set(name, {
       id: id || `well-${name}`,
@@ -1080,8 +1143,8 @@ const collectWellsFromProject = (payload) => {
   return [...wellMap.values()]
 }
 
-const rebuildProjectTree = (payload) => {
-  const wells = collectWellsFromProject(payload)
+const rebuildProjectTree = (payload, allowedWellNames = null) => {
+  const wells = collectWellsFromProject(payload, allowedWellNames)
   const wellGroup = getWellGroup()
   if (!wellGroup) return
 
@@ -1321,8 +1384,17 @@ const nodeContainsWell = (node, wellName) => {
 
 const refreshProjectTree = async () => { //加在项目树
   try {
-    const res = await projectApi.getProject(PROJECT_ID)
-    rebuildProjectTree(normalizePayload(res))
+    const [projectResult, namesResult] = await Promise.allSettled([
+      projectApi.getProject(PROJECT_ID),
+      loadReservoirWellNames()
+    ])
+    if (projectResult.status === 'rejected') throw projectResult.reason
+    const names = namesResult.status === 'fulfilled' ? namesResult.value : null
+    if (namesResult.status === 'rejected') {
+      reservoirWellNames.value = null
+      console.warn('当前气藏井列表加载失败，项目树暂按项目数据展示', namesResult.reason)
+    }
+    rebuildProjectTree(normalizePayload(projectResult.value), names)
     await refreshOtherDataNodes()
   } catch (error) {
     console.warn('项目树加载失败', error)
@@ -1611,7 +1683,11 @@ const createWaterInvasionLogWaiter = (wellName, timeoutMs = WATER_INVASION_LOG_T
     // 水侵分析的中间步骤可能出现 error；只有最终完成日志才是计算终态。
     rejectOnError: false,
     allowGlobalComplete: true,
-    correlateGlobalCompleteByPin: true,
+    correlateGlobalCompleteByPin: false,
+    completeNoticeNodeTypes: [
+      NODETYPE.NodeType_WaterInvasionAnalysis,
+      NODETYPE.NodeType_WaterInvasionAnalysisActiveness
+    ],
     isComplete: (payload, logText) => WATER_INVASION_FINAL_COMPLETE_PATTERN.test(logText)
   })
 }
@@ -1633,6 +1709,8 @@ const createAnalysisLogWaiter = ({
   allowGlobalComplete = false,
   correlateGlobalCompleteByPin = false,
   rejectOnError = true,
+  ignoreLogErrors = false,
+  completeNoticeNodeTypes = [],
   isComplete = (payload, logText) => WATER_INVASION_COMPLETE_PATTERN.test(logText),
   isRelevant = null
 }) => {
@@ -1664,8 +1742,12 @@ const createAnalysisLogWaiter = ({
       const errorText = String(payload.error || '')
       if (isRelevant && !isRelevant(payload, logText, errorText)) return
 
+      const payloadType = String(payload.type || '').toUpperCase()
       const logLevel = String(payload.level || '').toLowerCase()
-      const complete = isComplete(payload, logText)
+      const noticeNode = Number(payload.node)
+      const isCompletionNotice = payloadType === 'NOTICE' &&
+        completeNoticeNodeTypes.map(Number).includes(noticeNode)
+      const complete = isCompletionNotice || isComplete(payload, logText)
       const matchesWell = !wellName || logText.includes(wellName)
       const payloadPin = String(payload.pin || '')
       if (matchesWell && payloadPin && !correlationPin) correlationPin = payloadPin
@@ -1675,7 +1757,9 @@ const createAnalysisLogWaiter = ({
       )
       if (!matchesWell && !correlatedGlobalComplete) return
 
-      if (rejectOnError && (logLevel === 'error' || WATER_INVASION_ERROR_PATTERN.test(logText) || WATER_INVASION_ERROR_PATTERN.test(errorText))) {
+      const isInformationalLog = payloadType === 'LOG'
+      if (rejectOnError && !(ignoreLogErrors && isInformationalLog) &&
+        (logLevel === 'error' || WATER_INVASION_ERROR_PATTERN.test(logText) || WATER_INVASION_ERROR_PATTERN.test(errorText))) {
         finish(reject, new Error(errorText || logText || fallbackErrorMessage))
         return
       }
@@ -1841,24 +1925,113 @@ const createAnalyticMethodLogWaiter = (wellName, timeoutMs = ANALYTIC_METHOD_LOG
 const createMaterialBalanceLogWaiter = (wellName, timeoutMs = MATERIAL_BALANCE_LOG_TIMEOUT) =>
   createAnalysisLogWaiter({
     module: MATERIAL_BALANCE_NOTIFY_MODULE,
-    wellName: '',
-    timeoutMs,
-    timeoutMessage: `${wellName}物质平衡日志超时，未收到完成消息`,
-    fallbackErrorMessage: `${wellName}物质平衡计算失败`
-  })
-
-//wattenbarger日志等待器
-const createWattenbargerLogWaiter = (wellName, timeoutMs = TYPICAL_CURVE_LOG_TIMEOUT) =>
-  createAnalysisLogWaiter({
-    module: TYPICAL_CURVE_NOTIFY_MODULE,
     wellName,
     timeoutMs,
-    timeoutMessage: `${wellName} Wattenbarger日志超时，未收到完成消息`,
-    fallbackErrorMessage: `${wellName} Wattenbarger计算失败`,
+    timeoutMessage: `${wellName}物质平衡日志超时，未收到完成消息`,
+    fallbackErrorMessage: `${wellName}物质平衡计算失败`,
     allowGlobalComplete: true,
-    isComplete: (_payload, logText) =>
-      WATER_INVASION_COMPLETE_PATTERN.test(logText)
+    correlateGlobalCompleteByPin: true,
+    ignoreLogErrors: true,
+    completeNoticeNodeTypes: [NODETYPE.NodeType_DynamicOriginalGasInplace]
   })
+
+const WATTENBARGER_FINAL_COMPLETE_PATTERN =
+  /\[\s*产量不稳定分析-典型曲线拟合\s*\]\s*[:：]\s*完成/
+const WATTENBARGER_LOG_SCOPE_PATTERN = /Wattenbarger|产量不稳定分析-典型曲线拟合|典型曲线/i
+
+const getWattenbargerLogText = value => {
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'string') return value.trim()
+  if (typeof value !== 'object') return String(value)
+
+  for (const key of ['message', 'error', 'msg', 'detail', 'reason']) {
+    const text = getWattenbargerLogText(value[key])
+    if (text) return text
+  }
+
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return String(value)
+  }
+}
+
+// Wattenbarger 的真实最终通知为 NOTICE/node=25，而 93–97 是结果节点类型。
+// 这里只被动监听 WebSocket，不查询或轮询 /common/notify/logs。
+const createWattenbargerLogWaiter = (wellName, timeoutMs = 180000) => {
+  let settled = false
+  let cleanup = () => { }
+
+  const promise = new Promise((resolve, reject) => {
+    const finish = (callback, value) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      callback(value)
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      // 在限定时间内没有进入明确的成功终态，即按本次计算失败处理。
+      finish(reject, new Error(`${wellName}井Wattenbarger计算失败`))
+    }, timeoutMs)
+
+    const onNotifyMessage = event => {
+      const message = event.detail || {}
+      const payload = message.payload ?? message.data ?? message
+      if (!payload || typeof payload !== 'object') return
+
+      const fields = payload.fields && typeof payload.fields === 'object' ? payload.fields : {}
+      const data = payload.data && typeof payload.data === 'object' ? payload.data : {}
+      const moduleName = String(payload.module ?? fields.module ?? data.module ?? message.module ?? '')
+      const payloadType = String(payload.type ?? fields.type ?? data.type ?? '').toUpperCase()
+      const outerType = String(message.type || '').toUpperCase()
+      const logLevel = String(payload.level ?? fields.level ?? data.level ?? '').toLowerCase()
+      const noticeNode = Number(payload.node ?? fields.node ?? data.node)
+      const logText = getWattenbargerLogText(
+        payload.message ?? fields.message ?? data.message ?? payload.msg ?? fields.msg ?? data.msg
+      )
+      const errorText = getWattenbargerLogText(
+        payload.error ?? fields.error ?? data.error ?? payload.detail ?? fields.detail ?? data.detail
+      )
+      const combinedText = [logText, errorText].filter(Boolean).join(' ')
+      const matchesModule = moduleName.toLowerCase() === TYPICAL_CURVE_NOTIFY_MODULE.toLowerCase() ||
+        /^projectanalysis\.typicalcurve/i.test(moduleName)
+      const isError = outerType === 'ERROR' || payloadType === 'ERROR' || payloadType === 'FAIL' ||
+        logLevel === 'error' || WATER_INVASION_ERROR_PATTERN.test(combinedText)
+      const isWattenbargerEvent = matchesModule ||
+        WATTENBARGER_LOG_SCOPE_PATTERN.test(combinedText) ||
+        (isError && noticeNode === NODETYPE.NodeType_ProductivityInstabilityAnalysis)
+
+      if (!isWattenbargerEvent) return
+
+      if (isError) {
+        finish(reject, new Error(`${wellName}井Wattenbarger计算失败`))
+        return
+      }
+
+      const isComplete = matchesModule && payloadType === 'NOTICE' &&
+        noticeNode === NODETYPE.NodeType_ProductivityInstabilityAnalysis &&
+        WATTENBARGER_FINAL_COMPLETE_PATTERN.test(logText)
+      if (isComplete) finish(resolve, payload)
+    }
+
+    cleanup = () => {
+      window.clearTimeout(timeoutId)
+      window.removeEventListener('notify-message', onNotifyMessage)
+    }
+
+    window.addEventListener('notify-message', onNotifyMessage)
+  })
+
+  return {
+    promise,
+    cancel: () => {
+      if (settled) return
+      settled = true
+      cleanup()
+    }
+  }
+}
 
 const pollAnalyticMethodNodes = async (wellNames, maxRetries = 20, intervalMs = 1500) => {
   const targets = wellNames.filter(Boolean)
@@ -1961,9 +2134,9 @@ const waitForMaterialBalanceResult = async (wellName, gasReservoirType, maxRetri
       if (resultNode && materialBalanceRows.length) {
         return latestResult
       }
-    } catch {
+    } catch (error) {
       // 首次创建期间查询接口可能短暂不可用，继续下一次查询。
-      ElMessage.error(error.message || '物质平衡计算失败')
+      console.debug('物质平衡结果暂未落库，继续等待', error)
     }
   }
   return latestResult
@@ -2179,38 +2352,6 @@ const getWattenbargerNodeOnce = async (wellName, delayMs = 1200) => {
   return { rootNode, wattenbargerNode: findWattenbargerNodeByWell(rootNode, wellName) }
 }
 
-//wattenbarger节点结果等待
-const waitForWattenbargerNode = async (
-  wellName,
-  maxRetries = 20,
-  intervalMs = 500
-) => {
-  let latestResult = {
-    rootNode: null,
-    wattenbargerNode: null
-  }
-
-  // 首次计算需要创建新节点，完成日志可能略早于节点查询接口。
-  // 此处只等待节点落库，成功或失败仍由日志判断。
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    if (attempt > 0) {
-      await new Promise(resolve => setTimeout(resolve, intervalMs))
-    }
-
-    try {
-      latestResult = await getWattenbargerNodeOnce(wellName, 0)
-
-      if (latestResult.wattenbargerNode) {
-        return latestResult
-      }
-    } catch {
-      // 新节点落库期间查询可能暂时失败，继续下一次读取。
-    }
-  }
-
-  return latestResult
-}
-
 const getWattenbargerResultInput = (payload) =>
   payload?.input || payload?.inputs || payload?.parameter || {}
 
@@ -2241,6 +2382,24 @@ const isWattenbargerResultForOptions = (payload, options) => {
     Boolean(actualSkipFitting) === Boolean(options.isSkipFitting)
 }
 
+const hasWattenbargerResultPayload = (payload) => {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return false
+
+  return Object.keys(payload).length > 0 && Boolean(
+    payload.input ||
+    payload.inputs ||
+    payload.parameter ||
+    payload.output ||
+    payload.outputs ||
+    payload.analysis ||
+    payload.result ||
+    payload.chartItems ||
+    payload.items ||
+    payload.records ||
+    payload.data
+  )
+}
+
 const waitForWattenbargerResult = async (
   nodeId,
   options,
@@ -2259,7 +2418,12 @@ const waitForWattenbargerResult = async (
         nodeId
       )
       latestPayload = normalizePayload(response)
-      if (isWattenbargerResultForOptions(latestPayload, options)) {
+      // fitting 请求已完成且结果节点已经可读。原接口不会稳定回显全部拟合参数，
+      // 因此参数完全匹配只作为优先校验；结果主体可读取时即可渲染。
+      if (
+        isWattenbargerResultForOptions(latestPayload, options) ||
+        hasWattenbargerResultPayload(latestPayload)
+      ) {
         return latestPayload
       }
     } catch {
@@ -2353,6 +2517,7 @@ const runWaterInvasionForSelectedWell = async (options = {}) => { //点击水侵
   waterInvasionRunning.value = true
   const logWaiter = createWaterInvasionLogWaiter(targetWellName)
   try {
+    await ensureWellBelongsToCurrentReservoir(targetWellName)
     // 启动接口可能在后台计算完成后仍不关闭请求，最终状态统一由 WebSocket 完成日志判定。
     void waterInvasionApi.analyze({
       gasReservoirId: Number(GAS_RESERVOIR_ID),
@@ -2361,7 +2526,7 @@ const runWaterInvasionForSelectedWell = async (options = {}) => { //点击水侵
       wellNames: [targetWellName],
       isUseActualStaticPressure: options.isUseActualStaticPressure ?? true,
       waterGasRatioLimit: options.waterGasRatioLimit ?? -1
-    }).catch(error => {
+    }, { silentError: true }).catch(error => {
       console.warn('水侵分析启动接口异常，继续等待最终完成日志', error)
     })
 
@@ -2399,6 +2564,7 @@ const runWaterInvasionForSelectedWell = async (options = {}) => { //点击水侵
     ElMessage.error(error.message || '水侵分析失败')
     console.error('水侵分析失败', error)
   } finally {
+    logWaiter.cancel()
     waterInvasionRunning.value = false
   }
 }
@@ -2445,6 +2611,26 @@ const normalizeMaterialBalanceReservoirType = (value) => {
   return 1
 }
 
+const resolveMaterialBalanceWaterGasRatioLimit = async (options = {}) => {
+  if (Object.prototype.hasOwnProperty.call(options, 'waterGasRatioLimit')) {
+    const requestedLimit = Number(options.waterGasRatioLimit)
+    return Number.isFinite(requestedLimit) ? requestedLimit : -1
+  }
+
+  try {
+    const response = await parametersApi.getMinWaterGasRatio(
+      PROJECT_ID,
+      GAS_RESERVOIR_ID,
+      { silentError: true }
+    )
+    const limit = Number(normalizePayload(response)?.vaule)
+    return Number.isFinite(limit) ? limit : -1
+  } catch (error) {
+    console.warn('生产水气比上限读取失败，本次物质平衡不启用水气比过滤', error)
+    return -1
+  }
+}
+
 const runMaterialBalanceForSelectedWell = async (recalculateOptions = {}) => {
   const targetWellName = selectedWellName.value
   // 接口需要批量计算全部井，但页面仍只展示当前选中井的计算状态。
@@ -2459,14 +2645,15 @@ const runMaterialBalanceForSelectedWell = async (recalculateOptions = {}) => {
   materialBalanceRunning.value = true
   //调计算接口之前创建日志监听器
   const logWaiter = createMaterialBalanceLogWaiter(targetWellName)
+  void logWaiter.promise.catch(() => {
+    // notify 只负责进度和刷新；计算是否成功由 HTTP 响应与结果落库共同确认。
+  })
   try {
+    await ensureWellBelongsToCurrentReservoir(targetWellName)
     const gasReservoirType = normalizeMaterialBalanceReservoirType(
       recalculateOptions?.gasReservoirType
     )
-    const requestedWaterGasRatioLimit = Number(recalculateOptions?.waterGasRatioLimit)
-    const waterGasRatioLimit = Number.isFinite(requestedWaterGasRatioLimit)
-      ? requestedWaterGasRatioLimit
-      : 0.0602
+    const waterGasRatioLimit = await resolveMaterialBalanceWaterGasRatioLimit(recalculateOptions)
 
     await materialBalanceApi.calc({
       wellNames: [targetWellName],
@@ -2474,11 +2661,9 @@ const runMaterialBalanceForSelectedWell = async (recalculateOptions = {}) => {
       gasReservoirId: Number(GAS_RESERVOIR_ID),
       projectId: Number(PROJECT_ID),
       waterGasRatioLimit
-    })
+    }, { silentError: true })
 
     ElMessage.info(`${targetWellName} 物质平衡计算中，请稍候...`)
-    //等待日志完成后再读取节点
-    await logWaiter.promise
     // // 从日志确认，读取结果节点
     // const { rootNode, resultNode } =
     //     await getMaterialBalanceNodeOnce(targetWellName,0)
@@ -2490,7 +2675,8 @@ const runMaterialBalanceForSelectedWell = async (recalculateOptions = {}) => {
     // 日志确认成功后，等待首次创建的节点和结果数据完成落库。
     const {rootNode, resultNode, materialBalanceRows} = await waitForMaterialBalanceResult(
       targetWellName,
-      gasReservoirType
+      gasReservoirType,
+      60
     )
 
     if (!resultNode) {
@@ -2541,6 +2727,7 @@ const runMaterialBalanceForSelectedWell = async (recalculateOptions = {}) => {
     ElMessage.error(error.message || '物质平衡计算失败')
     console.error('物质平衡计算失败', error)
   } finally {
+    logWaiter.cancel()
     materialBalanceRunning.value = false
   }
 }
@@ -3047,6 +3234,26 @@ const runTransientForSelectedWell = async (options = {}) => {
   }
 }
 
+const resolveWattenbargerMinimumWaterGasRatio = async (options = {}) => {
+  if (Object.prototype.hasOwnProperty.call(options, 'minimumWaterGasRatio')) {
+    const requestedLimit = Number(options.minimumWaterGasRatio)
+    return Number.isFinite(requestedLimit) ? requestedLimit : -1
+  }
+
+  try {
+    const response = await parametersApi.getMinWaterGasRatio(
+      PROJECT_ID,
+      GAS_RESERVOIR_ID,
+      { silentError: true }
+    )
+    const limit = Number(normalizePayload(response)?.vaule)
+    return Number.isFinite(limit) ? limit : -1
+  } catch (error) {
+    console.warn('Wattenbarger生产水气比上限读取失败，本次计算不启用水气比过滤', error)
+    return -1
+  }
+}
+
 const runWattenbargerForSelectedWell = async (options={}) => {
   const targetWellName = options.wellName || selectedWellName.value
   if (!targetWellName) {
@@ -3055,44 +3262,72 @@ const runWattenbargerForSelectedWell = async (options={}) => {
   }
   if (typicalCurveRunning.value) return
   typicalCurveRunning.value = true
-  //监听器创建
+  // 请求发出前先挂载 WebSocket 监听，避免 fitting 很快完成时漏掉最终通知。
   const logWaiter = createWattenbargerLogWaiter(targetWellName)
   try {
+    await ensureWellBelongsToCurrentReservoir(targetWellName)
+    const minimumWaterGasRatio = await resolveWattenbargerMinimumWaterGasRatio(options)
     const fittingOptions = {
       isSkipFitting: options.isSkipFitting ?? false,
       dataSize: options.dataSize ?? 300,
       fineScanDataSize: options.fineScanDataSize ?? 30,
       initScanDataSize: options.initScanDataSize ?? 10,
-      minimumWaterGasRatio: options.minimumWaterGasRatio ?? 0.0602
+      minimumWaterGasRatio: Number.isFinite(minimumWaterGasRatio)
+        ? minimumWaterGasRatio
+        : -1
     }
 
-    await typicalCurveApi.fitting({
+    ElMessage.info(`${targetWellName} Wattenbarger计算中，请稍候...`)
+
+    // fitting 只负责启动任务，最终状态以 notify 为准。部分后端任务已经完成，
+    // 但启动请求仍可能返回普通 Error，不能因此覆盖已经收到的完成日志。
+    const fittingFailure = typicalCurveApi.fitting({
       gasReservoirId: Number(GAS_RESERVOIR_ID),
       projectId: Number(PROJECT_ID),
       wellNames: [targetWellName],
       fittingType: 5,
       ...fittingOptions
+    }, {
+      silentError: true,
+      timeout: 180000
+    }).then(response => {
+      if (isFailureResponse(response)) {
+        throw new Error(getResponseMessage(response) || `${targetWellName} Wattenbarger计算失败`)
+      }
+      // 启动成功不是计算完成，最终仍由 notify 决定。
+      return new Promise(() => { })
+    }, error => {
+      console.error('Wattenbarger启动接口异常，继续等待最终notify日志', error)
+
+      const responseError = getWattenbargerLogText(
+        error?.response?.data?.error ??
+        error?.response?.data?.message ??
+        error?.response?.data?.msg
+      )
+      // 明确的后端业务错误可直接提示；普通 Error/网络异常继续等待 notify，
+      // 避免覆盖后端随后发出的成功终态。
+      if (responseError && !/^(error|network error|timeout)$/i.test(responseError)) {
+        throw new Error(responseError)
+      }
+      return new Promise(() => { })
     })
-    ElMessage.info(`${targetWellName} Wattenbarger计算中，请稍候...`)
-    await logWaiter.promise
-    //原轮询逻辑
-    // let rootNode = null
-    // let resultNode = null
-    // const result = await getWattenbargerNodeOnce(targetWellName, 1500)
-    // rootNode = result.rootNode
-    // resultNode = result.wattenbargerNode
 
-    // 日志确认完成后读取结果。
-    const {
-      rootNode,
-      wattenbargerNode: resultNode
-    } = await waitForWattenbargerNode(targetWellName)
+    await Promise.race([logWaiter.promise, fittingFailure])
 
-    if (!resultNode) { throw new Error(`${targetWellName}井Wattenbarger日志已完成，但未生成结果节点`) }
+    // 完成日志后只读取一次 node/6/4/25，并先以本次后端响应严格确认目标井结果。
+    // 没有结果时不更新树、不创建节点，直接进入失败提示。
+    const nodeLookup = await getWattenbargerNodeOnce(targetWellName, 0)
+    const rootNode = nodeLookup.rootNode
+    const resultNode = nodeLookup.wattenbargerNode
 
-    applyTypicalCurveNodes(rootNode)
+    if (!resultNode) {
+      throw new Error(`${targetWellName}井Wattenbarger计算失败`)
+    }
 
-    const treeNode = addWattenbargerNode(targetWellName, {
+    applyTypicalCurveNodes(rootNode, targetWellName)
+    const parsedTreeNode = findWattenbargerTreeNodeForWell(targetWellName)
+
+    const treeNode = parsedTreeNode || addWattenbargerNode(targetWellName, {
       ...resultNode,
       nodeType: NODETYPE.NodeType_TypicalCurveWattenbarger,
       nodeTitle: 'Wattenbarger'
@@ -3110,6 +3345,7 @@ const runWattenbargerForSelectedWell = async (options={}) => {
       treeNode: resultNode
     }
 
+    revealWattenbargerNode(targetWellName)
     activeNodeId.value = viewNode.id
     currentView.value = 'wattenbarger'
     currentViewNode.value = viewNode
@@ -3117,9 +3353,10 @@ const runWattenbargerForSelectedWell = async (options={}) => {
     ElMessage.success(`${targetWellName} Wattenbarger计算完成`)
   } catch (error) {
     logWaiter.cancel()
-    ElMessage.error(error.message || 'Wattenbarger计算失败')
+    ElMessage.error(`${targetWellName}井Wattenbarger计算失败`)
     console.error('Wattenbarger计算失败', error)
   } finally {
+    logWaiter.cancel()
     typicalCurveRunning.value = false
   }
 }
