@@ -1,7 +1,11 @@
 const RECONNECT_DELAY = 3000
+const HEARTBEAT_INTERVAL = 30000
+const PONG_TIMEOUT = 5000
 
 let socket = null
 let reconnectTimer = null
+let heartbeatTimer = null
+let pongTimer = null
 let manuallyClosed = false
 
 const getAccount = () => {
@@ -22,6 +26,23 @@ const clearReconnectTimer = () => {
     if (!reconnectTimer) return
     window.clearTimeout(reconnectTimer)
     reconnectTimer = null
+}
+
+const clearHeartbeat = () => {
+    if (heartbeatTimer) window.clearInterval(heartbeatTimer)
+    if (pongTimer) window.clearTimeout(pongTimer)
+    heartbeatTimer = null
+    pongTimer = null
+}
+
+const startHeartbeat = () => {
+    clearHeartbeat()
+    heartbeatTimer = window.setInterval(() => {
+        if (socket?.readyState !== WebSocket.OPEN) return
+        socket.send(JSON.stringify({ type: 'ping' }))
+        if (pongTimer) window.clearTimeout(pongTimer)
+        pongTimer = window.setTimeout(() => socket?.close(), PONG_TIMEOUT)
+    }, HEARTBEAT_INTERVAL)
 }
 
 const scheduleReconnect = () => {
@@ -46,6 +67,7 @@ const parseMessage = (data) => {
 export const disconnectNotifySocket = () => {
     manuallyClosed = true
     clearReconnectTimer()
+    clearHeartbeat()
 
     if (!socket) return
     const currentSocket = socket
@@ -62,8 +84,16 @@ export const connectNotifySocket = () => {
 
     socket = new WebSocket(buildNotifyUrl())
 
+    socket.addEventListener('open', startHeartbeat)
+
     socket.addEventListener('message', (event) => {
         const message = parseMessage(event.data)
+
+        if (message?.type === 'pong') {
+            if (pongTimer) window.clearTimeout(pongTimer)
+            pongTimer = null
+            return
+        }
 
         if (message?.type === 'ping' && socket?.readyState === WebSocket.OPEN) {
             socket.send(JSON.stringify({ type: 'pong', payload: null }))
@@ -74,6 +104,7 @@ export const connectNotifySocket = () => {
     })
 
     socket.addEventListener('close', () => {
+        clearHeartbeat()
         socket = null
         scheduleReconnect()
     })
