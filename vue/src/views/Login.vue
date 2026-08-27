@@ -65,7 +65,7 @@ const onLogin = async () => {
       }
 
       // 必须先拿到并校验原平台会话，再进入会发起原平台请求的主页面。
-      await loginDockerPlatform()
+      // await loginDockerPlatform()
       await enterIpr(account)
     } catch (error) {
       ElMessage.error(error.message || '登录失败')

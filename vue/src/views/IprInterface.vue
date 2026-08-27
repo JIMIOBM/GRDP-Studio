@@ -32,6 +32,7 @@ import WellDataTableContent from '@/views/DataManagement/WellDataTableContent.vu
 import { NODETYPE } from '@/constants/nodeType'
 import { analyticMethodApi, dataManagementApi, dynamicBalanceApi, materialBalanceApi, nodeApi, notifyApi, projectApi, typicalCurveApi, waterInvasionApi } from '@/api/docker'
 import { pvtStorageApi } from '@/api/pvtStorage'
+import { productivityStorageApi } from '@/api/productivityStorage'
 import { createPvtDraftRecord } from '@/utils/pvtRecords'
 import {
   getNextRelativePermeabilityIndex,
@@ -49,7 +50,7 @@ import {
 } from '@/utils/workspaceTreeState'
 
 // 7
-const PROJECT_ID = 6
+const PROJECT_ID = 2
 // 4
 const GAS_RESERVOIR_ID = 1
 const router = useRouter()
@@ -1324,8 +1325,70 @@ const refreshProjectTree = async () => { //加在项目树
     const res = await projectApi.getProject(PROJECT_ID)
     rebuildProjectTree(normalizePayload(res))
     await refreshOtherDataNodes()
+    await refreshIsochronalProductivityNodes()
   } catch (error) {
     console.warn('项目树加载失败', error)
+  }
+}
+
+const addIsochronalProductivityNode = record => {
+  const well = ensureWell(record.wellName, `well-${record.wellName}`)
+  const productivityGroup = well?.children.find(item =>
+    item.type === 'single-well-productivity' || item.label === '单井产能'
+  )
+  if (!well || !productivityGroup) return
+
+  let testGroup = productivityGroup.children.find(item =>
+    item.type === 'productivity-test' || item.label === '产能试井'
+  )
+  if (!testGroup) {
+    testGroup = {
+      id: `${well.id}-single-well-productivity-productivity-test`,
+      label: '产能试井',
+      type: 'productivity-test',
+      wellName: record.wellName,
+      defaultExpanded: false,
+      children: []
+    }
+    productivityGroup.children.push(testGroup)
+  }
+
+  let recordNode = testGroup.children.find(item =>
+    item.type === 'productivity-test-record' && Number(item.testId) === Number(record.testId)
+  )
+  if (!recordNode) {
+    recordNode = {
+      id: `${well.id}-productivity-test-${record.testId}`,
+      label: record.testName || `产能试井-${record.testNo}`,
+      type: 'productivity-test-record',
+      wellName: record.wellName,
+      testId: record.testId,
+      testNo: record.testNo,
+      defaultExpanded: false,
+      children: []
+    }
+    testGroup.children.push(recordNode)
+  }
+
+  if (!recordNode.children.some(item => item.type === 'productivity-test-isochronal')) {
+    recordNode.children.push({
+      id: `${well.id}-productivity-test-${record.testId}-isochronal`,
+      label: '等时试井',
+      type: 'productivity-test-isochronal',
+      wellName: record.wellName,
+      testId: record.testId,
+      children: []
+    })
+  }
+  testGroup.children.sort((left, right) => Number(left.testNo || 0) - Number(right.testNo || 0))
+}
+
+const refreshIsochronalProductivityNodes = async () => {
+  try {
+    const response = await productivityStorageApi.listIsochronal(PROJECT_ID, GAS_RESERVOIR_ID)
+    ;(response?.data || []).forEach(addIsochronalProductivityNode)
+  } catch (error) {
+    console.warn('等时试井目录加载失败', error)
   }
 }
 
@@ -3364,6 +3427,8 @@ const initTree = async () => {
     await refreshProjectTree()
     workspaceTreeHydrated.value = true
   }
+  // 数据库目录独立于原平台项目树；即使原平台请求失败，也要恢复已保存的产能试井分支。
+  await refreshIsochronalProductivityNodes()
 
   // 清理跨页面缓存的展开状态和动态节点；接口只在用户再次展开对应分组时调用。
   const resetLazyState = nodes => {
@@ -3570,6 +3635,24 @@ const handleSelect = async (node) => { // 点击左侧树节点
   activeNode.value = node
 
   if (isWellMenuGroup) return
+
+  if (node.type === 'productivity-test-record') {
+    // 产能试井-i 是结果目录，展开后由具体试井方法节点打开右侧内容。
+    return
+  }
+
+  if (node.type === 'productivity-test-isochronal' && node.testId) {
+    await router.push({
+      name: 'SingleWellProductivity',
+      query: {
+        module: '产能试井',
+        method: '等时试井',
+        well: nodeWellName,
+        testId: node.testId
+      }
+    })
+    return
+  }
 
   if (node.type === 'well-data-pvt-group') {
     // “PVT性质”只是目录：点击时仅由树组件展开或收起，不打开任何具体记录。

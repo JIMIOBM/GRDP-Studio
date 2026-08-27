@@ -1505,6 +1505,123 @@ const switchPanel = async (panel) => {
   else renderChart()
 }
 
+const getPersistenceSnapshot = () => {
+  if (!result.value || result.value.calculationResultType !== 'binomial') return null
+  const validRows = inputRows.value.filter(row =>
+    [row.flowRate, row.flowingPressure, row.recoveryPressure].every(value => Number.isFinite(Number(value)))
+  )
+  return {
+    input: {
+      maximumFormationPressure: Number(formationPressure.value),
+      formationTemperature: Number(temperature.value),
+      onePointAlpha: Number(props.externalOnePointAlpha),
+      gasType: props.pvtRecord?.gasSettings?.gasType || null,
+      specificGravity: Number(props.pvtRecord?.gasSettings?.specificGravity) || null,
+      hydrogenSulfide: Number(props.pvtRecord?.gasSettings?.hydrogenSulfide) || null,
+      carbonDioxide: Number(props.pvtRecord?.gasSettings?.carbonDioxide) || null,
+      nitrogen: Number(props.pvtRecord?.gasSettings?.nitrogen) || null,
+      condensateOilDensity: Number(props.pvtRecord?.gasSettings?.condensateOilDensity) || null,
+      modificationMethod: props.pvtRecord?.gasSettings?.modificationMethod || null,
+      deviationFactorMethod: props.pvtRecord?.gasSettings?.deviationFactorMethod || null,
+      viscosityMethod: props.pvtRecord?.gasSettings?.viscosityMethod || null,
+      points: validRows.map((row, index) => ({
+        pointNumber: Number(row.sequence || index + 1),
+        gasProduction: Number(row.flowRate),
+        reservoirPressure: Number(row.recoveryPressure),
+        flowPressure: Number(row.flowingPressure)
+      }))
+    },
+    pressureMethod: calculationMethod.value,
+    result: {
+      darcyCoefficient: Number(result.value.darcyCoefficient),
+      nonDarcyCoefficient: Number(result.value.nonDarcyCoefficient),
+      openFlowCapacity: Number(result.value.aofRate),
+      gradient: Number.isFinite(Number(result.value.nonDarcyCoefficient))
+        ? Number(result.value.nonDarcyCoefficient)
+        : null,
+      intercept: Number.isFinite(Number(result.value.darcyCoefficient))
+        ? Number(result.value.darcyCoefficient)
+        : null,
+      rSquared: Number.isFinite(Number(result.value.rSquared)) ? Number(result.value.rSquared) : null,
+      reliabilityLevel: null,
+      reliabilityDescription: result.value.reliability || null,
+      analysisPoints: (result.value.analysisPoints || []).map(point => ({
+        x: Number(point.flowRate), y: Number(point.transformedPressure), label: null
+      })),
+      regressionLine: (result.value.regressionLine || []).map(point => ({
+        x: Number(point.flowRate), y: Number(point.transformedPressure), label: null
+      })),
+      transientLine: (result.value.transientLine || []).map(point => ({
+        x: Number(point.flowRate), y: Number(point.transformedPressure), label: null
+      })),
+      iprCurves: (result.value.iprCurves || []).map(curve => ({
+        formationPressure: Number(curve.formationPressure),
+        points: (curve.points || []).map(point => ({
+          gasProduction: Number(point.flowRate),
+          bottomHoleFlowingPressure: Number(point.flowingPressure),
+          label: null
+        }))
+      }))
+    }
+  }
+}
+
+const restorePersisted = detail => {
+  if (!detail?.input || !detail?.result) return
+  activeTestType.value = 'isochronal'
+  selectedDataTable.value = 'isochronal'
+  formationPressure.value = Number(detail.input.maximumFormationPressure)
+  temperature.value = Number(detail.input.formationTemperature)
+  calculationMethod.value = normalizeCalculationMethod(detail.pressureMethod)
+  calculationResultType.value = 'binomial'
+  inputRows.value = (detail.input.points || []).map(point => ({
+    sequence: point.pointNumber,
+    flowRate: point.gasProduction,
+    equivalentFlowRate: '',
+    flowingPressure: point.flowPressure,
+    recoveryPressure: point.reservoirPressure
+  }))
+  hasMethodData.value = inputRows.value.length > 0
+  const restored = {
+    wellName: detail.record?.wellName || selectedWellName.value,
+    testType: 'isochronal',
+    methodName: '等时',
+    calculationMethod: calculationMethod.value,
+    calculationResultType: 'binomial',
+    formationPressure: Number(detail.input.maximumFormationPressure),
+    darcyCoefficient: detail.result.darcyCoefficient,
+    nonDarcyCoefficient: detail.result.nonDarcyCoefficient,
+    aofRate: detail.result.openFlowCapacity,
+    rSquared: detail.result.rSquared,
+    reliability: detail.result.reliabilityDescription || '',
+    analysisPoints: (detail.result.analysisPoints || []).map(point => ({
+      flowRate: point.x, transformedPressure: point.y
+    })),
+    regressionLine: (detail.result.regressionLine || []).map(point => ({
+      flowRate: point.x, transformedPressure: point.y
+    })),
+    transientLine: (detail.result.transientLine || []).map(point => ({
+      flowRate: point.x, transformedPressure: point.y
+    })),
+    iprCurves: (detail.result.iprCurves || []).map(curve => ({
+      formationPressure: Number(curve.formationPressure) || Number(detail.input.maximumFormationPressure),
+      points: (curve.points || []).map(point => ({
+        flowRate: point.gasProduction,
+        flowingPressure: point.bottomHoleFlowingPressure
+      }))
+    }))
+  }
+  restored.iprCurve = restored.iprCurves.at(-1)?.points || []
+  result.value = restored
+  emit('result-change', restored)
+  activePanel.value = 'analysis'
+  activeChart.value = 'analysis'
+  nextTick(() => {
+    if (activeChart.value === 'ipr') renderIprChart()
+    else renderChart()
+  })
+}
+
 const switchChart = async (chartType) => {
   activeChart.value = chartType
   if (activePanel.value !== 'analysis' || !result.value) return
@@ -1567,7 +1684,7 @@ onMounted(async () => {
   if (selectedWellName.value) await loadWellData()
 })
 
-defineExpose({ analyze, loadWellData, switchPanel })
+defineExpose({ analyze, loadWellData, switchPanel, getPersistenceSnapshot, restorePersisted })
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize)
