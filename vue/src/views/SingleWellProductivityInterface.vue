@@ -43,8 +43,8 @@ import {
   workspaceTreeKeyword
 } from '@/utils/workspaceTreeState'
 
-const PROJECT_ID = 2
-const GAS_RESERVOIR_ID = 1
+const PROJECT_ID = 6
+const GAS_RESERVOIR_ID = 4
 const MODIFIED_ISOCHRONAL_PROJECT_ID = 6
 const MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID = 4
 
