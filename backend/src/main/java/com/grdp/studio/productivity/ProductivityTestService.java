@@ -20,6 +20,9 @@ import java.sql.Date;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -37,6 +40,8 @@ public class ProductivityTestService {
             "pseudo-pressure", "pressure-squared", "pressure");
     private static final Set<String> CURVE_TYPES = Set.of(
             "regularized", "stable", "regression", "shifted-regression");
+    private static final DateTimeFormatter NODE_TIME_FORMAT = DateTimeFormatter.ofPattern("yy.M.d.HHmm");
+    private static final ZoneId CHINA_ZONE = ZoneId.of("Asia/Shanghai");
 
     private final JdbcTemplate jdbc;
 
@@ -77,13 +82,18 @@ public class ProductivityTestService {
 
         List<Map<String, Object>> outputs = jdbc.queryForList("""
                 SELECT * FROM project_well_productivity_binomial_output
-                WHERE test_id=? ORDER BY updated_at DESC,id DESC LIMIT 1
+                WHERE test_id=? ORDER BY updated_at DESC,id DESC
                 """, testId);
         Result result = outputs.isEmpty() ? null : result(outputs.getFirst());
+        List<EvaluationReference> evaluations = outputs.stream()
+                .map(output -> new EvaluationReference(string(output.get("pressure_method")),
+                        longValue(output.get("source_evaluation_id"))))
+                .filter(reference -> reference.evaluationId() != null)
+                .toList();
         return new Detail(testId, number(test.get("pvt_id")).longValue(), number(test.get("test_no")).intValue(),
                 string(test.get("test_name")), date(test.get("test_date")), string(test.get("operation_type")),
                 string(test.get("test_method")), string(test.get("well_name")), string(test.get("well_type")),
-                string(test.get("status")), input(input), items, result);
+                string(test.get("status")), input(input), items, result, evaluations);
     }
 
     @Transactional
@@ -94,13 +104,14 @@ public class ProductivityTestService {
         boolean created = request.testId() == null;
         int testNo = created ? nextTestNo(wellId, request.operationType(), request.testMethod())
                 : requireTest(request.testId(), wellId);
-        long testId = created ? insertTest(request, wellId, testNo) : request.testId();
-        String testName = operationLabel(request.operationType()) + methodLabel(request.testMethod()) + "试井" + testNo;
+        String testName = created ? createTestName(request.testMethod(), request.operationType(), testNo)
+                : requireTestName(request.testId());
+        long testId = created ? insertTest(request, wellId, testNo, testName) : request.testId();
         if (!created) {
             jdbc.update("""
-                    UPDATE project_well_productivity_test SET pvt_id=?,test_date=?,well_type=?,test_name=?,status='calculated'
+                    UPDATE project_well_productivity_test SET pvt_id=?,test_date=?,well_type=?,status='calculated'
                     WHERE id=?
-                    """, request.pvtId(), Date.valueOf(request.testDate()), blankToNull(request.wellType()), testName, testId);
+                    """, request.pvtId(), Date.valueOf(request.testDate()), blankToNull(request.wellType()), testId);
         }
 
         if (created || request.replaceInput()) {
@@ -271,8 +282,7 @@ public class ProductivityTestService {
         return values.getFirst();
     }
 
-    private long insertTest(SaveRequest request, long wellId, int testNo) {
-        String name = operationLabel(request.operationType()) + methodLabel(request.testMethod()) + "试井" + testNo;
+    private long insertTest(SaveRequest request, long wellId, int testNo, String name) {
         return insert("""
                 INSERT INTO project_well_productivity_test
                 (project_id,project_gas_reservoir_id,well_id,well_name,pvt_id,operation_type,test_method,
@@ -308,10 +318,10 @@ public class ProductivityTestService {
                 testId, result.pressureMethod());
         long outputId = insert("""
                 INSERT INTO project_well_productivity_binomial_output
-                (test_id,pressure_method,darcy_seepage_coefficient,non_darcy_seepage_coefficient,open_flow_capacity,
+                (test_id,pressure_method,source_evaluation_id,darcy_seepage_coefficient,non_darcy_seepage_coefficient,open_flow_capacity,
                  gradient,intercept,r_squared,reliability_level,reliability_description)
-                VALUES (?,?,?,?,?,?,?,?,?,?)
-                """, testId, result.pressureMethod(), result.darcySeepageCoefficient(),
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                """, testId, result.pressureMethod(), result.evaluationId(), result.darcySeepageCoefficient(),
                 result.nonDarcySeepageCoefficient(), result.openFlowCapacity(), result.gradient(), result.intercept(),
                 result.rSquared(), result.reliabilityLevel(), blankToNull(result.reliabilityDescription()));
         if (result.chartPoints() != null) for (ChartPoint point : result.chartPoints()) jdbc.update("""
@@ -339,7 +349,8 @@ public class ProductivityTestService {
                 FROM project_well_productivity_binomial_ipr_item WHERE output_id=? ORDER BY curve_number,point_number
                 """, (rs, row) -> new IprPoint(rs.getInt(1), rs.getInt(2), rs.getDouble(3), rs.getDouble(4),
                 rs.getBoolean(5), rs.getString(6)), outputId);
-        return new Result(string(output.get("pressure_method")), decimal(output.get("darcy_seepage_coefficient")),
+        return new Result(string(output.get("pressure_method")), longValue(output.get("source_evaluation_id")),
+                decimal(output.get("darcy_seepage_coefficient")),
                 decimal(output.get("non_darcy_seepage_coefficient")), decimal(output.get("open_flow_capacity")),
                 decimal(output.get("gradient")), decimal(output.get("intercept")), decimal(output.get("r_squared")),
                 integer(output.get("reliability_level")), string(output.get("reliability_description")), charts, ipr);
@@ -373,10 +384,20 @@ public class ProductivityTestService {
     private List<String> split(String value) { return value == null || value.isBlank() ? List.of() : List.of(value.split(",")); }
     private String operationLabel(String value) { return "injection".equals(value) ? "注气" : "采气"; }
     private String methodLabel(String value) { return Map.of("back-pressure", "回压", "isochronal", "等时", "modified-isochronal", "修正等时", "one-point", "一点法").get(value); }
+    private String createTestName(String method, String operation, int testNo) {
+        if ("modified-isochronal".equals(method)) {
+            return "修正等时-" + LocalDateTime.now(CHINA_ZONE).format(NODE_TIME_FORMAT);
+        }
+        return operationLabel(operation) + methodLabel(method) + "试井" + testNo;
+    }
+    private String requireTestName(long testId) {
+        return jdbc.queryForObject("SELECT test_name FROM project_well_productivity_test WHERE id=?", String.class, testId);
+    }
     private String cell(List<String> row, int index) { return index < row.size() ? row.get(index) : ""; }
     private double parse(String value) { return Double.parseDouble(value.replace(",", "").trim()); }
     private void finite(Double value, String field) { if (value == null || !Double.isFinite(value)) throw new BusinessException(400, field + "必须是有效数字"); }
     private Number number(Object value) { return (Number) value; }
+    private Long longValue(Object value) { return value == null ? null : number(value).longValue(); }
     private Double decimal(Object value) { return value == null ? null : number(value).doubleValue(); }
     private Integer integer(Object value) { return value == null ? null : number(value).intValue(); }
     private String string(Object value) { return value == null ? null : String.valueOf(value); }

@@ -236,6 +236,12 @@ export const wellApi = {
 
 /* ===== 单井产能 - 产能试井 ===== */
 export const productivityEvaluationApi = {
+  initialize: (data, options = {}) =>
+    dockerRequest.post(
+      '/projectanalysis/productivityevaluation/deliverabilitytest/calc',
+      data,
+      { timeout: 180000, ...options }
+    ),
   calculate: (wellName, data, options = {}) =>
     dockerRequest.post(
       `/projectanalysis/productivityevaluation/${encodeURIComponent(wellName)}/calc`,

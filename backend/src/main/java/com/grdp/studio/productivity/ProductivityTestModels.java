@@ -16,6 +16,8 @@ public final class ProductivityTestModels {
                           String operationType, String testMethod, String status,
                           List<String> pressureMethods) {}
 
+    public record EvaluationReference(String pressureMethod, Long evaluationId) {}
+
     public record InputItem(@Positive int testPointNumber, @NotNull Double testDailyGasProduction,
                             @NotNull Double reservoirPressure, @NotNull Double testFlowPressure) {}
 
@@ -27,7 +29,7 @@ public final class ProductivityTestModels {
                            @NotNull Double gasProduction, @NotNull Double bottomHoleFlowingPressure,
                            boolean deleted, String dataLabel) {}
 
-    public record Result(String pressureMethod, Double darcySeepageCoefficient,
+    public record Result(String pressureMethod, @NotNull @Positive Long evaluationId, Double darcySeepageCoefficient,
                          Double nonDarcySeepageCoefficient, Double openFlowCapacity,
                          Double gradient, Double intercept, Double rSquared,
                          Integer reliabilityLevel, String reliabilityDescription,
@@ -41,7 +43,8 @@ public final class ProductivityTestModels {
 
     public record Detail(long id, long pvtId, int testNo, String testName, LocalDate testDate,
                          String operationType, String testMethod, String wellName, String wellType,
-                         String status, Input input, List<InputItem> inputItems, Result result) {}
+                         String status, Input input, List<InputItem> inputItems, Result result,
+                         List<EvaluationReference> evaluations) {}
 
     public record SaveRequest(Long testId, @Positive long projectId, @Positive long gasReservoirId,
                               @NotBlank String wellName, @Positive long pvtId,
