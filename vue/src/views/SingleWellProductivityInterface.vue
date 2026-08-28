@@ -33,6 +33,7 @@ import {
   workspaceSelectedWellName,
   workspaceTreeCollapsed,
   workspaceTreeData,
+  workspaceTreeHydrated,
   workspaceTreeKeyword
 } from '@/utils/workspaceTreeState'
 
@@ -382,6 +383,10 @@ const handleProductivitySaved = async saved => {
 }
 
 onMounted(async () => {
+  if (!workspaceTreeHydrated.value) {
+    await router.replace({ name: 'IprInterface' })
+    return
+  }
   await loadWells()
   void loadAllModifiedIsochronalNodes()
 })

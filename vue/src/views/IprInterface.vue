@@ -1131,7 +1131,6 @@ const collectWellsFromProject = (payload, allowedWellNames = null) => {
     if (isWell && name) {
       const id = value.nodeId || value.id || value.wellId || `well-${name}`
       addWell(name, value, id)
-      getChildren(value).forEach(child => addAnalysisNode(name, child))
     }
 
     Object.entries(value).forEach(([key, child]) => {
@@ -1151,6 +1150,9 @@ const rebuildProjectTree = (payload, allowedWellNames = null) => {
 
   wellGroup.children = []
   wells.forEach(well => ensureWell(well.name, well.id))
+  wells.forEach(well => {
+    getChildren(well.raw).forEach(child => addAnalysisNode(well.name, child))
+  })
 }
 
 const applyWaterInvasionNodes = (node, targetWellName = '') => {
@@ -3601,26 +3603,6 @@ const initTree = async () => {
   if (!workspaceTreeHydrated.value) {
     await refreshProjectTree()
     workspaceTreeHydrated.value = true
-
-    // 仅首次初始化时清理懒加载状态，避免页面返回时删除其他模块的已加载节点。
-    const resetLazyState = nodes => {
-      nodes.forEach(node => {
-        node.expanded = false
-        node.defaultExpanded = false
-        node.childrenLoaded = false
-        if (node.type === 'data-management') {
-          node.children = (node.children || []).filter(
-            child => child.type !== 'well-data-pvt-group'
-          )
-        }
-        if (node.type === 'well-control-inventory') {
-          node.children = []
-          node.lazy = true
-        }
-        resetLazyState(node.children || [])
-      })
-    }
-    resetLazyState(treeData.value)
   }
 }
 
