@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import { pbkdf2Sync } from 'node:crypto'
 import { fileURLToPath, URL } from 'node:url'
 
 const parseEnvValue = (value) => {
@@ -63,6 +64,10 @@ const getCsrfToken = (flow) => {
   }
   return ''
 }
+
+// Match the password derivation used by the AHKs login page before submitting to Kratos.
+const hashDockerPassword = (password, username) =>
+  pbkdf2Sync(password, username, 1000, 32, 'sha256').toString('hex')
 
 const verifyDockerSession = async (cookie, baseUrl) => {
   const sessionPath = getLocalEnvValue('DOCKER_SESSION_CHECK_PATH') || '/services/ory/kratos/sessions/whoami'
@@ -147,7 +152,10 @@ const loginDockerPlatform = async ({ username, password }) => {
   form.set('csrf_token', csrfToken)
   form.set('method', getLocalEnvValue('DOCKER_LOGIN_METHOD_NAME') || 'password')
   form.set(getLocalEnvValue('DOCKER_LOGIN_USERNAME_FIELD') || 'identifier', username)
-  form.set(getLocalEnvValue('DOCKER_LOGIN_PASSWORD_FIELD') || 'password', password)
+  form.set(
+    getLocalEnvValue('DOCKER_LOGIN_PASSWORD_FIELD') || 'password',
+    hashDockerPassword(password, username)
+  )
 
   const response = await fetch(new URL(`${loginPath}?flow=${encodeURIComponent(flowId)}`, baseUrl), {
     method: 'POST',
