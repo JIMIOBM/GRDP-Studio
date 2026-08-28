@@ -156,17 +156,16 @@ const discoverEvaluationId = async method => {
   const response = await nodeApi.getNode(props.projectId, props.gasReservoirId,
     pressureNodeTypeByMethod[normalized], { silentError: true })
   const candidates = new Set()
-  const walk = (node, insideWell = false, insideModified = false) => {
+  const walk = (node, insideWell = false) => {
     if (!node || typeof node !== 'object') return
-    if (Array.isArray(node)) return node.forEach(item => walk(item, insideWell, insideModified))
+    if (Array.isArray(node)) return node.forEach(item => walk(item, insideWell))
     const label = nodeLabel(node)
     const inWell = insideWell || label === props.wellName || node.wellName === props.wellName
-    const inModified = insideModified || Number(node.nodeType ?? node.type) ===
-      NODETYPE.NodeType_ProductivityEvaluationModifiedIsochronalWellTest || label.includes('修正等时')
-    if (inWell && inModified) candidateNodeIds(node).forEach(id => candidates.add(id))
-    nodeChildren(node).forEach(child => walk(child, inWell, inModified))
+    if (inWell) candidateNodeIds(node).forEach(id => candidates.add(id))
+    nodeChildren(node).forEach(child => walk(child, inWell))
   }
-  walk(unwrap(response))
+  const payload = unwrap(response)
+  walk(payload.node ?? payload)
   const form = evaluationFormByMethod[normalized]
   for (const id of [...candidates].sort((a, b) => b - a)) {
     try {

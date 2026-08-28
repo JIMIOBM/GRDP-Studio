@@ -3601,27 +3601,27 @@ const initTree = async () => {
   if (!workspaceTreeHydrated.value) {
     await refreshProjectTree()
     workspaceTreeHydrated.value = true
-  }
 
-  // 清理跨页面缓存的展开状态和动态节点；接口只在用户再次展开对应分组时调用。
-  const resetLazyState = nodes => {
-    nodes.forEach(node => {
-      node.expanded = false
-      node.defaultExpanded = false
-      node.childrenLoaded = false
-      if (node.type === 'data-management') {
-        node.children = (node.children || []).filter(
-          child => child.type !== 'well-data-pvt-group'
-        )
-      }
-      if (node.type === 'well-control-inventory') {
-        node.children = []
-        node.lazy = true
-      }
-      resetLazyState(node.children || [])
-    })
+    // 仅首次初始化时清理懒加载状态，避免页面返回时删除其他模块的已加载节点。
+    const resetLazyState = nodes => {
+      nodes.forEach(node => {
+        node.expanded = false
+        node.defaultExpanded = false
+        node.childrenLoaded = false
+        if (node.type === 'data-management') {
+          node.children = (node.children || []).filter(
+            child => child.type !== 'well-data-pvt-group'
+          )
+        }
+        if (node.type === 'well-control-inventory') {
+          node.children = []
+          node.lazy = true
+        }
+        resetLazyState(node.children || [])
+      })
+    }
+    resetLazyState(treeData.value)
   }
-  resetLazyState(treeData.value)
 }
 
 const loadWellChildren = async (node, force = false) => {
