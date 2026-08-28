@@ -119,7 +119,7 @@ public class ProductivityTestStorageService {
                    test_method,test_no,test_name,test_date,status)
                 VALUES(?,?,?,?,?,'production','isochronal',?,?,?,'data-ready')
                 """, request.projectId(), request.gasReservoirId(), wellId, request.wellName().trim(),
-                pvtId, testNo, "产能试井-" + testNo,
+                pvtId, testNo, "等时试井" + testNo,
                 Objects.requireNonNullElse(request.testDate(), LocalDate.now()));
     }
 

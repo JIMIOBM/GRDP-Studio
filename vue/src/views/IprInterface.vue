@@ -32,8 +32,13 @@ import WellDataTableContent from '@/views/DataManagement/WellDataTableContent.vu
 import { NODETYPE } from '@/constants/nodeType'
 import { analyticMethodApi, dataManagementApi, dynamicBalanceApi, materialBalanceApi, nodeApi, notifyApi, parametersApi, projectApi, typicalCurveApi, waterInvasionApi, wellApi } from '@/api/docker'
 import { pvtStorageApi } from '@/api/pvtStorage'
-import { productivityStorageApi } from '@/api/productivityStorage'
 import { createPvtDraftRecord } from '@/utils/pvtRecords'
+import { loadAllModifiedIsochronalTreeNodes } from '@/utils/modifiedIsochronalTree'
+import {
+  ISOCHRONAL_METHOD_NODE_TYPE,
+  ISOCHRONAL_RECORD_NODE_TYPE,
+  loadAllIsochronalTreeNodes
+} from '@/utils/isochronalTree'
 import {
   getNextRelativePermeabilityIndex,
   getRelativePermeabilityRecords
@@ -50,9 +55,9 @@ import {
 } from '@/utils/workspaceTreeState'
 
 // 7
-const PROJECT_ID = 2
+const PROJECT_ID = 6
 // 4
-const GAS_RESERVOIR_ID = 1
+const GAS_RESERVOIR_ID = 4
 const router = useRouter()
 const FLOW_BALANCE_NODE_TYPE = NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure
 
@@ -1397,70 +1402,8 @@ const refreshProjectTree = async () => { //加在项目树
     }
     rebuildProjectTree(normalizePayload(projectResult.value), names)
     await refreshOtherDataNodes()
-    await refreshIsochronalProductivityNodes()
   } catch (error) {
     console.warn('项目树加载失败', error)
-  }
-}
-
-const addIsochronalProductivityNode = record => {
-  const well = ensureWell(record.wellName, `well-${record.wellName}`)
-  const productivityGroup = well?.children.find(item =>
-    item.type === 'single-well-productivity' || item.label === '单井产能'
-  )
-  if (!well || !productivityGroup) return
-
-  let testGroup = productivityGroup.children.find(item =>
-    item.type === 'productivity-test' || item.label === '产能试井'
-  )
-  if (!testGroup) {
-    testGroup = {
-      id: `${well.id}-single-well-productivity-productivity-test`,
-      label: '产能试井',
-      type: 'productivity-test',
-      wellName: record.wellName,
-      defaultExpanded: false,
-      children: []
-    }
-    productivityGroup.children.push(testGroup)
-  }
-
-  let recordNode = testGroup.children.find(item =>
-    item.type === 'productivity-test-record' && Number(item.testId) === Number(record.testId)
-  )
-  if (!recordNode) {
-    recordNode = {
-      id: `${well.id}-productivity-test-${record.testId}`,
-      label: record.testName || `产能试井-${record.testNo}`,
-      type: 'productivity-test-record',
-      wellName: record.wellName,
-      testId: record.testId,
-      testNo: record.testNo,
-      defaultExpanded: false,
-      children: []
-    }
-    testGroup.children.push(recordNode)
-  }
-
-  if (!recordNode.children.some(item => item.type === 'productivity-test-isochronal')) {
-    recordNode.children.push({
-      id: `${well.id}-productivity-test-${record.testId}-isochronal`,
-      label: '等时试井',
-      type: 'productivity-test-isochronal',
-      wellName: record.wellName,
-      testId: record.testId,
-      children: []
-    })
-  }
-  testGroup.children.sort((left, right) => Number(left.testNo || 0) - Number(right.testNo || 0))
-}
-
-const refreshIsochronalProductivityNodes = async () => {
-  try {
-    const response = await productivityStorageApi.listIsochronal(PROJECT_ID, GAS_RESERVOIR_ID)
-    ;(response?.data || []).forEach(addIsochronalProductivityNode)
-  } catch (error) {
-    console.warn('等时试井目录加载失败', error)
   }
 }
 
@@ -3663,29 +3606,27 @@ const initTree = async () => {
   if (!workspaceTreeHydrated.value) {
     await refreshProjectTree()
     workspaceTreeHydrated.value = true
-  }
-  // 数据库目录独立于原平台项目树；即使原平台请求失败，也要恢复已保存的产能试井分支。
-  await refreshIsochronalProductivityNodes()
 
-  // 清理跨页面缓存的展开状态和动态节点；接口只在用户再次展开对应分组时调用。
-  const resetLazyState = nodes => {
-    nodes.forEach(node => {
-      node.expanded = false
-      node.defaultExpanded = false
-      node.childrenLoaded = false
-      if (node.type === 'data-management') {
-        node.children = (node.children || []).filter(
-          child => child.type !== 'well-data-pvt-group'
-        )
-      }
-      if (node.type === 'well-control-inventory') {
-        node.children = []
-        node.lazy = true
-      }
-      resetLazyState(node.children || [])
-    })
+    // 仅首次初始化时清理懒加载状态，避免页面返回时删除其他模块的已加载节点。
+    const resetLazyState = nodes => {
+      nodes.forEach(node => {
+        node.expanded = false
+        node.defaultExpanded = false
+        node.childrenLoaded = false
+        if (node.type === 'data-management') {
+          node.children = (node.children || []).filter(
+            child => child.type !== 'well-data-pvt-group'
+          )
+        }
+        if (node.type === 'well-control-inventory') {
+          node.children = []
+          node.lazy = true
+        }
+        resetLazyState(node.children || [])
+      })
+    }
+    resetLazyState(treeData.value)
   }
-  resetLazyState(treeData.value)
 }
 
 const loadWellChildren = async (node, force = false) => {
@@ -3871,14 +3812,23 @@ const handleSelect = async (node) => { // 点击左侧树节点
   activeNodeId.value = node.id
   activeNode.value = node
 
-  if (isWellMenuGroup) return
-
-  if (node.type === 'productivity-test-record') {
-    // 产能试井-i 是结果目录，展开后由具体试井方法节点打开右侧内容。
+  if (node.type === NODETYPE.NodeType_ProductivityEvaluationModifiedIsochronalWellTest) {
+    await router.push({
+      name: 'SingleWellProductivity',
+      query: {
+        module: '产能试井',
+        method: '修正等时',
+        well: nodeWellName,
+        testId: node.testId || node.resultId,
+        ...(node.evaluationId ? { evaluationId: node.evaluationId } : {})
+      }
+    })
     return
   }
 
-  if (node.type === 'productivity-test-isochronal' && node.testId) {
+  if (node.type === ISOCHRONAL_METHOD_NODE_TYPE) return
+
+  if (node.type === ISOCHRONAL_RECORD_NODE_TYPE && node.testId) {
     await router.push({
       name: 'SingleWellProductivity',
       query: {
@@ -3890,6 +3840,8 @@ const handleSelect = async (node) => { // 点击左侧树节点
     })
     return
   }
+
+  if (isWellMenuGroup) return
 
   if (node.type === 'well-data-pvt-group') {
     // “PVT性质”只是目录：点击时仅由树组件展开或收起，不打开任何具体记录。
@@ -4224,6 +4176,18 @@ onMounted(async () => {
 
   try {
     await initTree()
+    void Promise.allSettled([
+      loadAllModifiedIsochronalTreeNodes({
+        treeData: treeData.value,
+        projectId: PROJECT_ID,
+        gasReservoirId: GAS_RESERVOIR_ID
+      }),
+      loadAllIsochronalTreeNodes({
+        treeData: treeData.value,
+        projectId: PROJECT_ID,
+        gasReservoirId: GAS_RESERVOIR_ID
+      })
+    ])
   } catch (error) {
     console.error('工作台目录初始化失败', error)
   }

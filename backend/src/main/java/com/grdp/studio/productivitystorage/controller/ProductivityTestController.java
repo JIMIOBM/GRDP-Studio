@@ -16,8 +16,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
-@RestController
-@RequestMapping("/productivity-tests")
+@RestController("isochronalProductivityTestController")
+@RequestMapping("/isochronal-productivity-tests")
 public class ProductivityTestController {
     private final ProductivityTestStorageService storageService;
 
@@ -39,7 +39,7 @@ public class ProductivityTestController {
         return ApiResponse.success(storageService.getIsochronal(testId, projectId, gasReservoirId));
     }
 
-    @PostMapping("/isochronal/save")
+    @PostMapping("/save")
     public ApiResponse<Summary> save(@Valid @RequestBody SaveRequest request) {
         return ApiResponse.success(storageService.saveIsochronal(request));
     }

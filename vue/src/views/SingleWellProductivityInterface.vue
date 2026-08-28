@@ -24,9 +24,15 @@ import { wellApi } from '@/api/docker'
 import { productivityStorageApi } from '@/api/productivityStorage'
 import { getPvtRecords } from '@/utils/pvtRecords'
 import {
-  getRememberedModifiedIsochronalWells,
-  rememberModifiedIsochronalNode
-} from '@/utils/productivityRecords'
+  ISOCHRONAL_METHOD_NODE_TYPE,
+  ISOCHRONAL_RECORD_NODE_TYPE,
+  loadAllIsochronalTreeNodes,
+  loadIsochronalTreeNodes
+} from '@/utils/isochronalTree'
+import {
+  loadAllModifiedIsochronalTreeNodes,
+  loadModifiedIsochronalTreeNodes
+} from '@/utils/modifiedIsochronalTree'
 import {
   workspaceActiveNodeId,
   workspacePendingCommand,
@@ -37,9 +43,8 @@ import {
   workspaceTreeKeyword
 } from '@/utils/workspaceTreeState'
 
-const PROJECT_ID = 2
-const GAS_RESERVOIR_ID = 1
-// 用户指定的原平台修正等时结果接口：/productivityevaluation/6/4/20
+const PROJECT_ID = 6
+const GAS_RESERVOIR_ID = 4
 const MODIFIED_ISOCHRONAL_PROJECT_ID = 6
 const MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID = 4
 
@@ -81,12 +86,15 @@ if (route.query.well) selectedWellName.value = String(route.query.well)
 const sideTreeCollapsed = workspaceTreeCollapsed
 // 展开后适当加宽以容纳三种计算方式；收起形态对齐 PVT 的“图表数据”侧栏。
 const paramsCollapsed = ref(false)
-const activeModule = ref(
-  MODULES.some(item => item.name === route.query.module)
-    ? route.query.module
-    : MODULES[0].name
-)
-const activeMethod = ref('')
+const routeModule = String(route.query.module || '')
+const routeConfig = MODULES.find(item => item.name === routeModule)
+const routeMethod = String(route.query.method || '')
+const activeModule = ref(routeConfig?.name || '')
+const activeMethod = ref(routeConfig?.methods.includes(routeMethod) ? routeMethod : '')
+const routeTestId = Number(route.query.testId)
+const routeEvaluationId = Number(route.query.evaluationId)
+const activeProductivityTestId = ref(Number.isFinite(routeTestId) && routeTestId > 0 ? routeTestId : null)
+const activeEvaluationId = ref(Number.isFinite(routeEvaluationId) && routeEvaluationId > 0 ? routeEvaluationId : null)
 const selectedPvtTable = ref('')
 const selectedDataTable = ref('')
 const maximumFormationPressure = ref('56.34')
@@ -97,7 +105,6 @@ const calculationResult = ref('二项式')
 const activeContentTab = ref('chart')
 const pressureContentRef = ref(null)
 const calculationOutput = ref(null)
-const activeProductivityTestId = ref(null)
 const savingProductivityTest = ref(false)
 
 const scientific = value => {
@@ -199,110 +206,37 @@ const selectModule = (moduleName, method = '') => {
   })
 }
 
-const ensureModifiedIsochronalNode = (wellName, { activate = true, persist = true } = {}) => {
-  const wellGroup = workspaceTreeData.value.find(node => node.id === 'g-well')
-  const wellNode = wellGroup?.children?.find(node =>
-    (node.wellName || node.label) === wellName
-  )
-  if (!wellNode) return null
-
-  const productivityGroup = wellNode.children?.find(node =>
-    node.type === 'single-well-productivity' || node.label === '单井产能'
-  )
-  if (!productivityGroup) return null
-
-  let testGroup = productivityGroup.children?.find(node =>
-    node.type === 'productivity-test' || node.label === '产能试井'
-  )
-  if (!testGroup) {
-    testGroup = {
-      id: `${wellNode.id}-single-well-productivity-productivity-test`,
-      label: '产能试井',
-      type: 'productivity-test',
-      wellName,
-      children: []
-    }
-    productivityGroup.children = [...(productivityGroup.children || []), testGroup]
-  }
-
-  let resultNode = testGroup.children?.find(node =>
-    node.type === NODETYPE.NodeType_ProductivityEvaluationModifiedIsochronalWellTest ||
-    node.label === '修正等时'
-  )
-  if (!resultNode) {
-    resultNode = {
-      id: `${wellNode.id}-modified-isochronal`,
-      label: '修正等时',
-      type: NODETYPE.NodeType_ProductivityEvaluationModifiedIsochronalWellTest,
-      wellName,
-      projectId: MODIFIED_ISOCHRONAL_PROJECT_ID,
-      gasReservoirId: MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID,
-      pNodeType: NODETYPE.NodeType_ProductivityEvaluationByPseudoPressure,
-      children: []
-    }
-    testGroup.children = [...(testGroup.children || []), resultNode]
-  }
-
-  wellNode.expanded = true
-  productivityGroup.expanded = true
-  testGroup.expanded = true
-  if (persist) rememberModifiedIsochronalNode(PROJECT_ID, GAS_RESERVOIR_ID, wellName)
-  if (activate) workspaceActiveNodeId.value = resultNode.id
-  return resultNode
+const loadModifiedIsochronalNodes = async (wellName, { expand = false } = {}) => {
+  await loadModifiedIsochronalTreeNodes({
+    treeData: workspaceTreeData.value,
+    projectId: MODIFIED_ISOCHRONAL_PROJECT_ID,
+    gasReservoirId: MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID,
+    wellName,
+    expand
+  })
 }
 
-const ensureIsochronalRecordNode = (record, { activate = false } = {}) => {
-  const wellGroup = workspaceTreeData.value.find(node => node.id === 'g-well')
-  const wellNode = wellGroup?.children?.find(node => (node.wellName || node.label) === record.wellName)
-  const productivityGroup = wellNode?.children?.find(node =>
-    node.type === 'single-well-productivity' || node.label === '单井产能'
-  )
-  if (!wellNode || !productivityGroup) return null
-  let testGroup = productivityGroup.children?.find(node =>
-    node.type === 'productivity-test' || node.label === '产能试井'
-  )
-  if (!testGroup) {
-    testGroup = {
-      id: `${wellNode.id}-single-well-productivity-productivity-test`,
-      label: '产能试井', type: 'productivity-test', wellName: record.wellName, children: []
-    }
-    productivityGroup.children = [...(productivityGroup.children || []), testGroup]
-  }
-  let recordNode = testGroup.children?.find(node =>
-    node.type === 'productivity-test-record' && Number(node.testId) === Number(record.testId)
-  )
-  if (!recordNode) {
-    recordNode = {
-      id: `${wellNode.id}-productivity-test-${record.testId}`,
-      label: record.testName || `产能试井-${record.testNo}`,
-      type: 'productivity-test-record', wellName: record.wellName, testId: record.testId,
-      children: [{
-        id: `${wellNode.id}-productivity-test-${record.testId}-isochronal`,
-        label: '等时试井', type: 'productivity-test-isochronal',
-        wellName: record.wellName, testId: record.testId, children: []
-      }]
-    }
-    testGroup.children = [...(testGroup.children || []), recordNode]
-      .sort((left, right) => Number(left.testId || 0) - Number(right.testId || 0))
-  }
-  if (activate) {
-    wellNode.expanded = true
-    productivityGroup.expanded = true
-    testGroup.expanded = true
-    recordNode.expanded = true
-    workspaceActiveNodeId.value = recordNode.children[0].id
-  }
-  return recordNode.children[0]
+const loadAllModifiedIsochronalNodes = async () => {
+  await loadAllModifiedIsochronalTreeNodes({
+    treeData: workspaceTreeData.value,
+    projectId: MODIFIED_ISOCHRONAL_PROJECT_ID,
+    gasReservoirId: MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID
+  })
 }
 
-const loadIsochronalRecordNodes = async () => {
-  try {
-    const response = await productivityStorageApi.listIsochronal(PROJECT_ID, GAS_RESERVOIR_ID)
-    ;(response?.data || []).forEach(record => ensureIsochronalRecordNode(record))
-  } catch (error) {
-    console.warn('读取等时试井记录失败', error)
-  }
-}
+const loadIsochronalNodes = async (wellName, { expand = false } = {}) => loadIsochronalTreeNodes({
+  treeData: workspaceTreeData.value,
+  projectId: PROJECT_ID,
+  gasReservoirId: GAS_RESERVOIR_ID,
+  wellName,
+  expand
+})
+
+const loadAllIsochronalNodes = async () => loadAllIsochronalTreeNodes({
+  treeData: workspaceTreeData.value,
+  projectId: PROJECT_ID,
+  gasReservoirId: GAS_RESERVOIR_ID
+})
 
 const handleCommand = async ({ group, name, parent }) => {
   // 顶部菜单栏“单井产能”板块：留在当前独立页面并切换功能模块/计算方法。
@@ -312,7 +246,8 @@ const handleCommand = async ({ group, name, parent }) => {
       return
     }
     if (parent === '产能试井' && name === '修正等时') {
-      ensureModifiedIsochronalNode(selectedWellName.value)
+      activeProductivityTestId.value = null
+      activeEvaluationId.value = null
     }
     if (parent === '产能试井' && name === '等时试井') {
       activeProductivityTestId.value = null
@@ -352,7 +287,7 @@ const loadWells = async () => {
         label: well.wellName,
         type: 'single-well',
         wellName: well.wellName,
-        defaultExpanded: well.wellName === selectedWellName.value,
+        defaultExpanded: false,
         children: WORKSPACE_GROUPS.map(group => ({
           id: `single-well-${well.id}-${group.id}`,
           label: group.label,
@@ -369,34 +304,40 @@ const loadWells = async () => {
   }
 }
 
-const selectWell = wellName => {
-  if (selectedWellName.value !== wellName) {
-    activeProductivityTestId.value = null
-    calculationOutput.value = null
-  }
+const selectWell = async wellName => {
   selectedWellName.value = wellName
   selectedPvtTable.value = ''
   selectedDataTable.value = ''
+  activeProductivityTestId.value = null
+  activeEvaluationId.value = null
+  try {
+    await Promise.all([
+      loadModifiedIsochronalNodes(wellName),
+      loadIsochronalNodes(wellName)
+    ])
+  } catch (error) {
+    ElMessage.warning(error?.msg || error?.message || '已保存试井记录读取失败')
+  }
 }
 
 const handleSidebarSelect = async node => {
-  workspaceActiveNodeId.value = node?.id || ''
-  if (node?.wellName) {
-    selectWell(node.wellName)
-  }
-
   if (!node) return
+  workspaceActiveNodeId.value = node.id || ''
 
-  if (['productivity-test', 'productivity-test-record'].includes(node.type)) {
-    return
-  }
+  const isModifiedIsochronalRecord =
+    node.type === NODETYPE.NodeType_ProductivityEvaluationModifiedIsochronalWellTest
+  const isProductivityTestNode = node.type === 'productivity-test' || node.label === '产能试井'
 
-  if (node.type === 'productivity-test-isochronal' && node.testId) {
+  // “产能试井”仅作为目录层级，不代表一条真实试井记录。
+  if (isProductivityTestNode || node.type === ISOCHRONAL_METHOD_NODE_TYPE) return
+
+  if (node.type === ISOCHRONAL_RECORD_NODE_TYPE && node.testId) {
+    selectedWellName.value = node.wellName || selectedWellName.value
+    activeProductivityTestId.value = Number(node.testId)
+    activeEvaluationId.value = null
     activeModule.value = '产能试井'
     activeMethod.value = '等时试井'
-    activeProductivityTestId.value = Number(node.testId)
-    selectedPvtTable.value = ''
-    selectedDataTable.value = `${node.wellName}-产能测试数据`
+    selectedDataTable.value = `${selectedWellName.value}-产能测试数据`
     try {
       const response = await productivityStorageApi.getIsochronal(
         node.testId, PROJECT_ID, GAS_RESERVOIR_ID
@@ -415,7 +356,10 @@ const handleSidebarSelect = async node => {
         : '二项式'
       await router.replace({
         name: 'SingleWellProductivity',
-        query: { module: '产能试井', method: '等时试井', well: node.wellName, testId: node.testId }
+        query: {
+          module: '产能试井', method: '等时试井',
+          well: selectedWellName.value, testId: node.testId
+        }
       })
       await nextTick()
       await pressureContentRef.value?.loadWellData?.()
@@ -426,18 +370,35 @@ const handleSidebarSelect = async node => {
     return
   }
 
-  if (
-    node.type === NODETYPE.NodeType_ProductivityEvaluationModifiedIsochronalWellTest ||
-    (node.label === '修正等时' && node.resultId)
-  ) {
+  if (isModifiedIsochronalRecord) {
+    // 该类节点本身已含有所属井和记录编号，点击时直接打开页面。
+    // 不在此处重新请求并替换整棵子树，避免点击事件进行中节点被销毁而造成界面闪回。
+    selectedWellName.value = node.wellName || selectedWellName.value
+    activeProductivityTestId.value = node.testId || node.resultId || null
+    activeEvaluationId.value = node.evaluationId || node.raw?.ProductivityEvaluationId || null
     activeModule.value = '产能试井'
     activeMethod.value = '修正等时'
     activeContentTab.value = 'chart'
-    await router.replace({
-      name: 'SingleWellProductivity',
-      query: { module: '产能试井', method: '修正等时', well: node.wellName }
-    })
+    const targetWell = selectedWellName.value
+    const targetTestId = activeProductivityTestId.value
+    if (route.query.module !== '产能试井' || route.query.method !== '修正等时' ||
+        route.query.well !== targetWell || Number(route.query.testId) !== Number(targetTestId)) {
+      await router.replace({
+        name: 'SingleWellProductivity',
+        query: {
+          module: '产能试井',
+          method: '修正等时',
+          well: targetWell,
+          testId: targetTestId,
+          ...(activeEvaluationId.value ? { evaluationId: activeEvaluationId.value } : {})
+        }
+      })
+    }
     return
+  }
+
+  if (node.wellName) {
+    await selectWell(node.wellName)
   }
 
   const isWorkspaceGroup = WORKSPACE_GROUPS.some(group => group.id === node.type)
@@ -468,7 +429,7 @@ const handleCalculate = async () => {
 }
 
 const handleSaveIsochronal = async () => {
-  if (activeMethod.value !== '等时试井') return
+  if (activeMethod.value !== '等时试井' || savingProductivityTest.value) return
   if (!selectedPvtRecord.value) {
     ElMessage.warning('请选择PVT表')
     return
@@ -496,8 +457,17 @@ const handleSaveIsochronal = async () => {
     })
     const record = response?.data
     activeProductivityTestId.value = Number(record.testId)
-    ensureIsochronalRecordNode(record, { activate: true })
-    ElMessage.success(`已保存${record.testName}`)
+    const nodes = await loadIsochronalNodes(selectedWellName.value, { expand: true })
+    const savedNode = nodes.find(item => Number(item.testId) === Number(record.testId))
+    if (savedNode) workspaceActiveNodeId.value = savedNode.id
+    await router.replace({
+      name: 'SingleWellProductivity',
+      query: {
+        module: '产能试井', method: '等时试井',
+        well: selectedWellName.value, testId: record.testId
+      }
+    })
+    ElMessage.success(`已保存等时试井${record.testNo}`)
   } catch (error) {
     ElMessage.error(error.response?.data?.msg || error.response?.data?.message || error.message || '保存失败')
   } finally {
@@ -509,36 +479,39 @@ const toggleParamsPanel = () => {
   paramsCollapsed.value = !paramsCollapsed.value
 }
 
+const handleProductivitySaved = async saved => {
+  activeProductivityTestId.value = saved.testId
+  await loadModifiedIsochronalNodes(selectedWellName.value, { expand: true })
+  const wellNode = workspaceTreeData.value.find(node => node.id === 'g-well')?.children
+    ?.find(node => (node.wellName || node.label) === selectedWellName.value)
+  const savedNode = wellNode?.children?.find(node => node.type === 'single-well-productivity')
+    ?.children?.find(node => node.type === 'productivity-test')
+    ?.children?.find(node => Number(node.testId) === Number(saved.testId))
+  if (savedNode) workspaceActiveNodeId.value = savedNode.id
+  await router.replace({
+    name: 'SingleWellProductivity',
+    query: {
+      module: '产能试井',
+      method: '修正等时',
+      well: selectedWellName.value,
+      testId: saved.testId
+    }
+  })
+}
+
 onMounted(async () => {
   await loadWells()
-  await loadIsochronalRecordNodes()
-  getRememberedModifiedIsochronalWells(PROJECT_ID, GAS_RESERVOIR_ID).forEach(wellName => {
-    ensureModifiedIsochronalNode(wellName, { activate: false, persist: false })
-  })
-  if (selectedWellName.value) {
-    const method = String(route.query.method || '')
-    const routeTestId = Number(route.query.testId)
-    if (method === '等时试井' && Number.isFinite(routeTestId) && routeTestId > 0) {
-      const recordNode = workspaceTreeData.value
-        .find(node => node.id === 'g-well')?.children
-        ?.flatMap(well => well.children || [])
-        .flatMap(group => group.children || [])
-        .flatMap(record => record.children || [])
-        .flatMap(method => method.children || [])
-        .find(node => node.type === 'productivity-test-isochronal' && Number(node.testId) === routeTestId)
-      await handleSidebarSelect(recordNode || {
-        id: `productivity-test-${routeTestId}-isochronal`,
-        type: 'productivity-test-isochronal',
-        testId: routeTestId,
-        wellName: selectedWellName.value,
-        label: '等时试井'
-      })
-      return
-    }
-    if (activeModule.value === '产能试井' && method === '修正等时') {
-      ensureModifiedIsochronalNode(selectedWellName.value)
-    }
-    selectModule(activeModule.value, method)
+  await Promise.allSettled([
+    loadAllModifiedIsochronalNodes(),
+    loadAllIsochronalNodes()
+  ])
+  if (selectedWellName.value && route.query.method === '等时试井' && activeProductivityTestId.value) {
+    await handleSidebarSelect({
+      id: `productivity-test-isochronal-${activeProductivityTestId.value}`,
+      type: ISOCHRONAL_RECORD_NODE_TYPE,
+      testId: activeProductivityTestId.value,
+      wellName: selectedWellName.value
+    })
   }
 })
 </script>
@@ -572,14 +545,9 @@ onMounted(async () => {
             :project-id="MODIFIED_ISOCHRONAL_PROJECT_ID"
             :gas-reservoir-id="MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID"
             :well-name="selectedWellName"
-            :pvt-table-options="pvtTableOptions"
-            :data-table-options="dataTableOptions"
-            v-model:selected-pvt-table="selectedPvtTable"
-            v-model:selected-data-table="selectedDataTable"
-            v-model:maximum-formation-pressure="maximumFormationPressure"
-            v-model:formation-temperature="formationTemperature"
-            v-model:calculation-method="calculationMethod"
-            v-model:calculation-result="calculationResult"
+            :test-id="activeProductivityTestId"
+            :evaluation-id="activeEvaluationId"
+            @saved="handleProductivitySaved"
           />
 
           <section v-else class="test-workspace">
@@ -662,12 +630,8 @@ onMounted(async () => {
                   <label><input v-model="calculationResult" type="radio" value="二项式" />二项式</label>
                   <label><input v-model="calculationResult" type="radio" value="指数式" />指数式</label>
                 </fieldset>
-                  <button
-                    type="button"
-                    class="calculate-button"
-                    :disabled="savingProductivityTest"
-                    @click="handleCalculate"
-                  >{{ savingProductivityTest ? '保存中' : '计算' }}</button>
+
+                  <button type="button" class="calculate-button" @click="handleCalculate">计算</button>
                   <div v-if="calculationOutput" class="calculation-output">
                     <template v-if="calculationOutput.calculationResultType === 'exponential'">
                       <label class="field-group">
@@ -1022,11 +986,6 @@ $accent-soft: #fff8d8;
   transition: background-color 0.15s ease;
 
   &:hover { background: #050505; }
-}
-
-.calculate-button:disabled {
-  cursor: wait;
-  opacity: 0.6;
 }
 
 .calculation-output {

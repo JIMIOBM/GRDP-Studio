@@ -236,6 +236,18 @@ export const wellApi = {
 
 /* ===== 单井产能 - 产能试井 ===== */
 export const productivityEvaluationApi = {
+  initialize: (data, options = {}) =>
+    dockerRequest.post(
+      '/projectanalysis/productivityevaluation/deliverabilitytest/calc',
+      data,
+      { timeout: 180000, ...options }
+    ),
+  calculate: (wellName, data, options = {}) =>
+    dockerRequest.post(
+      `/projectanalysis/productivityevaluation/${encodeURIComponent(wellName)}/calc`,
+      data,
+      { timeout: 180000, ...options }
+    ),
   /**
    * 获取产能评价结果。原平台返回 input/inputItems、output/evaluation、
    * chartItems 与 iprChartItems，前端据此同时还原输入、输出、数据表和曲线。
