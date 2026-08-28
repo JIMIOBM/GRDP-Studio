@@ -10,12 +10,13 @@
  * 用户点击顶部“单井产能”板块的命令时，本页面只负责路由跳转，
  * 不再在 IprInterface.vue 内渲染单井产能的业务界面。
  */
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete } from '@element-plus/icons-vue'
 import RibbonMenu from '@/components/RibbonMenu.vue'
 import WorkspaceSidebar from '@/components/WorkspaceSidebar.vue'
+import SoftwareIntegrationOverview from '@/views/SoftwareIntegration/SoftwareIntegrationOverview.vue'
 import WaterInvasionContent from '@/views/WellControlInventory/WaterInvasionContent.vue'
 import MaterialBalanceContent from '@/views/WellControlInventory/MaterialBalanceContent.vue'
 import FlowBalanceContent from '@/views/WellControlInventory/FlowBalanceContent.vue'
@@ -53,6 +54,8 @@ import {
 const PROJECT_ID = 6
 // 4
 const GAS_RESERVOIR_ID = 4
+const SOFTWARE_INTEGRATION_WORKSPACE = 'software-integration'
+const route = useRoute()
 const router = useRouter()
 const FLOW_BALANCE_NODE_TYPE = NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure
 
@@ -137,6 +140,14 @@ const activeNodeId = workspaceActiveNodeId  // 当前左侧树选中的节点 ID
 const activeNode = ref(null)  // 当前选中的完整节点对象
 const currentView = ref(null)  // currentView.value = 'water-invasion'，即确定右侧部分区域所显示的界面
 const currentViewNode = ref(null)  // 传给右侧内容组件的节点对象
+const softwareIntegrationActiveNodeId = ref('')
+const isSoftwareIntegration = computed(
+  () => route.query.workspace === SOFTWARE_INTEGRATION_WORKSPACE
+)
+const activeRibbonTabName = ref(isSoftwareIntegration.value ? '软件集成' : '解析融合')
+const displayedActiveNodeId = computed(
+  () => isSoftwareIntegration.value ? softwareIntegrationActiveNodeId.value : activeNodeId.value
+)
 const WELL_CONTROL_VIEWS = new Set([
   'water-invasion',
   'analytic-method',
@@ -182,6 +193,32 @@ const projectWellNames = computed(() =>
     .map(item => item.wellName || item.label)
     .filter(Boolean) || []
 )
+
+watch(
+  () => route.query.workspace,
+  workspace => {
+    if (workspace === SOFTWARE_INTEGRATION_WORKSPACE) {
+      activeRibbonTabName.value = '软件集成'
+    } else if (activeRibbonTabName.value === '软件集成') {
+      activeRibbonTabName.value = '解析融合'
+    }
+  }
+)
+
+const handleRibbonTabChange = async tabName => {
+  activeRibbonTabName.value = tabName
+  const query = { ...route.query }
+
+  if (tabName === '软件集成') {
+    query.workspace = SOFTWARE_INTEGRATION_WORKSPACE
+  } else {
+    delete query.workspace
+  }
+
+  const currentWorkspace = route.query.workspace
+  if (query.workspace === currentWorkspace || (!query.workspace && !currentWorkspace)) return
+  await router.push({ name: 'IprInterface', query })
+}
 const treeContextMenu = ref({
   visible: false,
   x: 0,
@@ -3652,6 +3689,8 @@ const closeTreeContextMenu = () => {
 }
 
 const handleNodeContextMenu = (node, event) => {
+  if (isSoftwareIntegration.value) return
+
   if (!isTreeContextMenuNode(node)) {
     closeTreeContextMenu()
     return
@@ -3800,6 +3839,11 @@ const handleDeleteContextNode = async () => {
 
 const handleSelect = async (node) => { // 点击左侧树节点
   closeTreeContextMenu()
+  if (isSoftwareIntegration.value) {
+    softwareIntegrationActiveNodeId.value = node.id || ''
+    return
+  }
+
   const isWellMenuGroup = WELL_GROUPS.some(group => group.id === node.type)
   const nodeWellName = node.wellName || (node.type === NODETYPE.NodeType_Well ? node.label : '')
 
@@ -3930,6 +3974,11 @@ const handleSelect = async (node) => { // 点击左侧树节点
 }
 
 const handleCommand = async ({ group, name, parent }) => { // 接收顶部菜单栏的点击事件
+  if (isSoftwareIntegration.value) {
+    ElMessage.info(`${name} 功能正在开发中`)
+    return
+  }
+
   // 顶部菜单栏“单井产能”板块：跳转到独立的单井产能工作台。
   if (group === '单井产能') {
     const activeWellName = selectedWellName.value || activeNode.value?.wellName || (
@@ -4191,7 +4240,11 @@ onBeforeUnmount(() => {
   -->
   <div class="ipr-container">
     <!--    顶部菜单栏目-->
-    <RibbonMenu @command="handleCommand" />
+    <RibbonMenu
+      :active-tab-name="activeRibbonTabName"
+      @command="handleCommand"
+      @tab-change="handleRibbonTabChange"
+    />
 
 
     <div class="ipr-main">
@@ -4200,7 +4253,7 @@ onBeforeUnmount(() => {
         v-model:keyword="wellKeyword"
         v-model:collapsed="sideTreeCollapsed"
         :nodes="filteredTreeData"
-        :active-id="activeNodeId"
+        :active-id="displayedActiveNodeId"
         @select="handleSelect"
         @expand="handleNodeExpand"
         @node-contextmenu="handleNodeContextMenu"
@@ -4214,6 +4267,8 @@ onBeforeUnmount(() => {
           'pvt-yellow-theme': isPvtView
         }"
       >
+        <SoftwareIntegrationOverview v-if="isSoftwareIntegration" />
+        <template v-else>
         <PvtPropertiesContent
           v-if="currentView === 'pvt-properties'"
           :key="currentViewNode?.viewInstanceKey || currentViewNode?.id || currentViewNode?.wellName"
@@ -4266,11 +4321,12 @@ onBeforeUnmount(() => {
           :gas-reservoir-id="GAS_RESERVOIR_ID" :recalculating="dynamicBalanceRunning" @recalculate="handleDynamicBalanceRecalculate"/>
         <AGContent v-if="currentView === 'Agarwal-Gardner'" :node="currentViewNode" :project-id="PROJECT_ID"
           :gas-reservoir-id="GAS_RESERVOIR_ID" @recalculate="runAGForSelectedWell" />
+        </template>
       </main>
     </div>
 
     <Teleport to="body">
-      <div v-if="treeContextMenu.visible" class="tree-context-menu"
+      <div v-if="!isSoftwareIntegration && treeContextMenu.visible" class="tree-context-menu"
         :style="{ left: `${treeContextMenu.x}px`, top: `${treeContextMenu.y}px` }" @click.stop @contextmenu.prevent>
         <button class="tree-context-menu-item" type="button" @click="handleDeleteContextNode">
           <el-icon class="tree-context-menu-icon">

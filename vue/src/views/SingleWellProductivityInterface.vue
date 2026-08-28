@@ -236,6 +236,14 @@ const handleCommand = async ({ group, name, parent }) => {
   await router.push({ name: 'IprInterface' })
 }
 
+const handleRibbonTabChange = async tabName => {
+  if (tabName !== '软件集成') return
+  await router.push({
+    name: 'IprInterface',
+    query: { workspace: 'software-integration' }
+  })
+}
+
 const loadWells = async () => {
   const existingWellNodes = workspaceTreeData.value.find(node => node.id === 'g-well')?.children || []
   if (existingWellNodes.length) {
@@ -390,7 +398,7 @@ onMounted(async () => {
 <template>
   <!-- 顶部菜单栏对应板块：单井产能。 -->
   <div class="productivity-interface">
-    <RibbonMenu @command="handleCommand" />
+    <RibbonMenu @command="handleCommand" @tab-change="handleRibbonTabChange" />
 
     <div class="productivity-main">
       <!-- 公共左侧目录：与 IprInterface.vue 使用同一个组件。 -->

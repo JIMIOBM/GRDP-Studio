@@ -10,10 +10,14 @@ const props = defineProps({ //允许外部传菜单配置
   tabs: {
     type: Array,
     default: () => null
+  },
+  activeTabName: {
+    type: String,
+    default: ''
   }
 })
 
-const emit = defineEmits(['command']) //向父组件发送命令
+const emit = defineEmits(['command', 'tab-change']) //向父组件发送命令
 
 const defaultTabs = [
   {
@@ -78,17 +82,68 @@ const defaultTabs = [
     name: '软件集成',
     groups: [
       {
-        title: '外部软件',
+        title: '项目管理',
         columns: [
-          { type: 'large', label: 'Eclipse' },
-          { type: 'large', label: 'CMG' },
-          { type: 'large', label: 'PIPESIM' }
+          { type: 'large', label: '新建项目', icon: '方案生成' },
+          {
+            type: 'large',
+            label: '导入模型',
+            icon: '数据映射',
+            dropdown: true,
+            dropdownItems: ['PIPESIM 井筒模型']
+          },
+          { type: 'large', label: '保存', icon: '生成报告' }
         ]
       },
       {
-        title: '数据接口',
+        title: '数值模拟',
         columns: [
-          { type: 'checks', items: ['数据映射', '单位转换', '接口配置'] }
+          { type: 'large', label: 'ECLIPSE', icon: 'Eclipse' },
+          { type: 'large', label: 'INTERSECT', icon: 'CMG' },
+          { type: 'large', label: '扩展接口', icon: '接口配置' }
+        ]
+      },
+      {
+        title: '井筒模拟',
+        columns: [
+          { type: 'large', label: 'PIPESIM 井筒', icon: 'PIPESIM' },
+          { type: 'large', label: 'wellcat', icon: '井身结构' },
+          { type: 'large', label: '扩展接口', icon: '接口配置' }
+        ]
+      },
+      {
+        title: '管网模拟',
+        columns: [
+          { type: 'large', label: 'PIPESIM Network', icon: '管流计算' },
+          { type: 'large', label: 'wellcat', icon: '约束条件' },
+          { type: 'large', label: '扩展接口', icon: '接口配置' }
+        ]
+      },
+      {
+        title: '一体化模拟',
+        columns: [
+          { type: 'large', label: '加载模拟', icon: '初始方案' },
+          {
+            type: 'large',
+            label: '一体化建模',
+            icon: '一体化耦合优化',
+            dropdown: true,
+            dropdownItems: ['模型组合', '方案构建']
+          },
+          { type: 'checks', items: ['PVT设置', '井信息匹配', '耦合参数传递'] },
+          { type: 'checks', items: ['模拟控制', '耦合计算', '运行状态监控'] }
+        ]
+      },
+      {
+        title: '模拟器设置',
+        columns: [
+          { type: 'large', label: '模拟器设置', icon: '接口配置' }
+        ]
+      },
+      {
+        title: '可视化',
+        columns: [
+          { type: 'checks', items: ['2D可视化', '3D可视化', '曲线'] }
         ]
       }
     ]
@@ -220,6 +275,16 @@ const canScrollLeft = ref(false)
 const canScrollRight = ref(false)
 let ribbonResizeObserver = null
 
+watch(
+  () => props.activeTabName,
+  name => {
+    if (!name) return
+    const index = tabList.value.findIndex(tab => tab.name === name)
+    if (index >= 0) activeTab.value = index
+  },
+  { immediate: true }
+)
+
 const updateRibbonOverflow = () => {
   const body = ribbonBody.value
   if (!body) return
@@ -284,11 +349,24 @@ const iconAliases = {
   静压数据: '压力折算',
   测井数据: '动态数据',
   注采数据: '注采拟合',
-  PVT性质: 'PVT模型'
+  PVT性质: 'PVT模型',
+  PVT设置: 'PVT模型',
+  井信息匹配: '注采拟合',
+  耦合参数传递: '数据映射',
+  模拟控制: '约束设置',
+  耦合计算: '一体化耦合优化',
+  运行状态监控: '动态数据',
+  '2D可视化': '曲线图',
+  '3D可视化': '云图',
+  曲线: '曲线图',
+  'PIPESIM 井筒模型': 'PIPESIM',
+  模型组合: '一体化耦合优化',
+  方案构建: '方案生成'
 }
 
 const switchTab = (idx) => { //切换页签
   activeTab.value = idx
+  emit('tab-change', tabList.value[idx]?.name || '')
 }
 
 const onItemClick = (groupTitle, label, parent = '') => { //点击菜单项
@@ -302,7 +380,10 @@ const getIcon = (label) => iconMap[normalizeIconKey(iconAliases[label] || label)
 </script>
 
 <template>
-  <div class="ribbon">
+  <div
+      class="ribbon"
+      :class="{ 'software-integration-ribbon': tabList[activeTab]?.name === '软件集成' }"
+  >
     <!-- 顶部页签条 -->
     <div class="ribbon-tabs">
       <div
@@ -310,7 +391,10 @@ const getIcon = (label) => iconMap[normalizeIconKey(iconAliases[label] || label)
           :key="tab.name"
           class="ribbon-tab"
           :class="{ active: idx === activeTab }"
+          role="button"
+          tabindex="0"
           @click="switchTab(idx)"
+          @keydown.enter.prevent="switchTab(idx)"
       >
         {{ tab.name }}
       </div>
@@ -396,9 +480,9 @@ const getIcon = (label) => iconMap[normalizeIconKey(iconAliases[label] || label)
               <template #reference>
                 <div class="col-large">
                   <img
-                      v-if="getIcon(col.label)"
+                      v-if="getIcon(col.icon || col.label)"
                       class="big-icon"
-                      :src="getIcon(col.label)"
+                      :src="getIcon(col.icon || col.label)"
                       :alt="col.label"
                   >
                   <span v-else class="big-icon icon-placeholder"></span>
@@ -435,9 +519,9 @@ const getIcon = (label) => iconMap[normalizeIconKey(iconAliases[label] || label)
                 @click="!col.passive && onItemClick(group.title, col.label)"
             >
               <img
-                  v-if="getIcon(col.label)"
+                  v-if="getIcon(col.icon || col.label)"
                   class="big-icon"
-                  :src="getIcon(col.label)"
+                  :src="getIcon(col.icon || col.label)"
                   :alt="col.label"
               >
               <span v-else class="big-icon icon-placeholder"></span>
@@ -872,6 +956,62 @@ $square-border: #c2c2c2;
 
     .col-large {
       min-width: 64px;
+    }
+  }
+}
+
+/* 软件集成命令名称更长，只在该页签保留稳定尺寸并使用横向滚动。 */
+.ribbon.software-integration-ribbon {
+  .ribbon-group {
+    flex: 0 0 auto;
+
+    .group-content {
+      gap: 6px;
+      padding-right: 8px;
+      padding-left: 8px;
+      box-sizing: border-box;
+    }
+  }
+
+  .col-checks {
+    min-width: 104px;
+
+    .check-item {
+      min-height: 20px;
+    }
+
+    .small-icon {
+      display: block;
+    }
+  }
+
+  .col-large {
+    position: relative;
+    justify-content: flex-start;
+    width: 60px;
+    min-width: 60px;
+    height: 84px;
+    padding-right: 4px;
+    padding-left: 4px;
+    box-sizing: border-box;
+
+    .big-icon {
+      display: block;
+      margin: 1px auto 0;
+    }
+
+    .big-label {
+      width: 100%;
+      min-height: 32px;
+      margin-top: 4px;
+      line-height: 16px;
+      text-align: center;
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
+
+    .dropdown-arrow {
+      min-height: 8px;
     }
   }
 }
