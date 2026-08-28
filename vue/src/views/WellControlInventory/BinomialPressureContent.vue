@@ -661,10 +661,10 @@ const pressureExpression = method => ({
 }[method] || 'Pr - Pwf')
 
 const analysisAxisName = method => ({
-  'pseudo-pressure': '[m(Pr) - m(Pwf)] / qsc\n(MPa²/(mPa·s)/(10⁴m³/d))',
-  'pressure-squared': '(Pr² - Pwf²) / qsc\n(MPa²/(10⁴m³/d))',
-  pressure: '(Pr - Pwf) / qsc\n(MPa/(10⁴m³/d))'
-}[method] || '(Pr - Pwf) / qsc\n(MPa/(10⁴m³/d))')
+  'pseudo-pressure': '[m(Pr) - m(Pwf)] / qsc [(MPa²/(mPa·s))/(10⁴m³/d)]',
+  'pressure-squared': '(Pr² - Pwf²) / qsc [MPa²/(10⁴m³/d)]',
+  pressure: '(Pr - Pwf) / qsc [MPa/(10⁴m³/d)]'
+}[method] || '(Pr - Pwf) / qsc [MPa/(10⁴m³/d)]')
 
 const exponentialAnalysisAxisName = method => ({
   'pseudo-pressure': 'm(Pr) - m(Pwf)\n(MPa²/(mPa·s))',
@@ -1369,50 +1369,203 @@ const renderChart = () => {
   const analysisPoints = result.value.analysisPoints || []
   const regressionLine = result.value.regressionLine || []
   const transientLine = result.value.transientLine || []
+  const isIsochronalBinomial = activeTestType.value === 'isochronal' &&
+    result.value.calculationResultType === 'binomial' && transientLine.length > 0
+  const unstablePoints = isIsochronalBinomial ? analysisPoints.slice(0, -1) : analysisPoints
+  const stablePoints = isIsochronalBinomial ? analysisPoints.slice(-1) : []
+  const rateValues = analysisPoints.map(point => Number(point.flowRate)).filter(Number.isFinite)
+  const minimumRate = Math.min(...rateValues)
+  const maximumRate = Math.max(...rateValues)
+  const clipLine = line => {
+    if (line.length < 2 || !Number.isFinite(minimumRate) || !Number.isFinite(maximumRate)) return line
+    const [start, end] = line
+    const x1 = Number(start.flowRate)
+    const y1 = Number(start.transformedPressure)
+    const x2 = Number(end.flowRate)
+    const y2 = Number(end.transformedPressure)
+    if (![x1, y1, x2, y2].every(Number.isFinite) || Math.abs(x2 - x1) < 1e-12) return line
+    const interpolate = x => y1 + (y2 - y1) * (x - x1) / (x2 - x1)
+    return [
+      { flowRate: minimumRate, transformedPressure: interpolate(minimumRate) },
+      { flowRate: maximumRate, transformedPressure: interpolate(maximumRate) }
+    ]
+  }
+  const method = result.value.calculationMethod || calculationMethod.value
+  const analysisUnit = ({
+    'pseudo-pressure': '[(MPa²/(mPa·s))/(10⁴m³/d)]',
+    'pressure-squared': '[MPa²/(10⁴m³/d)]',
+    pressure: '[MPa/(10⁴m³/d)]'
+  })[method] || '[MPa/(10⁴m³/d)]'
+  const blackLine = isIsochronalBinomial ? transientLine : regressionLine
+  const orangeLine = isIsochronalBinomial ? regressionLine : transientLine
   const series = [
     {
-      name: '测试点',
+      name: isIsochronalBinomial ? `不稳定点${analysisUnit}` : '测试点',
       type: 'scatter',
       symbolSize: 10,
-      data: analysisPoints.map(point => [point.flowRate, point.transformedPressure]),
-      itemStyle: { color: '#4d78c9' }
+      z: 4,
+      data: unstablePoints.map(point => [point.flowRate, point.transformedPressure]),
+      itemStyle: { color: '#5478c9' }
     },
     {
-      name: activeTestType.value === 'isochronal' ? '稳定线' : '回归线',
+      name: isIsochronalBinomial ? `回归线${analysisUnit}` : '回归线',
       type: 'line',
       showSymbol: false,
-      data: regressionLine.map(point => [point.flowRate, point.transformedPressure]),
-      lineStyle: { color: '#222', width: 2 }
+      symbol: 'none',
+      z: 2,
+      data: clipLine(blackLine).map(point => [point.flowRate, point.transformedPressure]),
+      lineStyle: { color: '#303030', width: 2 },
+      itemStyle: { color: '#303030' }
     }
   ]
 
-  if (transientLine.length) {
+  if (orangeLine.length) {
     series.push({
-      name: '等时线',
+      name: isIsochronalBinomial ? `平移线${analysisUnit}` : '等时线',
       type: 'line',
       showSymbol: false,
-      data: transientLine.map(point => [point.flowRate, point.transformedPressure]),
-      lineStyle: { color: '#f2a900', width: 2, type: 'dashed' }
+      symbol: 'none',
+      z: 2,
+      data: clipLine(orangeLine).map(point => [point.flowRate, point.transformedPressure]),
+      lineStyle: { color: '#f5a000', width: 2, type: 'dotted' },
+      itemStyle: { color: '#f5a000' }
     })
   }
 
+  if (stablePoints.length) {
+    series.push({
+      name: `稳定点${analysisUnit}`,
+      type: 'scatter',
+      symbolSize: 10,
+      z: 5,
+      data: stablePoints.map(point => [point.flowRate, point.transformedPressure]),
+      itemStyle: { color: '#e75b62' }
+    })
+  }
+
+  const legendItems = series.map(item => ({
+    name: item.name,
+    type: item.type,
+    color: item.itemStyle?.color || item.lineStyle?.color || '#333',
+    dotted: item.lineStyle?.type === 'dotted'
+  }))
+  const legendMeasureContext = document.createElement('canvas').getContext('2d')
+  if (legendMeasureContext) legendMeasureContext.font = '12px "Microsoft YaHei", sans-serif'
+  const widestLegendText = Math.max(
+    0,
+    ...legendItems.map(item => legendMeasureContext?.measureText(item.name).width || item.name.length * 7)
+  )
+  const legendPanelWidth = Math.min(330, Math.max(190, Math.ceil(widestLegendText) + 49))
+  const legendRowHeight = 21
+  const legendPanelHeight = legendItems.length * legendRowHeight + 12
+  const legendChildren = [{
+    type: 'rect',
+    z: 1000,
+    zlevel: 20,
+    shape: { x: 0, y: 0, width: legendPanelWidth, height: legendPanelHeight, r: 2 },
+    style: {
+      fill: '#fff',
+      stroke: '#cfd5dc',
+      lineWidth: 1,
+      shadowBlur: 7,
+      shadowColor: 'rgba(0,0,0,0.14)',
+      shadowOffsetY: 2
+    }
+  }]
+  legendItems.forEach((item, index) => {
+    const centerY = 6 + legendRowHeight * index + legendRowHeight / 2
+    legendChildren.push(item.type === 'scatter'
+      ? {
+          type: 'circle',
+          z: 1001,
+          zlevel: 20,
+          shape: { cx: 17, cy: centerY, r: 5.5 },
+          style: { fill: item.color }
+        }
+      : {
+          type: 'line',
+          z: 1001,
+          zlevel: 20,
+          shape: { x1: 8, y1: centerY, x2: 28, y2: centerY },
+          style: {
+            stroke: item.color,
+            lineWidth: 2,
+            lineDash: item.dotted ? [2, 2] : null
+          }
+        })
+    legendChildren.push({
+      type: 'text',
+      z: 1001,
+      zlevel: 20,
+      style: {
+        x: 35,
+        y: centerY,
+        text: item.name,
+        font: '12px "Microsoft YaHei", sans-serif',
+        fill: '#303030',
+        verticalAlign: 'middle'
+      }
+    })
+  })
+  const formulaText = result.value.rSquared === null || result.value.rSquared === undefined
+    ? result.value.equation
+    : `${result.value.equation}\nR² = ${Number(result.value.rSquared).toFixed(4)}`
+  const formulaPanelWidth = 350
+  const formulaPanelHeight = result.value.rSquared === null || result.value.rSquared === undefined ? 42 : 60
+
   chartInstance.setOption({
     animation: false,
+    backgroundColor: '#fff',
     title: {
       text: `${methodName.value}试井分析图`,
       left: 'center',
-      textStyle: { fontSize: 16, fontWeight: 600 }
+      top: 8,
+      textStyle: { color: '#3f3f3f', fontSize: 14, fontWeight: 600 }
     },
-    tooltip: { trigger: 'axis' },
-    legend: { right: 18, top: 12 },
-    grid: { left: 82, right: 34, top: 60, bottom: 62 },
+    tooltip: {
+      trigger: 'axis',
+      confine: true,
+      backgroundColor: 'rgba(255,255,255,0.96)',
+      borderColor: '#cfd5dc',
+      borderWidth: 1,
+      textStyle: { color: '#333', fontSize: 12 },
+      axisPointer: {
+        type: 'line',
+        axis: 'x',
+        snap: false,
+        lineStyle: { color: '#5f6f82', width: 1, type: 'dashed' },
+        label: {
+          show: true,
+          backgroundColor: '#5f6f82',
+          color: '#fff',
+          precision: 3
+        }
+      }
+    },
+    legend: { show: false },
+    grid: {
+      left: 74,
+      right: 30,
+      top: 40,
+      bottom: 58,
+      show: true,
+      borderColor: '#d7dfeb',
+      borderWidth: 1
+    },
     xAxis: {
       type: result.value.calculationResultType === 'exponential' ? 'log' : 'value',
       scale: true,
       name: 'qsc(10⁴m³/d)',
       nameLocation: 'middle',
-      nameGap: 38,
-      splitLine: { lineStyle: { color: '#e7edf6' } }
+      nameGap: 32,
+      nameTextStyle: { color: '#333', fontSize: 14 },
+      axisLine: { show: true, lineStyle: { color: '#444', width: 1 } },
+      axisTick: { show: true, lineStyle: { color: '#555' } },
+      axisLabel: { color: '#444', fontSize: 12 },
+      splitNumber: 12,
+      splitLine: { show: true, lineStyle: { color: '#dbe4f1', width: 1 } },
+      minorTick: { show: true, splitNumber: 5 },
+      minorSplitLine: { show: true, lineStyle: { color: '#edf2f8', width: 1 } }
     },
     yAxis: {
       type: result.value.calculationResultType === 'exponential' ? 'log' : 'value',
@@ -1421,35 +1574,70 @@ const renderChart = () => {
         ? exponentialAnalysisAxisName(result.value.calculationMethod || calculationMethod.value)
         : analysisAxisName(result.value.calculationMethod || calculationMethod.value),
       nameLocation: 'middle',
-      nameGap: 58,
-      splitLine: { lineStyle: { color: '#e7edf6' } }
+      nameGap: 48,
+      nameTextStyle: { color: '#333', fontSize: 14 },
+      axisLine: { show: true, lineStyle: { color: '#444', width: 1 } },
+      axisTick: { show: true, lineStyle: { color: '#555' } },
+      axisLabel: { color: '#444', fontSize: 12 },
+      splitNumber: 10,
+      splitLine: { show: true, lineStyle: { color: '#dbe4f1', width: 1 } },
+      minorTick: { show: true, splitNumber: 5 },
+      minorSplitLine: { show: true, lineStyle: { color: '#edf2f8', width: 1 } }
     },
     series,
-    graphic: [{
-      type: 'group',
-      right: 46,
-      bottom: 70,
-      children: [
-        {
-          type: 'rect',
-          shape: { x: 0, y: 0, width: 310, height: 62 },
-          style: { fill: 'rgba(255,255,255,0.88)', stroke: '#d8dee8' }
-        },
-        {
-          type: 'text',
-          style: {
-            x: 12,
-            y: 12,
-            text: result.value.rSquared === null || result.value.rSquared === undefined
-              ? result.value.equation
-              : `${result.value.equation}\nR² = ${Number(result.value.rSquared).toFixed(4)}`,
-            font: '14px sans-serif',
-            fill: '#444',
-            lineHeight: 24
+    graphic: [
+      {
+        id: 'analysis-legend-panel',
+        type: 'group',
+        right: 16,
+        top: 62,
+        z: 100,
+        zlevel: 20,
+        draggable: true,
+        cursor: 'move',
+        children: legendChildren
+      },
+      {
+        id: 'analysis-formula-panel',
+        type: 'group',
+        right: 46,
+        bottom: 72,
+        z: 100,
+        zlevel: 20,
+        draggable: true,
+        cursor: 'move',
+        children: [
+          {
+            type: 'rect',
+            z: 1000,
+            zlevel: 20,
+            shape: { x: 0, y: 0, width: formulaPanelWidth, height: formulaPanelHeight, r: 2 },
+            style: {
+              fill: '#fff',
+              stroke: '#cfd5dc',
+              lineWidth: 1,
+              shadowBlur: 7,
+              shadowColor: 'rgba(0,0,0,0.14)',
+              shadowOffsetY: 2
+            }
+          },
+          {
+            type: 'text',
+            z: 1001,
+            zlevel: 20,
+            style: {
+              x: 12,
+              y: 9,
+              text: formulaText,
+              font: '13px "Microsoft YaHei", sans-serif',
+              fill: '#444',
+              lineHeight: 21,
+              textAlign: 'left'
+            }
           }
-        }
-      ]
-    }]
+        ]
+      }
+    ]
   }, true)
   chartInstance.resize()
 }
@@ -1461,38 +1649,150 @@ const renderIprChart = () => {
   const iprCurves = Array.isArray(result.value.iprCurves) && result.value.iprCurves.length
     ? result.value.iprCurves
     : [{ formationPressure: result.value.formationPressure, points: result.value.iprCurve || [] }]
+  const iprColors = [
+    '#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de',
+    '#3ba272', '#fc8452', '#9a60b4', '#ea7ccc', '#00b7c7',
+    '#6f7ad3', '#c98bd4'
+  ]
+  const iprSeries = iprCurves.map((curve, index) => ({
+    name: `Pr${index + 1}=${Number(curve.formationPressure).toFixed(0)} MPa`,
+    type: 'line',
+    showSymbol: false,
+    symbol: 'none',
+    smooth: true,
+    data: (curve.points || []).map(point => [point.flowRate, point.flowingPressure]),
+    lineStyle: { width: 1.7, color: iprColors[index % iprColors.length] },
+    itemStyle: { color: iprColors[index % iprColors.length] }
+  }))
+  const iprMeasureContext = document.createElement('canvas').getContext('2d')
+  if (iprMeasureContext) iprMeasureContext.font = '11px "Microsoft YaHei", sans-serif'
+  const iprLegendTextWidth = Math.max(
+    0,
+    ...iprSeries.map(item => iprMeasureContext?.measureText(item.name).width || item.name.length * 6.5)
+  )
+  const iprLegendWidth = Math.min(190, Math.max(115, Math.ceil(iprLegendTextWidth) + 43))
+  const iprLegendRowHeight = 18
+  const iprLegendHeight = iprSeries.length * iprLegendRowHeight + 12
+  const iprLegendChildren = [{
+    type: 'rect',
+    z: 1000,
+    zlevel: 20,
+    shape: { x: 0, y: 0, width: iprLegendWidth, height: iprLegendHeight, r: 2 },
+    style: {
+      fill: '#fff',
+      stroke: '#cfd5dc',
+      lineWidth: 1,
+      shadowBlur: 7,
+      shadowColor: 'rgba(0,0,0,0.14)',
+      shadowOffsetY: 2
+    }
+  }]
+  iprSeries.forEach((item, index) => {
+    const centerY = 6 + iprLegendRowHeight * index + iprLegendRowHeight / 2
+    iprLegendChildren.push(
+      {
+        type: 'line',
+        z: 1001,
+        zlevel: 20,
+        shape: { x1: 8, y1: centerY, x2: 25, y2: centerY },
+        style: { stroke: item.lineStyle.color, lineWidth: 2 }
+      },
+      {
+        type: 'text',
+        z: 1001,
+        zlevel: 20,
+        style: {
+          x: 31,
+          y: centerY,
+          text: item.name,
+          font: '11px "Microsoft YaHei", sans-serif',
+          fill: '#303030',
+          verticalAlign: 'middle'
+        }
+      }
+    )
+  })
   chartInstance.setOption({
     animation: false,
+    backgroundColor: '#fff',
     title: {
       text: 'IPR曲线',
       left: 'center',
-      textStyle: { fontSize: 16, fontWeight: 600 }
+      top: 8,
+      textStyle: { color: '#3f3f3f', fontSize: 14, fontWeight: 600 }
     },
-    tooltip: { trigger: 'axis' },
-    legend: { right: 28, top: 20, orient: 'vertical' },
-    grid: { left: 75, right: 145, top: 58, bottom: 60 },
+    tooltip: {
+      trigger: 'axis',
+      confine: true,
+      backgroundColor: 'rgba(255,255,255,0.96)',
+      borderColor: '#cfd5dc',
+      borderWidth: 1,
+      textStyle: { color: '#333', fontSize: 12 },
+      axisPointer: {
+        type: 'line',
+        axis: 'x',
+        snap: false,
+        lineStyle: { color: '#5f6f82', width: 1, type: 'dashed' },
+        label: {
+          show: true,
+          backgroundColor: '#5f6f82',
+          color: '#fff',
+          precision: 3
+        }
+      }
+    },
+    legend: { show: false },
+    grid: {
+      left: 68,
+      right: 28,
+      top: 40,
+      bottom: 58,
+      show: true,
+      borderColor: '#d7dfeb',
+      borderWidth: 1
+    },
     xAxis: {
       type: 'value',
+      min: 0,
       name: 'qsc(10⁴m³/d)',
       nameLocation: 'middle',
-      nameGap: 38,
-      splitLine: { lineStyle: { color: '#e7edf6' } }
+      nameGap: 32,
+      nameTextStyle: { color: '#333', fontSize: 14 },
+      axisLine: { show: true, lineStyle: { color: '#444', width: 1 } },
+      axisTick: { show: true, lineStyle: { color: '#555' } },
+      axisLabel: { color: '#444', fontSize: 12 },
+      splitNumber: 15,
+      splitLine: { show: true, lineStyle: { color: '#dbe4f1', width: 1 } },
+      minorTick: { show: true, splitNumber: 5 },
+      minorSplitLine: { show: true, lineStyle: { color: '#edf2f8', width: 1 } }
     },
     yAxis: {
       type: 'value',
+      min: 0,
       name: 'Pwf(MPa)',
       nameLocation: 'middle',
-      nameGap: 48,
-      splitLine: { lineStyle: { color: '#e7edf6' } }
+      nameGap: 43,
+      nameTextStyle: { color: '#333', fontSize: 14 },
+      axisLine: { show: true, lineStyle: { color: '#444', width: 1 } },
+      axisTick: { show: true, lineStyle: { color: '#555' } },
+      axisLabel: { color: '#444', fontSize: 12 },
+      splitNumber: 12,
+      splitLine: { show: true, lineStyle: { color: '#dbe4f1', width: 1 } },
+      minorTick: { show: true, splitNumber: 5 },
+      minorSplitLine: { show: true, lineStyle: { color: '#edf2f8', width: 1 } }
     },
-    series: iprCurves.map((curve, index) => ({
-      name: `Pr${index + 1}=${Number(curve.formationPressure).toFixed(0)} MPa`,
-      type: 'line',
-      showSymbol: false,
-      smooth: true,
-      data: (curve.points || []).map(point => [point.flowRate, point.flowingPressure]),
-      lineStyle: { width: 2 }
-    }))
+    series: iprSeries,
+    graphic: [{
+      id: 'ipr-legend-panel',
+      type: 'group',
+      right: 16,
+      top: 54,
+      z: 100,
+      zlevel: 20,
+      draggable: true,
+      cursor: 'move',
+      children: iprLegendChildren
+    }]
   }, true)
   chartInstance.resize()
 }
@@ -1506,7 +1806,7 @@ const switchPanel = async (panel) => {
 }
 
 const getPersistenceSnapshot = () => {
-  if (!result.value || result.value.calculationResultType !== 'binomial') return null
+  if (!result.value) return null
   const validRows = inputRows.value.filter(row =>
     [row.flowRate, row.flowingPressure, row.recoveryPressure].every(value => Number.isFinite(Number(value)))
   )
@@ -1533,8 +1833,19 @@ const getPersistenceSnapshot = () => {
     },
     pressureMethod: calculationMethod.value,
     result: {
-      darcyCoefficient: Number(result.value.darcyCoefficient),
-      nonDarcyCoefficient: Number(result.value.nonDarcyCoefficient),
+      calculationResultType: result.value.calculationResultType,
+      darcyCoefficient: result.value.calculationResultType === 'binomial'
+        ? Number(result.value.darcyCoefficient)
+        : null,
+      nonDarcyCoefficient: result.value.calculationResultType === 'binomial'
+        ? Number(result.value.nonDarcyCoefficient)
+        : null,
+      productivityCoefficient: result.value.calculationResultType === 'exponential'
+        ? Number(result.value.productivityCoefficient)
+        : null,
+      productivityExponent: result.value.calculationResultType === 'exponential'
+        ? Number(result.value.productivityExponent)
+        : null,
       openFlowCapacity: Number(result.value.aofRate),
       gradient: Number.isFinite(Number(result.value.nonDarcyCoefficient))
         ? Number(result.value.nonDarcyCoefficient)
@@ -1573,7 +1884,9 @@ const restorePersisted = detail => {
   formationPressure.value = Number(detail.input.maximumFormationPressure)
   temperature.value = Number(detail.input.formationTemperature)
   calculationMethod.value = normalizeCalculationMethod(detail.pressureMethod)
-  calculationResultType.value = 'binomial'
+  calculationResultType.value = detail.result.calculationResultType === 'exponential'
+    ? 'exponential'
+    : 'binomial'
   inputRows.value = (detail.input.points || []).map(point => ({
     sequence: point.pointNumber,
     flowRate: point.gasProduction,
@@ -1587,10 +1900,23 @@ const restorePersisted = detail => {
     testType: 'isochronal',
     methodName: '等时',
     calculationMethod: calculationMethod.value,
-    calculationResultType: 'binomial',
+    calculationResultType: calculationResultType.value,
     formationPressure: Number(detail.input.maximumFormationPressure),
     darcyCoefficient: detail.result.darcyCoefficient,
     nonDarcyCoefficient: detail.result.nonDarcyCoefficient,
+    productivityCoefficient: detail.result.productivityCoefficient,
+    productivityExponent: detail.result.productivityExponent,
+    equation: calculationResultType.value === 'exponential'
+      ? exponentialEquation(
+          calculationMethod.value,
+          Number(detail.result.productivityCoefficient),
+          Number(detail.result.productivityExponent)
+        )
+      : coefficientEquation(
+          calculationMethod.value,
+          Number(detail.result.darcyCoefficient),
+          Number(detail.result.nonDarcyCoefficient)
+        ),
     aofRate: detail.result.openFlowCapacity,
     rSquared: detail.result.rSquared,
     reliability: detail.result.reliabilityDescription || '',

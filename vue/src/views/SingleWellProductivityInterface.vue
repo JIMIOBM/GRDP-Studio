@@ -410,7 +410,9 @@ const handleSidebarSelect = async node => {
         'pressure-squared': '压力平方方法',
         pressure: '压力法'
       })[detail.pressureMethod] || '压力法'
-      calculationResult.value = '二项式'
+      calculationResult.value = detail.result?.calculationResultType === 'exponential'
+        ? '指数式'
+        : '二项式'
       await router.replace({
         name: 'SingleWellProductivity',
         query: { module: '产能试井', method: '等时试井', well: node.wellName, testId: node.testId }
@@ -473,7 +475,7 @@ const handleSaveIsochronal = async () => {
   }
   const snapshot = pressureContentRef.value?.getPersistenceSnapshot?.()
   if (!snapshot) {
-    ElMessage.warning('请先完成二项式等时试井计算')
+    ElMessage.warning('请先完成等时试井计算')
     return
   }
   if (!snapshot.input.points.length) {
@@ -660,7 +662,6 @@ onMounted(async () => {
                   <label><input v-model="calculationResult" type="radio" value="二项式" />二项式</label>
                   <label><input v-model="calculationResult" type="radio" value="指数式" />指数式</label>
                 </fieldset>
-
                   <button
                     type="button"
                     class="calculate-button"
@@ -696,7 +697,7 @@ onMounted(async () => {
             <div class="result-output-panel" :aria-label="`${testTitle}结果区域`">
               <BinomialPressureContent
                 v-if="usesPressureCalculation && selectedDataTable"
-                :key="`${selectedWellName}-${activeMethod}-${selectedDataTable}-${calculationResult}-${activeProductivityTestId || 'new'}`"
+                :key="`${selectedWellName}-${activeMethod}-${selectedDataTable}-${calculationResult}`"
                 ref="pressureContentRef"
                 embedded
                 auto-select-data

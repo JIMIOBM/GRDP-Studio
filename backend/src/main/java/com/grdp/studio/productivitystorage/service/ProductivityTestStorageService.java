@@ -28,6 +28,7 @@ import java.util.Objects;
 public class ProductivityTestStorageService {
     private static final List<String> PRESSURE_METHODS =
             List.of("pseudo-pressure", "pressure-squared", "pressure");
+    private static final List<String> RESULT_TYPES = List.of("binomial", "exponential");
     private final JdbcTemplate jdbc;
 
     public ProductivityTestStorageService(JdbcTemplate jdbc) {
@@ -67,6 +68,7 @@ public class ProductivityTestStorageService {
     @Transactional
     public Summary saveIsochronal(SaveRequest request) {
         validatePressureMethod(request.pressureMethod());
+        validateResult(request.result());
         long wellId = findWellId(request.projectId(), request.gasReservoirId(), request.wellName());
         long pvtId = ensurePvt(wellId, request.pvtNo(), request.pvtName());
         long testId = request.testId() == null
@@ -162,10 +164,13 @@ public class ProductivityTestStorageService {
         if (!ids.isEmpty()) jdbc.update("DELETE FROM project_well_productivity_binomial_output WHERE id=?", ids.getFirst());
         return insertAndReturnKey("""
                 INSERT INTO project_well_productivity_binomial_output
-                  (test_id,pressure_method,darcy_seepage_coefficient,non_darcy_seepage_coefficient,
+                  (test_id,pressure_method,result_type,darcy_seepage_coefficient,non_darcy_seepage_coefficient,
+                   productivity_coefficient,productivity_exponent,
                    open_flow_capacity,gradient,intercept,r_squared,reliability_level,reliability_description,calculated_at)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?)
-                """, testId, method, result.darcyCoefficient(), result.nonDarcyCoefficient(),
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """, testId, method, result.calculationResultType(),
+                result.darcyCoefficient(), result.nonDarcyCoefficient(),
+                result.productivityCoefficient(), result.productivityExponent(),
                 result.openFlowCapacity(), result.gradient(), result.intercept(), result.rSquared(),
                 result.reliabilityLevel(), result.reliabilityDescription(), new Timestamp(System.currentTimeMillis()));
     }
@@ -247,7 +252,8 @@ public class ProductivityTestStorageService {
 
     private Result loadResult(long testId, String method) {
         return jdbc.queryForObject("""
-                SELECT id,darcy_seepage_coefficient,non_darcy_seepage_coefficient,open_flow_capacity,
+                SELECT id,result_type,darcy_seepage_coefficient,non_darcy_seepage_coefficient,
+                       productivity_coefficient,productivity_exponent,open_flow_capacity,
                        gradient,intercept,r_squared,reliability_level,reliability_description
                 FROM project_well_productivity_binomial_output WHERE test_id=? AND pressure_method=?
                 """, (rs, rowNum) -> {
@@ -256,8 +262,9 @@ public class ProductivityTestStorageService {
             List<CurvePoint> regression = loadCurve(outputId, "regression");
             List<CurvePoint> transientLine = loadCurve(outputId, "shifted-regression");
             List<IprCurve> curves = loadIprCurves(outputId);
-            return new Result(rs.getDouble(2), rs.getDouble(3), rs.getDouble(4), nullableDouble(rs, 5),
-                    nullableDouble(rs, 6), nullableDouble(rs, 7), rs.getString(8), rs.getString(9),
+            return new Result(rs.getString(2), nullableDouble(rs, 3), nullableDouble(rs, 4),
+                    nullableDouble(rs, 5), nullableDouble(rs, 6), rs.getDouble(7), nullableDouble(rs, 8),
+                    nullableDouble(rs, 9), nullableDouble(rs, 10), rs.getString(11), rs.getString(12),
                     analysis, regression, transientLine, curves);
         }, testId, method);
     }
@@ -290,6 +297,21 @@ public class ProductivityTestStorageService {
     private void validatePressureMethod(String method) {
         if (!PRESSURE_METHODS.contains(method)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "不支持的压力计算方法：" + method);
+        }
+    }
+
+    private void validateResult(Result result) {
+        if (!RESULT_TYPES.contains(result.calculationResultType())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "不支持的产能计算结果类型：" + result.calculationResultType());
+        }
+        if ("binomial".equals(result.calculationResultType()) &&
+                (result.darcyCoefficient() == null || result.nonDarcyCoefficient() == null)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "二项式结果缺少 A、B 系数");
+        }
+        if ("exponential".equals(result.calculationResultType()) &&
+                (result.productivityCoefficient() == null || result.productivityExponent() == null)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "指数式结果缺少 C、n 系数");
         }
     }
 

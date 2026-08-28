@@ -48,8 +48,11 @@ public final class IsochronalTestDtos {
                              @NotNull Double reservoirPressure, @NotNull Double flowPressure) {}
 
     public record Result(
-            @NotNull Double darcyCoefficient,
-            @NotNull Double nonDarcyCoefficient,
+            @NotBlank String calculationResultType,
+            Double darcyCoefficient,
+            Double nonDarcyCoefficient,
+            Double productivityCoefficient,
+            Double productivityExponent,
             @NotNull Double openFlowCapacity,
             Double gradient,
             Double intercept,
