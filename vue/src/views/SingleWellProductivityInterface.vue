@@ -21,8 +21,9 @@ import BinomialPressureContent from '@/views/WellControlInventory/BinomialPressu
 import ModifiedIsochronalContent from '@/views/SingleWellProductivity/ModifiedIsochronalContent.vue'
 import { NODETYPE } from '@/constants/nodeType'
 import { wellApi } from '@/api/docker'
+import { pvtStorageApi } from '@/api/pvtStorage'
 import { productivityStorageApi } from '@/api/productivityStorage'
-import { getPvtRecords } from '@/utils/pvtRecords'
+import { productivityTestsApi } from '@/api/productivityTests'
 import {
   ISOCHRONAL_METHOD_NODE_TYPE,
   ISOCHRONAL_RECORD_NODE_TYPE,
@@ -102,8 +103,15 @@ const formationTemperature = ref('120')
 const onePointAlpha = ref('0.25')
 const calculationMethod = ref('拟压力')
 const calculationResult = ref('二项式')
+const operationType = ref('production')
 const activeContentTab = ref('chart')
 const pressureContentRef = ref(null)
+const dataFileInput = ref(null)
+const importingData = ref(false)
+const importedDataFileName = ref('当前井产能测试数据')
+const databasePvtRecords = ref([])
+const selectedPvtDetail = ref(null)
+const pressureWorkspaceKey = ref(0)
 const calculationOutput = ref(null)
 const savingProductivityTest = ref(false)
 
@@ -132,21 +140,16 @@ const sidebarTreeData = computed(() => {
   )
 })
 
-const availablePvtRecords = computed(() =>
-  selectedWellName.value
-    ? getPvtRecords(PROJECT_ID, GAS_RESERVOIR_ID, selectedWellName.value)
-    : []
-)
+const pvtTableOptions = computed(() => databasePvtRecords.value.map(record => ({
+  value: String(record.pvtId),
+  label: record.pvtName || `PVT性质${record.pvtNo}`
+})))
 
-const pvtTableOptions = computed(() => {
-  return availablePvtRecords.value.map(record => `PVT性质${record.index}`)
-})
+const selectedPvtOption = computed(() => databasePvtRecords.value.find(
+  record => String(record.pvtId) === String(selectedPvtTable.value)
+) || null)
 
-const selectedPvtRecord = computed(() => {
-  if (!selectedWellName.value || !selectedPvtTable.value) return null
-  const index = Number(String(selectedPvtTable.value).match(/(\d+)$/)?.[1])
-  return availablePvtRecords.value.find(record => Number(record.index) === index) || null
-})
+const selectedPvtRecord = computed(() => selectedPvtDetail.value)
 
 watch(selectedPvtRecord, record => {
   const firstResult = record?.gasResultRows?.[0]
@@ -159,10 +162,80 @@ watch(selectedPvtRecord, record => {
   if (Number.isFinite(pvtTemperature)) formationTemperature.value = String(pvtTemperature)
 }, { immediate: true })
 
-const dataTableOptions = computed(() => selectedWellName.value
-  ? [`${selectedWellName.value}-产能测试数据`]
-  : []
-)
+const unwrapData = response => response?.data ?? response ?? {}
+const parseSettings = value => {
+  if (!value) return {}
+  if (typeof value === 'object') return value
+  try { return JSON.parse(value) } catch { return {} }
+}
+
+const normalizePvtDetail = detail => {
+  const gasInput = detail?.gasInput || {}
+  const gasSettings = { ...gasInput, ...parseSettings(detail?.settings?.gas) }
+  return {
+    pvtId: detail?.record?.pvtId,
+    index: detail?.record?.pvtNo,
+    pvtNo: detail?.record?.pvtNo,
+    pvtName: detail?.record?.pvtName,
+    gasRows: [[gasInput.gasType, gasInput.specificGravity, gasInput.hydrogenSulfide,
+      gasInput.carbonDioxide, gasInput.nitrogen, gasInput.condensateOilDensity]],
+    gasSettings,
+    gasResultRows: detail?.gasResults || []
+  }
+}
+
+const loadSelectedPvtDetail = async () => {
+  selectedPvtDetail.value = null
+  if (!selectedPvtTable.value || !selectedWellName.value) return
+  try {
+    const detail = unwrapData(await pvtStorageApi.getDetail(
+      selectedPvtTable.value, PROJECT_ID, GAS_RESERVOIR_ID, selectedWellName.value
+    ))
+    selectedPvtDetail.value = normalizePvtDetail(detail)
+  } catch (error) {
+    ElMessage.warning(error?.msg || error?.message || 'PVT性质明细读取失败')
+  }
+}
+
+const loadPvtOptions = async (preferredPvtId = null) => {
+  databasePvtRecords.value = []
+  selectedPvtDetail.value = null
+  if (!selectedWellName.value) return void (selectedPvtTable.value = '')
+  try {
+    const records = unwrapData(await pvtStorageApi.list(
+      PROJECT_ID, GAS_RESERVOIR_ID, selectedWellName.value
+    )) || []
+    databasePvtRecords.value = records
+    const preferred = records.find(item => String(item.pvtId) === String(preferredPvtId))
+    const current = records.find(item => String(item.pvtId) === String(selectedPvtTable.value))
+    selectedPvtTable.value = String((preferred || current || records[0])?.pvtId || '')
+    await loadSelectedPvtDetail()
+  } catch (error) {
+    selectedPvtTable.value = ''
+    console.warn('当前井PVT性质读取失败', error)
+  }
+}
+
+const chooseDataFile = () => dataFileInput.value?.click()
+const handleDataFile = async event => {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file) return
+  importingData.value = true
+  try {
+    const result = unwrapData(await productivityTestsApi.importFile(file))
+    const rows = result.rows || []
+    selectedDataTable.value = 'local-import'
+    await nextTick()
+    pressureContentRef.value?.replaceInputRows?.(rows)
+    importedDataFileName.value = `${file.name} · ${rows.length} 行`
+    ElMessage.success(`已导入 ${rows.length} 条产能测试数据`)
+  } catch (error) {
+    ElMessage.error(error?.msg || error?.message || '本地文件导入失败')
+  } finally {
+    importingData.value = false
+  }
+}
 
 const testTitle = computed(() => `产能试井-${activeMethod.value}`)
 const pressureTestType = computed(() => ({
@@ -252,6 +325,10 @@ const handleCommand = async ({ group, name, parent }) => {
     if (parent === '产能试井' && name === '等时试井') {
       activeProductivityTestId.value = null
       calculationOutput.value = null
+      pressureWorkspaceKey.value += 1
+      selectedDataTable.value = 'local-import'
+      importedDataFileName.value = '当前井产能测试数据'
+      await loadPvtOptions()
     }
     selectModule(parent || name, parent ? name : '')
     return
@@ -307,13 +384,16 @@ const loadWells = async () => {
 const selectWell = async wellName => {
   selectedWellName.value = wellName
   selectedPvtTable.value = ''
-  selectedDataTable.value = ''
+  selectedDataTable.value = activeMethod.value === '等时试井' ? 'local-import' : ''
+  importedDataFileName.value = '当前井产能测试数据'
   activeProductivityTestId.value = null
   activeEvaluationId.value = null
+  pressureWorkspaceKey.value += 1
   try {
     await Promise.all([
       loadModifiedIsochronalNodes(wellName),
-      loadIsochronalNodes(wellName)
+      loadIsochronalNodes(wellName),
+      loadPvtOptions()
     ])
   } catch (error) {
     ElMessage.warning(error?.msg || error?.message || '已保存试井记录读取失败')
@@ -337,13 +417,15 @@ const handleSidebarSelect = async node => {
     activeEvaluationId.value = null
     activeModule.value = '产能试井'
     activeMethod.value = '等时试井'
-    selectedDataTable.value = `${selectedWellName.value}-产能测试数据`
+    pressureWorkspaceKey.value += 1
+    selectedDataTable.value = 'local-import'
+    importedDataFileName.value = `${node.label || '已保存等时试井'}数据`
     try {
       const response = await productivityStorageApi.getIsochronal(
         node.testId, PROJECT_ID, GAS_RESERVOIR_ID
       )
       const detail = response?.data
-      selectedPvtTable.value = `PVT性质${detail.record.pvtNo}`
+      await loadPvtOptions(detail.record.pvtId)
       maximumFormationPressure.value = String(detail.input.maximumFormationPressure)
       formationTemperature.value = String(detail.input.formationTemperature)
       calculationMethod.value = ({
@@ -445,14 +527,14 @@ const handleSaveIsochronal = async () => {
   }
   savingProductivityTest.value = true
   try {
-    const pvtNo = Number(String(selectedPvtTable.value).match(/(\d+)$/)?.[1])
+    const pvtNo = Number(selectedPvtOption.value?.pvtNo)
     const response = await productivityStorageApi.saveIsochronal({
       projectId: PROJECT_ID,
       gasReservoirId: GAS_RESERVOIR_ID,
       wellName: selectedWellName.value,
       testId: activeProductivityTestId.value,
       pvtNo,
-      pvtName: selectedPvtTable.value,
+      pvtName: selectedPvtOption.value?.pvtName || `PVT性质${pvtNo}`,
       ...snapshot
     })
     const record = response?.data
@@ -501,6 +583,8 @@ const handleProductivitySaved = async saved => {
 
 onMounted(async () => {
   await loadWells()
+  if (selectedWellName.value) await loadPvtOptions()
+  if (route.query.method === '等时试井') selectedDataTable.value = 'local-import'
   await Promise.allSettled([
     loadAllModifiedIsochronalNodes(),
     loadAllIsochronalNodes()
@@ -580,22 +664,21 @@ onMounted(async () => {
                 <div class="parameter-form">
                 <label class="field-group">
                   <span>选择PVT表</span>
-                  <select v-model="selectedPvtTable">
-                    <option value="">请选择</option>
-                    <option v-for="option in pvtTableOptions" :key="option" :value="option">
-                      {{ option }}
+                  <select v-model="selectedPvtTable" @change="loadSelectedPvtDetail">
+                    <option value="" disabled>{{ pvtTableOptions.length ? '请选择PVT性质' : '当前井暂无PVT性质' }}</option>
+                    <option v-for="option in pvtTableOptions" :key="option.value" :value="option.value">
+                      {{ option.label }}
                     </option>
                   </select>
                 </label>
 
                 <label class="field-group">
                   <span>选择数据表</span>
-                  <select v-model="selectedDataTable">
-                    <option value="">请选择</option>
-                    <option v-for="option in dataTableOptions" :key="option" :value="option">
-                      {{ option }}
-                    </option>
-                  </select>
+                  <button type="button" class="local-import-button" :disabled="importingData" @click="chooseDataFile">
+                    {{ importingData ? '正在导入…' : '本地导入' }}
+                  </button>
+                  <input ref="dataFileInput" class="hidden-data-file" type="file" accept=".xlsx,.xls,.csv" @change="handleDataFile" />
+                  <small class="imported-data-name">{{ importedDataFileName }}</small>
                 </label>
 
                 <div class="section-heading">
@@ -623,6 +706,14 @@ onMounted(async () => {
                   <label><input v-model="calculationMethod" type="radio" value="拟压力" />拟压力</label>
                   <label><input v-model="calculationMethod" type="radio" value="压力平方方法" />压力平方方法</label>
                   <label><input v-model="calculationMethod" type="radio" value="压力法" />压力法</label>
+                </fieldset>
+
+                <fieldset class="radio-group">
+                  <legend>注采类型</legend>
+                  <label><input v-model="operationType" type="radio" value="production" />采气</label>
+                  <label class="disabled-radio" title="当前计算仅支持采气">
+                    <input type="radio" value="injection" disabled />注气
+                  </label>
                 </fieldset>
 
                 <fieldset class="radio-group result-methods">
@@ -661,7 +752,7 @@ onMounted(async () => {
             <div class="result-output-panel" :aria-label="`${testTitle}结果区域`">
               <BinomialPressureContent
                 v-if="usesPressureCalculation && selectedDataTable"
-                :key="`${selectedWellName}-${activeMethod}-${selectedDataTable}-${calculationResult}`"
+                :key="`${selectedWellName}-${activeMethod}-${pressureWorkspaceKey}`"
                 ref="pressureContentRef"
                 embedded
                 auto-select-data
@@ -927,6 +1018,33 @@ $accent-soft: #fff8d8;
   }
 }
 
+.local-import-button {
+  width: 100%;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid #aaa;
+  border-radius: 3px;
+  background: #fff;
+  color: #333;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover { border-color: #777; }
+  &:disabled { color: #999; cursor: wait; }
+}
+
+.hidden-data-file { display: none; }
+
+.imported-data-name {
+  display: block;
+  margin-top: 4px;
+  overflow: hidden;
+  color: #777;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .section-heading {
   height: 22px;
   margin: 10px 0 7px;
@@ -970,6 +1088,11 @@ $accent-soft: #fff8d8;
 }
 
 .result-methods { margin-bottom: 10px; }
+
+.disabled-radio {
+  color: #aaa;
+  cursor: not-allowed !important;
+}
 
 .calculate-button {
   min-width: 86px;

@@ -85,15 +85,10 @@ public class ProductivityTestService {
                 WHERE test_id=? ORDER BY updated_at DESC,id DESC
                 """, testId);
         Result result = outputs.isEmpty() ? null : result(outputs.getFirst());
-        List<EvaluationReference> evaluations = outputs.stream()
-                .map(output -> new EvaluationReference(string(output.get("pressure_method")),
-                        longValue(output.get("source_evaluation_id"))))
-                .filter(reference -> reference.evaluationId() != null)
-                .toList();
         return new Detail(testId, number(test.get("pvt_id")).longValue(), number(test.get("test_no")).intValue(),
                 string(test.get("test_name")), date(test.get("test_date")), string(test.get("operation_type")),
                 string(test.get("test_method")), string(test.get("well_name")), string(test.get("well_type")),
-                string(test.get("status")), input(input), items, result, evaluations);
+                string(test.get("status")), input(input), items, result, List.of());
     }
 
     @Transactional
@@ -318,10 +313,10 @@ public class ProductivityTestService {
                 testId, result.pressureMethod());
         long outputId = insert("""
                 INSERT INTO project_well_productivity_binomial_output
-                (test_id,pressure_method,source_evaluation_id,darcy_seepage_coefficient,non_darcy_seepage_coefficient,open_flow_capacity,
+                (test_id,pressure_method,darcy_seepage_coefficient,non_darcy_seepage_coefficient,open_flow_capacity,
                  gradient,intercept,r_squared,reliability_level,reliability_description)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?)
-                """, testId, result.pressureMethod(), result.evaluationId(), result.darcySeepageCoefficient(),
+                VALUES (?,?,?,?,?,?,?,?,?,?)
+                """, testId, result.pressureMethod(), result.darcySeepageCoefficient(),
                 result.nonDarcySeepageCoefficient(), result.openFlowCapacity(), result.gradient(), result.intercept(),
                 result.rSquared(), result.reliabilityLevel(), blankToNull(result.reliabilityDescription()));
         if (result.chartPoints() != null) for (ChartPoint point : result.chartPoints()) jdbc.update("""
@@ -349,7 +344,7 @@ public class ProductivityTestService {
                 FROM project_well_productivity_binomial_ipr_item WHERE output_id=? ORDER BY curve_number,point_number
                 """, (rs, row) -> new IprPoint(rs.getInt(1), rs.getInt(2), rs.getDouble(3), rs.getDouble(4),
                 rs.getBoolean(5), rs.getString(6)), outputId);
-        return new Result(string(output.get("pressure_method")), longValue(output.get("source_evaluation_id")),
+        return new Result(string(output.get("pressure_method")), null,
                 decimal(output.get("darcy_seepage_coefficient")),
                 decimal(output.get("non_darcy_seepage_coefficient")), decimal(output.get("open_flow_capacity")),
                 decimal(output.get("gradient")), decimal(output.get("intercept")), decimal(output.get("r_squared")),

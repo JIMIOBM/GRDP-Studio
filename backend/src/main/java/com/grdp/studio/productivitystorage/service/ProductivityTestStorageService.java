@@ -41,7 +41,11 @@ public class ProductivityTestStorageService {
                        COALESCE(o.pressure_method,''),t.status
                 FROM project_well_productivity_test t
                 JOIN project_well_pvt p ON p.id=t.pvt_id
-                LEFT JOIN project_well_productivity_binomial_output o ON o.test_id=t.id
+                LEFT JOIN (
+                    SELECT test_id,pressure_method,updated_at FROM project_well_productivity_binomial_output
+                    UNION ALL
+                    SELECT test_id,pressure_method,updated_at FROM project_well_productivity_exponential_output
+                ) o ON o.test_id=t.id
                 WHERE t.project_id=? AND t.project_gas_reservoir_id=? AND t.test_method='isochronal'
                 """ + (wellName == null || wellName.isBlank() ? "" : " AND t.well_name=?") +
                 " ORDER BY t.well_name,t.test_no,o.updated_at DESC";
@@ -76,11 +80,16 @@ public class ProductivityTestStorageService {
                 : updateAndValidateTest(request, wellId, pvtId);
         // 输入或 PVT 发生变化时，旧压力方法的结果不再可信；本次保存只重建当前方法。
         jdbc.update("DELETE FROM project_well_productivity_binomial_output WHERE test_id=?", testId);
+        jdbc.update("DELETE FROM project_well_productivity_exponential_output WHERE test_id=?", testId);
         long inputId = replaceInput(testId, request.input());
         replaceInputPoints(inputId, request.input().points());
         long outputId = replaceOutput(testId, request.pressureMethod(), request.result());
         replaceCurvePoints(outputId, request.result());
-        replaceIprPoints(outputId, request.result().iprCurves());
+        if ("exponential".equals(request.result().calculationResultType())) {
+            replaceExponentialIprPoints(outputId, request.result().iprCurves());
+        } else {
+            replaceIprPoints(outputId, request.result().iprCurves());
+        }
         jdbc.update("UPDATE project_well_productivity_test SET status='calculated' WHERE id=?", testId);
         return findSummary(testId, request.projectId(), request.gasReservoirId());
     }
@@ -158,27 +167,49 @@ public class ProductivityTestStorageService {
     }
 
     private long replaceOutput(long testId, String method, Result result) {
-        List<Long> ids = jdbc.query("""
-                SELECT id FROM project_well_productivity_binomial_output WHERE test_id=? AND pressure_method=?
-                """, (rs, rowNum) -> rs.getLong(1), testId, method);
-        if (!ids.isEmpty()) jdbc.update("DELETE FROM project_well_productivity_binomial_output WHERE id=?", ids.getFirst());
+        if ("exponential".equals(result.calculationResultType())) {
+            return insertAndReturnKey("""
+                    INSERT INTO project_well_productivity_exponential_output
+                      (test_id,pressure_method,productivity_coefficient,productivity_exponent,
+                       open_flow_capacity,r_squared,reliability_description,calculated_at)
+                    VALUES(?,?,?,?,?,?,?,?)
+                    """, testId, method, result.productivityCoefficient(), result.productivityExponent(),
+                    result.openFlowCapacity(), result.rSquared(), result.reliabilityDescription(),
+                    new Timestamp(System.currentTimeMillis()));
+        }
         return insertAndReturnKey("""
                 INSERT INTO project_well_productivity_binomial_output
-                  (test_id,pressure_method,result_type,darcy_seepage_coefficient,non_darcy_seepage_coefficient,
-                   productivity_coefficient,productivity_exponent,
+                  (test_id,pressure_method,darcy_seepage_coefficient,non_darcy_seepage_coefficient,
                    open_flow_capacity,gradient,intercept,r_squared,reliability_level,reliability_description,calculated_at)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                """, testId, method, result.calculationResultType(),
-                result.darcyCoefficient(), result.nonDarcyCoefficient(),
-                result.productivityCoefficient(), result.productivityExponent(),
+                VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                """, testId, method, result.darcyCoefficient(), result.nonDarcyCoefficient(),
                 result.openFlowCapacity(), result.gradient(), result.intercept(), result.rSquared(),
                 result.reliabilityLevel(), result.reliabilityDescription(), new Timestamp(System.currentTimeMillis()));
     }
 
     private void replaceCurvePoints(long outputId, Result result) {
+        if ("exponential".equals(result.calculationResultType())) {
+            insertExponentialCurve(outputId, "analysis", result.analysisPoints());
+            insertExponentialCurve(outputId, "regression", result.regressionLine());
+            insertExponentialCurve(outputId, "transient", result.transientLine());
+            return;
+        }
         insertCurve(outputId, "regularized", result.analysisPoints());
         insertCurve(outputId, "regression", result.regressionLine());
         insertCurve(outputId, "shifted-regression", result.transientLine());
+    }
+
+    private void insertExponentialCurve(long outputId, String type, List<CurvePoint> points) {
+        if (points == null) return;
+        for (int index = 0; index < points.size(); index++) {
+            CurvePoint point = points.get(index);
+            jdbc.update("""
+                    INSERT INTO project_well_productivity_exponential_output_item
+                      (output_id,curve_type,point_number,source_point_number,x_value,y_value,data_label)
+                    VALUES(?,?,?,?,?,?,?)
+                    """, outputId, type, index + 1, "analysis".equals(type) ? index + 1 : null,
+                    point.x(), point.y(), point.label());
+        }
     }
 
     private void insertCurve(long outputId, String type, List<CurvePoint> points) {
@@ -213,6 +244,24 @@ public class ProductivityTestStorageService {
         }
     }
 
+    private void replaceExponentialIprPoints(long outputId, List<IprCurve> curves) {
+        if (curves == null) return;
+        for (int curveIndex = 0; curveIndex < curves.size(); curveIndex++) {
+            IprCurve curve = curves.get(curveIndex);
+            if (curve.points() == null || curve.formationPressure() == null) continue;
+            for (int pointIndex = 0; pointIndex < curve.points().size(); pointIndex++) {
+                IprPoint point = curve.points().get(pointIndex);
+                jdbc.update("""
+                        INSERT INTO project_well_productivity_exponential_ipr_item
+                          (output_id,curve_number,formation_pressure,point_number,gas_production,
+                           bottom_hole_flowing_pressure,data_label)
+                        VALUES(?,?,?,?,?,?,?)
+                        """, outputId, curveIndex + 1, curve.formationPressure(), pointIndex + 1,
+                        point.gasProduction(), point.bottomHoleFlowingPressure(), point.label());
+            }
+        }
+    }
+
     private Summary findSummary(long testId, long projectId, long reservoirId) {
         try {
             return jdbc.queryForObject("""
@@ -220,7 +269,11 @@ public class ProductivityTestStorageService {
                            COALESCE(o.pressure_method,''),t.status
                     FROM project_well_productivity_test t
                     JOIN project_well_pvt p ON p.id=t.pvt_id
-                    LEFT JOIN project_well_productivity_binomial_output o ON o.test_id=t.id
+                    LEFT JOIN (
+                        SELECT test_id,pressure_method,updated_at FROM project_well_productivity_binomial_output
+                        UNION ALL
+                        SELECT test_id,pressure_method,updated_at FROM project_well_productivity_exponential_output
+                    ) o ON o.test_id=t.id
                     WHERE t.id=? AND t.project_id=? AND t.project_gas_reservoir_id=?
                     ORDER BY o.updated_at DESC LIMIT 1
                     """, (rs, rowNum) -> new Summary(rs.getLong(1), rs.getInt(2), rs.getString(3),
@@ -251,9 +304,13 @@ public class ProductivityTestStorageService {
     }
 
     private Result loadResult(long testId, String method) {
+        List<Long> exponentialIds = jdbc.query("""
+                SELECT id FROM project_well_productivity_exponential_output
+                WHERE test_id=? AND pressure_method=?
+                """, (rs, rowNum) -> rs.getLong(1), testId, method);
+        if (!exponentialIds.isEmpty()) return loadExponentialResult(exponentialIds.getFirst());
         return jdbc.queryForObject("""
-                SELECT id,result_type,darcy_seepage_coefficient,non_darcy_seepage_coefficient,
-                       productivity_coefficient,productivity_exponent,open_flow_capacity,
+                SELECT id,darcy_seepage_coefficient,non_darcy_seepage_coefficient,open_flow_capacity,
                        gradient,intercept,r_squared,reliability_level,reliability_description
                 FROM project_well_productivity_binomial_output WHERE test_id=? AND pressure_method=?
                 """, (rs, rowNum) -> {
@@ -262,11 +319,50 @@ public class ProductivityTestStorageService {
             List<CurvePoint> regression = loadCurve(outputId, "regression");
             List<CurvePoint> transientLine = loadCurve(outputId, "shifted-regression");
             List<IprCurve> curves = loadIprCurves(outputId);
-            return new Result(rs.getString(2), nullableDouble(rs, 3), nullableDouble(rs, 4),
-                    nullableDouble(rs, 5), nullableDouble(rs, 6), rs.getDouble(7), nullableDouble(rs, 8),
-                    nullableDouble(rs, 9), nullableDouble(rs, 10), rs.getString(11), rs.getString(12),
+            return new Result("binomial", rs.getDouble(2), rs.getDouble(3),
+                    null, null, rs.getDouble(4), nullableDouble(rs, 5),
+                    nullableDouble(rs, 6), nullableDouble(rs, 7), rs.getString(8), rs.getString(9),
                     analysis, regression, transientLine, curves);
         }, testId, method);
+    }
+
+    private Result loadExponentialResult(long outputId) {
+        return jdbc.queryForObject("""
+                SELECT productivity_coefficient,productivity_exponent,open_flow_capacity,
+                       r_squared,reliability_description
+                FROM project_well_productivity_exponential_output WHERE id=?
+                """, (rs, rowNum) -> new Result("exponential", null, null, rs.getDouble(1), rs.getDouble(2),
+                rs.getDouble(3), null, null, nullableDouble(rs, 4), null, rs.getString(5),
+                loadExponentialCurve(outputId, "analysis"), loadExponentialCurve(outputId, "regression"),
+                loadExponentialCurve(outputId, "transient"), loadExponentialIprCurves(outputId)), outputId);
+    }
+
+    private List<CurvePoint> loadExponentialCurve(long outputId, String type) {
+        return jdbc.query("""
+                SELECT x_value,y_value,data_label FROM project_well_productivity_exponential_output_item
+                WHERE output_id=? AND curve_type=? AND is_deleted=0 ORDER BY point_number
+                """, (rs, rowNum) -> new CurvePoint(rs.getDouble(1), rs.getDouble(2), rs.getString(3)), outputId, type);
+    }
+
+    private List<IprCurve> loadExponentialIprCurves(long outputId) {
+        List<Integer> numbers = jdbc.query("""
+                SELECT DISTINCT curve_number FROM project_well_productivity_exponential_ipr_item
+                WHERE output_id=? AND is_deleted=0 ORDER BY curve_number
+                """, (rs, rowNum) -> rs.getInt(1), outputId);
+        List<IprCurve> curves = new ArrayList<>();
+        for (Integer number : numbers) {
+            List<IprPoint> points = jdbc.query("""
+                    SELECT gas_production,bottom_hole_flowing_pressure,data_label
+                    FROM project_well_productivity_exponential_ipr_item
+                    WHERE output_id=? AND curve_number=? AND is_deleted=0 ORDER BY point_number
+                    """, (rs, rowNum) -> new IprPoint(rs.getDouble(1), rs.getDouble(2), rs.getString(3)), outputId, number);
+            Double pressure = jdbc.queryForObject("""
+                    SELECT formation_pressure FROM project_well_productivity_exponential_ipr_item
+                    WHERE output_id=? AND curve_number=? ORDER BY point_number LIMIT 1
+                    """, Double.class, outputId, number);
+            curves.add(new IprCurve(pressure, points));
+        }
+        return curves;
     }
 
     private List<CurvePoint> loadCurve(long outputId, String type) {

@@ -477,6 +477,22 @@ const addRow = () => {
   inputRows.value.push(createBlankRow(inputRows.value.length + 1))
 }
 
+const replaceInputRows = rows => {
+  inputRows.value = (rows || []).map((row, index) => ({
+    sequence: Number(row.testPointNumber ?? row.sequence ?? index + 1),
+    date: formatDate(row.testDate ?? row.date),
+    testType: activeTestType.value,
+    recoveryPressure: normalizePressure(row.reservoirPressure ?? row.reserviorPressure ?? row.recoveryPressure),
+    flowRate: normalizeGasRate(row.testDailyGasProduction ?? row.gasProduction ?? row.flowRate),
+    equivalentFlowRate: normalizeGasRate(row.equivalentTestDailyGasProduction ?? row.equivalentFlowRate),
+    flowingPressure: normalizePressure(row.testFlowPressure ?? row.flowingPressure ?? row.flowPressure)
+  }))
+  hasMethodData.value = inputRows.value.length > 0
+  result.value = null
+  activePanel.value = 'input'
+  activeChart.value = 'analysis'
+}
+
 const removeRow = (index) => {
   inputRows.value.splice(index, 1)
   inputRows.value.forEach((row, rowIndex) => {
@@ -2010,7 +2026,7 @@ onMounted(async () => {
   if (selectedWellName.value) await loadWellData()
 })
 
-defineExpose({ analyze, loadWellData, switchPanel, getPersistenceSnapshot, restorePersisted })
+defineExpose({ analyze, loadWellData, replaceInputRows, switchPanel, getPersistenceSnapshot, restorePersisted })
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize)
