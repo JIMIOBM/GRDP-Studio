@@ -208,7 +208,13 @@ export default defineConfig(() => {
   const applyDockerHeaders = (proxyReq, req) => {
     alignDockerOrigin(proxyReq)
 
-    if (dockerSessionCookie) {
+    // A user may sign in to the original platform again after Vite has cached
+    // an older Kratos session. Prefer the cookie on the current browser request
+    // so an inactive cached session cannot overwrite the newly active one.
+    const browserCookie = req.headers?.cookie || ''
+    if (browserCookie) {
+      proxyReq.setHeader('Cookie', browserCookie)
+    } else if (dockerSessionCookie) {
       proxyReq.setHeader('Cookie', dockerSessionCookie)
     }
   }

@@ -935,11 +935,26 @@ const calculateLocally = (payload) => {
   }
 
   if (payload.calculationResultType === 'exponential') {
-    const {
-      productivityCoefficient,
-      productivityExponent,
-      rSquared
-    } = regressExponentialPoints(points)
+    let regressionPoints = points
+    let stablePoint = null
+    if (payload.testType === 'isochronal') {
+      // 与原系统一致：等时试井最后一个测试点为延长生产稳定点，其余点用于确定指数 n。
+      stablePoint = points[points.length - 1]
+      regressionPoints = points.slice(0, -1)
+      if (regressionPoints.length < 2) throw new Error('等时试井至少需要 3 个测试点')
+    }
+    const exponentialCoefficients = regressExponentialPoints(regressionPoints)
+    const productivityExponent = exponentialCoefficients.productivityExponent
+    const transientProductivityCoefficient = stablePoint
+      ? exponentialCoefficients.productivityCoefficient
+      : null
+    const productivityCoefficient = stablePoint
+      ? stablePoint.flowRate / stablePoint.potentialDifference ** productivityExponent
+      : exponentialCoefficients.productivityCoefficient
+    const rSquared = exponentialCoefficients.rSquared
+    if (!Number.isFinite(productivityCoefficient) || productivityCoefficient <= 0) {
+      throw new Error('稳定点不能得到有效的指数式产能系数，请检查最后一个测试点')
+    }
     const atmosphericPressure = Math.min(maximumPressure, ATMOSPHERIC_PRESSURE_MPA)
     const maximumPotential = pressurePotential(maximumPressure, selectedCalculationMethod, pvtCurve) -
       pressurePotential(atmosphericPressure, selectedCalculationMethod, pvtCurve)
@@ -956,13 +971,17 @@ const calculateLocally = (payload) => {
     const lineStart = Math.max(minimumRate / 1.25, Number.MIN_VALUE)
     const lineEnd = maximumRate * 1.02
     const rateRatio = lineEnd / lineStart
-    const regressionLine = Array.from({ length: 41 }, (_, index) => {
+    const makeRegressionLine = coefficient => Array.from({ length: 41 }, (_, index) => {
       const flowRate = lineStart * rateRatio ** (index / 40)
       return {
         flowRate,
-        transformedPressure: (flowRate / productivityCoefficient) ** (1 / productivityExponent)
+        transformedPressure: (flowRate / coefficient) ** (1 / productivityExponent)
       }
     })
+    const regressionLine = makeRegressionLine(productivityCoefficient)
+    const transientLine = transientProductivityCoefficient === null
+      ? []
+      : makeRegressionLine(transientProductivityCoefficient)
     const makeIprCurve = pressure => createExponentialIprCurve(
       pressure,
       productivityCoefficient,
@@ -1001,7 +1020,7 @@ const calculateLocally = (payload) => {
       ),
       analysisPoints,
       regressionLine,
-      transientLine: [],
+      transientLine,
       iprCurve,
       iprCurves
     }
@@ -1385,38 +1404,63 @@ const renderChart = () => {
   const analysisPoints = result.value.analysisPoints || []
   const regressionLine = result.value.regressionLine || []
   const transientLine = result.value.transientLine || []
-  const isIsochronalBinomial = activeTestType.value === 'isochronal' &&
-    result.value.calculationResultType === 'binomial' && transientLine.length > 0
-  const unstablePoints = isIsochronalBinomial ? analysisPoints.slice(0, -1) : analysisPoints
-  const stablePoints = isIsochronalBinomial ? analysisPoints.slice(-1) : []
+  const isIsochronalResult = activeTestType.value === 'isochronal' && transientLine.length > 0
+  const isExponentialResult = result.value.calculationResultType === 'exponential'
+  const unstablePoints = isIsochronalResult ? analysisPoints.slice(0, -1) : analysisPoints
+  const stablePoints = isIsochronalResult ? analysisPoints.slice(-1) : []
   const rateValues = analysisPoints.map(point => Number(point.flowRate)).filter(Number.isFinite)
   const minimumRate = Math.min(...rateValues)
   const maximumRate = Math.max(...rateValues)
   const clipLine = line => {
     if (line.length < 2 || !Number.isFinite(minimumRate) || !Number.isFinite(maximumRate)) return line
-    const [start, end] = line
-    const x1 = Number(start.flowRate)
-    const y1 = Number(start.transformedPressure)
-    const x2 = Number(end.flowRate)
-    const y2 = Number(end.transformedPressure)
-    if (![x1, y1, x2, y2].every(Number.isFinite) || Math.abs(x2 - x1) < 1e-12) return line
-    const interpolate = x => y1 + (y2 - y1) * (x - x1) / (x2 - x1)
+    const sorted = [...line]
+      .filter(point => [point.flowRate, point.transformedPressure].every(value => Number.isFinite(Number(value))))
+      .sort((left, right) => Number(left.flowRate) - Number(right.flowRate))
+    if (sorted.length < 2) return sorted
+    const interpolate = x => {
+      let upperIndex = sorted.findIndex(point => Number(point.flowRate) >= x)
+      if (upperIndex <= 0) upperIndex = 1
+      if (upperIndex < 0) upperIndex = sorted.length - 1
+      const lower = sorted[upperIndex - 1]
+      const upper = sorted[upperIndex]
+      const x1 = Number(lower.flowRate)
+      const y1 = Number(lower.transformedPressure)
+      const x2 = Number(upper.flowRate)
+      const y2 = Number(upper.transformedPressure)
+      if (Math.abs(x2 - x1) < 1e-12) return y1
+      if (isExponentialResult && [x, x1, x2, y1, y2].every(value => value > 0)) {
+        const ratio = (Math.log(x) - Math.log(x1)) / (Math.log(x2) - Math.log(x1))
+        return Math.exp(Math.log(y1) + ratio * (Math.log(y2) - Math.log(y1)))
+      }
+      return y1 + (y2 - y1) * (x - x1) / (x2 - x1)
+    }
+    const middle = sorted.filter(point => {
+      const rate = Number(point.flowRate)
+      return rate > minimumRate && rate < maximumRate
+    })
     return [
       { flowRate: minimumRate, transformedPressure: interpolate(minimumRate) },
+      ...middle,
       { flowRate: maximumRate, transformedPressure: interpolate(maximumRate) }
     ]
   }
   const method = result.value.calculationMethod || calculationMethod.value
-  const analysisUnit = ({
-    'pseudo-pressure': '[(MPa²/(mPa·s))/(10⁴m³/d)]',
-    'pressure-squared': '[MPa²/(10⁴m³/d)]',
-    pressure: '[MPa/(10⁴m³/d)]'
-  })[method] || '[MPa/(10⁴m³/d)]'
-  const blackLine = isIsochronalBinomial ? transientLine : regressionLine
-  const orangeLine = isIsochronalBinomial ? regressionLine : transientLine
+  const analysisUnit = isExponentialResult
+    ? ({
+        'pseudo-pressure': '[MPa²/(mPa·s)]',
+        'pressure-squared': '[MPa²]',
+        pressure: '[MPa]'
+      })[method] || '[MPa]'
+    : ({
+        'pseudo-pressure': '[(MPa²/(mPa·s))/(10⁴m³/d)]',
+        'pressure-squared': '[MPa²/(10⁴m³/d)]',
+        pressure: '[MPa/(10⁴m³/d)]'
+      })[method] || '[MPa/(10⁴m³/d)]'
+  const blackLine = isIsochronalResult ? transientLine : regressionLine
+  const orangeLine = isIsochronalResult ? regressionLine : transientLine
   const series = [
     {
-      name: isIsochronalBinomial ? `不稳定点${analysisUnit}` : '测试点',
+      name: isIsochronalResult ? `不稳定点${analysisUnit}` : '测试点',
       type: 'scatter',
       symbolSize: 10,
       z: 4,
@@ -1424,7 +1468,7 @@ const renderChart = () => {
       itemStyle: { color: '#5478c9' }
     },
     {
-      name: isIsochronalBinomial ? `回归线${analysisUnit}` : '回归线',
+      name: isIsochronalResult ? `回归线${analysisUnit}` : '回归线',
       type: 'line',
       showSymbol: false,
       symbol: 'none',
@@ -1437,7 +1481,7 @@ const renderChart = () => {
 
   if (orangeLine.length) {
     series.push({
-      name: isIsochronalBinomial ? `平移线${analysisUnit}` : '等时线',
+      name: isIsochronalResult ? `平移线${analysisUnit}` : '等时线',
       type: 'line',
       showSymbol: false,
       symbol: 'none',
@@ -2142,6 +2186,12 @@ onBeforeUnmount(() => {
             <el-table-column label="测试流压(MPa)" min-width="145">
               <template #default="scope">
                 <el-input-number v-model="scope.row.flowingPressure" :controls="false" size="small" />
+              </template>
+            </el-table-column>
+            <el-table-column v-if="activeTestType === 'isochronal'" label="测点类型" width="90" align="center">
+              <template #default="scope">
+                <el-tag v-if="scope.$index === inputRows.length - 1" type="danger" size="small">稳定点</el-tag>
+                <span v-else>等时点</span>
               </template>
             </el-table-column>
             <el-table-column label="操作" width="75" align="center">
