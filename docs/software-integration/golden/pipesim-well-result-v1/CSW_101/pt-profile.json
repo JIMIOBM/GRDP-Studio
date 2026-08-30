@@ -1,0 +1,153 @@
+{
+  "schemaVersion": "pipesim-well-result/1",
+  "model_kind": "black_oil_liquid",
+  "runTask": "profile",
+  "resultContract": "VALID_FULL",
+  "units": {
+    "flow": {
+      "displayUnit": null,
+      "semantics": "unspecified"
+    },
+    "pressure": {
+      "displayUnit": null,
+      "semantics": "unspecified"
+    },
+    "depth": {
+      "displayUnit": null,
+      "semantics": "unspecified"
+    },
+    "temperature": {
+      "displayUnit": null,
+      "semantics": "unspecified"
+    }
+  },
+  "ipr": [],
+  "vlp": [],
+  "profile": [
+    {
+      "depth": 0.0,
+      "pressure": 299.9520296530212,
+      "temperature": 67.03671874323595
+    },
+    {
+      "depth": 1000.0,
+      "pressure": 529.8099592992168,
+      "temperature": 88.77696172979518
+    },
+    {
+      "depth": 1700.0000000000002,
+      "pressure": 716.9047967254854,
+      "temperature": 103.49332307625559
+    },
+    {
+      "depth": 2599.3614533681102,
+      "pressure": 978.6155421038748,
+      "temperature": 123.62655811602372
+    },
+    {
+      "depth": 2700.0,
+      "pressure": 1008.4707569187107,
+      "temperature": 125.88132146957685
+    },
+    {
+      "depth": 3599.36145336811,
+      "pressure": 1276.110199867058,
+      "temperature": 146.04149694790237
+    },
+    {
+      "depth": 3699.999999999999,
+      "pressure": 1306.2068969760785,
+      "temperature": 148.29271373087954
+    },
+    {
+      "depth": 4599.280575539569,
+      "pressure": 1576.6417444228587,
+      "temperature": 168.39650840865397
+    },
+    {
+      "depth": 4700.0,
+      "pressure": 1607.089379722465,
+      "temperature": 170.6400883525514
+    },
+    {
+      "depth": 5599.36145336811,
+      "pressure": 1880.0846736673004,
+      "temperature": 190.60195071761734
+    },
+    {
+      "depth": 5700.0,
+      "pressure": 1910.7359953138655,
+      "temperature": 192.81849003021478
+    },
+    {
+      "depth": 6599.36145336811,
+      "pressure": 2185.242217722415,
+      "temperature": 212.38280120217917
+    },
+    {
+      "depth": 6700.0,
+      "pressure": 2216.0071479832654,
+      "temperature": 214.5256992293065
+    },
+    {
+      "depth": 6999.820143884889,
+      "pressure": 2307.694438648908,
+      "temperature": 218.9053006435696
+    },
+    {
+      "depth": 6999.820143884889,
+      "pressure": 2307.694438648908,
+      "temperature": 220.83288345457777
+    },
+    {
+      "depth": 6999.820143884889,
+      "pressure": 2307.694438648908,
+      "temperature": 220.83288345457777
+    },
+    {
+      "depth": 6999.999999999999,
+      "pressure": 2307.76109308399,
+      "temperature": 218.9090242711112
+    },
+    {
+      "depth": 7700.0,
+      "pressure": 2566.79262428384,
+      "temperature": 230.8694815922363
+    },
+    {
+      "depth": 7700.449680726679,
+      "pressure": 2566.9587206156925,
+      "temperature": 230.8757453119298
+    },
+    {
+      "depth": 7700.449680726679,
+      "pressure": 2566.9587206156925,
+      "temperature": 230.8757453119298
+    },
+    {
+      "depth": 8599.81113409479,
+      "pressure": 2897.1553954645856,
+      "temperature": 253.9061411031596
+    },
+    {
+      "depth": 8700.0,
+      "pressure": 2933.7296623876077,
+      "temperature": 257.05475011028886
+    },
+    {
+      "depth": 9000.0,
+      "pressure": 5000.0,
+      "temperature": 249.99999999998226
+    },
+    {
+      "depth": 9000.0,
+      "pressure": 3042.907284480558,
+      "temperature": 268.1816006627623
+    },
+    {
+      "depth": 9000.0,
+      "pressure": 3042.907284480558,
+      "temperature": 268.1816006627623
+    }
+  ]
+}

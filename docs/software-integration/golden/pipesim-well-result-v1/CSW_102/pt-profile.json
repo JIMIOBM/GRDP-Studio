@@ -1,0 +1,108 @@
+{
+  "schemaVersion": "pipesim-well-result/1",
+  "model_kind": "basic_gas",
+  "runTask": "profile",
+  "resultContract": "VALID_FULL",
+  "units": {
+    "flow": {
+      "displayUnit": "mmscf/d",
+      "semantics": "standard_gas_volume_rate"
+    },
+    "pressure": {
+      "displayUnit": null,
+      "semantics": "unspecified"
+    },
+    "depth": {
+      "displayUnit": null,
+      "semantics": "unspecified"
+    },
+    "temperature": {
+      "displayUnit": null,
+      "semantics": "unspecified"
+    }
+  },
+  "ipr": [],
+  "vlp": [],
+  "profile": [
+    {
+      "depth": 160.0,
+      "pressure": 1100.164027049467,
+      "temperature": 146.519674549995
+    },
+    {
+      "depth": 1160.0,
+      "pressure": 1161.6759843201705,
+      "temperature": 154.0798990921768
+    },
+    {
+      "depth": 2160.0,
+      "pressure": 1232.8747961337572,
+      "temperature": 161.33289225196086
+    },
+    {
+      "depth": 3160.0,
+      "pressure": 1320.2230939808335,
+      "temperature": 168.81862505978734
+    },
+    {
+      "depth": 4000.0,
+      "pressure": 1408.5372022568386,
+      "temperature": 175.80740017769006
+    },
+    {
+      "depth": 4625.0,
+      "pressure": 1540.1096958311475,
+      "temperature": 184.61109351653795
+    },
+    {
+      "depth": 5250.0,
+      "pressure": 1667.0370386931484,
+      "temperature": 192.49818729499168
+    },
+    {
+      "depth": 5875.0,
+      "pressure": 1790.4089612990915,
+      "temperature": 199.7880709151383
+    },
+    {
+      "depth": 6500.0,
+      "pressure": 1911.0228823109514,
+      "temperature": 206.13400606620564
+    },
+    {
+      "depth": 7125.000000000001,
+      "pressure": 2029.4304278928512,
+      "temperature": 212.0814727755759
+    },
+    {
+      "depth": 7750.000000000001,
+      "pressure": 2146.0504058243414,
+      "temperature": 217.17492424872432
+    },
+    {
+      "depth": 8375.0,
+      "pressure": 2261.473938615675,
+      "temperature": 221.8256513375735
+    },
+    {
+      "depth": 8375.0,
+      "pressure": 2261.210818211273,
+      "temperature": 221.8190630782924
+    },
+    {
+      "depth": 9000.0,
+      "pressure": 4000.0,
+      "temperature": 249.99999999998226
+    },
+    {
+      "depth": 9000.0,
+      "pressure": 2330.477896793876,
+      "temperature": 225.30886403621707
+    },
+    {
+      "depth": 9000.0,
+      "pressure": 2330.477896793876,
+      "temperature": 225.30886403621707
+    }
+  ]
+}
