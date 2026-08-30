@@ -35,6 +35,11 @@ import { pvtStorageApi } from '@/api/pvtStorage'
 import { createPvtDraftRecord } from '@/utils/pvtRecords'
 import { loadAllModifiedIsochronalTreeNodes } from '@/utils/modifiedIsochronalTree'
 import {
+  ISOCHRONAL_METHOD_NODE_TYPE,
+  ISOCHRONAL_RECORD_NODE_TYPE,
+  loadAllIsochronalTreeNodes
+} from '@/utils/isochronalTree'
+import {
   getNextRelativePermeabilityIndex,
   getRelativePermeabilityRecords
 } from '@/utils/relativePermeabilityRecords'
@@ -3803,6 +3808,21 @@ const handleSelect = async (node) => { // 点击左侧树节点
     return
   }
 
+  if (node.type === ISOCHRONAL_METHOD_NODE_TYPE) return
+
+  if (node.type === ISOCHRONAL_RECORD_NODE_TYPE && node.testId) {
+    await router.push({
+      name: 'SingleWellProductivity',
+      query: {
+        module: '产能试井',
+        method: '等时试井',
+        well: nodeWellName,
+        testId: node.testId
+      }
+    })
+    return
+  }
+
   if (isWellMenuGroup) return
 
   if (node.type === 'well-data-pvt-group') {
@@ -4138,11 +4158,18 @@ onMounted(async () => {
 
   try {
     await initTree()
-    void loadAllModifiedIsochronalTreeNodes({
-      treeData: treeData.value,
-      projectId: PROJECT_ID,
-      gasReservoirId: GAS_RESERVOIR_ID
-    })
+    void Promise.allSettled([
+      loadAllModifiedIsochronalTreeNodes({
+        treeData: treeData.value,
+        projectId: PROJECT_ID,
+        gasReservoirId: GAS_RESERVOIR_ID
+      }),
+      loadAllIsochronalTreeNodes({
+        treeData: treeData.value,
+        projectId: PROJECT_ID,
+        gasReservoirId: GAS_RESERVOIR_ID
+      })
+    ])
   } catch (error) {
     console.error('工作台目录初始化失败', error)
   }

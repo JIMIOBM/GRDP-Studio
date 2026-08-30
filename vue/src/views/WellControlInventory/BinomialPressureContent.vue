@@ -477,6 +477,22 @@ const addRow = () => {
   inputRows.value.push(createBlankRow(inputRows.value.length + 1))
 }
 
+const replaceInputRows = rows => {
+  inputRows.value = (rows || []).map((row, index) => ({
+    sequence: Number(row.testPointNumber ?? row.sequence ?? index + 1),
+    date: formatDate(row.testDate ?? row.date),
+    testType: activeTestType.value,
+    recoveryPressure: normalizePressure(row.reservoirPressure ?? row.reserviorPressure ?? row.recoveryPressure),
+    flowRate: normalizeGasRate(row.testDailyGasProduction ?? row.gasProduction ?? row.flowRate),
+    equivalentFlowRate: normalizeGasRate(row.equivalentTestDailyGasProduction ?? row.equivalentFlowRate),
+    flowingPressure: normalizePressure(row.testFlowPressure ?? row.flowingPressure ?? row.flowPressure)
+  }))
+  hasMethodData.value = inputRows.value.length > 0
+  result.value = null
+  activePanel.value = 'input'
+  activeChart.value = 'analysis'
+}
+
 const removeRow = (index) => {
   inputRows.value.splice(index, 1)
   inputRows.value.forEach((row, rowIndex) => {
@@ -661,10 +677,10 @@ const pressureExpression = method => ({
 }[method] || 'Pr - Pwf')
 
 const analysisAxisName = method => ({
-  'pseudo-pressure': '[m(Pr) - m(Pwf)] / qsc\n(MPa²/(mPa·s)/(10⁴m³/d))',
-  'pressure-squared': '(Pr² - Pwf²) / qsc\n(MPa²/(10⁴m³/d))',
-  pressure: '(Pr - Pwf) / qsc\n(MPa/(10⁴m³/d))'
-}[method] || '(Pr - Pwf) / qsc\n(MPa/(10⁴m³/d))')
+  'pseudo-pressure': '[m(Pr) - m(Pwf)] / qsc [(MPa²/(mPa·s))/(10⁴m³/d)]',
+  'pressure-squared': '(Pr² - Pwf²) / qsc [MPa²/(10⁴m³/d)]',
+  pressure: '(Pr - Pwf) / qsc [MPa/(10⁴m³/d)]'
+}[method] || '(Pr - Pwf) / qsc [MPa/(10⁴m³/d)]')
 
 const exponentialAnalysisAxisName = method => ({
   'pseudo-pressure': 'm(Pr) - m(Pwf)\n(MPa²/(mPa·s))',
@@ -919,11 +935,26 @@ const calculateLocally = (payload) => {
   }
 
   if (payload.calculationResultType === 'exponential') {
-    const {
-      productivityCoefficient,
-      productivityExponent,
-      rSquared
-    } = regressExponentialPoints(points)
+    let regressionPoints = points
+    let stablePoint = null
+    if (payload.testType === 'isochronal') {
+      // 与原系统一致：等时试井最后一个测试点为延长生产稳定点，其余点用于确定指数 n。
+      stablePoint = points[points.length - 1]
+      regressionPoints = points.slice(0, -1)
+      if (regressionPoints.length < 2) throw new Error('等时试井至少需要 3 个测试点')
+    }
+    const exponentialCoefficients = regressExponentialPoints(regressionPoints)
+    const productivityExponent = exponentialCoefficients.productivityExponent
+    const transientProductivityCoefficient = stablePoint
+      ? exponentialCoefficients.productivityCoefficient
+      : null
+    const productivityCoefficient = stablePoint
+      ? stablePoint.flowRate / stablePoint.potentialDifference ** productivityExponent
+      : exponentialCoefficients.productivityCoefficient
+    const rSquared = exponentialCoefficients.rSquared
+    if (!Number.isFinite(productivityCoefficient) || productivityCoefficient <= 0) {
+      throw new Error('稳定点不能得到有效的指数式产能系数，请检查最后一个测试点')
+    }
     const atmosphericPressure = Math.min(maximumPressure, ATMOSPHERIC_PRESSURE_MPA)
     const maximumPotential = pressurePotential(maximumPressure, selectedCalculationMethod, pvtCurve) -
       pressurePotential(atmosphericPressure, selectedCalculationMethod, pvtCurve)
@@ -940,13 +971,17 @@ const calculateLocally = (payload) => {
     const lineStart = Math.max(minimumRate / 1.25, Number.MIN_VALUE)
     const lineEnd = maximumRate * 1.02
     const rateRatio = lineEnd / lineStart
-    const regressionLine = Array.from({ length: 41 }, (_, index) => {
+    const makeRegressionLine = coefficient => Array.from({ length: 41 }, (_, index) => {
       const flowRate = lineStart * rateRatio ** (index / 40)
       return {
         flowRate,
-        transformedPressure: (flowRate / productivityCoefficient) ** (1 / productivityExponent)
+        transformedPressure: (flowRate / coefficient) ** (1 / productivityExponent)
       }
     })
+    const regressionLine = makeRegressionLine(productivityCoefficient)
+    const transientLine = transientProductivityCoefficient === null
+      ? []
+      : makeRegressionLine(transientProductivityCoefficient)
     const makeIprCurve = pressure => createExponentialIprCurve(
       pressure,
       productivityCoefficient,
@@ -985,7 +1020,7 @@ const calculateLocally = (payload) => {
       ),
       analysisPoints,
       regressionLine,
-      transientLine: [],
+      transientLine,
       iprCurve,
       iprCurves
     }
@@ -1369,50 +1404,228 @@ const renderChart = () => {
   const analysisPoints = result.value.analysisPoints || []
   const regressionLine = result.value.regressionLine || []
   const transientLine = result.value.transientLine || []
+  const isIsochronalResult = activeTestType.value === 'isochronal' && transientLine.length > 0
+  const isExponentialResult = result.value.calculationResultType === 'exponential'
+  const unstablePoints = isIsochronalResult ? analysisPoints.slice(0, -1) : analysisPoints
+  const stablePoints = isIsochronalResult ? analysisPoints.slice(-1) : []
+  const rateValues = analysisPoints.map(point => Number(point.flowRate)).filter(Number.isFinite)
+  const minimumRate = Math.min(...rateValues)
+  const maximumRate = Math.max(...rateValues)
+  const clipLine = line => {
+    if (line.length < 2 || !Number.isFinite(minimumRate) || !Number.isFinite(maximumRate)) return line
+    const sorted = [...line]
+      .filter(point => [point.flowRate, point.transformedPressure].every(value => Number.isFinite(Number(value))))
+      .sort((left, right) => Number(left.flowRate) - Number(right.flowRate))
+    if (sorted.length < 2) return sorted
+    const interpolate = x => {
+      let upperIndex = sorted.findIndex(point => Number(point.flowRate) >= x)
+      if (upperIndex <= 0) upperIndex = 1
+      if (upperIndex < 0) upperIndex = sorted.length - 1
+      const lower = sorted[upperIndex - 1]
+      const upper = sorted[upperIndex]
+      const x1 = Number(lower.flowRate)
+      const y1 = Number(lower.transformedPressure)
+      const x2 = Number(upper.flowRate)
+      const y2 = Number(upper.transformedPressure)
+      if (Math.abs(x2 - x1) < 1e-12) return y1
+      if (isExponentialResult && [x, x1, x2, y1, y2].every(value => value > 0)) {
+        const ratio = (Math.log(x) - Math.log(x1)) / (Math.log(x2) - Math.log(x1))
+        return Math.exp(Math.log(y1) + ratio * (Math.log(y2) - Math.log(y1)))
+      }
+      return y1 + (y2 - y1) * (x - x1) / (x2 - x1)
+    }
+    const middle = sorted.filter(point => {
+      const rate = Number(point.flowRate)
+      return rate > minimumRate && rate < maximumRate
+    })
+    return [
+      { flowRate: minimumRate, transformedPressure: interpolate(minimumRate) },
+      ...middle,
+      { flowRate: maximumRate, transformedPressure: interpolate(maximumRate) }
+    ]
+  }
+  const method = result.value.calculationMethod || calculationMethod.value
+  const analysisUnit = isExponentialResult
+    ? ({
+        'pseudo-pressure': '[MPa²/(mPa·s)]',
+        'pressure-squared': '[MPa²]',
+        pressure: '[MPa]'
+      })[method] || '[MPa]'
+    : ({
+        'pseudo-pressure': '[(MPa²/(mPa·s))/(10⁴m³/d)]',
+        'pressure-squared': '[MPa²/(10⁴m³/d)]',
+        pressure: '[MPa/(10⁴m³/d)]'
+      })[method] || '[MPa/(10⁴m³/d)]'
+  const blackLine = isIsochronalResult ? transientLine : regressionLine
+  const orangeLine = isIsochronalResult ? regressionLine : transientLine
   const series = [
     {
-      name: '测试点',
+      name: isIsochronalResult ? `不稳定点${analysisUnit}` : '测试点',
       type: 'scatter',
       symbolSize: 10,
-      data: analysisPoints.map(point => [point.flowRate, point.transformedPressure]),
-      itemStyle: { color: '#4d78c9' }
+      z: 4,
+      data: unstablePoints.map(point => [point.flowRate, point.transformedPressure]),
+      itemStyle: { color: '#5478c9' }
     },
     {
-      name: activeTestType.value === 'isochronal' ? '稳定线' : '回归线',
+      name: isIsochronalResult ? `回归线${analysisUnit}` : '回归线',
       type: 'line',
       showSymbol: false,
-      data: regressionLine.map(point => [point.flowRate, point.transformedPressure]),
-      lineStyle: { color: '#222', width: 2 }
+      symbol: 'none',
+      z: 2,
+      data: clipLine(blackLine).map(point => [point.flowRate, point.transformedPressure]),
+      lineStyle: { color: '#303030', width: 2 },
+      itemStyle: { color: '#303030' }
     }
   ]
 
-  if (transientLine.length) {
+  if (orangeLine.length) {
     series.push({
-      name: '等时线',
+      name: isIsochronalResult ? `平移线${analysisUnit}` : '等时线',
       type: 'line',
       showSymbol: false,
-      data: transientLine.map(point => [point.flowRate, point.transformedPressure]),
-      lineStyle: { color: '#f2a900', width: 2, type: 'dashed' }
+      symbol: 'none',
+      z: 2,
+      data: clipLine(orangeLine).map(point => [point.flowRate, point.transformedPressure]),
+      lineStyle: { color: '#f5a000', width: 2, type: 'dotted' },
+      itemStyle: { color: '#f5a000' }
     })
   }
 
+  if (stablePoints.length) {
+    series.push({
+      name: `稳定点${analysisUnit}`,
+      type: 'scatter',
+      symbolSize: 10,
+      z: 5,
+      data: stablePoints.map(point => [point.flowRate, point.transformedPressure]),
+      itemStyle: { color: '#e75b62' }
+    })
+  }
+
+  const legendItems = series.map(item => ({
+    name: item.name,
+    type: item.type,
+    color: item.itemStyle?.color || item.lineStyle?.color || '#333',
+    dotted: item.lineStyle?.type === 'dotted'
+  }))
+  const legendMeasureContext = document.createElement('canvas').getContext('2d')
+  if (legendMeasureContext) legendMeasureContext.font = '12px "Microsoft YaHei", sans-serif'
+  const widestLegendText = Math.max(
+    0,
+    ...legendItems.map(item => legendMeasureContext?.measureText(item.name).width || item.name.length * 7)
+  )
+  const legendPanelWidth = Math.min(330, Math.max(190, Math.ceil(widestLegendText) + 49))
+  const legendRowHeight = 21
+  const legendPanelHeight = legendItems.length * legendRowHeight + 12
+  const legendChildren = [{
+    type: 'rect',
+    z: 1000,
+    zlevel: 20,
+    shape: { x: 0, y: 0, width: legendPanelWidth, height: legendPanelHeight, r: 2 },
+    style: {
+      fill: '#fff',
+      stroke: '#cfd5dc',
+      lineWidth: 1,
+      shadowBlur: 7,
+      shadowColor: 'rgba(0,0,0,0.14)',
+      shadowOffsetY: 2
+    }
+  }]
+  legendItems.forEach((item, index) => {
+    const centerY = 6 + legendRowHeight * index + legendRowHeight / 2
+    legendChildren.push(item.type === 'scatter'
+      ? {
+          type: 'circle',
+          z: 1001,
+          zlevel: 20,
+          shape: { cx: 17, cy: centerY, r: 5.5 },
+          style: { fill: item.color }
+        }
+      : {
+          type: 'line',
+          z: 1001,
+          zlevel: 20,
+          shape: { x1: 8, y1: centerY, x2: 28, y2: centerY },
+          style: {
+            stroke: item.color,
+            lineWidth: 2,
+            lineDash: item.dotted ? [2, 2] : null
+          }
+        })
+    legendChildren.push({
+      type: 'text',
+      z: 1001,
+      zlevel: 20,
+      style: {
+        x: 35,
+        y: centerY,
+        text: item.name,
+        font: '12px "Microsoft YaHei", sans-serif',
+        fill: '#303030',
+        verticalAlign: 'middle'
+      }
+    })
+  })
+  const formulaText = result.value.rSquared === null || result.value.rSquared === undefined
+    ? result.value.equation
+    : `${result.value.equation}\nR² = ${Number(result.value.rSquared).toFixed(4)}`
+  const formulaPanelWidth = 350
+  const formulaPanelHeight = result.value.rSquared === null || result.value.rSquared === undefined ? 42 : 60
+
   chartInstance.setOption({
     animation: false,
+    backgroundColor: '#fff',
     title: {
       text: `${methodName.value}试井分析图`,
       left: 'center',
-      textStyle: { fontSize: 16, fontWeight: 600 }
+      top: 8,
+      textStyle: { color: '#3f3f3f', fontSize: 14, fontWeight: 600 }
     },
-    tooltip: { trigger: 'axis' },
-    legend: { right: 18, top: 12 },
-    grid: { left: 82, right: 34, top: 60, bottom: 62 },
+    tooltip: {
+      trigger: 'axis',
+      confine: true,
+      backgroundColor: 'rgba(255,255,255,0.96)',
+      borderColor: '#cfd5dc',
+      borderWidth: 1,
+      textStyle: { color: '#333', fontSize: 12 },
+      axisPointer: {
+        type: 'line',
+        axis: 'x',
+        snap: false,
+        lineStyle: { color: '#5f6f82', width: 1, type: 'dashed' },
+        label: {
+          show: true,
+          backgroundColor: '#5f6f82',
+          color: '#fff',
+          precision: 3
+        }
+      }
+    },
+    legend: { show: false },
+    grid: {
+      left: 74,
+      right: 30,
+      top: 40,
+      bottom: 58,
+      show: true,
+      borderColor: '#d7dfeb',
+      borderWidth: 1
+    },
     xAxis: {
       type: result.value.calculationResultType === 'exponential' ? 'log' : 'value',
       scale: true,
       name: 'qsc(10⁴m³/d)',
       nameLocation: 'middle',
-      nameGap: 38,
-      splitLine: { lineStyle: { color: '#e7edf6' } }
+      nameGap: 32,
+      nameTextStyle: { color: '#333', fontSize: 14 },
+      axisLine: { show: true, lineStyle: { color: '#444', width: 1 } },
+      axisTick: { show: true, lineStyle: { color: '#555' } },
+      axisLabel: { color: '#444', fontSize: 12 },
+      splitNumber: 12,
+      splitLine: { show: true, lineStyle: { color: '#dbe4f1', width: 1 } },
+      minorTick: { show: true, splitNumber: 5 },
+      minorSplitLine: { show: true, lineStyle: { color: '#edf2f8', width: 1 } }
     },
     yAxis: {
       type: result.value.calculationResultType === 'exponential' ? 'log' : 'value',
@@ -1421,35 +1634,70 @@ const renderChart = () => {
         ? exponentialAnalysisAxisName(result.value.calculationMethod || calculationMethod.value)
         : analysisAxisName(result.value.calculationMethod || calculationMethod.value),
       nameLocation: 'middle',
-      nameGap: 58,
-      splitLine: { lineStyle: { color: '#e7edf6' } }
+      nameGap: 48,
+      nameTextStyle: { color: '#333', fontSize: 14 },
+      axisLine: { show: true, lineStyle: { color: '#444', width: 1 } },
+      axisTick: { show: true, lineStyle: { color: '#555' } },
+      axisLabel: { color: '#444', fontSize: 12 },
+      splitNumber: 10,
+      splitLine: { show: true, lineStyle: { color: '#dbe4f1', width: 1 } },
+      minorTick: { show: true, splitNumber: 5 },
+      minorSplitLine: { show: true, lineStyle: { color: '#edf2f8', width: 1 } }
     },
     series,
-    graphic: [{
-      type: 'group',
-      right: 46,
-      bottom: 70,
-      children: [
-        {
-          type: 'rect',
-          shape: { x: 0, y: 0, width: 310, height: 62 },
-          style: { fill: 'rgba(255,255,255,0.88)', stroke: '#d8dee8' }
-        },
-        {
-          type: 'text',
-          style: {
-            x: 12,
-            y: 12,
-            text: result.value.rSquared === null || result.value.rSquared === undefined
-              ? result.value.equation
-              : `${result.value.equation}\nR² = ${Number(result.value.rSquared).toFixed(4)}`,
-            font: '14px sans-serif',
-            fill: '#444',
-            lineHeight: 24
+    graphic: [
+      {
+        id: 'analysis-legend-panel',
+        type: 'group',
+        right: 16,
+        top: 62,
+        z: 100,
+        zlevel: 20,
+        draggable: true,
+        cursor: 'move',
+        children: legendChildren
+      },
+      {
+        id: 'analysis-formula-panel',
+        type: 'group',
+        right: 46,
+        bottom: 72,
+        z: 100,
+        zlevel: 20,
+        draggable: true,
+        cursor: 'move',
+        children: [
+          {
+            type: 'rect',
+            z: 1000,
+            zlevel: 20,
+            shape: { x: 0, y: 0, width: formulaPanelWidth, height: formulaPanelHeight, r: 2 },
+            style: {
+              fill: '#fff',
+              stroke: '#cfd5dc',
+              lineWidth: 1,
+              shadowBlur: 7,
+              shadowColor: 'rgba(0,0,0,0.14)',
+              shadowOffsetY: 2
+            }
+          },
+          {
+            type: 'text',
+            z: 1001,
+            zlevel: 20,
+            style: {
+              x: 12,
+              y: 9,
+              text: formulaText,
+              font: '13px "Microsoft YaHei", sans-serif',
+              fill: '#444',
+              lineHeight: 21,
+              textAlign: 'left'
+            }
           }
-        }
-      ]
-    }]
+        ]
+      }
+    ]
   }, true)
   chartInstance.resize()
 }
@@ -1461,38 +1709,150 @@ const renderIprChart = () => {
   const iprCurves = Array.isArray(result.value.iprCurves) && result.value.iprCurves.length
     ? result.value.iprCurves
     : [{ formationPressure: result.value.formationPressure, points: result.value.iprCurve || [] }]
+  const iprColors = [
+    '#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de',
+    '#3ba272', '#fc8452', '#9a60b4', '#ea7ccc', '#00b7c7',
+    '#6f7ad3', '#c98bd4'
+  ]
+  const iprSeries = iprCurves.map((curve, index) => ({
+    name: `Pr${index + 1}=${Number(curve.formationPressure).toFixed(0)} MPa`,
+    type: 'line',
+    showSymbol: false,
+    symbol: 'none',
+    smooth: true,
+    data: (curve.points || []).map(point => [point.flowRate, point.flowingPressure]),
+    lineStyle: { width: 1.7, color: iprColors[index % iprColors.length] },
+    itemStyle: { color: iprColors[index % iprColors.length] }
+  }))
+  const iprMeasureContext = document.createElement('canvas').getContext('2d')
+  if (iprMeasureContext) iprMeasureContext.font = '11px "Microsoft YaHei", sans-serif'
+  const iprLegendTextWidth = Math.max(
+    0,
+    ...iprSeries.map(item => iprMeasureContext?.measureText(item.name).width || item.name.length * 6.5)
+  )
+  const iprLegendWidth = Math.min(190, Math.max(115, Math.ceil(iprLegendTextWidth) + 43))
+  const iprLegendRowHeight = 18
+  const iprLegendHeight = iprSeries.length * iprLegendRowHeight + 12
+  const iprLegendChildren = [{
+    type: 'rect',
+    z: 1000,
+    zlevel: 20,
+    shape: { x: 0, y: 0, width: iprLegendWidth, height: iprLegendHeight, r: 2 },
+    style: {
+      fill: '#fff',
+      stroke: '#cfd5dc',
+      lineWidth: 1,
+      shadowBlur: 7,
+      shadowColor: 'rgba(0,0,0,0.14)',
+      shadowOffsetY: 2
+    }
+  }]
+  iprSeries.forEach((item, index) => {
+    const centerY = 6 + iprLegendRowHeight * index + iprLegendRowHeight / 2
+    iprLegendChildren.push(
+      {
+        type: 'line',
+        z: 1001,
+        zlevel: 20,
+        shape: { x1: 8, y1: centerY, x2: 25, y2: centerY },
+        style: { stroke: item.lineStyle.color, lineWidth: 2 }
+      },
+      {
+        type: 'text',
+        z: 1001,
+        zlevel: 20,
+        style: {
+          x: 31,
+          y: centerY,
+          text: item.name,
+          font: '11px "Microsoft YaHei", sans-serif',
+          fill: '#303030',
+          verticalAlign: 'middle'
+        }
+      }
+    )
+  })
   chartInstance.setOption({
     animation: false,
+    backgroundColor: '#fff',
     title: {
       text: 'IPR曲线',
       left: 'center',
-      textStyle: { fontSize: 16, fontWeight: 600 }
+      top: 8,
+      textStyle: { color: '#3f3f3f', fontSize: 14, fontWeight: 600 }
     },
-    tooltip: { trigger: 'axis' },
-    legend: { right: 28, top: 20, orient: 'vertical' },
-    grid: { left: 75, right: 145, top: 58, bottom: 60 },
+    tooltip: {
+      trigger: 'axis',
+      confine: true,
+      backgroundColor: 'rgba(255,255,255,0.96)',
+      borderColor: '#cfd5dc',
+      borderWidth: 1,
+      textStyle: { color: '#333', fontSize: 12 },
+      axisPointer: {
+        type: 'line',
+        axis: 'x',
+        snap: false,
+        lineStyle: { color: '#5f6f82', width: 1, type: 'dashed' },
+        label: {
+          show: true,
+          backgroundColor: '#5f6f82',
+          color: '#fff',
+          precision: 3
+        }
+      }
+    },
+    legend: { show: false },
+    grid: {
+      left: 68,
+      right: 28,
+      top: 40,
+      bottom: 58,
+      show: true,
+      borderColor: '#d7dfeb',
+      borderWidth: 1
+    },
     xAxis: {
       type: 'value',
+      min: 0,
       name: 'qsc(10⁴m³/d)',
       nameLocation: 'middle',
-      nameGap: 38,
-      splitLine: { lineStyle: { color: '#e7edf6' } }
+      nameGap: 32,
+      nameTextStyle: { color: '#333', fontSize: 14 },
+      axisLine: { show: true, lineStyle: { color: '#444', width: 1 } },
+      axisTick: { show: true, lineStyle: { color: '#555' } },
+      axisLabel: { color: '#444', fontSize: 12 },
+      splitNumber: 15,
+      splitLine: { show: true, lineStyle: { color: '#dbe4f1', width: 1 } },
+      minorTick: { show: true, splitNumber: 5 },
+      minorSplitLine: { show: true, lineStyle: { color: '#edf2f8', width: 1 } }
     },
     yAxis: {
       type: 'value',
+      min: 0,
       name: 'Pwf(MPa)',
       nameLocation: 'middle',
-      nameGap: 48,
-      splitLine: { lineStyle: { color: '#e7edf6' } }
+      nameGap: 43,
+      nameTextStyle: { color: '#333', fontSize: 14 },
+      axisLine: { show: true, lineStyle: { color: '#444', width: 1 } },
+      axisTick: { show: true, lineStyle: { color: '#555' } },
+      axisLabel: { color: '#444', fontSize: 12 },
+      splitNumber: 12,
+      splitLine: { show: true, lineStyle: { color: '#dbe4f1', width: 1 } },
+      minorTick: { show: true, splitNumber: 5 },
+      minorSplitLine: { show: true, lineStyle: { color: '#edf2f8', width: 1 } }
     },
-    series: iprCurves.map((curve, index) => ({
-      name: `Pr${index + 1}=${Number(curve.formationPressure).toFixed(0)} MPa`,
-      type: 'line',
-      showSymbol: false,
-      smooth: true,
-      data: (curve.points || []).map(point => [point.flowRate, point.flowingPressure]),
-      lineStyle: { width: 2 }
-    }))
+    series: iprSeries,
+    graphic: [{
+      id: 'ipr-legend-panel',
+      type: 'group',
+      right: 16,
+      top: 54,
+      z: 100,
+      zlevel: 20,
+      draggable: true,
+      cursor: 'move',
+      children: iprLegendChildren
+    }]
   }, true)
   chartInstance.resize()
 }
@@ -1503,6 +1863,149 @@ const switchPanel = async (panel) => {
   await nextTick()
   if (activeChart.value === 'ipr') renderIprChart()
   else renderChart()
+}
+
+const getPersistenceSnapshot = () => {
+  if (!result.value) return null
+  const validRows = inputRows.value.filter(row =>
+    [row.flowRate, row.flowingPressure, row.recoveryPressure].every(value => Number.isFinite(Number(value)))
+  )
+  return {
+    input: {
+      maximumFormationPressure: Number(formationPressure.value),
+      formationTemperature: Number(temperature.value),
+      onePointAlpha: Number(props.externalOnePointAlpha),
+      gasType: props.pvtRecord?.gasSettings?.gasType || null,
+      specificGravity: Number(props.pvtRecord?.gasSettings?.specificGravity) || null,
+      hydrogenSulfide: Number(props.pvtRecord?.gasSettings?.hydrogenSulfide) || null,
+      carbonDioxide: Number(props.pvtRecord?.gasSettings?.carbonDioxide) || null,
+      nitrogen: Number(props.pvtRecord?.gasSettings?.nitrogen) || null,
+      condensateOilDensity: Number(props.pvtRecord?.gasSettings?.condensateOilDensity) || null,
+      modificationMethod: props.pvtRecord?.gasSettings?.modificationMethod || null,
+      deviationFactorMethod: props.pvtRecord?.gasSettings?.deviationFactorMethod || null,
+      viscosityMethod: props.pvtRecord?.gasSettings?.viscosityMethod || null,
+      points: validRows.map((row, index) => ({
+        pointNumber: Number(row.sequence || index + 1),
+        gasProduction: Number(row.flowRate),
+        reservoirPressure: Number(row.recoveryPressure),
+        flowPressure: Number(row.flowingPressure)
+      }))
+    },
+    pressureMethod: calculationMethod.value,
+    result: {
+      calculationResultType: result.value.calculationResultType,
+      darcyCoefficient: result.value.calculationResultType === 'binomial'
+        ? Number(result.value.darcyCoefficient)
+        : null,
+      nonDarcyCoefficient: result.value.calculationResultType === 'binomial'
+        ? Number(result.value.nonDarcyCoefficient)
+        : null,
+      productivityCoefficient: result.value.calculationResultType === 'exponential'
+        ? Number(result.value.productivityCoefficient)
+        : null,
+      productivityExponent: result.value.calculationResultType === 'exponential'
+        ? Number(result.value.productivityExponent)
+        : null,
+      openFlowCapacity: Number(result.value.aofRate),
+      gradient: Number.isFinite(Number(result.value.nonDarcyCoefficient))
+        ? Number(result.value.nonDarcyCoefficient)
+        : null,
+      intercept: Number.isFinite(Number(result.value.darcyCoefficient))
+        ? Number(result.value.darcyCoefficient)
+        : null,
+      rSquared: Number.isFinite(Number(result.value.rSquared)) ? Number(result.value.rSquared) : null,
+      reliabilityLevel: null,
+      reliabilityDescription: result.value.reliability || null,
+      analysisPoints: (result.value.analysisPoints || []).map(point => ({
+        x: Number(point.flowRate), y: Number(point.transformedPressure), label: null
+      })),
+      regressionLine: (result.value.regressionLine || []).map(point => ({
+        x: Number(point.flowRate), y: Number(point.transformedPressure), label: null
+      })),
+      transientLine: (result.value.transientLine || []).map(point => ({
+        x: Number(point.flowRate), y: Number(point.transformedPressure), label: null
+      })),
+      iprCurves: (result.value.iprCurves || []).map(curve => ({
+        formationPressure: Number(curve.formationPressure),
+        points: (curve.points || []).map(point => ({
+          gasProduction: Number(point.flowRate),
+          bottomHoleFlowingPressure: Number(point.flowingPressure),
+          label: null
+        }))
+      }))
+    }
+  }
+}
+
+const restorePersisted = detail => {
+  if (!detail?.input || !detail?.result) return
+  activeTestType.value = 'isochronal'
+  selectedDataTable.value = 'isochronal'
+  formationPressure.value = Number(detail.input.maximumFormationPressure)
+  temperature.value = Number(detail.input.formationTemperature)
+  calculationMethod.value = normalizeCalculationMethod(detail.pressureMethod)
+  calculationResultType.value = detail.result.calculationResultType === 'exponential'
+    ? 'exponential'
+    : 'binomial'
+  inputRows.value = (detail.input.points || []).map(point => ({
+    sequence: point.pointNumber,
+    flowRate: point.gasProduction,
+    equivalentFlowRate: '',
+    flowingPressure: point.flowPressure,
+    recoveryPressure: point.reservoirPressure
+  }))
+  hasMethodData.value = inputRows.value.length > 0
+  const restored = {
+    wellName: detail.record?.wellName || selectedWellName.value,
+    testType: 'isochronal',
+    methodName: '等时',
+    calculationMethod: calculationMethod.value,
+    calculationResultType: calculationResultType.value,
+    formationPressure: Number(detail.input.maximumFormationPressure),
+    darcyCoefficient: detail.result.darcyCoefficient,
+    nonDarcyCoefficient: detail.result.nonDarcyCoefficient,
+    productivityCoefficient: detail.result.productivityCoefficient,
+    productivityExponent: detail.result.productivityExponent,
+    equation: calculationResultType.value === 'exponential'
+      ? exponentialEquation(
+          calculationMethod.value,
+          Number(detail.result.productivityCoefficient),
+          Number(detail.result.productivityExponent)
+        )
+      : coefficientEquation(
+          calculationMethod.value,
+          Number(detail.result.darcyCoefficient),
+          Number(detail.result.nonDarcyCoefficient)
+        ),
+    aofRate: detail.result.openFlowCapacity,
+    rSquared: detail.result.rSquared,
+    reliability: detail.result.reliabilityDescription || '',
+    analysisPoints: (detail.result.analysisPoints || []).map(point => ({
+      flowRate: point.x, transformedPressure: point.y
+    })),
+    regressionLine: (detail.result.regressionLine || []).map(point => ({
+      flowRate: point.x, transformedPressure: point.y
+    })),
+    transientLine: (detail.result.transientLine || []).map(point => ({
+      flowRate: point.x, transformedPressure: point.y
+    })),
+    iprCurves: (detail.result.iprCurves || []).map(curve => ({
+      formationPressure: Number(curve.formationPressure) || Number(detail.input.maximumFormationPressure),
+      points: (curve.points || []).map(point => ({
+        flowRate: point.gasProduction,
+        flowingPressure: point.bottomHoleFlowingPressure
+      }))
+    }))
+  }
+  restored.iprCurve = restored.iprCurves.at(-1)?.points || []
+  result.value = restored
+  emit('result-change', restored)
+  activePanel.value = 'analysis'
+  activeChart.value = 'analysis'
+  nextTick(() => {
+    if (activeChart.value === 'ipr') renderIprChart()
+    else renderChart()
+  })
 }
 
 const switchChart = async (chartType) => {
@@ -1567,7 +2070,7 @@ onMounted(async () => {
   if (selectedWellName.value) await loadWellData()
 })
 
-defineExpose({ analyze, loadWellData, switchPanel })
+defineExpose({ analyze, loadWellData, replaceInputRows, switchPanel, getPersistenceSnapshot, restorePersisted })
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize)
@@ -1683,6 +2186,12 @@ onBeforeUnmount(() => {
             <el-table-column label="测试流压(MPa)" min-width="145">
               <template #default="scope">
                 <el-input-number v-model="scope.row.flowingPressure" :controls="false" size="small" />
+              </template>
+            </el-table-column>
+            <el-table-column v-if="activeTestType === 'isochronal'" label="测点类型" width="90" align="center">
+              <template #default="scope">
+                <el-tag v-if="scope.$index === inputRows.length - 1" type="danger" size="small">稳定点</el-tag>
+                <span v-else>等时点</span>
               </template>
             </el-table-column>
             <el-table-column label="操作" width="75" align="center">

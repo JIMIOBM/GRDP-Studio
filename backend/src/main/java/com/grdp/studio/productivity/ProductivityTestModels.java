@@ -29,7 +29,7 @@ public final class ProductivityTestModels {
                            @NotNull Double gasProduction, @NotNull Double bottomHoleFlowingPressure,
                            boolean deleted, String dataLabel) {}
 
-    public record Result(String pressureMethod, @NotNull @Positive Long evaluationId, Double darcySeepageCoefficient,
+    public record Result(String pressureMethod, Long evaluationId, Double darcySeepageCoefficient,
                          Double nonDarcySeepageCoefficient, Double openFlowCapacity,
                          Double gradient, Double intercept, Double rSquared,
                          Integer reliabilityLevel, String reliabilityDescription,
