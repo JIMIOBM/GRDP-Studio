@@ -5,7 +5,7 @@ Last verified: 2026-08-30
 ## Repository State
 
 - Branch: `violet/feature/software-integration-ui`
-- Stage 0 baseline protection is ready to commit in this handoff.
+- Stage 0 baseline protection was committed in this handoff.
 - Other Stage 1/2 software-integration work remains uncommitted.
 - Existing unrelated worktree changes must not be reverted.
 - Authoritative requirements: `docs/software-integration/requirements.md`
