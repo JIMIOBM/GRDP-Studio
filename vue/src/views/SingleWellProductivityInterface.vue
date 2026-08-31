@@ -781,7 +781,7 @@ const saveCalculation = async () => {
 }
 
 const handleCalculate = async () => {
-  if (!selectedPvtTable.value) {
+  if (calculationMethod.value === '拟压力' && !selectedPvtTable.value) {
     ElMessage.warning('请选择PVT表')
     return
   }

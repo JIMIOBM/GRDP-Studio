@@ -5,6 +5,12 @@ import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import dockerRequest, { nodeApi, productivityEvaluationApi } from '@/api/docker'
 import { NODETYPE } from '@/constants/nodeType'
+import {
+  fitBackPressureBinomial,
+  fitBackPressureExponential,
+  solveBackPressureBinomialRate,
+  solveBackPressureExponentialRate
+} from '@/utils/backPressureCalculation'
 
 const getStoredToken = () => {
   try {
@@ -745,11 +751,7 @@ const exponentialEquation = (method, coefficient, exponent, selectedOperationTyp
   `qsc = ${coefficient.toPrecision(6)} × [${pressureExpression(method, selectedOperationType)}]^${exponent.toPrecision(6)}`
 
 const solveBinomialFlowRate = (drawdown, darcy, nonDarcy) => {
-  if (!Number.isFinite(drawdown) || drawdown <= 0) return 0
-  if (nonDarcy > 1e-12) {
-    return (-darcy + Math.sqrt(darcy ** 2 + 4 * nonDarcy * drawdown)) / (2 * nonDarcy)
-  }
-  return darcy > 1e-12 ? drawdown / darcy : 0
+  return solveBackPressureBinomialRate(drawdown, darcy, nonDarcy)
 }
 
 const createIprCurve = (
@@ -800,7 +802,7 @@ const createExponentialIprCurve = (
       ? flowingPotential - reservoirPotential
       : reservoirPotential - flowingPotential
     return {
-      flowRate: drawdown > 0 ? coefficient * drawdown ** exponent : 0,
+      flowRate: solveBackPressureExponentialRate(drawdown, coefficient, exponent),
       flowingPressure
     }
   })
@@ -860,6 +862,15 @@ const normalizeLocalPoints = (
 }
 
 const regressLocalPoints = (points) => {
+  if (activeTestType.value === 'back-pressure') {
+    const fitted = fitBackPressureBinomial(points)
+    return {
+      darcyCoefficient: fitted.darcyCoefficient,
+      nonDarcyCoefficient: fitted.nonDarcyCoefficient,
+      rSquared: fitted.rSquared,
+      transientDarcyCoefficient: null
+    }
+  }
   const meanX = points.reduce((sum, point) => sum + point.flowRate, 0) / points.length
   const meanY = points.reduce((sum, point) => sum + point.transformedPressure, 0) / points.length
   const sxx = points.reduce((sum, point) => sum + (point.flowRate - meanX) ** 2, 0)
@@ -883,6 +894,9 @@ const regressLocalPoints = (points) => {
 }
 
 const regressExponentialPoints = points => {
+  if (activeTestType.value === 'back-pressure') {
+    return fitBackPressureExponential(points)
+  }
   const logarithmicPoints = points.map(point => {
     if (!Number.isFinite(point.potentialDifference) || point.potentialDifference <= 0) {
       throw new Error('压力函数差必须大于 0')
@@ -1760,7 +1774,7 @@ const analyze = async () => {
   }
   calculating.value = true
   try {
-    if (['back-pressure', 'one-point'].includes(activeTestType.value)) {
+    if (activeTestType.value === 'one-point') {
       await syncOriginalInputDefaults()
     }
     const payload = buildPayload()
@@ -1768,8 +1782,7 @@ const analyze = async () => {
       const exactRows = await loadExactPseudoPressureRows(payload)
       payload.pvtResultRows = [...payload.pvtResultRows, ...exactRows]
     }
-    if (payload.calculationResultType === 'binomial' &&
-        ['back-pressure', 'one-point'].includes(payload.testType)) {
+    if (payload.calculationResultType === 'binomial' && payload.testType === 'one-point') {
       result.value = await calculateWithOriginalPlatform(payload)
     } else {
       const response = { data: calculateLocally(payload) }
