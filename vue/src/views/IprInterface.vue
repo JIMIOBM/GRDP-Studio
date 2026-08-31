@@ -57,7 +57,7 @@ import {
 // 7
 const PROJECT_ID = 6
 // 4
-const GAS_RESERVOIR_ID = 4
+const GAS_RESERVOIR_ID = 1
 const router = useRouter()
 const FLOW_BALANCE_NODE_TYPE = NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure
 
