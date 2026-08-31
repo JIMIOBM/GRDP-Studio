@@ -43,7 +43,7 @@ const defaultTabs = [
           { type: 'large', label: '产能系数', dropdown: true, dropdownItems: ['二项式', '指数式'] },
           { type: 'large', label: '理论计算', dropdown: true, dropdownItems: ['稳定流', '不稳定流'] },
           { type: 'large', label: '动态产能', dropdown: true, dropdownItems: ['稳定流', '不稳定流'] },
-          { type: 'large', label: '产能对比', dropdown: true, dropdownItems: ['多周期'] }
+          { type: 'large', label: '产能对比', dropdown: true, dropdownItems: ['多周期', '多方法', '注采对比'] }
         ]
       },
       {

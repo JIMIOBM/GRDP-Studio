@@ -19,6 +19,8 @@ import RibbonMenu from '@/components/RibbonMenu.vue'
 import WorkspaceSidebar from '@/components/WorkspaceSidebar.vue'
 import BinomialPressureContent from '@/views/WellControlInventory/BinomialPressureContent.vue'
 import ModifiedIsochronalContent from '@/views/SingleWellProductivity/ModifiedIsochronalContent.vue'
+import ExponentialContent from '@/views/SingleWellProductivity/ExponentialContent.vue'
+import ProductivityComparison from '@/views/SingleWellProductivity/ProductivityComparison.vue'  
 import { NODETYPE } from '@/constants/nodeType'
 import { wellApi } from '@/api/docker'
 import { pvtStorageApi } from '@/api/pvtStorage'
@@ -46,9 +48,9 @@ import {
 } from '@/utils/workspaceTreeState'
 
 const PROJECT_ID = 6
-const GAS_RESERVOIR_ID = 4
+const GAS_RESERVOIR_ID = 1
 const MODIFIED_ISOCHRONAL_PROJECT_ID = 6
-const MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID = 4
+const MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID = 1
 
 const route = useRoute()
 const router = useRouter()
@@ -58,7 +60,7 @@ const MODULES = [
   { name: '产能系数', methods: ['二项式', '指数式'] },
   { name: '理论计算', methods: ['稳定流', '不稳定流'] },
   { name: '动态产能', methods: ['稳定流', '不稳定流'] },
-  { name: '产能对比', methods: ['多周期'] }
+  { name: '产能对比', methods: ['多周期', '多方法', '注采对比'] }
 ]
 
 const WORKSPACE_GROUPS = [
@@ -102,6 +104,15 @@ const selectedDataTable = ref('')
 const maximumFormationPressure = ref('56.34')
 const formationTemperature = ref('120')
 const onePointAlpha = ref('0.25')
+// 产能系数
+const productivityCoefficientC = ref('1.0877')
+const productivityExponentN = ref('3.8453')
+const correctedCoefficientC = ref('2.099')
+const correctedExponentN = ref('6.096')
+const fittedFormationPressure = ref('28.99')
+const exponentialCalculationMethod = ref('拟压力')
+const openFlowRate = ref('5')
+
 const calculationMethod = ref('拟压力')
 const calculationResult = ref('二项式')
 const operationType = ref('production')
@@ -132,11 +143,11 @@ const sidebarTreeData = computed(() => {
 
   return workspaceTreeData.value.map(node => node.id === 'g-well'
     ? {
-        ...node,
-        children: (node.children || []).filter(well =>
-          String(well.wellName || well.label || '').toLowerCase().includes(value)
-        )
-      }
+      ...node,
+      children: (node.children || []).filter(well =>
+        String(well.wellName || well.label || '').toLowerCase().includes(value)
+      )
+    }
     : node
   )
 })
@@ -179,7 +190,7 @@ const normalizePvtDetail = detail => {
     pvtNo: detail?.record?.pvtNo,
     pvtName: detail?.record?.pvtName,
     gasRows: [[gasInput.gasType, gasInput.specificGravity, gasInput.hydrogenSulfide,
-      gasInput.carbonDioxide, gasInput.nitrogen, gasInput.condensateOilDensity]],
+    gasInput.carbonDioxide, gasInput.nitrogen, gasInput.condensateOilDensity]],
     gasSettings,
     gasResultRows: detail?.gasResults || []
   }
@@ -238,7 +249,12 @@ const handleDataFile = async event => {
   }
 }
 
-const testTitle = computed(() => `产能试井-${activeMethod.value}`)
+const tabTitle = computed(() => {
+  if (activeMethod.value) {
+    return `${activeModule.value}-${activeMethod.value}`
+  }
+  return activeModule.value
+})
 const pressureTestType = computed(() => ({
   '回压试井': 'back-pressure',
   '等时试井': 'isochronal',
@@ -465,7 +481,7 @@ const handleSidebarSelect = async node => {
     const targetWell = selectedWellName.value
     const targetTestId = activeProductivityTestId.value
     if (route.query.module !== '产能试井' || route.query.method !== '修正等时' ||
-        route.query.well !== targetWell || Number(route.query.testId) !== Number(targetTestId)) {
+      route.query.well !== targetWell || Number(route.query.testId) !== Number(targetTestId)) {
       await router.replace({
         name: 'SingleWellProductivity',
         query: {
@@ -612,120 +628,100 @@ onMounted(async () => {
 
     <div class="productivity-main">
       <!-- 公共左侧目录：与 IprInterface.vue 使用同一个组件。 -->
-      <WorkspaceSidebar
-        v-model:keyword="keyword"
-        v-model:collapsed="sideTreeCollapsed"
-        :nodes="sidebarTreeData"
-        :active-id="workspaceActiveNodeId"
-        :loading="loadingWells"
-        @select="handleSidebarSelect"
-      />
+      <WorkspaceSidebar v-model:keyword="keyword" v-model:collapsed="sideTreeCollapsed" :nodes="sidebarTreeData"
+        :active-id="workspaceActiveNodeId" :loading="loadingWells" @select="handleSidebarSelect" />
 
-      <main class="productivity-content">
-        <template v-if="activeModule === '产能试井' && activeMethod">
-          <div class="test-tabs">
-            <div class="test-tab">
-              <span>{{ testTitle }}</span>
-            </div>
+            <main class="productivity-content">
+        <div v-if="activeModule && activeMethod" class="test-tabs">
+          <div class="test-tab">
+            <span>{{ tabTitle }}</span>
           </div>
+        </div>
 
-          <ModifiedIsochronalContent
-            v-if="activeMethod === '修正等时'"
-            :project-id="MODIFIED_ISOCHRONAL_PROJECT_ID"
-            :gas-reservoir-id="MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID"
-            :well-name="selectedWellName"
-            :test-id="activeProductivityTestId"
-            :evaluation-id="activeEvaluationId"
-            @saved="handleProductivitySaved"
-          />
+        <template v-if="activeModule === '产能试井' && activeMethod">
+
+          <ModifiedIsochronalContent v-if="activeMethod === '修正等时'" :project-id="MODIFIED_ISOCHRONAL_PROJECT_ID"
+            :gas-reservoir-id="MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID" :well-name="selectedWellName"
+            :test-id="activeProductivityTestId" :evaluation-id="activeEvaluationId" @saved="handleProductivitySaved" />
 
           <section v-else class="test-workspace">
             <aside class="parameter-panel" :class="{ collapsed: paramsCollapsed }">
-              <button
-                v-if="paramsCollapsed"
-                class="parameter-collapsed-tab"
-                type="button"
-                title="展开参数设置"
-                @click="toggleParamsPanel"
-              >
+              <button v-if="paramsCollapsed" class="parameter-collapsed-tab" type="button" title="展开参数设置"
+                @click="toggleParamsPanel">
                 参数设置
               </button>
 
               <template v-else>
                 <div class="parameter-heading">
                   <span>参数设置</span>
-                  <button
-                    class="parameter-toggle"
-                    type="button"
-                    title="收起参数设置"
-                    aria-label="收起参数设置"
-                    @click="toggleParamsPanel"
-                  >
+                  <button class="parameter-toggle" type="button" title="收起参数设置" aria-label="收起参数设置"
+                    @click="toggleParamsPanel">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="#777" aria-hidden="true">
                       <path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z" />
                     </svg>
                   </button>
                 </div>
                 <div class="parameter-form">
-                <label class="field-group">
-                  <span>选择PVT表</span>
-                  <select v-model="selectedPvtTable" @change="loadSelectedPvtDetail">
-                    <option value="" disabled>{{ pvtTableOptions.length ? '请选择PVT性质' : '当前井暂无PVT性质' }}</option>
-                    <option v-for="option in pvtTableOptions" :key="option.value" :value="option.value">
-                      {{ option.label }}
-                    </option>
-                  </select>
-                </label>
-
-                <label class="field-group">
-                  <span>选择数据表</span>
-                  <button type="button" class="local-import-button" :disabled="importingData" @click="chooseDataFile">
-                    {{ importingData ? '正在导入…' : '本地导入' }}
-                  </button>
-                  <input ref="dataFileInput" class="hidden-data-file" type="file" accept=".xlsx,.xls,.csv" @change="handleDataFile" />
-                  <small class="imported-data-name">{{ importedDataFileName }}</small>
-                </label>
-
-                <div class="section-heading">
-                  <span>其他数据</span>
-                  <i></i>
-                </div>
-
-                <label class="field-group">
-                  <span>计算IPR曲线的最大地层压力（MPa）</span>
-                  <input v-model="maximumFormationPressure" inputmode="decimal" />
-                </label>
-
-                <label class="field-group">
-                  <span>地层温度（℃）</span>
-                  <input v-model="formationTemperature" inputmode="decimal" />
-                </label>
-
-                <label v-if="activeMethod === '一点法'" class="field-group">
-                  <span>产能系数（α）</span>
-                  <input v-model="onePointAlpha" inputmode="decimal" />
-                </label>
-
-                <fieldset class="radio-group">
-                  <legend>计算方法</legend>
-                  <label><input v-model="calculationMethod" type="radio" value="拟压力" />拟压力</label>
-                  <label><input v-model="calculationMethod" type="radio" value="压力平方方法" />压力平方方法</label>
-                  <label><input v-model="calculationMethod" type="radio" value="压力法" />压力法</label>
-                </fieldset>
-
-                <fieldset class="radio-group">
-                  <legend>注采类型</legend>
-                  <label><input v-model="operationType" type="radio" value="production" />采气</label>
-                  <label class="disabled-radio" title="当前计算仅支持采气">
-                    <input type="radio" value="injection" disabled />注气
+                  <label class="field-group">
+                    <span>选择PVT表</span>
+                    <select v-model="selectedPvtTable" @change="loadSelectedPvtDetail">
+                      <option value="" disabled>{{ pvtTableOptions.length ? '请选择PVT性质' : '当前井暂无PVT性质' }}</option>
+                      <option v-for="option in pvtTableOptions" :key="option.value" :value="option.value">
+                        {{ option.label }}
+                      </option>
+                    </select>
                   </label>
-                </fieldset>
 
-                <fieldset class="radio-group result-methods">
-                  <legend>计算结果</legend>
-                  <label><input v-model="calculationResult" type="radio" value="二项式" />二项式</label>
-                  <label><input v-model="calculationResult" type="radio" value="指数式" />指数式</label>
-                </fieldset>
+                  <label class="field-group">
+                    <span>选择数据表</span>
+                    <button type="button" class="local-import-button" :disabled="importingData" @click="chooseDataFile">
+                      {{ importingData ? '正在导入…' : '本地导入' }}
+                    </button>
+                    <input ref="dataFileInput" class="hidden-data-file" type="file" accept=".xlsx,.xls,.csv"
+                      @change="handleDataFile" />
+                    <small class="imported-data-name">{{ importedDataFileName }}</small>
+                  </label>
+
+                  <div class="section-heading">
+                    <span>其他数据</span>
+                    <i></i>
+                  </div>
+
+                  <label class="field-group">
+                    <span>计算IPR曲线的最大地层压力（MPa）</span>
+                    <input v-model="maximumFormationPressure" inputmode="decimal" />
+                  </label>
+
+                  <label class="field-group">
+                    <span>地层温度（℃）</span>
+                    <input v-model="formationTemperature" inputmode="decimal" />
+                  </label>
+
+                  <label v-if="activeMethod === '一点法'" class="field-group">
+                    <span>产能系数（α）</span>
+                    <input v-model="onePointAlpha" inputmode="decimal" />
+                  </label>
+
+                  <fieldset class="radio-group">
+                    <legend>计算方法</legend>
+                    <label><input v-model="calculationMethod" type="radio" value="拟压力" />拟压力</label>
+                    <label><input v-model="calculationMethod" type="radio" value="压力平方方法" />压力平方方法</label>
+                    <label><input v-model="calculationMethod" type="radio" value="压力法" />压力法</label>
+                  </fieldset>
+
+                  <fieldset class="radio-group">
+                    <legend>注采类型</legend>
+                    <label><input v-model="operationType" type="radio" value="production" />采气</label>
+                    <label class="disabled-radio" title="当前计算仅支持采气">
+                      <input type="radio" value="injection" disabled />注气
+                    </label>
+                  </fieldset>
+
+                  <fieldset class="radio-group result-methods">
+                    <legend>计算结果</legend>
+                    <label><input v-model="calculationResult" type="radio" value="二项式" />二项式</label>
+                    <label><input v-model="calculationResult" type="radio" value="指数式" />指数式</label>
+                  </fieldset>
 
                   <button type="button" class="calculate-button" @click="handleCalculate">计算</button>
                   <div v-if="calculationOutput" class="calculation-output">
@@ -755,76 +751,75 @@ onMounted(async () => {
             </aside>
 
             <div class="result-output-panel" :aria-label="`${testTitle}结果区域`">
-              <BinomialPressureContent
-                v-if="usesPressureCalculation && selectedDataTable"
-                :key="`${selectedWellName}-${activeMethod}-${pressureWorkspaceKey}`"
-                ref="pressureContentRef"
-                embedded
-                auto-select-data
-                :well-names="wells.map(item => item.wellName)"
-                :initial-well-name="selectedWellName"
-                :initial-test-type="pressureTestType"
-                :external-formation-pressure="Number(maximumFormationPressure)"
-                :external-temperature="Number(formationTemperature)"
-                :external-one-point-alpha="Number(onePointAlpha)"
+              <BinomialPressureContent v-if="usesPressureCalculation && selectedDataTable"
+                :key="`${selectedWellName}-${activeMethod}-${pressureWorkspaceKey}`" ref="pressureContentRef" embedded
+                auto-select-data :well-names="wells.map(item => item.wellName)" :initial-well-name="selectedWellName"
+                :initial-test-type="pressureTestType" :external-formation-pressure="Number(maximumFormationPressure)"
+                :external-temperature="Number(formationTemperature)" :external-one-point-alpha="Number(onePointAlpha)"
                 :external-calculation-method="pressureCalculationMethod"
                 :external-calculation-result="calculationResult === '指数式' ? 'exponential' : 'binomial'"
-                :pvt-result-rows="selectedPvtRecord?.gasResultRows || []"
-                :pvt-record="selectedPvtRecord"
-                :project-id="PROJECT_ID"
-                :gas-reservoir-id="GAS_RESERVOIR_ID"
-                @result-change="calculationOutput = $event"
-              />
+                :pvt-result-rows="selectedPvtRecord?.gasResultRows || []" :pvt-record="selectedPvtRecord"
+                :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID"
+                @result-change="calculationOutput = $event" />
 
               <template v-else>
-              <div v-show="activeContentTab === 'table'" class="result-table-panel">
-                <el-table
-                  :data="resultGridRows"
-                  :show-header="false"
-                  height="100%"
-                  size="small"
-                  border
-                  empty-text=""
-                  row-key="id"
-                >
-                  <el-table-column
-                    v-for="column in resultGridColumns"
-                    :key="column.prop"
-                    :prop="column.prop"
-                    :min-width="column.minWidth"
-                  />
-                </el-table>
-              </div>
+                <div v-show="activeContentTab === 'table'" class="result-table-panel">
+                  <el-table :data="resultGridRows" :show-header="false" height="100%" size="small" border empty-text=""
+                    row-key="id">
+                    <el-table-column v-for="column in resultGridColumns" :key="column.prop" :prop="column.prop"
+                      :min-width="column.minWidth" />
+                  </el-table>
+                </div>
 
-              <div
-                v-show="activeContentTab === 'chart'"
-                class="result-chart-panel"
-                :aria-label="`${testTitle}结果分析图`"
-              ></div>
+                <div v-show="activeContentTab === 'chart'" class="result-chart-panel" :aria-label="`${testTitle}结果分析图`">
+                </div>
 
-              <div class="bottom-chart-tabs">
-                <button
-                  type="button"
-                  class="bottom-chart-tab"
-                  :class="{ active: activeContentTab === 'table' }"
-                  @click="activeContentTab = 'table'"
-                >
-                  数据列表
-                </button>
-                <button
-                  type="button"
-                  class="bottom-chart-tab"
-                  :class="{ active: activeContentTab === 'chart' }"
-                  @click="activeContentTab = 'chart'"
-                >
-                  结果分析图
-                </button>
-              </div>
+                <div class="bottom-chart-tabs">
+                  <button type="button" class="bottom-chart-tab" :class="{ active: activeContentTab === 'table' }"
+                    @click="activeContentTab = 'table'">
+                    数据列表
+                  </button>
+                  <button type="button" class="bottom-chart-tab" :class="{ active: activeContentTab === 'chart' }"
+                    @click="activeContentTab = 'chart'">
+                    结果分析图
+                  </button>
+                </div>
               </template>
             </div>
           </section>
         </template>
-
+        <template v-else-if="activeModule === '产能系数'">
+          <ExponentialContent
+            :well-name="selectedWellName"
+            :maximum-formation-pressure="maximumFormationPressure"
+            :formation-temperature="formationTemperature"
+            :productivity-coefficient-c="productivityCoefficientC"
+            :productivity-exponent-n="productivityExponentN"
+            :corrected-coefficient-c="correctedCoefficientC"
+            :corrected-exponent-n="correctedExponentN"
+            :fitted-formation-pressure="fittedFormationPressure"
+            :open-flow-rate="openFlowRate"
+            :pvt-record="selectedPvtRecord"
+            :project-id="PROJECT_ID"
+            :gas-reservoir-id="GAS_RESERVOIR_ID"
+            :method-type="activeMethod"
+            @update:coefficient-c="productivityCoefficientC = $event"
+            @update:exponent-n="productivityExponentN = $event"
+            @update:corrected-c="correctedCoefficientC = $event"
+            @update:corrected-n="correctedExponentN = $event"
+            @update:fitted-pressure="fittedFormationPressure = $event"
+            @update:open-flow-rate="openFlowRate = $event"
+          />
+        </template>
+        
+        <template v-else-if="activeModule === '产能对比'">
+          <ProductivityComparison
+            :well-name="selectedWellName"
+            :project-id="PROJECT_ID"
+            :gas-reservoir-id="GAS_RESERVOIR_ID"
+            :method-type="activeMethod"
+          />
+        </template>
       </main>
     </div>
   </div>
@@ -886,7 +881,7 @@ $accent-soft: #fff8d8;
   border-bottom: 2px solid transparent;
   white-space: nowrap;
 
-  > span {
+  >span {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -961,7 +956,9 @@ $accent-soft: #fff8d8;
   justify-content: center;
   cursor: pointer;
 
-  &:hover { background: $accent-soft; }
+  &:hover {
+    background: $accent-soft;
+  }
 }
 
 .parameter-collapsed-tab {
@@ -995,7 +992,7 @@ $accent-soft: #fff8d8;
   margin-bottom: 9px;
   color: #333;
 
-  > span {
+  >span {
     display: block;
     margin-bottom: 3px;
     font-size: 12px;
@@ -1034,11 +1031,19 @@ $accent-soft: #fff8d8;
   text-align: left;
   cursor: pointer;
 
-  &:hover { border-color: #777; }
-  &:disabled { color: #999; cursor: wait; }
+  &:hover {
+    border-color: #777;
+  }
+
+  &:disabled {
+    color: #999;
+    cursor: wait;
+  }
 }
 
-.hidden-data-file { display: none; }
+.hidden-data-file {
+  display: none;
+}
 
 .imported-data-name {
   display: block;
@@ -1059,7 +1064,11 @@ $accent-soft: #fff8d8;
   font-size: 13px;
   font-weight: 500;
 
-  i { flex: 1; height: 1px; background: #999; }
+  i {
+    flex: 1;
+    height: 1px;
+    background: #999;
+  }
 }
 
 .radio-group {
@@ -1092,7 +1101,9 @@ $accent-soft: #fff8d8;
   }
 }
 
-.result-methods { margin-bottom: 10px; }
+.result-methods {
+  margin-bottom: 10px;
+}
 
 .disabled-radio {
   color: #aaa;
@@ -1113,7 +1124,9 @@ $accent-soft: #fff8d8;
   cursor: pointer;
   transition: background-color 0.15s ease;
 
-  &:hover { background: #050505; }
+  &:hover {
+    background: #050505;
+  }
 }
 
 .calculation-output {
@@ -1229,7 +1242,7 @@ $accent-soft: #fff8d8;
 }
 
 @media (max-width: 800px) {
-  .field-group > span {
+  .field-group>span {
     line-height: 18px;
   }
 
@@ -1237,5 +1250,4 @@ $accent-soft: #fff8d8;
     margin: 0 5px 5px 0;
   }
 }
-
 </style>
