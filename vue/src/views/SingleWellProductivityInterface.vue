@@ -37,6 +37,12 @@ import {
   loadModifiedIsochronalTreeNodes
 } from '@/utils/modifiedIsochronalTree'
 import {
+  loadAllOwnedProductivityTestTreeNodes,
+  loadOwnedProductivityTestTreeNodes,
+  OWNED_PRODUCTIVITY_METHOD_NODE_TYPE,
+  OWNED_PRODUCTIVITY_RECORD_NODE_TYPE
+} from '@/utils/ownedProductivityTestTree'
+import {
   workspaceActiveNodeId,
   workspacePendingCommand,
   workspacePendingNode,
@@ -125,6 +131,10 @@ const selectedPvtDetail = ref(null)
 const pressureWorkspaceKey = ref(0)
 const calculationOutput = ref(null)
 const savingProductivityTest = ref(false)
+const storedProductivityTest = ref(null)
+const savingResult = ref(false)
+const resultDirty = ref(false)
+const savedInputSignature = ref('')
 
 const scientific = value => {
   const number = Number(value)
@@ -173,6 +183,12 @@ watch(selectedPvtRecord, record => {
   if (Number.isFinite(pvtTemperature)) formationTemperature.value = String(pvtTemperature)
 }, { immediate: true })
 
+watch([calculationMethod, calculationResult], () => {
+  if (!isOwnedPressureMethod.value) return
+  calculationOutput.value = null
+  resultDirty.value = false
+})
+
 const unwrapData = response => response?.data ?? response ?? {}
 const parseSettings = value => {
   if (!value) return {}
@@ -190,6 +206,7 @@ const normalizePvtDetail = detail => {
     pvtName: detail?.record?.pvtName,
     gasRows: [[gasInput.gasType, gasInput.specificGravity, gasInput.hydrogenSulfide,
     gasInput.carbonDioxide, gasInput.nitrogen, gasInput.condensateOilDensity]],
+    gasInput,
     gasSettings,
     gasResultRows: detail?.gasResults || []
   }
@@ -268,6 +285,10 @@ const pressureCalculationMethod = computed(() => ({
 const usesPressureCalculation = computed(() =>
   activeModule.value === '产能试井' && Boolean(activeMethod.value)
 )
+const isOwnedPressureMethod = computed(() =>
+  activeModule.value === '产能试井' &&
+  ['back-pressure', 'one-point'].includes(pressureTestType.value)
+)
 
 const normalizeWells = payload => {
   const source = payload?.data?.wells ?? payload?.wells ?? []
@@ -285,6 +306,15 @@ const selectModule = (moduleName, method = '') => {
   activeModule.value = config.name
   activeMethod.value = config.methods.includes(method) ? method : config.methods[0]
   activeContentTab.value = 'chart'
+  if (isOwnedPressureMethod.value) {
+    storedProductivityTest.value = null
+    activeProductivityTestId.value = null
+    calculationOutput.value = null
+    resultDirty.value = false
+    savedInputSignature.value = ''
+    selectedDataTable.value = pressureTestType.value
+    pressureWorkspaceKey.value += 1
+  }
   router.replace({
     name: 'SingleWellProductivity',
     query: {
@@ -322,6 +352,21 @@ const loadIsochronalNodes = async (wellName, { expand = false } = {}) => loadIso
 })
 
 const loadAllIsochronalNodes = async () => loadAllIsochronalTreeNodes({
+  treeData: workspaceTreeData.value,
+  projectId: PROJECT_ID,
+  gasReservoirId: GAS_RESERVOIR_ID
+})
+
+const loadOwnedProductivityNodes = async (wellName, { expand = false } = {}) =>
+  loadOwnedProductivityTestTreeNodes({
+    treeData: workspaceTreeData.value,
+    projectId: PROJECT_ID,
+    gasReservoirId: GAS_RESERVOIR_ID,
+    wellName,
+    expand
+  })
+
+const loadAllOwnedProductivityNodes = async () => loadAllOwnedProductivityTestTreeNodes({
   treeData: workspaceTreeData.value,
   projectId: PROJECT_ID,
   gasReservoirId: GAS_RESERVOIR_ID
@@ -400,10 +445,18 @@ const loadWells = async () => {
 const selectWell = async wellName => {
   selectedWellName.value = wellName
   selectedPvtTable.value = ''
-  selectedDataTable.value = activeMethod.value === '等时试井' ? 'local-import' : ''
+  selectedDataTable.value = activeMethod.value === '等时试井'
+    ? 'local-import'
+    : (isOwnedPressureMethod.value ? pressureTestType.value : '')
   importedDataFileName.value = '当前井产能测试数据'
   activeProductivityTestId.value = null
   activeEvaluationId.value = null
+  if (isOwnedPressureMethod.value) {
+    storedProductivityTest.value = null
+    calculationOutput.value = null
+    resultDirty.value = false
+    savedInputSignature.value = ''
+  }
   pressureWorkspaceKey.value += 1
   try {
     await Promise.all([
@@ -413,6 +466,11 @@ const selectWell = async wellName => {
     ])
   } catch (error) {
     ElMessage.warning(error?.msg || error?.message || '已保存试井记录读取失败')
+  }
+  try {
+    await loadOwnedProductivityNodes(wellName)
+  } catch (error) {
+    console.warn('当前井回压/一点法记录读取失败', error)
   }
 }
 
@@ -426,6 +484,77 @@ const handleSidebarSelect = async node => {
 
   // “产能试井”仅作为目录层级，不代表一条真实试井记录。
   if (isProductivityTestNode || node.type === ISOCHRONAL_METHOD_NODE_TYPE) return
+
+  if (node.type === OWNED_PRODUCTIVITY_METHOD_NODE_TYPE) {
+    selectedWellName.value = node.wellName || selectedWellName.value
+    activeModule.value = '产能试井'
+    activeMethod.value = node.pageMethod || (node.testMethod === 'one-point' ? '一点法' : '回压试井')
+    selectedDataTable.value = node.testMethod
+    activeProductivityTestId.value = null
+    activeEvaluationId.value = null
+    storedProductivityTest.value = null
+    calculationOutput.value = null
+    resultDirty.value = false
+    savedInputSignature.value = ''
+    pressureWorkspaceKey.value += 1
+    await loadPvtOptions()
+    await router.replace({
+      name: 'SingleWellProductivity',
+      query: { module: '产能试井', method: activeMethod.value, well: selectedWellName.value }
+    })
+    return
+  }
+
+  if (node.type === OWNED_PRODUCTIVITY_RECORD_NODE_TYPE && node.testId) {
+    selectedWellName.value = node.wellName || selectedWellName.value
+    activeModule.value = '产能试井'
+    activeMethod.value = node.pageMethod || (node.testMethod === 'one-point' ? '一点法' : '回压试井')
+    selectedDataTable.value = node.testMethod
+    activeProductivityTestId.value = Number(node.testId)
+    activeEvaluationId.value = null
+    calculationOutput.value = null
+    resultDirty.value = false
+    try {
+      const response = await productivityTestsApi.detail(
+        node.testId, PROJECT_ID, GAS_RESERVOIR_ID, selectedWellName.value
+      )
+      const detail = unwrapData(response)
+      const firstResult = detail.results?.[0] || detail.result
+      storedProductivityTest.value = detail
+      maximumFormationPressure.value = String(detail.input?.maximumFormationPressure ?? '')
+      formationTemperature.value = String(detail.input?.formationTemperature ?? '')
+      onePointAlpha.value = String(detail.input?.onePointAlpha ?? '0.25')
+      calculationMethod.value = ({
+        'pseudo-pressure': '拟压力',
+        'pressure-squared': '压力平方方法',
+        pressure: '压力法'
+      })[firstResult?.pressureMethod] || '压力法'
+      calculationResult.value = firstResult?.calculationResultType === 'exponential' ? '指数式' : '二项式'
+      savedInputSignature.value = inputSignature({
+        maximumFormationPressure: detail.input?.maximumFormationPressure,
+        formationTemperature: detail.input?.formationTemperature,
+        onePointAlpha: detail.input?.onePointAlpha,
+        points: (detail.inputItems || []).map(item => ({
+          pointNumber: item.testPointNumber,
+          gasProduction: item.testDailyGasProduction,
+          reservoirPressure: item.reservoirPressure,
+          flowPressure: item.testFlowPressure
+        }))
+      })
+      await loadPvtOptions(detail.pvtId)
+      pressureWorkspaceKey.value += 1
+      await router.replace({
+        name: 'SingleWellProductivity',
+        query: {
+          module: '产能试井', method: activeMethod.value,
+          well: selectedWellName.value, testId: node.testId
+        }
+      })
+    } catch (error) {
+      ElMessage.error(error.response?.data?.msg || error.message || '试井记录读取失败')
+    }
+    return
+  }
 
   if (node.type === ISOCHRONAL_RECORD_NODE_TYPE && node.testId) {
     selectedWellName.value = node.wellName || selectedWellName.value
@@ -509,6 +638,140 @@ const handleSidebarSelect = async node => {
   await router.push({ name: 'IprInterface' })
 }
 
+const inputSignature = input => JSON.stringify({
+  maximumFormationPressure: Number(input?.maximumFormationPressure),
+  formationTemperature: Number(input?.formationTemperature),
+  onePointAlpha: Number(input?.onePointAlpha),
+  points: (input?.points || []).map(point => [
+    Number(point.pointNumber),
+    Number(point.gasProduction),
+    Number(point.reservoirPressure),
+    Number(point.flowPressure)
+  ])
+})
+
+const handleResultChange = (output, metadata = {}) => {
+  calculationOutput.value = output
+  if (isOwnedPressureMethod.value) resultDirty.value = !metadata.stored
+}
+
+const resultChartPoints = snapshot => {
+  const exponential = snapshot.result.calculationResultType === 'exponential'
+  const definitions = exponential
+    ? [
+        ['analysis', snapshot.result.analysisPoints],
+        ['regression', snapshot.result.regressionLine],
+        ['transient', snapshot.result.transientLine]
+      ]
+    : [
+        ['regularized', snapshot.result.analysisPoints],
+        ['regression', snapshot.result.regressionLine],
+        ['shifted-regression', snapshot.result.transientLine]
+      ]
+  return definitions.flatMap(([curveType, points]) => (points || []).map((point, index) => ({
+    curveType,
+    pointNumber: index + 1,
+    sourcePointNumber: curveType === 'analysis' ? index + 1 : null,
+    xValue: Number(point.x),
+    yValue: Number(point.y),
+    deleted: false,
+    dataLabel: point.label || null
+  })))
+}
+
+const resultIprPoints = snapshot => (snapshot.result.iprCurves || []).flatMap((curve, curveIndex) =>
+  (curve.points || []).map((point, pointIndex) => ({
+    curveNumber: curveIndex + 1,
+    pointNumber: pointIndex + 1,
+    formationPressure: snapshot.result.calculationResultType === 'exponential'
+      ? Number(curve.formationPressure)
+      : null,
+    gasProduction: Number(point.gasProduction),
+    bottomHoleFlowingPressure: Number(point.bottomHoleFlowingPressure),
+    deleted: false,
+    dataLabel: point.label || null
+  }))
+)
+
+const saveCalculation = async () => {
+  if (!isOwnedPressureMethod.value || savingResult.value) return
+  if (!selectedPvtRecord.value) {
+    ElMessage.warning('请选择PVT表')
+    return
+  }
+  const snapshot = pressureContentRef.value?.getPersistenceSnapshot?.()
+  if (!snapshot?.result || !snapshot.input?.points?.length) {
+    ElMessage.warning('请先完成计算')
+    return
+  }
+  savingResult.value = true
+  try {
+    const signature = inputSignature(snapshot.input)
+    const replaceInput = !activeProductivityTestId.value || signature !== savedInputSignature.value
+    const response = await productivityTestsApi.save({
+      testId: activeProductivityTestId.value,
+      projectId: PROJECT_ID,
+      gasReservoirId: GAS_RESERVOIR_ID,
+      wellName: selectedWellName.value,
+      pvtId: Number(selectedPvtTable.value),
+      operationType: operationType.value,
+      testMethod: pressureTestType.value,
+      testNo: null,
+      testDate: String(snapshot.testDate || new Date().toISOString().slice(0, 10)).slice(0, 10),
+      wellType: null,
+      replaceInput,
+      input: {
+        ...snapshot.input,
+        points: undefined
+      },
+      inputItems: snapshot.input.points.map(point => ({
+        testPointNumber: Number(point.pointNumber),
+        testDailyGasProduction: Number(point.gasProduction),
+        reservoirPressure: Number(point.reservoirPressure),
+        testFlowPressure: Number(point.flowPressure)
+      })),
+      result: {
+        calculationResultType: snapshot.result.calculationResultType,
+        pressureMethod: snapshot.pressureMethod,
+        evaluationId: snapshot.result.evaluationId,
+        darcySeepageCoefficient: snapshot.result.darcyCoefficient,
+        nonDarcySeepageCoefficient: snapshot.result.nonDarcyCoefficient,
+        openFlowCapacity: snapshot.result.openFlowCapacity,
+        productivityCoefficient: snapshot.result.productivityCoefficient,
+        productivityExponent: snapshot.result.productivityExponent,
+        gradient: snapshot.result.gradient,
+        intercept: snapshot.result.intercept,
+        rSquared: snapshot.result.rSquared,
+        reliabilityLevel: snapshot.result.reliabilityLevel,
+        reliabilityDescription: snapshot.result.reliabilityDescription,
+        chartPoints: resultChartPoints(snapshot),
+        iprPoints: resultIprPoints(snapshot)
+      }
+    })
+    const saved = unwrapData(response)
+    activeProductivityTestId.value = Number(saved.testId)
+    savedInputSignature.value = signature
+    resultDirty.value = false
+    await loadOwnedProductivityNodes(selectedWellName.value, { expand: true })
+    const detail = unwrapData(await productivityTestsApi.detail(
+      saved.testId, PROJECT_ID, GAS_RESERVOIR_ID, selectedWellName.value
+    ))
+    storedProductivityTest.value = detail
+    await router.replace({
+      name: 'SingleWellProductivity',
+      query: {
+        module: '产能试井', method: activeMethod.value,
+        well: selectedWellName.value, testId: saved.testId
+      }
+    })
+    ElMessage.success(`已保存${activeMethod.value}${saved.testNo}`)
+  } catch (error) {
+    ElMessage.error(error.response?.data?.msg || error.response?.data?.message || error.message || '保存失败')
+  } finally {
+    savingResult.value = false
+  }
+}
+
 const handleCalculate = async () => {
   if (!selectedPvtTable.value) {
     ElMessage.warning('请选择PVT表')
@@ -524,6 +787,11 @@ const handleCalculate = async () => {
   if (activeMethod.value === '等时试井' && calculationOutput.value) {
     await handleSaveIsochronal()
   }
+}
+
+const handleSourceInputSync = ({ maximumFormationPressure: pressure, formationTemperature: temperature }) => {
+  if (Number.isFinite(Number(pressure))) maximumFormationPressure.value = String(pressure)
+  if (Number.isFinite(Number(temperature))) formationTemperature.value = String(temperature)
 }
 
 const handleSaveIsochronal = async () => {
@@ -599,16 +867,31 @@ const handleProductivitySaved = async saved => {
 
 onMounted(async () => {
   await loadWells()
+  if (isOwnedPressureMethod.value) selectedDataTable.value = pressureTestType.value
   if (selectedWellName.value) await loadPvtOptions()
   if (route.query.method === '等时试井') selectedDataTable.value = 'local-import'
   await Promise.allSettled([
     loadAllModifiedIsochronalNodes(),
     loadAllIsochronalNodes()
   ])
+  try {
+    await loadAllOwnedProductivityNodes()
+  } catch (error) {
+    console.warn('部分回压/一点法记录加载失败', error)
+  }
   if (selectedWellName.value && route.query.method === '等时试井' && activeProductivityTestId.value) {
     await handleSidebarSelect({
       id: `productivity-test-isochronal-${activeProductivityTestId.value}`,
       type: ISOCHRONAL_RECORD_NODE_TYPE,
+      testId: activeProductivityTestId.value,
+      wellName: selectedWellName.value
+    })
+  } else if (selectedWellName.value && isOwnedPressureMethod.value && activeProductivityTestId.value) {
+    await handleSidebarSelect({
+      id: `owned-productivity-test-${pressureTestType.value}-${activeProductivityTestId.value}`,
+      type: OWNED_PRODUCTIVITY_RECORD_NODE_TYPE,
+      testMethod: pressureTestType.value,
+      pageMethod: activeMethod.value,
       testId: activeProductivityTestId.value,
       wellName: selectedWellName.value
     })
@@ -718,7 +1001,16 @@ onMounted(async () => {
                     <label><input v-model="calculationResult" type="radio" value="指数式" />指数式</label>
                   </fieldset>
 
-                  <button type="button" class="calculate-button" @click="handleCalculate">计算</button>
+                  <div class="parameter-actions">
+                    <button type="button" class="calculate-button" @click="handleCalculate">计算</button>
+                    <button
+                      v-if="isOwnedPressureMethod"
+                      type="button"
+                      class="save-button"
+                      :disabled="savingResult || !calculationOutput || !resultDirty"
+                      @click="saveCalculation"
+                    >{{ savingResult ? '保存中…' : '保存' }}</button>
+                  </div>
                   <div v-if="calculationOutput" class="calculation-output">
                     <template v-if="calculationOutput.calculationResultType === 'exponential'">
                       <label class="field-group">
@@ -754,8 +1046,10 @@ onMounted(async () => {
                 :external-calculation-method="pressureCalculationMethod"
                 :external-calculation-result="calculationResult === '指数式' ? 'exponential' : 'binomial'"
                 :pvt-result-rows="selectedPvtRecord?.gasResultRows || []" :pvt-record="selectedPvtRecord"
+                :stored-test="storedProductivityTest"
                 :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID"
-                @result-change="calculationOutput = $event" />
+                @result-change="handleResultChange"
+                @source-input-sync="handleSourceInputSync" />
 
               <template v-else>
                 <div v-show="activeContentTab === 'table'" class="result-table-panel">
@@ -1105,6 +1399,12 @@ $accent-soft: #fff8d8;
   cursor: not-allowed !important;
 }
 
+.parameter-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .calculate-button {
   min-width: 86px;
   height: 32px;
@@ -1121,6 +1421,27 @@ $accent-soft: #fff8d8;
 
   &:hover {
     background: #050505;
+  }
+}
+
+.save-button {
+  min-width: 86px;
+  height: 32px;
+  padding: 0 22px;
+  border: 1px solid #252525;
+  border-radius: 5px;
+  background: #fff;
+  color: #252525;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+
+  &:hover:not(:disabled) { background: #f5f5f5; }
+  &:disabled {
+    border-color: #d7d7d7;
+    color: #aaa;
+    cursor: not-allowed;
   }
 }
 

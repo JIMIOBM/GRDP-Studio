@@ -22,15 +22,19 @@ public final class ProductivityTestModels {
                             @NotNull Double reservoirPressure, @NotNull Double testFlowPressure) {}
 
     public record ChartPoint(@NotBlank String curveType, @Positive int pointNumber,
+                             Integer sourcePointNumber,
                              @NotNull Double xValue, @NotNull Double yValue,
                              boolean deleted, String dataLabel) {}
 
     public record IprPoint(@Positive int curveNumber, @Positive int pointNumber,
+                           Double formationPressure,
                            @NotNull Double gasProduction, @NotNull Double bottomHoleFlowingPressure,
                            boolean deleted, String dataLabel) {}
 
-    public record Result(String pressureMethod, Long evaluationId, Double darcySeepageCoefficient,
+    public record Result(String calculationResultType, String pressureMethod, Long evaluationId,
+                         Double darcySeepageCoefficient,
                          Double nonDarcySeepageCoefficient, Double openFlowCapacity,
+                         Double productivityCoefficient, Double productivityExponent,
                          Double gradient, Double intercept, Double rSquared,
                          Integer reliabilityLevel, String reliabilityDescription,
                          List<ChartPoint> chartPoints, List<IprPoint> iprPoints) {}
@@ -44,7 +48,7 @@ public final class ProductivityTestModels {
     public record Detail(long id, long pvtId, int testNo, String testName, LocalDate testDate,
                          String operationType, String testMethod, String wellName, String wellType,
                          String status, Input input, List<InputItem> inputItems, Result result,
-                         List<EvaluationReference> evaluations) {}
+                         List<EvaluationReference> evaluations, List<Result> results) {}
 
     public record SaveRequest(Long testId, @Positive long projectId, @Positive long gasReservoirId,
                               @NotBlank String wellName, @Positive long pvtId,

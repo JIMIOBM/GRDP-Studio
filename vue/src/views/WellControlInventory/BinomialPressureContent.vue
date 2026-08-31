@@ -3,7 +3,8 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
-import dockerRequest from '@/api/docker'
+import dockerRequest, { nodeApi, productivityEvaluationApi } from '@/api/docker'
+import { NODETYPE } from '@/constants/nodeType'
 
 const getStoredToken = () => {
   try {
@@ -43,16 +44,36 @@ const props = defineProps({
   externalCalculationMethod: { type: String, default: 'pressure' },
   externalCalculationResult: { type: String, default: 'binomial' },
   pvtResultRows: { type: Array, default: () => [] },
-  pvtRecord: { type: Object, default: null }
+  pvtRecord: { type: Object, default: null },
+  storedTest: { type: Object, default: null }
 })
-const emit = defineEmits(['result-change'])
+const emit = defineEmits(['result-change', 'source-input-sync'])
 const TEST_TYPES = [
   { value: 'back-pressure', label: '回压' },
-  { value: 'one-point', label: '一点法（迁移）' },
+  { value: 'one-point', label: '一点法' },
   { value: 'isochronal', label: '等时' },
   { value: 'modified-isochronal', label: '修正等时' }
 ]
 const ATMOSPHERIC_PRESSURE_MPA = 0.101325
+const EVALUATION_FORM_BY_METHOD = Object.freeze({
+  pressure: 1,
+  'pressure-squared': 2,
+  'pseudo-pressure': 3
+})
+const PRESSURE_NODE_TYPE_BY_METHOD = Object.freeze({
+  pressure: NODETYPE.NodeType_ProductivityEvaluationByPressure,
+  'pressure-squared': NODETYPE.NodeType_ProductivityEvaluationByPressureSquared,
+  'pseudo-pressure': NODETYPE.NodeType_ProductivityEvaluationByPseudoPressure
+})
+const EVALUATION_TYPE_BY_TEST = Object.freeze({
+  'one-point': 1,
+  'back-pressure': 2
+})
+const TEST_NODE_TYPE_BY_TEST = Object.freeze({
+  'one-point': NODETYPE.NodeType_ProductivityEvaluationOnePointWellTest,
+  'back-pressure': NODETYPE.NodeType_ProductivityEvaluationBackPressureWellTest
+})
+const originalEvaluationCache = new Map()
 const normalizeCalculationMethod = value => ({
   '拟压力': 'pseudo-pressure',
   '压力平方方法': 'pressure-squared',
@@ -65,6 +86,7 @@ const selectedWellName = ref(props.initialWellName || props.wellNames[0] || '')
 const activeTestType = ref(TEST_TYPES.some(item => item.value === props.initialTestType)
   ? props.initialTestType
   : 'back-pressure')
+const isOwnedTestType = () => ['back-pressure', 'one-point'].includes(activeTestType.value)
 const selectedPvtTable = ref('')
 const selectedDataTable = ref(props.autoSelectData ? activeTestType.value : '')
 const sourceRows = ref([])
@@ -85,6 +107,7 @@ const activeChart = ref('analysis')
 const hasMethodData = ref(false)
 const chartEl = ref(null)
 let chart = null
+let originalInputSyncKey = ''
 
 const methodName = computed(
   () => TEST_TYPES.find(item => item.value === activeTestType.value)?.label || '回压'
@@ -398,6 +421,7 @@ const createBlankRow = (sequence) => ({
 })
 
 const applySourceRows = () => {
+  originalInputSyncKey = ''
   const matching = sourceRows.value.filter(row => row.testType === activeTestType.value)
   hasMethodData.value = matching.length > 0
   inputRows.value = matching.map((row, index) => ({
@@ -676,11 +700,15 @@ const pressureExpression = method => ({
   pressure: 'Pr - Pwf'
 }[method] || 'Pr - Pwf')
 
-const analysisAxisName = method => ({
+const analysisAxisName = method => (isOwnedTestType() ? ({
+  'pseudo-pressure': '[m(Pr) - m(Pwf)] / qsc((MPa²/(mPa·s))/(10⁴m³/d))',
+  'pressure-squared': '(Pr² - Pwf²) / qsc(MPa²/(10⁴m³/d))',
+  pressure: '(Pr - Pwf) / qsc(MPa/(10⁴m³/d))'
+}) : ({
   'pseudo-pressure': '[m(Pr) - m(Pwf)] / qsc [(MPa²/(mPa·s))/(10⁴m³/d)]',
   'pressure-squared': '(Pr² - Pwf²) / qsc [MPa²/(10⁴m³/d)]',
   pressure: '(Pr - Pwf) / qsc [MPa/(10⁴m³/d)]'
-}[method] || '(Pr - Pwf) / qsc [MPa/(10⁴m³/d)]')
+}))[method] || '(Pr - Pwf) / qsc [MPa/(10⁴m³/d)]'
 
 const exponentialAnalysisAxisName = method => ({
   'pseudo-pressure': 'm(Pr) - m(Pwf)\n(MPa²/(mPa·s))',
@@ -688,8 +716,11 @@ const exponentialAnalysisAxisName = method => ({
   pressure: 'Pr - Pwf\n(MPa)'
 }[method] || 'Pr - Pwf\n(MPa)')
 
+const equationCoefficient = value => Number(value).toExponential(4).replace('e', 'E')
 const coefficientEquation = (method, darcy, nonDarcy) =>
-  `${pressureExpression(method)} = ${darcy.toPrecision(6)} × qsc + ${nonDarcy.toPrecision(6)} × qsc²`
+  isOwnedTestType()
+    ? `${pressureExpression(method)} = ${equationCoefficient(darcy)} qsc + ${equationCoefficient(nonDarcy)} qsc²`
+    : `${pressureExpression(method)} = ${darcy.toPrecision(6)} × qsc + ${nonDarcy.toPrecision(6)} × qsc²`
 
 const exponentialEquation = (method, coefficient, exponent) =>
   `qsc = ${coefficient.toPrecision(6)} × [${pressureExpression(method)}]^${exponent.toPrecision(6)}`
@@ -1342,6 +1373,277 @@ const normalizeCalculationResult = (response, pvtResultRows = props.pvtResultRow
   }
 }
 
+const unwrapDockerPayload = response => response?.data?.data ?? response?.data ?? response ?? {}
+const originalNodeChildren = node => [node?.children, node?.subNodes, node?.nodes, node?.analysisNodes]
+  .flatMap(value => Array.isArray(value) ? value : value ? [value] : [])
+const originalNodeLabel = node => String(
+  node?.wellName || node?.nodeTitle || node?.name || node?.title || node?.label || ''
+).trim()
+
+const discoverOriginalEvaluation = async (payload) => {
+  const method = normalizeCalculationMethod(payload.calculationMethod)
+  const evaluationForm = EVALUATION_FORM_BY_METHOD[method]
+  const evaluationType = EVALUATION_TYPE_BY_TEST[payload.testType]
+  const testNodeType = TEST_NODE_TYPE_BY_TEST[payload.testType]
+  const pressureNodeType = PRESSURE_NODE_TYPE_BY_METHOD[method]
+  if (![evaluationForm, evaluationType, testNodeType, pressureNodeType].every(Number.isFinite)) {
+    throw new Error('当前试井类型或压力处理方法无法对应智慧气藏评价记录')
+  }
+
+  const requestedDate = String(inputRows.value.find(row => row.date)?.date || '').slice(0, 10)
+  const cacheKey = [props.projectId, props.gasReservoirId, selectedWellName.value,
+    evaluationForm, evaluationType, requestedDate].join('/')
+  const cached = originalEvaluationCache.get(cacheKey)
+  if (cached) return cached
+
+  const response = await nodeApi.getNode(
+    props.projectId,
+    props.gasReservoirId,
+    pressureNodeType,
+    { silentError: true }
+  )
+  const payloadData = unwrapDockerPayload(response)
+  const root = payloadData?.node ?? payloadData
+  const candidates = []
+  const walk = (node, insideWell = false) => {
+    if (!node || typeof node !== 'object') return
+    if (Array.isArray(node)) return node.forEach(item => walk(item, insideWell))
+    const label = originalNodeLabel(node)
+    const inWell = insideWell || label === selectedWellName.value || node.wellName === selectedWellName.value
+    const nodeId = Number(node.nodeId ?? node.evaluationId ?? node.resultId ?? node.id)
+    if (inWell && Number(node.nodeType) === Number(testNodeType) && Number.isFinite(nodeId) && nodeId > 0) {
+      candidates.push({ id: nodeId, dateMatched: Boolean(requestedDate && label.includes(requestedDate)) })
+    }
+    originalNodeChildren(node).forEach(child => walk(child, inWell))
+  }
+  walk(root)
+
+  for (const candidate of candidates.sort((left, right) =>
+    Number(right.dateMatched) - Number(left.dateMatched) || right.id - left.id)) {
+    try {
+      const detailResponse = await productivityEvaluationApi.getResult(
+        props.projectId,
+        props.gasReservoirId,
+        candidate.id,
+        { silentError: true }
+      )
+      const detail = unwrapDockerPayload(detailResponse)
+      if (String(detail?.evaluation?.wellName) !== String(selectedWellName.value) ||
+          Number(detail?.evaluation?.evaluationForm) !== evaluationForm ||
+          Number(detail?.evaluation?.evaluationType) !== evaluationType) continue
+      originalEvaluationCache.set(cacheKey, detail)
+      return detail
+    } catch { /* 节点编号不是评价结果主键时继续查找。 */ }
+  }
+  throw new Error(`智慧气藏中未找到${selectedWellName.value}${methodName.value}试井的对应结果`)
+}
+
+const originalChartData = item => (item?.data || []).map((point, index) => ({
+  sequence: index + 1,
+  flowRate: Number(point.xValue),
+  transformedPressure: Number(point.yValue),
+  deleted: Boolean(point.isDeleted),
+  dataLabel: point.dataLabel || ''
+})).filter(point => [point.flowRate, point.transformedPressure].every(Number.isFinite))
+
+const parseOriginalEvaluation = (detail, payload) => {
+  const output = detail?.output || {}
+  const charts = Array.isArray(detail?.chartItems) ? detail.chartItems : []
+  const findChart = (field, name) => charts.find(item => item.yAxisField === field) ||
+    charts.find(item => String(item.name).trim() === name)
+  const analysisPoints = originalChartData(findChart('regularizedPressure', '不稳定数据点'))
+  const regressionLine = originalChartData(findChart('linearRegressionPressure', '线性回归分析线'))
+  const transientLine = originalChartData(findChart(
+    'shiftLinearRegressionPressure',
+    '线性回归分析平移线'
+  ))
+  const iprCurves = (detail?.iprChartItems || []).map((item, curveIndex) => {
+    const points = (item?.data || []).map(point => ({
+      flowRate: Number(point.xValue),
+      flowingPressure: Number(point.yValue),
+      deleted: Boolean(point.isDeleted),
+      dataLabel: point.dataLabel || ''
+    })).filter(point => [point.flowRate, point.flowingPressure].every(Number.isFinite))
+    return {
+      curveNumber: Number(String(item?.yAxisField || '').match(/(\d+)$/)?.[1]) || curveIndex + 1,
+      formationPressure: Math.max(0, ...points.map(point => point.flowingPressure)),
+      points
+    }
+  }).filter(curve => curve.points.length).sort((left, right) => left.curveNumber - right.curveNumber)
+  const method = normalizeCalculationMethod(payload.calculationMethod)
+  const darcyCoefficient = Number(output.darcySeepageCoefficient)
+  const nonDarcyCoefficient = Number(output.nonDarcySeepageCoefficient)
+  return {
+    wellName: detail?.evaluation?.wellName || selectedWellName.value,
+    testType: payload.testType,
+    methodName: methodName.value,
+    calculationMethod: method,
+    calculationResultType: 'binomial',
+    evaluationId: Number(detail?.evaluation?.id),
+    formationPressure: Number(detail?.input?.originalFormationPressure ?? payload.formationPressure),
+    darcyCoefficient,
+    nonDarcyCoefficient,
+    aofRate: Number(output.openFlowCapacity),
+    rSquared: output.rSquared == null ? null : Number(output.rSquared),
+    reliabilityLevel: output.reliability == null ? null : Number(output.reliability),
+    reliability: output.reliabilityDesc || '',
+    equation: coefficientEquation(method, darcyCoefficient, nonDarcyCoefficient),
+    analysisPoints,
+    regressionLine,
+    transientLine,
+    iprCurve: iprCurves.at(-1)?.points || [],
+    iprCurves
+  }
+}
+
+const nearlyEqual = (left, right, tolerance = 0.002) =>
+  Number.isFinite(Number(left)) && Number.isFinite(Number(right)) &&
+  Math.abs(Number(left) - Number(right)) <= tolerance
+
+const matchesOriginalInput = (payload, detail) => {
+  const originalPoints = [...(detail?.inputItems || [])].sort((left, right) =>
+    Number(left.testPointNumber) - Number(right.testPointNumber))
+  const currentPoints = [...(payload.points || [])].sort((left, right) =>
+    Number(left.sequence) - Number(right.sequence))
+  return originalPoints.length === currentPoints.length &&
+    nearlyEqual(payload.formationPressure, detail?.input?.originalFormationPressure) &&
+    nearlyEqual(payload.temperature, detail?.input?.formationTemperature) &&
+    originalPoints.every((point, index) =>
+      nearlyEqual(currentPoints[index]?.flowRate, point.testDailyGasProduction) &&
+      nearlyEqual(currentPoints[index]?.recoveryPressure, point.reserviorPressure) &&
+      nearlyEqual(currentPoints[index]?.flowingPressure, point.testFlowPressure))
+}
+
+const matchesOriginalRows = (detail) => {
+  const originalPoints = [...(detail?.inputItems || [])].sort((left, right) =>
+    Number(left.testPointNumber) - Number(right.testPointNumber))
+  const currentPoints = [...inputRows.value].sort((left, right) =>
+    Number(left.sequence) - Number(right.sequence))
+  return originalPoints.length === currentPoints.length && originalPoints.every((point, index) =>
+    nearlyEqual(currentPoints[index]?.flowRate, point.testDailyGasProduction) &&
+    nearlyEqual(currentPoints[index]?.recoveryPressure, point.reserviorPressure) &&
+    nearlyEqual(currentPoints[index]?.flowingPressure, point.testFlowPressure))
+}
+
+const applyOriginalInputRows = detail => {
+  inputRows.value = (detail?.inputItems || []).map((item, index) => ({
+    sequence: Number(item.testPointNumber ?? index + 1),
+    date: String(detail?.evaluation?.wellTestDate || '').slice(0, 10),
+    testType: activeTestType.value,
+    recoveryPressure: Number(item.reserviorPressure),
+    flowRate: Number(item.testDailyGasProduction),
+    equivalentFlowRate: Number(item.equivalentTestDailyGasProduction),
+    flowingPressure: Number(item.testFlowPressure)
+  }))
+}
+
+const syncOriginalInputDefaults = async () => {
+  if (!isOwnedTestType()) return
+  if (props.storedTest || !selectedWellName.value || !inputRows.value.length) return
+  const syncKey = [selectedWellName.value, activeTestType.value,
+    normalizeCalculationMethod(calculationMethod.value)].join('/')
+  if (originalInputSyncKey === syncKey) return
+  const detail = await discoverOriginalEvaluation(buildPayload())
+  originalInputSyncKey = syncKey
+  if (!matchesOriginalRows(detail)) return
+  applyOriginalInputRows(detail)
+  formationPressure.value = Number(detail?.input?.originalFormationPressure ?? formationPressure.value)
+  temperature.value = Number(detail?.input?.formationTemperature ?? temperature.value)
+  emit('source-input-sync', {
+    maximumFormationPressure: formationPressure.value,
+    formationTemperature: temperature.value
+  })
+}
+
+const originalGasInput = detail => {
+  const gas = { ...(props.pvtRecord?.gasInput || {}), ...(props.pvtRecord?.gasSettings || {}) }
+  const fallback = detail?.input || {}
+  const methodNumber = (value, names, defaultValue) => {
+    if (Number.isInteger(Number(value))) return Number(value)
+    return normalizeMethodIndex(value, names, Number(defaultValue) || 0)
+  }
+  return {
+    gasType: gas.gasType ?? fallback.gasType,
+    specificGravity: Number(gas.specificGravity ?? fallback.specificGravity),
+    hydrogenSulfide: Number(gas.hydrogenSulfide ?? fallback.hydrogenSulfide ?? 0),
+    carbonDioxide: Number(gas.carbonDioxide ?? fallback.carbonDioxide ?? 0),
+    nitrogen: Number(gas.nitrogen ?? fallback.nitrogen ?? 0),
+    condensateOilDensityUnderStandardCondition: Number(
+      gas.condensateOilDensity ?? fallback.condensateOilDensityUnderStandardCondition ?? 0
+    ),
+    modificationMethod: methodNumber(
+      gas.modificationMethod,
+      ['Wichert-Aziz', 'Carr-Kobayashi-Burrous'],
+      fallback.modificationMethod
+    ),
+    deviationFactorMethod: methodNumber(
+      gas.deviationFactorMethod,
+      ['Dranchuk-Abu-Kassem', 'Dranchuk-Purvis-Robinson', 'Hall-Yarborough'],
+      fallback.deviationFactorMethod
+    ),
+    viscosityMethod: methodNumber(
+      gas.viscosityMethod,
+      ['Lee-Gonzalez-Eakin', 'Carr-Kobayashi-Burrous', 'Sutton'],
+      fallback.viscosityMethod
+    )
+  }
+}
+
+const calculateWithOriginalPlatform = async payload => {
+  let detail = await discoverOriginalEvaluation(payload)
+  if (!matchesOriginalInput(payload, detail)) {
+    const evaluationId = Number(detail?.evaluation?.id)
+    const evaluationForm = EVALUATION_FORM_BY_METHOD[normalizeCalculationMethod(payload.calculationMethod)]
+    const evaluationType = EVALUATION_TYPE_BY_TEST[payload.testType]
+    const originalInput = detail?.input || {}
+    const response = await productivityEvaluationApi.calculate(selectedWellName.value, {
+      gasReservoirId: Number(props.gasReservoirId),
+      projectId: Number(props.projectId),
+      evaluationId,
+      deletePointIds: [],
+      input: {
+        ...originalInput,
+        id: Number(originalInput.id),
+        ProductivityEvaluationId: evaluationId,
+        originalFormationPressure: Number(payload.formationPressure),
+        formationTemperature: Number(payload.temperature),
+        horizontalSectionLength: Number(originalInput.horizontalSectionLength || 0),
+        skinFactor: Number(originalInput.skinFactor || 0),
+        permeability: Number(originalInput.permeability || 0),
+        thickness: Number(originalInput.thickness || 0),
+        gasDrainageRadius: Number(originalInput.gasDrainageRadius || 0),
+        wellboreRadius: Number(originalInput.wellboreRadius || 0),
+        ...originalGasInput(detail),
+        edges: {}
+      },
+      inputItems: payload.points.map((point, index) => ({
+        testPointNumber: Number(point.sequence ?? index + 1),
+        reserviorPressure: Number(point.recoveryPressure),
+        testDailyGasProduction: Number(point.flowRate),
+        testFlowPressure: Number(point.flowingPressure),
+        testDailyOilProduction: 0
+      })),
+      evaluationForm,
+      evaluationType,
+      wellName: selectedWellName.value
+    }, { silentError: true })
+    detail = unwrapDockerPayload(response)
+    if (!detail?.output) {
+      const refreshed = await productivityEvaluationApi.getResult(
+        props.projectId,
+        props.gasReservoirId,
+        evaluationId,
+        { silentError: true }
+      )
+      detail = unwrapDockerPayload(refreshed)
+    }
+  }
+  applyOriginalInputRows(detail)
+  formationPressure.value = Number(detail?.input?.originalFormationPressure ?? payload.formationPressure)
+  temperature.value = Number(detail?.input?.formationTemperature ?? payload.temperature)
+  return parseOriginalEvaluation(detail, payload)
+}
+
 const analyze = async () => {
   if (!selectedWellName.value) {
     selectorVisible.value = true
@@ -1353,14 +1655,22 @@ const analyze = async () => {
   }
   calculating.value = true
   try {
+    if (['back-pressure', 'one-point'].includes(activeTestType.value)) {
+      await syncOriginalInputDefaults()
+    }
     const payload = buildPayload()
     if (normalizeCalculationMethod(payload.calculationMethod) === 'pseudo-pressure') {
       const exactRows = await loadExactPseudoPressureRows(payload)
       payload.pvtResultRows = [...payload.pvtResultRows, ...exactRows]
     }
-    const response = { data: calculateLocally(payload) }
-    result.value = normalizeCalculationResult(response, payload.pvtResultRows)
-    emit('result-change', result.value)
+    if (payload.calculationResultType === 'binomial' &&
+        ['back-pressure', 'one-point'].includes(payload.testType)) {
+      result.value = await calculateWithOriginalPlatform(payload)
+    } else {
+      const response = { data: calculateLocally(payload) }
+      result.value = normalizeCalculationResult(response, payload.pvtResultRows)
+    }
+    emit('result-change', result.value, { stored: false })
     activePanel.value = 'analysis'
     activeChart.value = 'analysis'
     await nextTick()
@@ -1445,22 +1755,31 @@ const renderChart = () => {
     ]
   }
   const method = result.value.calculationMethod || calculationMethod.value
+  const ownedPresentation = isOwnedTestType()
   const analysisUnit = isExponentialResult
     ? ({
         'pseudo-pressure': '[MPa²/(mPa·s)]',
         'pressure-squared': '[MPa²]',
         pressure: '[MPa]'
       })[method] || '[MPa]'
-    : ({
-        'pseudo-pressure': '[(MPa²/(mPa·s))/(10⁴m³/d)]',
-        'pressure-squared': '[MPa²/(10⁴m³/d)]',
-        pressure: '[MPa/(10⁴m³/d)]'
-      })[method] || '[MPa/(10⁴m³/d)]'
+    : ownedPresentation
+      ? ({
+          'pseudo-pressure': '((MPa²/(mPa·s))/(10⁴m³/d))',
+          'pressure-squared': '(MPa²/(10⁴m³/d))',
+          pressure: '(MPa/(10⁴m³/d))'
+        })[method] || '(MPa/(10⁴m³/d))'
+      : ({
+          'pseudo-pressure': '[(MPa²/(mPa·s))/(10⁴m³/d)]',
+          'pressure-squared': '[MPa²/(10⁴m³/d)]',
+          pressure: '[MPa/(10⁴m³/d)]'
+        })[method] || '[MPa/(10⁴m³/d)]'
   const blackLine = isIsochronalResult ? transientLine : regressionLine
   const orangeLine = isIsochronalResult ? regressionLine : transientLine
   const series = [
     {
-      name: isIsochronalResult ? `不稳定点${analysisUnit}` : '测试点',
+      name: isIsochronalResult
+        ? `不稳定点${analysisUnit}`
+        : (ownedPresentation ? `数据点${analysisUnit}` : '测试点'),
       type: 'scatter',
       symbolSize: 10,
       z: 4,
@@ -1468,7 +1787,7 @@ const renderChart = () => {
       itemStyle: { color: '#5478c9' }
     },
     {
-      name: isIsochronalResult ? `回归线${analysisUnit}` : '回归线',
+      name: isIsochronalResult || ownedPresentation ? `回归线${analysisUnit}` : '回归线',
       type: 'line',
       showSymbol: false,
       symbol: 'none',
@@ -1714,8 +2033,24 @@ const renderIprChart = () => {
     '#3ba272', '#fc8452', '#9a60b4', '#ea7ccc', '#00b7c7',
     '#6f7ad3', '#c98bd4'
   ]
+  const useOwnedPresentation = isOwnedTestType()
+  const formatIprPressure = value => useOwnedPresentation
+    ? Number.parseFloat(Number(value).toFixed(3)).toString()
+    : Number(value).toFixed(0)
+  const iprFlowValues = iprCurves.flatMap(curve =>
+    (curve.points || []).map(point => Number(point.flowRate)).filter(Number.isFinite))
+  const iprPressureValues = iprCurves.flatMap(curve =>
+    (curve.points || []).map(point => Number(point.flowingPressure)).filter(Number.isFinite))
+  const maximumIprFlow = Math.max(0, ...iprFlowValues)
+  const xStepBasis = maximumIprFlow / 11
+  const xStepMagnitude = xStepBasis > 0 ? 10 ** Math.floor(Math.log10(xStepBasis)) : 1
+  const xInterval = Math.max(xStepMagnitude,
+    Math.ceil(xStepBasis / xStepMagnitude - 1e-12) * xStepMagnitude)
+  const xMaximum = xInterval * 11
+  const maximumIprPressure = Math.max(0, ...iprPressureValues)
+  const yMaximum = Math.ceil((maximumIprPressure + 1e-9) / 5) * 5
   const iprSeries = iprCurves.map((curve, index) => ({
-    name: `Pr${index + 1}=${Number(curve.formationPressure).toFixed(0)} MPa`,
+    name: `${useOwnedPresentation ? 'Pᵣ' : 'Pr'}${index + 1}=${formatIprPressure(curve.formationPressure)} MPa`,
     type: 'line',
     showSymbol: false,
     symbol: 'none',
@@ -1814,6 +2149,7 @@ const renderIprChart = () => {
     xAxis: {
       type: 'value',
       min: 0,
+      ...(useOwnedPresentation ? { max: xMaximum, interval: xInterval } : {}),
       name: 'qsc(10⁴m³/d)',
       nameLocation: 'middle',
       nameGap: 32,
@@ -1829,6 +2165,7 @@ const renderIprChart = () => {
     yAxis: {
       type: 'value',
       min: 0,
+      ...(useOwnedPresentation ? { max: yMaximum, interval: 5 } : {}),
       name: 'Pwf(MPa)',
       nameLocation: 'middle',
       nameGap: 43,
@@ -1871,6 +2208,7 @@ const getPersistenceSnapshot = () => {
     [row.flowRate, row.flowingPressure, row.recoveryPressure].every(value => Number.isFinite(Number(value)))
   )
   return {
+    testDate: validRows.find(row => row.date)?.date || new Date().toISOString().slice(0, 10),
     input: {
       maximumFormationPressure: Number(formationPressure.value),
       formationTemperature: Number(temperature.value),
@@ -1894,6 +2232,11 @@ const getPersistenceSnapshot = () => {
     pressureMethod: calculationMethod.value,
     result: {
       calculationResultType: result.value.calculationResultType,
+      evaluationId: result.value.evaluationId !== null
+        && result.value.evaluationId !== undefined
+        && Number.isFinite(Number(result.value.evaluationId))
+        ? Number(result.value.evaluationId)
+        : null,
       darcyCoefficient: result.value.calculationResultType === 'binomial'
         ? Number(result.value.darcyCoefficient)
         : null,
@@ -1914,7 +2257,9 @@ const getPersistenceSnapshot = () => {
         ? Number(result.value.darcyCoefficient)
         : null,
       rSquared: Number.isFinite(Number(result.value.rSquared)) ? Number(result.value.rSquared) : null,
-      reliabilityLevel: null,
+      reliabilityLevel: Number.isFinite(Number(result.value.reliabilityLevel))
+        ? Number(result.value.reliabilityLevel)
+        : null,
       reliabilityDescription: result.value.reliability || null,
       analysisPoints: (result.value.analysisPoints || []).map(point => ({
         x: Number(point.flowRate), y: Number(point.transformedPressure), label: null
@@ -1935,6 +2280,113 @@ const getPersistenceSnapshot = () => {
       }))
     }
   }
+}
+
+const storedResult = () => {
+  const detail = props.storedTest
+  if (!detail) return null
+  const candidates = Array.isArray(detail.results) && detail.results.length
+    ? detail.results
+    : (detail.result ? [detail.result] : [])
+  const saved = candidates.find(item =>
+    (item.calculationResultType || 'binomial') === calculationResultType.value &&
+    normalizeCalculationMethod(item.pressureMethod) === calculationMethod.value
+  )
+  if (!saved) return null
+
+  const chartPoints = Array.isArray(saved.chartPoints) ? saved.chartPoints : []
+  const curve = types => chartPoints.filter(point => types.includes(point.curveType)).map(point => ({
+    sequence: point.sourcePointNumber ?? point.pointNumber,
+    flowRate: Number(point.xValue),
+    transformedPressure: Number(point.yValue),
+    deleted: Boolean(point.deleted),
+    dataLabel: point.dataLabel || ''
+  }))
+  const iprGroups = (saved.iprPoints || []).reduce((groups, point) => {
+    const curveNumber = Number(point.curveNumber)
+    const flowingPressure = Number(point.bottomHoleFlowingPressure)
+    const hasExplicitFormationPressure = point.formationPressure !== null &&
+      point.formationPressure !== undefined && Number.isFinite(Number(point.formationPressure))
+    const explicitFormationPressure = hasExplicitFormationPressure
+      ? Number(point.formationPressure)
+      : null
+    const current = groups.get(curveNumber) || {
+      formationPressure: hasExplicitFormationPressure
+        ? explicitFormationPressure
+        : flowingPressure,
+      points: []
+    }
+    if (!hasExplicitFormationPressure && Number.isFinite(flowingPressure)) {
+      current.formationPressure = Math.max(Number(current.formationPressure) || 0, flowingPressure)
+    }
+    current.points.push({
+      flowRate: Number(point.gasProduction),
+      flowingPressure,
+      deleted: Boolean(point.deleted),
+      dataLabel: point.dataLabel || ''
+    })
+    groups.set(curveNumber, current)
+    return groups
+  }, new Map())
+  const iprCurves = [...iprGroups.values()]
+  const isExponential = (saved.calculationResultType || 'binomial') === 'exponential'
+  const coefficient = Number(saved.productivityCoefficient)
+  const exponent = Number(saved.productivityExponent)
+  const darcy = Number(saved.darcySeepageCoefficient)
+  const nonDarcy = Number(saved.nonDarcySeepageCoefficient)
+  return {
+    wellName: detail.wellName,
+    testType: detail.testMethod,
+    methodName: methodName.value,
+    calculationMethod: normalizeCalculationMethod(saved.pressureMethod),
+    calculationResultType: isExponential ? 'exponential' : 'binomial',
+    evaluationId: saved.evaluationId == null ? null : Number(saved.evaluationId),
+    formationPressure: Number(detail.input?.maximumFormationPressure),
+    productivityCoefficient: isExponential ? coefficient : null,
+    productivityExponent: isExponential ? exponent : null,
+    darcyCoefficient: isExponential ? null : darcy,
+    nonDarcyCoefficient: isExponential ? null : nonDarcy,
+    aofRate: Number(saved.openFlowCapacity),
+    rSquared: saved.rSquared == null ? null : Number(saved.rSquared),
+    reliability: saved.reliabilityDescription || '',
+    equation: isExponential
+      ? exponentialEquation(saved.pressureMethod, coefficient, exponent)
+      : coefficientEquation(saved.pressureMethod, darcy, nonDarcy),
+    analysisPoints: curve(['analysis', 'regularized', 'stable']),
+    regressionLine: curve(['regression']),
+    transientLine: curve(['transient', 'shifted-regression']),
+    iprCurve: iprCurves[0]?.points || [],
+    iprCurves
+  }
+}
+
+const applyStoredTest = async () => {
+  const detail = props.storedTest
+  if (!detail || !['back-pressure', 'one-point'].includes(detail.testMethod)) return false
+  const input = detail.input || {}
+  selectedWellName.value = detail.wellName || props.initialWellName || selectedWellName.value
+  activeTestType.value = detail.testMethod || props.initialTestType
+  selectedDataTable.value = activeTestType.value
+  await nextTick()
+  inputRows.value = (detail.inputItems || []).map((item, index) => ({
+    sequence: item.testPointNumber ?? index + 1,
+    date: detail.testDate || '',
+    testType: activeTestType.value,
+    recoveryPressure: Number(item.reservoirPressure),
+    flowRate: Number(item.testDailyGasProduction),
+    equivalentFlowRate: null,
+    flowingPressure: Number(item.testFlowPressure)
+  }))
+  formationPressure.value = Number(input.maximumFormationPressure)
+  temperature.value = Number(input.formationTemperature)
+  hasMethodData.value = inputRows.value.length > 0
+  result.value = storedResult()
+  activePanel.value = result.value ? 'analysis' : 'input'
+  activeChart.value = 'analysis'
+  if (result.value) emit('result-change', result.value, { stored: true })
+  await nextTick()
+  if (result.value) renderChart()
+  return true
 }
 
 const restorePersisted = detail => {
@@ -2044,6 +2496,10 @@ watch(() => props.externalCalculationMethod, value => {
   const normalized = normalizeCalculationMethod(value)
   if (calculationMethod.value === normalized) return
   calculationMethod.value = normalized
+  if (props.storedTest) return void applyStoredTest()
+  originalInputSyncKey = ''
+  void syncOriginalInputDefaults().catch(error =>
+    console.warn('智慧气藏原始试井参数同步失败', error))
   result.value = null
   activePanel.value = 'input'
 })
@@ -2051,6 +2507,7 @@ watch(() => props.externalCalculationResult, value => {
   const normalized = value === 'exponential' ? 'exponential' : 'binomial'
   if (calculationResultType.value === normalized) return
   calculationResultType.value = normalized
+  if (props.storedTest) return void applyStoredTest()
   result.value = null
   activePanel.value = 'input'
 })
@@ -2062,15 +2519,24 @@ watch(() => props.pvtResultRows, () => {
 watch(() => props.viewKey, async () => {
   selectedWellName.value = props.initialWellName || props.wellNames[0] || ''
   clearWorkspace()
-  if (selectedWellName.value) await loadWellData()
+  if (!await applyStoredTest() && selectedWellName.value) {
+    await loadWellData()
+    await syncOriginalInputDefaults().catch(error =>
+      console.warn('智慧气藏原始试井参数同步失败', error))
+  }
 })
+watch(() => props.storedTest, () => { void applyStoredTest() }, { deep: true })
 
 onMounted(async () => {
   window.addEventListener('resize', handleResize)
-  if (selectedWellName.value) await loadWellData()
+  if (!await applyStoredTest() && selectedWellName.value) {
+    await loadWellData()
+    await syncOriginalInputDefaults().catch(error =>
+      console.warn('智慧气藏原始试井参数同步失败', error))
+  }
 })
 
-defineExpose({ analyze, loadWellData, replaceInputRows, switchPanel, getPersistenceSnapshot, restorePersisted })
+defineExpose({ analyze, loadWellData, replaceInputRows, switchPanel, getPersistenceSnapshot, restorePersisted, applyStoredTest })
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize)
@@ -2132,6 +2598,10 @@ onBeforeUnmount(() => {
           <el-button :loading="calculating" @click="analyze">计算</el-button>
         </div>
         <div v-if="result" class="left-result-fields">
+          <template v-if="isOwnedTestType()">
+            <label>产能评价方法</label>
+            <el-input :model-value="`${methodName}试井`" readonly />
+          </template>
           <template v-if="result.calculationResultType === 'exponential'">
             <label>产能系数 C</label>
             <el-input :model-value="scientific(result.productivityCoefficient)" readonly />
@@ -2143,6 +2613,15 @@ onBeforeUnmount(() => {
             <el-input :model-value="scientific(result.darcyCoefficient)" readonly />
             <label>非达西高速流系数 B</label>
             <el-input :model-value="scientific(result.nonDarcyCoefficient)" readonly />
+            <template v-if="activeTestType === 'back-pressure'">
+              <label>R²(dless)</label>
+              <el-input
+                :model-value="result.rSquared == null ? '' : Number(result.rSquared).toFixed(4)"
+                readonly
+              />
+              <label>结果可靠性</label>
+              <el-input :model-value="result.reliability" readonly />
+            </template>
           </template>
         </div>
       </section>

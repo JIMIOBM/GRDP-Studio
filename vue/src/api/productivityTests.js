@@ -5,7 +5,10 @@ export const productivityTestsApi = {
     request.get('/productivity-tests', {
       params: { projectId, gasReservoirId, wellName, testMethod }
     }),
-  detail: testId => request.get(`/productivity-tests/${testId}`),
+  detail: (testId, projectId, gasReservoirId, wellName) =>
+    request.get(`/productivity-tests/${testId}`, {
+      params: { projectId, gasReservoirId, wellName }
+    }),
   importFile: file => {
     const formData = new FormData()
     formData.append('file', file)
