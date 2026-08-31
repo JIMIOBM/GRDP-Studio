@@ -46,10 +46,15 @@ import {
   workspaceTreeKeyword
 } from '@/utils/workspaceTreeState'
 
+const props = defineProps({
+  embedded: { type: Boolean, default: false },
+  embeddedNode: { type: Object, default: null }
+})
+
 const PROJECT_ID = 6
-const GAS_RESERVOIR_ID = 1
+const GAS_RESERVOIR_ID = 4
 const MODIFIED_ISOCHRONAL_PROJECT_ID = 6
-const MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID = 1
+const MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID = 4
 
 const route = useRoute()
 const router = useRouter()
@@ -85,17 +90,18 @@ const wells = ref([])
 const loadingWells = ref(false)
 const keyword = workspaceTreeKeyword
 const selectedWellName = workspaceSelectedWellName
-if (route.query.well) selectedWellName.value = String(route.query.well)
+if (props.embeddedNode?.wellName) selectedWellName.value = String(props.embeddedNode.wellName)
+else if (route.query.well) selectedWellName.value = String(route.query.well)
 const sideTreeCollapsed = workspaceTreeCollapsed
 // 展开后适当加宽以容纳三种计算方式；收起形态对齐 PVT 的“图表数据”侧栏。
 const paramsCollapsed = ref(false)
-const routeModule = String(route.query.module || '')
+const routeModule = props.embeddedNode ? '产能试井' : String(route.query.module || '')
 const routeConfig = MODULES.find(item => item.name === routeModule)
-const routeMethod = String(route.query.method || '')
+const routeMethod = props.embeddedNode ? '等时试井' : String(route.query.method || '')
 const activeModule = ref(routeConfig?.name || '')
 const activeMethod = ref(routeConfig?.methods.includes(routeMethod) ? routeMethod : '')
-const routeTestId = Number(route.query.testId)
-const routeEvaluationId = Number(route.query.evaluationId)
+const routeTestId = Number(props.embeddedNode?.testId ?? route.query.testId)
+const routeEvaluationId = Number(props.embeddedNode?.evaluationId ?? route.query.evaluationId)
 const activeProductivityTestId = ref(Number.isFinite(routeTestId) && routeTestId > 0 ? routeTestId : null)
 const activeEvaluationId = ref(Number.isFinite(routeEvaluationId) && routeEvaluationId > 0 ? routeEvaluationId : null)
 const selectedPvtTable = ref('')
@@ -428,6 +434,14 @@ const handleSidebarSelect = async node => {
   if (isProductivityTestNode || node.type === ISOCHRONAL_METHOD_NODE_TYPE) return
 
   if (node.type === ISOCHRONAL_RECORD_NODE_TYPE && node.testId) {
+    // 独立的新建/计算页只负责把点击交还给 /ipr；真正的记录详情由
+    // /ipr 中复用的本工作台加载，使所有左侧记录节点拥有一致的地址行为。
+    if (!props.embedded) {
+      workspacePendingNode.value = node
+      await router.push({ name: 'IprInterface' })
+      return
+    }
+
     selectedWellName.value = node.wellName || selectedWellName.value
     activeProductivityTestId.value = Number(node.testId)
     activeEvaluationId.value = null
@@ -453,13 +467,6 @@ const handleSidebarSelect = async node => {
         ? '指数式'
         : '二项式'
       operationType.value = detail.record?.operationType === 'injection' ? 'injection' : 'production'
-      await router.replace({
-        name: 'SingleWellProductivity',
-        query: {
-          module: '产能试井', method: '等时试井',
-          well: selectedWellName.value, testId: node.testId
-        }
-      })
       await nextTick()
       await pressureContentRef.value?.loadWellData?.()
       pressureContentRef.value?.restorePersisted?.(detail)
@@ -559,13 +566,15 @@ const handleSaveIsochronal = async () => {
     const nodes = await loadIsochronalNodes(selectedWellName.value, { expand: true })
     const savedNode = nodes.find(item => Number(item.testId) === Number(record.testId))
     if (savedNode) workspaceActiveNodeId.value = savedNode.id
-    await router.replace({
-      name: 'SingleWellProductivity',
-      query: {
-        module: '产能试井', method: '等时试井',
-        well: selectedWellName.value, testId: record.testId
-      }
-    })
+    if (!props.embedded) {
+      await router.replace({
+        name: 'SingleWellProductivity',
+        query: {
+          module: '产能试井', method: '等时试井',
+          well: selectedWellName.value, testId: record.testId
+        }
+      })
+    }
     ElMessage.success(`已保存等时试井${record.testNo}`)
   } catch (error) {
     ElMessage.error(error.response?.data?.msg || error.response?.data?.message || error.message || '保存失败')
@@ -601,12 +610,12 @@ const handleProductivitySaved = async saved => {
 onMounted(async () => {
   await loadWells()
   if (selectedWellName.value) await loadPvtOptions()
-  if (route.query.method === '等时试井') selectedDataTable.value = 'local-import'
+  if (route.query.method === '等时试井' || props.embeddedNode) selectedDataTable.value = 'local-import'
   await Promise.allSettled([
     loadAllModifiedIsochronalNodes(),
     loadAllIsochronalNodes()
   ])
-  if (selectedWellName.value && route.query.method === '等时试井' && activeProductivityTestId.value) {
+  if (selectedWellName.value && (route.query.method === '等时试井' || props.embeddedNode) && activeProductivityTestId.value) {
     await handleSidebarSelect({
       id: `productivity-test-isochronal-${activeProductivityTestId.value}`,
       type: ISOCHRONAL_RECORD_NODE_TYPE,
@@ -619,12 +628,12 @@ onMounted(async () => {
 
 <template>
   <!-- 顶部菜单栏对应板块：单井产能。 -->
-  <div class="productivity-interface">
-    <RibbonMenu @command="handleCommand" />
+  <div class="productivity-interface" :class="{ embedded: props.embedded }">
+    <RibbonMenu v-if="!props.embedded" @command="handleCommand" />
 
     <div class="productivity-main">
       <!-- 公共左侧目录：与 IprInterface.vue 使用同一个组件。 -->
-      <WorkspaceSidebar v-model:keyword="keyword" v-model:collapsed="sideTreeCollapsed" :nodes="sidebarTreeData"
+      <WorkspaceSidebar v-if="!props.embedded" v-model:keyword="keyword" v-model:collapsed="sideTreeCollapsed" :nodes="sidebarTreeData"
         :active-id="workspaceActiveNodeId" :loading="loadingWells" @select="handleSidebarSelect" />
 
             <main class="productivity-content">
@@ -832,6 +841,11 @@ $accent-soft: #fff8d8;
   background: #fff;
   color: #252525;
   font: 14px "Microsoft YaHei", "Segoe UI", sans-serif;
+
+  &.embedded {
+    width: 100%;
+    height: 100%;
+  }
 }
 
 .productivity-main {

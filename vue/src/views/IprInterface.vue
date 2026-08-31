@@ -6,9 +6,8 @@
  * 1. 数据管理
  * 2. 井控库存
  *
- * “单井产能”已经拆分到 SingleWellProductivityInterface.vue。
- * 用户点击顶部“单井产能”板块的命令时，本页面只负责路由跳转，
- * 不再在 IprInterface.vue 内渲染单井产能的业务界面。
+ * 顶部“单井产能”命令进入独立工作台；左侧目录中的已保存记录则在
+ * 当前 /ipr 页面内打开，和其它目录节点保持一致。
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -29,6 +28,7 @@ import AGContent from '@/views/WellControlInventory/AGContent.vue'
 import PvtPropertiesContent from '@/views/DataManagement/PvtPropertiesContent.vue'
 import RelativePermeabilityContent from '@/views/DataManagement/RelativePermeabilityContent.vue'
 import WellDataTableContent from '@/views/DataManagement/WellDataTableContent.vue'
+import SingleWellProductivityInterface from '@/views/SingleWellProductivityInterface.vue'
 import { NODETYPE } from '@/constants/nodeType'
 import { analyticMethodApi, dataManagementApi, dynamicBalanceApi, materialBalanceApi, nodeApi, notifyApi, parametersApi, projectApi, typicalCurveApi, waterInvasionApi, wellApi } from '@/api/docker'
 import { pvtStorageApi } from '@/api/pvtStorage'
@@ -57,7 +57,7 @@ import {
 // 7
 const PROJECT_ID = 6
 // 4
-const GAS_RESERVOIR_ID = 1
+const GAS_RESERVOIR_ID = 4
 const router = useRouter()
 const FLOW_BALANCE_NODE_TYPE = NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure
 
@@ -3829,15 +3829,12 @@ const handleSelect = async (node) => { // 点击左侧树节点
   if (node.type === ISOCHRONAL_METHOD_NODE_TYPE) return
 
   if (node.type === ISOCHRONAL_RECORD_NODE_TYPE && node.testId) {
-    await router.push({
-      name: 'SingleWellProductivity',
-      query: {
-        module: '产能试井',
-        method: '等时试井',
-        well: nodeWellName,
-        testId: node.testId
-      }
-    })
+    currentView.value = 'isochronal-test'
+    currentViewNode.value = {
+      ...node,
+      wellName: nodeWellName,
+      viewInstanceKey: `${node.id}-${Date.now()}`
+    }
     return
   }
 
@@ -4214,7 +4211,7 @@ onBeforeUnmount(() => {
 <template>
   <!--
     顶部菜单栏对应板块：数据管理、井控库存。
-    单井产能板块通过 handleCommand 跳转到独立页面，不在本模板内渲染。
+    单井产能板块通过 handleCommand 跳转到独立页面；目录中的已保存等时试井在本页渲染。
   -->
   <div class="ipr-container">
     <!--    顶部菜单栏目-->
@@ -4241,6 +4238,12 @@ onBeforeUnmount(() => {
           'pvt-yellow-theme': isPvtView
         }"
       >
+        <SingleWellProductivityInterface
+          v-if="currentView === 'isochronal-test'"
+          :key="currentViewNode?.viewInstanceKey"
+          embedded
+          :embedded-node="currentViewNode"
+        />
         <PvtPropertiesContent
           v-if="currentView === 'pvt-properties'"
           :key="currentViewNode?.viewInstanceKey || currentViewNode?.id || currentViewNode?.wellName"
