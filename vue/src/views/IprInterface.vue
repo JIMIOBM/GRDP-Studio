@@ -35,6 +35,11 @@ import { pvtStorageApi } from '@/api/pvtStorage'
 import { createPvtDraftRecord } from '@/utils/pvtRecords'
 import { loadAllModifiedIsochronalTreeNodes } from '@/utils/modifiedIsochronalTree'
 import {
+  loadAllOwnedProductivityTestTreeNodes,
+  OWNED_PRODUCTIVITY_METHOD_NODE_TYPE,
+  OWNED_PRODUCTIVITY_RECORD_NODE_TYPE
+} from '@/utils/ownedProductivityTestTree'
+import {
   ISOCHRONAL_METHOD_NODE_TYPE,
   ISOCHRONAL_RECORD_NODE_TYPE,
   loadAllIsochronalTreeNodes
@@ -71,6 +76,9 @@ const WELL_GROUPS = [
 ]
 
 const WELL_DATA_NODES = [
+  { type: 'well-data-wellhead', label: '井头数据', dataType: 'wellhead' },
+  { type: 'well-data-deviation', label: '井斜数据', dataType: 'deviation' },
+  { type: 'well-data-logging', label: '测井数据', dataType: 'logging' },
   { type: 'well-data-deliverability', label: '产能测试', dataType: 'deliverability' },
   { type: 'well-data-wellcompletion', label: '完井数据', dataType: 'wellcompletion' },
   { type: 'well-data-otherdata', label: '其他数据', dataType: 'otherdata' },
@@ -3826,6 +3834,31 @@ const handleSelect = async (node) => { // 点击左侧树节点
     return
   }
 
+  if (node.type === OWNED_PRODUCTIVITY_METHOD_NODE_TYPE) {
+    await router.push({
+      name: 'SingleWellProductivity',
+      query: {
+        module: '产能试井',
+        method: node.pageMethod || (node.testMethod === 'one-point' ? '一点法' : '回压试井'),
+        well: nodeWellName
+      }
+    })
+    return
+  }
+
+  if (node.type === OWNED_PRODUCTIVITY_RECORD_NODE_TYPE && node.testId) {
+    await router.push({
+      name: 'SingleWellProductivity',
+      query: {
+        module: '产能试井',
+        method: node.pageMethod || (node.testMethod === 'one-point' ? '一点法' : '回压试井'),
+        well: nodeWellName,
+        testId: node.testId
+      }
+    })
+    return
+  }
+
   if (node.type === ISOCHRONAL_METHOD_NODE_TYPE) return
 
   if (node.type === ISOCHRONAL_RECORD_NODE_TYPE && node.testId) {
@@ -4180,6 +4213,11 @@ onMounted(async () => {
         gasReservoirId: GAS_RESERVOIR_ID
       }),
       loadAllIsochronalTreeNodes({
+        treeData: treeData.value,
+        projectId: PROJECT_ID,
+        gasReservoirId: GAS_RESERVOIR_ID
+      }),
+      loadAllOwnedProductivityTestTreeNodes({
         treeData: treeData.value,
         projectId: PROJECT_ID,
         gasReservoirId: GAS_RESERVOIR_ID

@@ -38,8 +38,11 @@ public class ProductivityTestService {
             "back-pressure", "isochronal", "modified-isochronal", "one-point");
     private static final Set<String> PRESSURE_METHODS = Set.of(
             "pseudo-pressure", "pressure-squared", "pressure");
-    private static final Set<String> CURVE_TYPES = Set.of(
+    private static final Set<String> RESULT_TYPES = Set.of("binomial", "exponential");
+    private static final Set<String> BINOMIAL_CURVE_TYPES = Set.of(
             "regularized", "stable", "regression", "shifted-regression");
+    private static final Set<String> EXPONENTIAL_CURVE_TYPES = Set.of(
+            "analysis", "regression", "transient");
     private static final DateTimeFormatter NODE_TIME_FORMAT = DateTimeFormatter.ofPattern("yy.M.d.HHmm");
     private static final ZoneId CHINA_ZONE = ZoneId.of("Asia/Shanghai");
 
@@ -53,9 +56,13 @@ public class ProductivityTestService {
         validateMethod(testMethod);
         return jdbc.query("""
                 SELECT t.id,t.test_no,t.test_name,t.test_date,t.operation_type,t.test_method,t.status,
-                       GROUP_CONCAT(o.pressure_method ORDER BY o.id SEPARATOR ',') AS pressure_methods
+                       GROUP_CONCAT(DISTINCT o.pressure_method ORDER BY o.pressure_method SEPARATOR ',') AS pressure_methods
                 FROM project_well_productivity_test t
-                LEFT JOIN project_well_productivity_binomial_output o ON o.test_id=t.id
+                LEFT JOIN (
+                    SELECT test_id,pressure_method FROM project_well_productivity_binomial_output
+                    UNION ALL
+                    SELECT test_id,pressure_method FROM project_well_productivity_exponential_output
+                ) o ON o.test_id=t.id
                 WHERE t.project_id=? AND t.project_gas_reservoir_id=? AND t.well_name=? AND t.test_method=?
                 GROUP BY t.id,t.test_no,t.test_name,t.test_date,t.operation_type,t.test_method,t.status
                 ORDER BY t.test_no,t.test_date,t.id
@@ -67,11 +74,12 @@ public class ProductivityTestService {
                 projectId, gasReservoirId, wellName.trim(), testMethod);
     }
 
-    public Detail detail(long testId) {
+    public Detail detail(long testId, long projectId, long gasReservoirId, String wellName) {
         Map<String, Object> test = one("""
                 SELECT id,pvt_id,test_no,test_name,test_date,operation_type,test_method,well_name,well_type,status
-                FROM project_well_productivity_test WHERE id=?
-                """, testId, "试井记录不存在");
+                FROM project_well_productivity_test
+                WHERE id=? AND project_id=? AND project_gas_reservoir_id=? AND well_name=?
+                """, new Object[]{testId, projectId, gasReservoirId, wellName.trim()}, "试井记录不存在或不属于当前井");
         Map<String, Object> input = one("SELECT * FROM project_well_productivity_test_input WHERE test_id=?",
                 testId, "试井输入不存在");
         long inputId = number(input.get("id")).longValue();
@@ -80,15 +88,22 @@ public class ProductivityTestService {
                 FROM project_well_productivity_test_input_item WHERE input_id=? ORDER BY test_point_number
                 """, (rs, row) -> new InputItem(rs.getInt(1), rs.getDouble(2), rs.getDouble(3), rs.getDouble(4)), inputId);
 
-        List<Map<String, Object>> outputs = jdbc.queryForList("""
+        List<Map<String, Object>> binomialOutputs = jdbc.queryForList("""
                 SELECT * FROM project_well_productivity_binomial_output
                 WHERE test_id=? ORDER BY updated_at DESC,id DESC
                 """, testId);
-        Result result = outputs.isEmpty() ? null : result(outputs.getFirst());
+        List<Map<String, Object>> exponentialOutputs = jdbc.queryForList("""
+                SELECT * FROM project_well_productivity_exponential_output
+                WHERE test_id=? ORDER BY updated_at DESC,id DESC
+                """, testId);
+        List<Result> results = new ArrayList<>();
+        binomialOutputs.stream().map(this::binomialResult).forEach(results::add);
+        exponentialOutputs.stream().map(this::exponentialResult).forEach(results::add);
+        Result result = results.isEmpty() ? null : results.getFirst();
         return new Detail(testId, number(test.get("pvt_id")).longValue(), number(test.get("test_no")).intValue(),
                 string(test.get("test_name")), date(test.get("test_date")), string(test.get("operation_type")),
                 string(test.get("test_method")), string(test.get("well_name")), string(test.get("well_type")),
-                string(test.get("status")), input(input), items, result, List.of());
+                string(test.get("status")), input(input), items, result, List.of(), results);
     }
 
     @Transactional
@@ -110,7 +125,10 @@ public class ProductivityTestService {
         }
 
         if (created || request.replaceInput()) {
-            if (!created) jdbc.update("DELETE FROM project_well_productivity_binomial_output WHERE test_id=?", testId);
+            if (!created) {
+                jdbc.update("DELETE FROM project_well_productivity_binomial_output WHERE test_id=?", testId);
+                jdbc.update("DELETE FROM project_well_productivity_exponential_output WHERE test_id=?", testId);
+            }
             long inputId = replaceInput(testId, request.input(), request.inputItems());
             if (inputId < 1) throw new BusinessException(500, "保存试井输入失败");
         }
@@ -220,23 +238,42 @@ public class ProductivityTestService {
         if (!Set.of("injection", "production").contains(request.operationType()))
             throw new BusinessException(400, "注采类型不正确");
         Result result = request.result();
+        String resultType = resultType(result);
+        if (!RESULT_TYPES.contains(resultType)) throw new BusinessException(400, "计算结果类型不正确");
         if (!PRESSURE_METHODS.contains(result.pressureMethod())) throw new BusinessException(400, "压力处理方法不正确");
         finite(request.input().maximumFormationPressure(), "最大地层压力");
         finite(request.input().formationTemperature(), "地层温度");
         finite(request.input().specificGravity(), "天然气比重");
-        finite(result.darcySeepageCoefficient(), "达西渗流系数A");
-        finite(result.nonDarcySeepageCoefficient(), "非达西渗流系数B");
-        finite(result.openFlowCapacity(), "无阻流量");
+        if (result.evaluationId() != null && result.evaluationId() <= 0)
+            throw new BusinessException(400, "原平台计算记录编号必须大于0");
+        if ("exponential".equals(resultType)) {
+            positive(result.productivityCoefficient(), "产能系数C");
+            positive(result.productivityExponent(), "产能指数n");
+            positive(result.openFlowCapacity(), "无阻流量");
+            if (result.chartPoints() == null || result.chartPoints().isEmpty())
+                throw new BusinessException(400, "指数式结果缺少分析曲线点");
+            if (result.iprPoints() == null || result.iprPoints().isEmpty())
+                throw new BusinessException(400, "指数式结果缺少IPR曲线点");
+        } else {
+            finite(result.darcySeepageCoefficient(), "达西渗流系数A");
+            finite(result.nonDarcySeepageCoefficient(), "非达西渗流系数B");
+            finite(result.openFlowCapacity(), "无阻流量");
+        }
         request.inputItems().forEach(item -> {
             finite(item.testDailyGasProduction(), "测试气产量");
             finite(item.reservoirPressure(), "地层/恢复压力");
             finite(item.testFlowPressure(), "测试流压");
         });
+        Set<String> curveTypes = "exponential".equals(resultType)
+                ? EXPONENTIAL_CURVE_TYPES : BINOMIAL_CURVE_TYPES;
         if (result.chartPoints() != null) result.chartPoints().forEach(point -> {
-            if (!CURVE_TYPES.contains(point.curveType())) throw new BusinessException(400, "分析曲线类型不正确");
+            if (!curveTypes.contains(point.curveType())) throw new BusinessException(400, "分析曲线类型不正确");
+            if (point.sourcePointNumber() != null && point.sourcePointNumber() <= 0)
+                throw new BusinessException(400, "来源测点序号必须大于0");
             finite(point.xValue(), "分析图横坐标"); finite(point.yValue(), "分析图纵坐标");
         });
         if (result.iprPoints() != null) result.iprPoints().forEach(point -> {
+            if ("exponential".equals(resultType)) positive(point.formationPressure(), "IPR曲线地层压力");
             finite(point.gasProduction(), "IPR曲线产气量");
             finite(point.bottomHoleFlowingPressure(), "IPR曲线井底流压");
         });
@@ -309,6 +346,10 @@ public class ProductivityTestService {
     }
 
     private void replaceResult(long testId, Result result) {
+        if ("exponential".equals(resultType(result))) {
+            replaceExponentialResult(testId, result);
+            return;
+        }
         jdbc.update("DELETE FROM project_well_productivity_binomial_output WHERE test_id=? AND pressure_method=?",
                 testId, result.pressureMethod());
         long outputId = insert("""
@@ -332,23 +373,73 @@ public class ProductivityTestService {
                 point.bottomHoleFlowingPressure(), point.deleted(), blankToNull(point.dataLabel()));
     }
 
-    private Result result(Map<String, Object> output) {
+    private void replaceExponentialResult(long testId, Result result) {
+        jdbc.update("DELETE FROM project_well_productivity_exponential_output WHERE test_id=? AND pressure_method=?",
+                testId, result.pressureMethod());
+        long outputId = insert("""
+                INSERT INTO project_well_productivity_exponential_output
+                (test_id,pressure_method,productivity_coefficient,productivity_exponent,open_flow_capacity,
+                 r_squared,reliability_description,calculated_at)
+                VALUES (?,?,?,?,?,?,?,?)
+                """, testId, result.pressureMethod(), result.productivityCoefficient(),
+                result.productivityExponent(), result.openFlowCapacity(), result.rSquared(),
+                blankToNull(result.reliabilityDescription()), LocalDateTime.now(CHINA_ZONE));
+        for (ChartPoint point : result.chartPoints()) jdbc.update("""
+                INSERT INTO project_well_productivity_exponential_output_item
+                (output_id,curve_type,point_number,source_point_number,x_value,y_value,is_deleted,data_label)
+                VALUES (?,?,?,?,?,?,?,?)
+                """, outputId, point.curveType(), point.pointNumber(), point.sourcePointNumber(),
+                point.xValue(), point.yValue(), point.deleted(), blankToNull(point.dataLabel()));
+        for (IprPoint point : result.iprPoints()) jdbc.update("""
+                INSERT INTO project_well_productivity_exponential_ipr_item
+                (output_id,curve_number,formation_pressure,point_number,gas_production,
+                 bottom_hole_flowing_pressure,is_deleted,data_label) VALUES (?,?,?,?,?,?,?,?)
+                """, outputId, point.curveNumber(), point.formationPressure(), point.pointNumber(),
+                point.gasProduction(), point.bottomHoleFlowingPressure(), point.deleted(),
+                blankToNull(point.dataLabel()));
+    }
+
+    private Result binomialResult(Map<String, Object> output) {
         long outputId = number(output.get("id")).longValue();
         List<ChartPoint> charts = jdbc.query("""
                 SELECT curve_type,point_number,x_value,y_value,is_deleted,data_label
                 FROM project_well_productivity_binomial_output_item WHERE output_id=? ORDER BY curve_type,point_number
-                """, (rs, row) -> new ChartPoint(rs.getString(1), rs.getInt(2), rs.getDouble(3), rs.getDouble(4),
-                rs.getBoolean(5), rs.getString(6)), outputId);
+                """, (rs, row) -> new ChartPoint(rs.getString(1), rs.getInt(2), null,
+                rs.getDouble(3), rs.getDouble(4), rs.getBoolean(5), rs.getString(6)), outputId);
         List<IprPoint> ipr = jdbc.query("""
                 SELECT curve_number,point_number,gas_production,bottom_hole_flowing_pressure,is_deleted,data_label
                 FROM project_well_productivity_binomial_ipr_item WHERE output_id=? ORDER BY curve_number,point_number
-                """, (rs, row) -> new IprPoint(rs.getInt(1), rs.getInt(2), rs.getDouble(3), rs.getDouble(4),
-                rs.getBoolean(5), rs.getString(6)), outputId);
-        return new Result(string(output.get("pressure_method")), null,
+                """, (rs, row) -> new IprPoint(rs.getInt(1), rs.getInt(2), null,
+                rs.getDouble(3), rs.getDouble(4), rs.getBoolean(5), rs.getString(6)), outputId);
+        return new Result("binomial", string(output.get("pressure_method")),
+                null,
                 decimal(output.get("darcy_seepage_coefficient")),
                 decimal(output.get("non_darcy_seepage_coefficient")), decimal(output.get("open_flow_capacity")),
+                null, null,
                 decimal(output.get("gradient")), decimal(output.get("intercept")), decimal(output.get("r_squared")),
                 integer(output.get("reliability_level")), string(output.get("reliability_description")), charts, ipr);
+    }
+
+    private Result exponentialResult(Map<String, Object> output) {
+        long outputId = number(output.get("id")).longValue();
+        List<ChartPoint> charts = jdbc.query("""
+                SELECT curve_type,point_number,source_point_number,x_value,y_value,is_deleted,data_label
+                FROM project_well_productivity_exponential_output_item
+                WHERE output_id=? ORDER BY curve_type,point_number
+                """, (rs, row) -> new ChartPoint(rs.getString(1), rs.getInt(2),
+                nullableInteger(rs, 3), rs.getDouble(4), rs.getDouble(5), rs.getBoolean(6), rs.getString(7)), outputId);
+        List<IprPoint> ipr = jdbc.query("""
+                SELECT curve_number,point_number,formation_pressure,gas_production,
+                       bottom_hole_flowing_pressure,is_deleted,data_label
+                FROM project_well_productivity_exponential_ipr_item
+                WHERE output_id=? ORDER BY curve_number,point_number
+                """, (rs, row) -> new IprPoint(rs.getInt(1), rs.getInt(2), rs.getDouble(3),
+                rs.getDouble(4), rs.getDouble(5), rs.getBoolean(6), rs.getString(7)), outputId);
+        return new Result("exponential", string(output.get("pressure_method")), null,
+                null, null, decimal(output.get("open_flow_capacity")),
+                decimal(output.get("productivity_coefficient")), decimal(output.get("productivity_exponent")),
+                null, null, decimal(output.get("r_squared")), null,
+                string(output.get("reliability_description")), charts, ipr);
     }
 
     private Input input(Map<String, Object> value) {
@@ -360,7 +451,9 @@ public class ProductivityTestService {
     }
 
     private Map<String, Object> one(String sql, Object argument, String message) {
-        List<Map<String, Object>> rows = jdbc.queryForList(sql, argument);
+        List<Map<String, Object>> rows = argument instanceof Object[] values
+                ? jdbc.queryForList(sql, values)
+                : jdbc.queryForList(sql, argument);
         if (rows.isEmpty()) throw new BusinessException(404, message);
         return rows.getFirst();
     }
@@ -391,10 +484,16 @@ public class ProductivityTestService {
     private String cell(List<String> row, int index) { return index < row.size() ? row.get(index) : ""; }
     private double parse(String value) { return Double.parseDouble(value.replace(",", "").trim()); }
     private void finite(Double value, String field) { if (value == null || !Double.isFinite(value)) throw new BusinessException(400, field + "必须是有效数字"); }
+    private void positive(Double value, String field) { finite(value, field); if (value <= 0) throw new BusinessException(400, field + "必须大于0"); }
+    private String resultType(Result result) { return result.calculationResultType() == null || result.calculationResultType().isBlank() ? "binomial" : result.calculationResultType().trim(); }
+    private Integer nullableInteger(java.sql.ResultSet resultSet, int column) throws java.sql.SQLException { int value = resultSet.getInt(column); return resultSet.wasNull() ? null : value; }
     private Number number(Object value) { return (Number) value; }
     private Long longValue(Object value) { return value == null ? null : number(value).longValue(); }
     private Double decimal(Object value) { return value == null ? null : number(value).doubleValue(); }
-    private Integer integer(Object value) { return value == null ? null : number(value).intValue(); }
+    private Integer integer(Object value) {
+        if (value == null) return null;
+        return value instanceof Number number ? number.intValue() : Integer.valueOf(String.valueOf(value));
+    }
     private String string(Object value) { return value == null ? null : String.valueOf(value); }
     private LocalDate date(Object value) { return value instanceof Date d ? d.toLocalDate() : LocalDate.parse(String.valueOf(value)); }
     private double zero(Double value) { return value == null ? 0 : value; }

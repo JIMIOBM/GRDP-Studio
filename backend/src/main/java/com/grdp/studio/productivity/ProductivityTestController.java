@@ -32,8 +32,12 @@ public class ProductivityTestController {
     }
 
     @GetMapping("/{testId}")
-    public ApiResponse<ProductivityTestModels.Detail> detail(@PathVariable long testId) {
-        return ApiResponse.success(service.detail(testId));
+    public ApiResponse<ProductivityTestModels.Detail> detail(
+            @PathVariable long testId,
+            @RequestParam long projectId,
+            @RequestParam long gasReservoirId,
+            @RequestParam String wellName) {
+        return ApiResponse.success(service.detail(testId, projectId, gasReservoirId, wellName));
     }
 
     @PostMapping("/import")
