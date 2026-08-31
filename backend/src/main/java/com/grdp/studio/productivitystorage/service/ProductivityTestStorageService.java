@@ -29,6 +29,7 @@ public class ProductivityTestStorageService {
     private static final List<String> PRESSURE_METHODS =
             List.of("pseudo-pressure", "pressure-squared", "pressure");
     private static final List<String> RESULT_TYPES = List.of("binomial", "exponential");
+    private static final List<String> OPERATION_TYPES = List.of("production", "injection");
     private final JdbcTemplate jdbc;
 
     public ProductivityTestStorageService(JdbcTemplate jdbc) {
@@ -38,7 +39,7 @@ public class ProductivityTestStorageService {
     public List<Summary> listIsochronal(long projectId, long reservoirId, String wellName) {
         String sql = """
                 SELECT t.id,t.test_no,t.test_name,t.well_name,t.pvt_id,p.pvt_no,
-                       COALESCE(o.pressure_method,''),t.status
+                       COALESCE(o.pressure_method,''),t.status,t.operation_type
                 FROM project_well_productivity_test t
                 JOIN project_well_pvt p ON p.id=t.pvt_id
                 LEFT JOIN (
@@ -54,7 +55,7 @@ public class ProductivityTestStorageService {
                 : new Object[]{projectId, reservoirId, wellName.trim()};
         List<Summary> rows = jdbc.query(sql, (rs, rowNum) -> new Summary(
                 rs.getLong(1), rs.getInt(2), rs.getString(3), rs.getString(4),
-                rs.getLong(5), rs.getInt(6), rs.getString(7), rs.getString(8)), args);
+                rs.getLong(5), rs.getInt(6), rs.getString(7), rs.getString(8), rs.getString(9)), args);
         List<Summary> unique = new ArrayList<>();
         for (Summary row : rows) {
             if (unique.stream().noneMatch(item -> item.testId() == row.testId())) unique.add(row);
@@ -72,6 +73,7 @@ public class ProductivityTestStorageService {
     @Transactional
     public Summary saveIsochronal(SaveRequest request) {
         validatePressureMethod(request.pressureMethod());
+        validateOperationType(request.operationType());
         validateResult(request.result());
         long wellId = findWellId(request.projectId(), request.gasReservoirId(), request.wellName());
         long pvtId = ensurePvt(wellId, request.pvtNo(), request.pvtName());
@@ -118,7 +120,7 @@ public class ProductivityTestStorageService {
     private long insertTest(SaveRequest request, long wellId, long pvtId) {
         Integer nextNo = jdbc.queryForObject("""
                 SELECT COALESCE(MAX(test_no),0)+1 FROM project_well_productivity_test
-                WHERE well_id=? AND operation_type='production' AND test_method='isochronal'
+                WHERE well_id=? AND test_method='isochronal'
                 FOR UPDATE
                 """, Integer.class, wellId);
         int testNo = Objects.requireNonNullElse(nextNo, 1);
@@ -126,9 +128,9 @@ public class ProductivityTestStorageService {
                 INSERT INTO project_well_productivity_test
                   (project_id,project_gas_reservoir_id,well_id,well_name,pvt_id,operation_type,
                    test_method,test_no,test_name,test_date,status)
-                VALUES(?,?,?,?,?,'production','isochronal',?,?,?,'data-ready')
+                VALUES(?,?,?,?,?,?,'isochronal',?,?,?,'data-ready')
                 """, request.projectId(), request.gasReservoirId(), wellId, request.wellName().trim(),
-                pvtId, testNo, "等时试井" + testNo,
+                pvtId, request.operationType(), testNo, "等时试井" + testNo,
                 Objects.requireNonNullElse(request.testDate(), LocalDate.now()));
     }
 
@@ -139,8 +141,9 @@ public class ProductivityTestStorageService {
                   AND test_method='isochronal'
                 """, Long.class, request.testId(), request.projectId(), request.gasReservoirId(), wellId);
         if (count == null || count == 0) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "等时试井记录不存在");
-        jdbc.update("UPDATE project_well_productivity_test SET pvt_id=?,test_date=? WHERE id=?",
-                pvtId, Objects.requireNonNullElse(request.testDate(), LocalDate.now()), request.testId());
+        jdbc.update("UPDATE project_well_productivity_test SET pvt_id=?,operation_type=?,test_date=? WHERE id=?",
+                pvtId, request.operationType(), Objects.requireNonNullElse(request.testDate(), LocalDate.now()),
+                request.testId());
         return request.testId();
     }
 
@@ -266,7 +269,7 @@ public class ProductivityTestStorageService {
         try {
             return jdbc.queryForObject("""
                     SELECT t.id,t.test_no,t.test_name,t.well_name,t.pvt_id,p.pvt_no,
-                           COALESCE(o.pressure_method,''),t.status
+                           COALESCE(o.pressure_method,''),t.status,t.operation_type
                     FROM project_well_productivity_test t
                     JOIN project_well_pvt p ON p.id=t.pvt_id
                     LEFT JOIN (
@@ -277,7 +280,8 @@ public class ProductivityTestStorageService {
                     WHERE t.id=? AND t.project_id=? AND t.project_gas_reservoir_id=?
                     ORDER BY o.updated_at DESC LIMIT 1
                     """, (rs, rowNum) -> new Summary(rs.getLong(1), rs.getInt(2), rs.getString(3),
-                            rs.getString(4), rs.getLong(5), rs.getInt(6), rs.getString(7), rs.getString(8)),
+                            rs.getString(4), rs.getLong(5), rs.getInt(6), rs.getString(7), rs.getString(8),
+                            rs.getString(9)),
                     testId, projectId, reservoirId);
         } catch (EmptyResultDataAccessException error) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "等时试井记录不存在");
@@ -393,6 +397,12 @@ public class ProductivityTestStorageService {
     private void validatePressureMethod(String method) {
         if (!PRESSURE_METHODS.contains(method)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "不支持的压力计算方法：" + method);
+        }
+    }
+
+    private void validateOperationType(String operationType) {
+        if (!OPERATION_TYPES.contains(operationType)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "不支持的注采类型：" + operationType);
         }
     }
 

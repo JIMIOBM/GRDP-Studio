@@ -13,7 +13,8 @@ public final class IsochronalTestDtos {
     private IsochronalTestDtos() {}
 
     public record Summary(long testId, int testNo, String testName, String wellName,
-                          long pvtId, int pvtNo, String pressureMethod, String status) {}
+                          long pvtId, int pvtNo, String pressureMethod, String status,
+                          String operationType) {}
 
     public record SaveRequest(
             @Min(1) long projectId,
@@ -22,6 +23,7 @@ public final class IsochronalTestDtos {
             Long testId,
             @Min(1) int pvtNo,
             @NotBlank String pvtName,
+            @NotBlank String operationType,
             LocalDate testDate,
             @Valid @NotNull Input input,
             @NotBlank String pressureMethod,

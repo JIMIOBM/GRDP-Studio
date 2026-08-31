@@ -436,6 +436,7 @@ const handleSidebarSelect = async node => {
       calculationResult.value = detail.result?.calculationResultType === 'exponential'
         ? '指数式'
         : '二项式'
+      operationType.value = detail.record?.operationType === 'injection' ? 'injection' : 'production'
       await router.replace({
         name: 'SingleWellProductivity',
         query: {
@@ -711,9 +712,7 @@ onMounted(async () => {
                 <fieldset class="radio-group">
                   <legend>注采类型</legend>
                   <label><input v-model="operationType" type="radio" value="production" />采气</label>
-                  <label class="disabled-radio" title="当前计算仅支持采气">
-                    <input type="radio" value="injection" disabled />注气
-                  </label>
+                  <label><input v-model="operationType" type="radio" value="injection" />注气</label>
                 </fieldset>
 
                 <fieldset class="radio-group result-methods">
@@ -726,11 +725,11 @@ onMounted(async () => {
                   <div v-if="calculationOutput" class="calculation-output">
                     <template v-if="calculationOutput.calculationResultType === 'exponential'">
                       <label class="field-group">
-                        <span>产能系数 C</span>
+                        <span>{{ operationType === 'injection' ? '注气能力系数 C' : '产能系数 C' }}</span>
                         <input :value="scientific(calculationOutput.productivityCoefficient)" readonly />
                       </label>
                       <label class="field-group">
-                        <span>产能指数 n</span>
+                        <span>{{ operationType === 'injection' ? '注气指数 n' : '产能指数 n' }}</span>
                         <input :value="Number(calculationOutput.productivityExponent).toFixed(4)" readonly />
                       </label>
                     </template>
@@ -764,6 +763,7 @@ onMounted(async () => {
                 :external-one-point-alpha="Number(onePointAlpha)"
                 :external-calculation-method="pressureCalculationMethod"
                 :external-calculation-result="calculationResult === '指数式' ? 'exponential' : 'binomial'"
+                :external-operation-type="operationType"
                 :pvt-result-rows="selectedPvtRecord?.gasResultRows || []"
                 :pvt-record="selectedPvtRecord"
                 :project-id="PROJECT_ID"
