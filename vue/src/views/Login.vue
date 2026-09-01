@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { User, Lock } from '@element-plus/icons-vue'
 import { projectName } from '../../config/config.default'
-import { userApi } from '@/api'
+import { connectNotifySocket } from '@/utils/notifySocket'
 
 const router = useRouter()
 const loading = ref(false)
@@ -43,6 +43,7 @@ const loginDockerPlatform = async () => {
 
 const enterIpr = async (account) => {
   localStorage.setItem('account', JSON.stringify(account))
+  connectNotifySocket()
   ElMessage.success('登录成功')
   await router.replace('/ipr')
 }
@@ -52,18 +53,14 @@ const onLogin = async () => {
     if (!valid) return
     loading.value = true
     try {
-      let account
-      try {
-        const res = await userApi.login(form.value)
-        account = res?.data || { id: 1, username: form.value.username, nickname: form.value.username }
-      } catch (error) {
-        // 本地业务后端未就绪时仍允许联调，但原平台必须真实登录成功。
-        console.warn('本地业务登录不可用，使用联调账号信息', error)
-        account = { id: 1, username: form.value.username, nickname: form.value.username }
+      // The business backend does not own authentication. Authenticate once
+      // against the original platform and use that identity locally as well.
+      await loginDockerPlatform()
+      const account = {
+        id: form.value.username,
+        username: form.value.username,
+        nickname: form.value.username
       }
-
-      // 必须先拿到并校验原平台会话，再进入会发起原平台请求的主页面。
-      // await loginDockerPlatform()
       await enterIpr(account)
     } catch (error) {
       ElMessage.error(error.message || '登录失败')

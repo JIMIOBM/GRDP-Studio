@@ -959,9 +959,6 @@ const handleCalculate = async () => {
   calculationOutput.value = null
   await nextTick()
   await pressureContentRef.value?.analyze?.()
-  if (activeMethod.value === '等时试井' && calculationOutput.value) {
-    await handleSaveIsochronal()
-  }
 }
 
 const handleSourceInputSync = ({ maximumFormationPressure: pressure, formationTemperature: temperature }) => {
@@ -1230,6 +1227,13 @@ onBeforeUnmount(() => window.removeEventListener('click', closeStableContextMenu
                       :disabled="savingResult || !calculationOutput || !resultDirty"
                       @click="saveCalculation"
                     >{{ savingResult ? '保存中…' : '保存' }}</button>
+                    <button
+                      v-if="activeMethod === '等时试井'"
+                      type="button"
+                      class="save-button"
+                      :disabled="savingProductivityTest || !calculationOutput"
+                      @click="handleSaveIsochronal"
+                    >{{ savingProductivityTest ? '保存中…' : '保存' }}</button>
                   </div>
                   <div v-if="calculationOutput" class="calculation-output">
                     <template v-if="calculationOutput.calculationResultType === 'exponential'">
