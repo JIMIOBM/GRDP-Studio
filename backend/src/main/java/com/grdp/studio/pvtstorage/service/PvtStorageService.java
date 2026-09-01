@@ -171,6 +171,50 @@ public class PvtStorageService {
     }
 
     /**
+     * 删除当前井的一次 PVT 及其七张子表数据。
+     *
+     * <p>删除前同时校验项目、气藏、井名和 pvtId，避免通过其他井的编号误删数据。
+     * 已经被产能试井引用的 PVT 暂不允许删除，因为旧试井表仍以 pvt_id 外键关联
+     * PVT 主表；未被引用时，所有删除操作都在同一事务中完成。</p>
+     */
+    @Transactional
+    public void delete(long pvtId, long projectId, long gasReservoirId, String wellName) {
+        long wellId = requireWellId(projectId, gasReservoirId, wellName);
+        WellPvtEntity pvt = wellPvtMapper.selectOne(
+                new LambdaQueryWrapper<WellPvtEntity>()
+                        .eq(WellPvtEntity::getId, pvtId)
+                        .eq(WellPvtEntity::getWellId, wellId)
+        );
+        if (pvt == null) {
+            throw new BusinessException(404, "没有找到当前井对应的PVT性质");
+        }
+
+        if (wellPvtMapper.countProductivityTestReferences(pvtId) > 0) {
+            throw new BusinessException(409, "该PVT已被产能试井引用，不能直接删除");
+        }
+
+        // 显式删除子表，使该功能不依赖不同环境中外键级联配置是否完全一致。
+        gasInputMapper.delete(new LambdaQueryWrapper<PvtGasInputEntity>()
+                .eq(PvtGasInputEntity::getPvtId, pvtId));
+        waterInputMapper.delete(new LambdaQueryWrapper<PvtWaterInputEntity>()
+                .eq(PvtWaterInputEntity::getPvtId, pvtId));
+        rockInputMapper.delete(new LambdaQueryWrapper<PvtRockInputEntity>()
+                .eq(PvtRockInputEntity::getPvtId, pvtId));
+        settingsMapper.delete(new LambdaQueryWrapper<PvtSettingsEntity>()
+                .eq(PvtSettingsEntity::getPvtId, pvtId));
+        gasResultMapper.delete(new LambdaQueryWrapper<PvtGasResultEntity>()
+                .eq(PvtGasResultEntity::getPvtId, pvtId));
+        waterResultMapper.delete(new LambdaQueryWrapper<PvtWaterResultEntity>()
+                .eq(PvtWaterResultEntity::getPvtId, pvtId));
+        rockResultMapper.delete(new LambdaQueryWrapper<PvtRockResultEntity>()
+                .eq(PvtRockResultEntity::getPvtId, pvtId));
+
+        if (wellPvtMapper.deleteById(pvtId) != 1) {
+            throw new BusinessException(500, "删除PVT主记录失败");
+        }
+    }
+
+    /**
      * 在一个事务内完成井定位、PVT 主记录创建/复用、子表保存和主表状态更新。
      * 任意一步失败都会回滚，避免出现只有主表、没有明细的半成品数据。
      */

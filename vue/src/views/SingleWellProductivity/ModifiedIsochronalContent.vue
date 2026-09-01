@@ -57,9 +57,26 @@ const initializedForms = new Set()
 const unwrap = response => response?.data ?? response ?? {}
 const scientific = value => Number.isFinite(Number(value)) ? Number(value).toExponential(4).replace('e', 'E') : ''
 const GAS_TYPE_NAMES = ['干气', '湿气', '凝析气']
+const MODIFICATION_METHOD_NAMES = ['Wichert-Aziz 修正方法', 'Carr-Kobayashi-Burrous 修正方法']
+const DEVIATION_METHOD_NAMES = ['Dranchuk-Abu-Kassem 方法', 'Dranchuk-Purvis-Robinson 方法', 'Hall-Yarborough 方法']
+const VISCOSITY_METHOD_NAMES = ['Lee-Gonzalez-Eakin 方法', 'Carr-Kobayashi-Burrous 方法', 'Sutton 方法']
+const isMissingValue = value => value === null || value === undefined ||
+  ['null', 'undefined', 'nan'].includes(String(value).trim().toLowerCase()) || String(value).trim() === ''
+const platformNumber = (value, fallback = 0) => {
+  if (isMissingValue(value)) return fallback
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? numeric : fallback
+}
+const platformMethodIndex = (value, names, fallback = 0) => {
+  if (isMissingValue(value)) return fallback
+  const numeric = Number(value)
+  if (Number.isInteger(numeric) && numeric >= 0 && numeric < names.length) return numeric
+  const index = names.indexOf(String(value).trim())
+  return index >= 0 ? index : fallback
+}
 const gasWithDefaults = value => Object.fromEntries(Object.entries(GAS_DEFAULTS).map(([key, fallback]) => {
   const current = value?.[key]
-  return [key, current === null || current === undefined || current === '' ? fallback : current]
+  return [key, isMissingValue(current) ? fallback : current]
 }))
 const normalizeGasType = value => {
   if (value === null || value === undefined || String(value).trim() === '') return null
@@ -79,7 +96,14 @@ const gasFromPvtDetail = detail => {
   const settings = typeof detail?.settings?.gas === 'string'
     ? JSON.parse(detail.settings.gas || '{}')
     : (detail?.settings?.gas || {})
-  return gasWithDefaults({ ...(detail?.gasInput || {}), ...settings })
+  const source = { ...(detail?.gasInput || {}), ...settings }
+  return gasWithDefaults({ ...source,
+    modificationMethod: platformMethodIndex(
+      isMissingValue(source.modificationMethod) ? source.gasCorrectionMethod : source.modificationMethod,
+      MODIFICATION_METHOD_NAMES),
+    deviationFactorMethod: platformMethodIndex(source.deviationFactorMethod, DEVIATION_METHOD_NAMES),
+    viscosityMethod: platformMethodIndex(source.viscosityMethod, VISCOSITY_METHOD_NAMES)
+  })
 }
 const isValidPvtGas = gas => normalizeGasType(gas?.gasType) !== null &&
   Number.isFinite(Number(gas?.specificGravity)) && Number(gas.specificGravity) > 0
@@ -283,7 +307,8 @@ const calculatePlatformResult = async (minimumPoints = 2) => {
   const evaluationId = await resolveEvaluationId(method)
   const gas = gasWithDefaults(selectedGas.value)
   const gasTypeIndex = normalizeGasType(gas.gasType)
-  if (gasTypeIndex === null || !Number.isFinite(Number(gas.specificGravity)) || Number(gas.specificGravity) <= 0) {
+  const specificGravity = platformNumber(gas.specificGravity, Number.NaN)
+  if (gasTypeIndex === null || !Number.isFinite(specificGravity) || specificGravity <= 0) {
     throw new Error('所选PVT性质缺少有效的气体类型或天然气相对密度')
   }
   // 原平台的产能评价接口使用中文气体类型名称；PVT库中的历史记录则可能保存为 0/1/2。
@@ -293,14 +318,14 @@ const calculatePlatformResult = async (minimumPoints = 2) => {
     originalFormationPressure: Number(maximumFormationPressure.value),
     formationTemperature: Number(formationTemperature.value), horizontalSectionLength: 0,
     skinFactor: 0, permeability: 0, thickness: 0, gasDrainageRadius: 0, wellboreRadius: 0,
-    gasType, specificGravity: Number(gas.specificGravity),
-    hydrogenSulfide: Number(gas.hydrogenSulfide || 0), carbonDioxide: Number(gas.carbonDioxide || 0),
-    nitrogen: Number(gas.nitrogen || 0),
-    condensateOilDensityUnderStandardCondition: Number(gas.condensateOilDensity || 0),
-    modificationMethod: Number(gas.modificationMethod || 0),
-    deviationFactorMethod: Number(gas.deviationFactorMethod || 0),
-    viscosityMethod: Number(gas.viscosityMethod || 0), edges: {},
-    condensateOilDensity: Number(gas.condensateOilDensity || 0)
+    gasType, specificGravity,
+    hydrogenSulfide: platformNumber(gas.hydrogenSulfide),
+    carbonDioxide: platformNumber(gas.carbonDioxide), nitrogen: platformNumber(gas.nitrogen),
+    condensateOilDensityUnderStandardCondition: platformNumber(gas.condensateOilDensity),
+    modificationMethod: platformMethodIndex(gas.modificationMethod, MODIFICATION_METHOD_NAMES),
+    deviationFactorMethod: platformMethodIndex(gas.deviationFactorMethod, DEVIATION_METHOD_NAMES),
+    viscosityMethod: platformMethodIndex(gas.viscosityMethod, VISCOSITY_METHOD_NAMES), edges: {},
+    condensateOilDensity: platformNumber(gas.condensateOilDensity)
   }
   await productivityEvaluationApi.calculate(props.wellName, {
     // 原平台单井产能模块约定 calc 请求的 gasReservoirId 固定为 0；
@@ -517,27 +542,37 @@ const loadTest = async (requestedType = null, requestedMethod = null) => {
   }
   loading.value = true
   try {
-    const detail = unwrap(await productivityTestsApi.detail(props.testId, requestedType, requestedMethod)); const input = detail.input || {}
+    const detail = unwrap(await productivityTestsApi.detail(
+      props.testId, props.projectId, props.gasReservoirId, props.wellName
+    )); const input = detail.input || {}
     if (sequence !== loadSequence) return
+    const targetType = requestedType === 'exponential' ? 'exponential'
+      : requestedType === 'binomial' ? 'binomial' : null
+    const targetMethod = requestedMethod ? normalizeMethod(requestedMethod) : null
+    const availableResults = Array.isArray(detail.results) ? detail.results : []
+    const selectedResult = availableResults.find(item =>
+      (!targetType || (item.calculationResultType || 'binomial') === targetType) &&
+      (!targetMethod || normalizeMethod(item.pressureMethod) === targetMethod)
+    ) || (!targetType && !targetMethod ? detail.result : null)
     selectedPvtId.value = pvtOptions.value.some(item => Number(item.pvtId) === Number(detail.pvtId))
       ? String(detail.pvtId) : ''
     selectedGas.value = gasWithDefaults(input); maximumFormationPressure.value = input.maximumFormationPressure
     formationTemperature.value = input.formationTemperature
-    calculationMethod.value = normalizeMethod(detail.result?.pressureMethod || requestedMethod)
-    calculationResultType.value = detail.result?.calculationResultType === 'exponential' || requestedType === 'exponential'
+    calculationMethod.value = normalizeMethod(selectedResult?.pressureMethod || requestedMethod)
+    calculationResultType.value = selectedResult?.calculationResultType === 'exponential' || requestedType === 'exponential'
       ? 'exponential' : 'binomial'
     operationType.value = detail.operationType || 'production'; testDate.value = detail.testDate
     evaluationIds.value = Object.fromEntries((detail.evaluations || []).map(item =>
       [normalizeMethod(item.pressureMethod), Number(item.evaluationId)]))
     rows.value = normalizeRows(detail.inputItems)
     importedFileName.value = `${detail.testName}已保存数据`
-    if (!detail.result) {
+    if (!selectedResult) {
       inputDirty.value = false
       currentResult.value = null
       activePanel.value = 'input'
       return
     }
-    const result = detail.result || {}; const chartItems = result.chartPoints || []
+    const result = selectedResult; const chartItems = result.chartPoints || []
     const selectedCurves = curvesForResult(calculationResultType.value)
     const analysisSeries = selectedCurves.map(config => ({ ...config,
       data: chartItems.filter(point => point.curveType === config.curveType).map(point => ({

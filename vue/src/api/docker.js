@@ -241,12 +241,26 @@ export const wellApi = {
      * GET /projectanalysis/{projectId}/{gasReservoirId}/wells
      * 返回 { wells: [...], fields: [...] }
      */
-    getWells: (projectId, gasReservoirId) =>
-        dockerRequest.get(`/projectanalysis/${projectId}/${gasReservoirId}/wells`)
+    getWells: (projectId, gasReservoirId, options = {}) =>
+        dockerRequest.get(`/projectanalysis/${projectId}/${gasReservoirId}/wells`, options)
 }
 
 /* ===== 单井产能 - 产能试井 ===== */
 export const productivityEvaluationApi = {
+  calculateFlowEquation: (data, options = {}) =>
+    dockerRequest.post(
+      '/projectanalysis/productivityevaluation/flowequation/calc',
+      data,
+      { timeout: 180000, ...options }
+    ),
+  calculateStableFlowEquations: ({ projectId, gasReservoirId, wellNames, parameterSource = 1 }, options = {}) =>
+    Promise.allSettled([1, 2, 3].map(evaluationForm =>
+      dockerRequest.post(
+        '/projectanalysis/productivityevaluation/flowequation/calc',
+        { projectId, gasReservoirId, wellNames, evaluationForm, parameterSource },
+        { timeout: 180000, ...options }
+      )
+    )),
   initialize: (data, options = {}) =>
     dockerRequest.post(
       '/projectanalysis/productivityevaluation/deliverabilitytest/calc',

@@ -12,7 +12,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Delete } from '@element-plus/icons-vue'
+import { Delete, Edit } from '@element-plus/icons-vue'
 import RibbonMenu from '@/components/RibbonMenu.vue'
 import WorkspaceSidebar from '@/components/WorkspaceSidebar.vue'
 import WaterInvasionContent from '@/views/WellControlInventory/WaterInvasionContent.vue'
@@ -33,6 +33,8 @@ import SingleWellProductivityInterface from '@/views/SingleWellProductivityInter
 import { NODETYPE } from '@/constants/nodeType'
 import { analyticMethodApi, dataManagementApi, dynamicBalanceApi, materialBalanceApi, nodeApi, notifyApi, parametersApi, projectApi, typicalCurveApi, waterInvasionApi, wellApi } from '@/api/docker'
 import { pvtStorageApi } from '@/api/pvtStorage'
+import { dynamicProductivityApi } from '@/api/dynamicProductivity'
+import { theoreticalProductivityApi } from '@/api/theoreticalProductivity'
 import { createPvtDraftRecord } from '@/utils/pvtRecords'
 import { acquireNotifySocket } from '@/utils/notifySocket'
 import { loadAllModifiedIsochronalTreeNodes } from '@/utils/modifiedIsochronalTree'
@@ -46,6 +48,18 @@ import {
   ISOCHRONAL_RECORD_NODE_TYPE,
   loadAllIsochronalTreeNodes
 } from '@/utils/isochronalTree'
+import {
+  DYNAMIC_STABLE_METHOD_NODE_TYPE,
+  DYNAMIC_STABLE_RECORD_NODE_TYPE,
+  loadAllDynamicStableTreeNodes,
+  loadDynamicStableTreeNodes
+} from '@/utils/dynamicStableTree'
+import {
+  THEORETICAL_STABLE_METHOD_NODE_TYPE,
+  THEORETICAL_STABLE_RECORD_NODE_TYPE,
+  loadAllTheoreticalStableTreeNodes,
+  loadTheoreticalStableTreeNodes
+} from '@/utils/theoreticalStableTree'
 import {
   getNextRelativePermeabilityIndex,
   getRelativePermeabilityRecords
@@ -62,7 +76,7 @@ import {
 } from '@/utils/workspaceTreeState'
 
 // 7
-const PROJECT_ID = 6
+const PROJECT_ID = 7
 // 4
 const GAS_RESERVOIR_ID = 4
 const router = useRouter()
@@ -353,9 +367,18 @@ const getTypicalCurveResultName = (item) => {
 const isTypicalCurveResultNode = (item) => Boolean(getTypicalCurveResultName(item))
 const isInventoryResultNode = (item) => Boolean(getInventoryResultName(item))
 
-const isTreeContextMenuNode = (item) => isInventoryResultNode(item) || isTypicalCurveResultNode(item)
+const isStableRecordNode = item => [
+  THEORETICAL_STABLE_RECORD_NODE_TYPE,
+  DYNAMIC_STABLE_RECORD_NODE_TYPE
+].includes(item?.type)
+
+const isTreeContextMenuNode = (item) =>
+  isInventoryResultNode(item) || isTypicalCurveResultNode(item) || isStableRecordNode(item)
 
 const treeContextMenuLabel = computed(() => {
+  if (isStableRecordNode(treeContextMenu.value.node)) {
+    return `删除${treeContextMenu.value.node?.label || '稳定流记录'}`
+  }
   const resultName = getTypicalCurveResultName(treeContextMenu.value.node) || getInventoryResultName(treeContextMenu.value.node)
   if (resultName) return `删除${resultName}结果`
   return '删除水侵动态分析结果'
@@ -3678,8 +3701,15 @@ const loadWellChildren = async (node, force = false) => {
       refreshAnalyticMethodNodes(wellName),
       refreshMaterialBalanceNodes(wellName),
       refreshFlowBalanceNodes(wellName),
-      refreshTypicalCurveNodes(wellName)
+      refreshTypicalCurveNodes(wellName),
+      loadTheoreticalStableTreeNodes({
+        treeData: treeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName
+      })
     ])
+    // 动态产能固定排在理论计算后面，因此在理论分支完成后再重建。
+    await loadDynamicStableTreeNodes({
+      treeData: treeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName
+    })
     node.childrenLoaded = true
   } finally {
     node.childrenLoading = false
@@ -3698,7 +3728,7 @@ const handleNodeContextMenu = (node, event) => {
   }
 
   const menuWidth = 240
-  const menuHeight = 42
+  const menuHeight = isStableRecordNode(node) ? 78 : 42
   const x = Math.min(event.clientX, window.innerWidth - menuWidth - 8)
   const y = Math.min(event.clientY, window.innerHeight - menuHeight - 8)
 
@@ -3716,6 +3746,36 @@ const handleDeleteContextNode = async () => {
   closeTreeContextMenu()
 
   if (!node) return
+
+  if (isStableRecordNode(node)) {
+    try {
+      await ElMessageBox.confirm(
+        `删除后将同时删除“${node.label}”的输入、三种输出和IPR曲线，是否继续？`,
+        '删除稳定流',
+        { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }
+      )
+      const api = node.type === THEORETICAL_STABLE_RECORD_NODE_TYPE
+        ? theoreticalProductivityApi : dynamicProductivityApi
+      await api.deleteStable(node.stableId, PROJECT_ID, GAS_RESERVOIR_ID, node.wellName)
+      if (node.type === THEORETICAL_STABLE_RECORD_NODE_TYPE) {
+        await loadTheoreticalStableTreeNodes({
+          treeData: treeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID,
+          wellName: node.wellName, expand: true
+        })
+      } else {
+        await loadDynamicStableTreeNodes({
+          treeData: treeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID,
+          wellName: node.wellName, expand: true
+        })
+      }
+      ElMessage.success(`${node.label}已删除`)
+    } catch (error) {
+      if (error !== 'cancel' && error !== 'close') {
+        ElMessage.error(error.response?.data?.message || error.message || '稳定流删除失败')
+      }
+    }
+    return
+  }
 
   if (node.type === NODETYPE.NodeType_WaterInvasionAnalysis) {
     const wellName = node.wellName || selectedWellName.value
@@ -3838,6 +3898,41 @@ const handleDeleteContextNode = async () => {
   }
 }
 
+const handleRenameContextNode = async () => {
+  const node = treeContextMenu.value.node
+  closeTreeContextMenu()
+  if (!isStableRecordNode(node)) return
+  try {
+    const { value } = await ElMessageBox.prompt('请输入新的稳定流名称', '重命名', {
+      inputValue: node.label,
+      inputPattern: /\S+/,
+      inputErrorMessage: '名称不能为空',
+      confirmButtonText: '确定',
+      cancelButtonText: '取消'
+    })
+    const stableName = String(value).trim()
+    const api = node.type === THEORETICAL_STABLE_RECORD_NODE_TYPE
+      ? theoreticalProductivityApi : dynamicProductivityApi
+    await api.renameStable(node.stableId, { stableName })
+    if (node.type === THEORETICAL_STABLE_RECORD_NODE_TYPE) {
+      await loadTheoreticalStableTreeNodes({
+        treeData: treeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID,
+        wellName: node.wellName, expand: true
+      })
+    } else {
+      await loadDynamicStableTreeNodes({
+        treeData: treeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID,
+        wellName: node.wellName, expand: true
+      })
+    }
+    ElMessage.success('重命名成功')
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') {
+      ElMessage.error(error.response?.data?.message || error.message || '重命名失败')
+    }
+  }
+}
+
 const handleSelect = async (node) => { // 点击左侧树节点
   closeTreeContextMenu()
   const isWellMenuGroup = WELL_GROUPS.some(group => group.id === node.type)
@@ -3854,6 +3949,8 @@ const handleSelect = async (node) => { // 点击左侧树节点
         module: '产能试井',
         method: '修正等时',
         well: nodeWellName,
+        projectId: PROJECT_ID,
+        gasReservoirId: GAS_RESERVOIR_ID,
         testId: node.testId || node.resultId,
         ...(node.evaluationId ? { evaluationId: node.evaluationId } : {})
       }
@@ -3867,7 +3964,9 @@ const handleSelect = async (node) => { // 点击左侧树节点
       query: {
         module: '产能试井',
         method: node.pageMethod || (node.testMethod === 'one-point' ? '一点法' : '回压试井'),
-        well: nodeWellName
+        well: nodeWellName,
+        projectId: PROJECT_ID,
+        gasReservoirId: GAS_RESERVOIR_ID
       }
     })
     return
@@ -3880,7 +3979,33 @@ const handleSelect = async (node) => { // 点击左侧树节点
         module: '产能试井',
         method: node.pageMethod || (node.testMethod === 'one-point' ? '一点法' : '回压试井'),
         well: nodeWellName,
+        projectId: PROJECT_ID,
+        gasReservoirId: GAS_RESERVOIR_ID,
         testId: node.testId
+      }
+    })
+    return
+  }
+
+  if ([THEORETICAL_STABLE_METHOD_NODE_TYPE, DYNAMIC_STABLE_METHOD_NODE_TYPE].includes(node.type)) {
+    await router.push({
+      name: 'SingleWellProductivity',
+      query: {
+        module: node.type === THEORETICAL_STABLE_METHOD_NODE_TYPE ? '理论计算' : '动态产能',
+        method: '稳定流', well: nodeWellName,
+        projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID
+      }
+    })
+    return
+  }
+
+  if ([THEORETICAL_STABLE_RECORD_NODE_TYPE, DYNAMIC_STABLE_RECORD_NODE_TYPE].includes(node.type) && node.stableId) {
+    await router.push({
+      name: 'SingleWellProductivity',
+      query: {
+        module: node.type === THEORETICAL_STABLE_RECORD_NODE_TYPE ? '理论计算' : '动态产能',
+        method: '稳定流', well: nodeWellName,
+        projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, stableId: node.stableId
       }
     })
     return
@@ -4028,7 +4153,12 @@ const handleCommand = async ({ group, name, parent }) => { // 接收顶部菜单
       query: {
         module: parent || name,
         method: parent ? name : '',
-        well: activeWellName
+        well: activeWellName,
+        projectId: PROJECT_ID,
+        gasReservoirId: GAS_RESERVOIR_ID,
+        ...(['理论计算', '动态产能'].includes(parent || name) && name === '稳定流'
+          ? { initialCalc: '1' }
+          : {})
       }
     })
     return
@@ -4252,7 +4382,7 @@ onMounted(async () => {
 
   try {
     await initTree()
-    void Promise.allSettled([
+    await Promise.allSettled([
       loadAllModifiedIsochronalTreeNodes({
         treeData: treeData.value,
         projectId: PROJECT_ID,
@@ -4269,6 +4399,13 @@ onMounted(async () => {
         gasReservoirId: GAS_RESERVOIR_ID
       })
     ])
+    // 两个分支会共同维护“单井产能”的 children，必须按理论、动态的固定顺序加载。
+    await loadAllTheoreticalStableTreeNodes({
+      treeData: treeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID
+    })
+    await loadAllDynamicStableTreeNodes({
+      treeData: treeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID
+    })
   } catch (error) {
     console.error('工作台目录初始化失败', error)
   }
@@ -4327,6 +4464,8 @@ onBeforeUnmount(() => {
           :key="currentViewNode?.viewInstanceKey"
           embedded
           :embedded-node="currentViewNode"
+          :project-id="PROJECT_ID"
+          :gas-reservoir-id="GAS_RESERVOIR_ID"
         />
         <PvtPropertiesContent
           v-if="currentView === 'pvt-properties'"
@@ -4389,6 +4528,11 @@ onBeforeUnmount(() => {
     <Teleport to="body">
       <div v-if="treeContextMenu.visible" class="tree-context-menu"
         :style="{ left: `${treeContextMenu.x}px`, top: `${treeContextMenu.y}px` }" @click.stop @contextmenu.prevent>
+        <button v-if="isStableRecordNode(treeContextMenu.node)" class="tree-context-menu-item" type="button"
+          @click="handleRenameContextNode">
+          <el-icon class="tree-context-menu-icon rename"><Edit /></el-icon>
+          <span>重命名</span>
+        </button>
         <button class="tree-context-menu-item" type="button" @click="handleDeleteContextNode">
           <el-icon class="tree-context-menu-icon">
             <Delete />
@@ -4657,5 +4801,9 @@ $accent-yellow: #f4d000;
 :global(.tree-context-menu-icon) {
   color: #d93025;
   font-size: 16px;
+}
+
+:global(.tree-context-menu-icon.rename) {
+  color: #606266;
 }
 </style>

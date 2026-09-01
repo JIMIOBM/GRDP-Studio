@@ -8,5 +8,9 @@ export const pvtStorageApi = {
     request.get(`/pvt/records/${pvtId}`, {
       params: { projectId, gasReservoirId, wellName }
     }),
+  delete: (pvtId, projectId, gasReservoirId, wellName) =>
+    request.delete(`/pvt/records/${pvtId}`, {
+      params: { projectId, gasReservoirId, wellName }
+    }),
   save: data => request.post('/pvt/records/save', data)
 }

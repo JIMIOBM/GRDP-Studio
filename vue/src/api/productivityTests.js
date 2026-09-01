@@ -9,6 +9,8 @@ export const productivityTestsApi = {
     request.get(`/productivity-tests/${testId}`, {
       params: { projectId, gasReservoirId, wellName }
     }),
+  calculateModifiedIsochronalExponential: data =>
+    request.post('/productivity-tests/modified-isochronal/exponential/calculate', data),
   importFile: file => {
     const formData = new FormData()
     formData.append('file', file)

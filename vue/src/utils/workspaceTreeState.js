@@ -16,5 +16,7 @@ export const workspaceTreeCollapsed = ref(false)
 export const workspacePendingCommand = ref(null)
 // 单井产能通过公共左侧目录跳回 IPR 时，携带本次点击的具体树节点。
 export const workspacePendingNode = ref(null)
+// 理论稳定流计算完成后保存压力、压力平方和拟压力结果，供独立单井产能页面切换绘图。
+export const workspaceTheoreticalStableResult = ref(null)
 // 仅真实的 IPR 项目树加载完成后置为 true；单井产能的临时井列表不算初始化完成。
 export const workspaceTreeHydrated = ref(false)
