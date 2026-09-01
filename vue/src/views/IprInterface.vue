@@ -33,6 +33,7 @@ import { NODETYPE } from '@/constants/nodeType'
 import { analyticMethodApi, dataManagementApi, dynamicBalanceApi, materialBalanceApi, nodeApi, notifyApi, parametersApi, projectApi, typicalCurveApi, waterInvasionApi, wellApi } from '@/api/docker'
 import { pvtStorageApi } from '@/api/pvtStorage'
 import { createPvtDraftRecord } from '@/utils/pvtRecords'
+import { acquireNotifySocket } from '@/utils/notifySocket'
 import { loadAllModifiedIsochronalTreeNodes } from '@/utils/modifiedIsochronalTree'
 import {
   loadAllOwnedProductivityTestTreeNodes,
@@ -665,8 +666,6 @@ const createRelativePermeabilityNodes = (wellName, wellId) =>
 
 const createWellDataNodes = (wellName, wellId) =>
   WELL_DATA_NODES
-    // PVT 目录本身也由数据库记录决定，不能在创建井节点时静态挂载。
-    .filter(item => item.type !== 'well-data-pvt-group')
     .map(item => ({
       ...item,
       id: `${wellId || wellName}-${item.type}`,
@@ -1144,7 +1143,6 @@ const collectWellsFromProject = (payload, allowedWellNames = null) => {
     if (isWell && name) {
       const id = value.nodeId || value.id || value.wellId || `well-${name}`
       addWell(name, value, id)
-      getChildren(value).forEach(child => addAnalysisNode(name, child))
     }
 
     Object.entries(value).forEach(([key, child]) => {
@@ -1164,6 +1162,9 @@ const rebuildProjectTree = (payload, allowedWellNames = null) => {
 
   wellGroup.children = []
   wells.forEach(well => ensureWell(well.name, well.id))
+  wells.forEach(well => {
+    getChildren(well.raw).forEach(child => addAnalysisNode(well.name, child))
+  })
 }
 
 const applyWaterInvasionNodes = (node, targetWellName = '') => {
@@ -1410,6 +1411,7 @@ const refreshProjectTree = async () => { //加在项目树
     }
     rebuildProjectTree(normalizePayload(projectResult.value), names)
     await refreshOtherDataNodes()
+    await refreshAllPvtNodes()
   } catch (error) {
     console.warn('项目树加载失败', error)
   }
@@ -1481,14 +1483,13 @@ const refreshPvtNodesForWell = async wellName => {
   if (!dataGroup) return []
 
   const response = await pvtStorageApi.list(PROJECT_ID, GAS_RESERVOIR_ID, wellName)
-  const records = Array.isArray(response?.data) ? response.data : []
+  const payload = normalizePayload(response)
+  const records = Array.isArray(payload)
+    ? payload
+    : Array.isArray(payload?.items)
+      ? payload.items
+      : []
   let pvtGroup = dataGroup.children.find(item => item.type === 'well-data-pvt-group')
-
-  if (!records.length) {
-    // 数据库没有 PVT 时连目录一起移除，同时清理旧版遗留的静态节点。
-    dataGroup.children = dataGroup.children.filter(item => item.type !== 'well-data-pvt-group')
-    return []
-  }
 
   if (!pvtGroup) {
     pvtGroup = {
@@ -1505,10 +1506,19 @@ const refreshPvtNodesForWell = async wellName => {
     dataGroup.children.splice(relativeIndex >= 0 ? relativeIndex : dataGroup.children.length, 0, pvtGroup)
   }
 
-  // 每次都整体替换，确保目录内容完全等于 project_well_pvt 查询结果。
+  // 目录固定存在，子节点每次整体替换并严格等于 project_well_pvt 查询结果。
   pvtGroup.children = createPvtPropertyNodes(wellName, well.id, records)
   pvtGroup.defaultExpanded = false
   return pvtGroup.children
+}
+
+const refreshAllPvtNodes = async () => {
+  const wellNames = getAllWellNames()
+  const results = await Promise.allSettled(wellNames.map(refreshPvtNodesForWell))
+  const failures = results.filter(result => result.status === 'rejected')
+  if (failures.length) {
+    console.warn(`有 ${failures.length} 口井的PVT目录加载失败`, failures)
+  }
 }
 
 const refreshRelativePermeabilityNodesForWell = wellName => {
@@ -1731,6 +1741,7 @@ const createAnalysisLogWaiter = ({
   let settled = false
   let correlationPin = ''
   let cleanup = () => { }
+  const releaseNotifySocket = acquireNotifySocket()
 
   const promise = new Promise((resolve, reject) => {
     const finish = (callback, value) => {
@@ -1786,6 +1797,7 @@ const createAnalysisLogWaiter = ({
     cleanup = () => {
       window.clearTimeout(timeoutId)
       window.removeEventListener('notify-message', onNotifyMessage)
+      releaseNotifySocket()
     }
 
     window.addEventListener('notify-message', onNotifyMessage)
@@ -1975,6 +1987,7 @@ const getWattenbargerLogText = value => {
 const createWattenbargerLogWaiter = (wellName, timeoutMs = 180000) => {
   let settled = false
   let cleanup = () => { }
+  const releaseNotifySocket = acquireNotifySocket()
 
   const promise = new Promise((resolve, reject) => {
     const finish = (callback, value) => {
@@ -2032,6 +2045,7 @@ const createWattenbargerLogWaiter = (wellName, timeoutMs = 180000) => {
     cleanup = () => {
       window.clearTimeout(timeoutId)
       window.removeEventListener('notify-message', onNotifyMessage)
+      releaseNotifySocket()
     }
 
     window.addEventListener('notify-message', onNotifyMessage)
@@ -3614,26 +3628,6 @@ const initTree = async () => {
   if (!workspaceTreeHydrated.value) {
     await refreshProjectTree()
     workspaceTreeHydrated.value = true
-
-    // 仅首次初始化时清理懒加载状态，避免页面返回时删除其他模块的已加载节点。
-    const resetLazyState = nodes => {
-      nodes.forEach(node => {
-        node.expanded = false
-        node.defaultExpanded = false
-        node.childrenLoaded = false
-        if (node.type === 'data-management') {
-          node.children = (node.children || []).filter(
-            child => child.type !== 'well-data-pvt-group'
-          )
-        }
-        if (node.type === 'well-control-inventory') {
-          node.children = []
-          node.lazy = true
-        }
-        resetLazyState(node.children || [])
-      })
-    }
-    resetLazyState(treeData.value)
   }
 }
 
@@ -3647,6 +3641,7 @@ const loadWellChildren = async (node, force = false) => {
   node.childrenLoading = true
   try {
     await Promise.all([
+      refreshPvtNodesForWell(wellName),
       refreshWaterInvasionNodes(wellName),
       refreshAnalyticMethodNodes(wellName),
       refreshMaterialBalanceNodes(wellName),
