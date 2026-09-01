@@ -29,6 +29,7 @@ import AGContent from '@/views/WellControlInventory/AGContent.vue'
 import PvtPropertiesContent from '@/views/DataManagement/PvtPropertiesContent.vue'
 import RelativePermeabilityContent from '@/views/DataManagement/RelativePermeabilityContent.vue'
 import WellDataTableContent from '@/views/DataManagement/WellDataTableContent.vue'
+import WellboreStructureContent from '@/views/WellboreCapacity/WellboreStructureContent.vue'
 import { NODETYPE } from '@/constants/nodeType'
 import { analyticMethodApi, dataManagementApi, dynamicBalanceApi, materialBalanceApi, nodeApi, notifyApi, parametersApi, projectApi, typicalCurveApi, waterInvasionApi, wellApi } from '@/api/docker'
 import { pvtStorageApi } from '@/api/pvtStorage'
@@ -750,6 +751,37 @@ const ensureWell = (wellName, wellId) => { //确保井存在
   })
 
   return wellItem
+}
+
+const openWellboreStructure = wellName => {
+  const wellItem = ensureWell(wellName, `well-${wellName}`)
+  const wellboreGroup = wellItem?.children.find(item => item.type === 'wellbore-capacity')
+  if (!wellItem || !wellboreGroup) return
+
+  const nodeId = `wellbore-structure-${wellName}`
+  let node = wellboreGroup.children.find(item => item.id === nodeId)
+  if (!node) {
+    node = {
+      id: nodeId,
+      label: '井身结构',
+      type: 'wellbore-structure',
+      wellName,
+      children: []
+    }
+    wellboreGroup.children.push(node)
+  }
+
+  const wellRoot = getWellGroup()
+  if (wellRoot) wellRoot.expanded = true
+  wellItem.expanded = true
+  wellboreGroup.expanded = true
+  treeData.value = [...treeData.value]
+
+  selectedWellName.value = wellName
+  activeNodeId.value = node.id
+  activeNode.value = node
+  currentView.value = 'wellbore-structure'
+  currentViewNode.value = node
 }
 
 const WELL_CONTROL_NODE_ORDER = new Map([
@@ -3878,6 +3910,12 @@ const handleSelect = async (node) => { // 点击左侧树节点
     return
   }
 
+  if (node.type === 'wellbore-structure') {
+    currentView.value = 'wellbore-structure'
+    currentViewNode.value = node
+    return
+  }
+
   if (node.dataType) {
     currentView.value = 'well-data-table'
     currentViewNode.value = {
@@ -3995,6 +4033,19 @@ const handleCommand = async ({ group, name, parent }) => { // 接收顶部菜单
       wellName: supportsProjectScope ? '' : activeWellName,
       dataType
     }
+    return
+  }
+
+  if (group === '井筒能力' && name === '井身结构') {
+    const activeWellName = selectedWellName.value || activeNode.value?.wellName || (
+      activeNode.value?.type === NODETYPE.NodeType_Well ? activeNode.value.label : ''
+    )
+    if (!activeWellName) {
+      ElMessage.warning('请先在左侧选择一口井')
+      return
+    }
+
+    openWellboreStructure(activeWellName)
     return
   }
 
@@ -4260,6 +4311,9 @@ onBeforeUnmount(() => {
         <WellDataTableContent v-if="currentView === 'well-data-table'"
           :data-type="currentViewNode?.dataType" :well-name="currentViewNode?.wellName"
           :well-names="projectWellNames" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
+        <WellboreStructureContent v-if="currentView === 'wellbore-structure'"
+          :key="currentViewNode?.id" :well-name="currentViewNode?.wellName"
+          :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
         <WaterInvasionContent v-if="currentView === 'water-invasion'" :node="currentViewNode" :project-id="PROJECT_ID"
           :gas-reservoir-id="GAS_RESERVOIR_ID" @refresh-tree="handleRefreshTree"
           @recalculate="runWaterInvasionForSelectedWell" />
