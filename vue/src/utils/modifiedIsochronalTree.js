@@ -1,5 +1,6 @@
 import { productivityTestsApi } from '@/api/productivityTests'
 import { NODETYPE } from '@/constants/nodeType'
+import { ensureProductivityTestMethodGroups } from '@/utils/productivityTestTree'
 
 export const loadModifiedIsochronalTreeNodes = async ({
   treeData,
@@ -32,33 +33,33 @@ export const loadModifiedIsochronalTreeNodes = async ({
     productivityGroup.children = [...(productivityGroup.children || []), testGroup]
   }
 
+  const methodGroups = ensureProductivityTestMethodGroups(testGroup, wellNode, wellName)
   const response = await productivityTestsApi.list(
     projectId, gasReservoirId, wellName, 'modified-isochronal'
   )
   const records = response?.data ?? response ?? []
-  const otherNodes = (testGroup.children || []).filter(node =>
-    node.type !== NODETYPE.NodeType_ProductivityEvaluationModifiedIsochronalWellTest &&
-    node.type !== 'modified-isochronal-method'
-  )
   const resultNodes = records.map(record => ({
     id: `${wellNode.id}-modified-isochronal-${record.id}`,
     label: record.testName || `修正等时${record.testNo}`,
     type: NODETYPE.NodeType_ProductivityEvaluationModifiedIsochronalWellTest,
     wellName,
     testId: record.id,
+    testNo: record.testNo,
     resultId: record.id,
     projectId,
     gasReservoirId,
     pressureMethods: record.pressureMethods || [],
     children: []
   }))
-  testGroup.children = [...otherNodes, ...resultNodes]
+  methodGroups['modified-isochronal'].children = resultNodes
 
   if (expand) {
     wellNode.expanded = true
     productivityGroup.expanded = true
     testGroup.expanded = true
+    methodGroups['modified-isochronal'].expanded = true
   }
+  return resultNodes
 }
 
 export const loadAllModifiedIsochronalTreeNodes = async options => {

@@ -1,4 +1,5 @@
 import { productivityStorageApi } from '@/api/productivityStorage'
+import { ensureProductivityTestMethodGroups } from '@/utils/productivityTestTree'
 
 export const ISOCHRONAL_METHOD_NODE_TYPE = 'productivity-test-isochronal-method'
 export const ISOCHRONAL_RECORD_NODE_TYPE = 'productivity-test-isochronal-record'
@@ -34,19 +35,10 @@ export const loadIsochronalTreeNodes = async ({
     productivityGroup.children = [...(productivityGroup.children || []), testGroup]
   }
 
+  const methodGroups = ensureProductivityTestMethodGroups(testGroup, wellNode, wellName)
   const response = await productivityStorageApi.listIsochronal(projectId, gasReservoirId, wellName)
   const records = response?.data ?? []
-  let methodGroup = (testGroup.children || []).find(node => node.type === ISOCHRONAL_METHOD_NODE_TYPE)
-  if (!methodGroup) {
-    methodGroup = {
-      id: `${wellNode.id}-productivity-test-isochronal`,
-      label: '等时试井',
-      type: ISOCHRONAL_METHOD_NODE_TYPE,
-      wellName,
-      children: []
-    }
-    testGroup.children = [...(testGroup.children || []), methodGroup]
-  }
+  const methodGroup = methodGroups.isochronal
   methodGroup.children = records.map(record => ({
     id: `${wellNode.id}-productivity-test-isochronal-${record.testId}`,
     label: `等时试井${record.testNo}`,

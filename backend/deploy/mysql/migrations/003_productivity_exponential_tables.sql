@@ -64,6 +64,18 @@ CREATE TABLE IF NOT EXISTS project_well_productivity_exponential_ipr_item (
     CONSTRAINT chk_prod_exp_ipr_deleted CHECK (is_deleted IN (0, 1))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+-- 只有早期开发库把指数式结果混存在二项式表中；现代六表结构没有 result_type 等列。
+-- 用信息架构保护旧数据搬迁，使本迁移可同时安全用于两种数据库。
+DELIMITER //
+DROP PROCEDURE IF EXISTS migrate_legacy_productivity_exponential//
+CREATE PROCEDURE migrate_legacy_productivity_exponential()
+BEGIN
+IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = DATABASE()
+      AND table_name = 'project_well_productivity_binomial_output'
+      AND column_name = 'result_type'
+) THEN
 INSERT INTO project_well_productivity_exponential_output
     (test_id, pressure_method, productivity_coefficient, productivity_exponent,
      open_flow_capacity, r_squared, reliability_description, calculated_at, updated_at)
@@ -132,3 +144,8 @@ ALTER TABLE project_well_productivity_binomial_output
     DROP COLUMN productivity_exponent,
     MODIFY COLUMN darcy_seepage_coefficient DOUBLE NOT NULL,
     MODIFY COLUMN non_darcy_seepage_coefficient DOUBLE NOT NULL;
+END IF;
+END//
+CALL migrate_legacy_productivity_exponential()//
+DROP PROCEDURE migrate_legacy_productivity_exponential//
+DELIMITER ;

@@ -5,7 +5,6 @@ import { ElMessage } from 'element-plus'
 import { User, Lock } from '@element-plus/icons-vue'
 import { projectName } from '../../config/config.default'
 import { userApi } from '@/api'
-import { connectNotifySocket } from '@/utils/notifySocket'
 
 const router = useRouter()
 const loading = ref(false)
@@ -44,7 +43,6 @@ const loginDockerPlatform = async () => {
 
 const enterIpr = async (account) => {
   localStorage.setItem('account', JSON.stringify(account))
-  connectNotifySocket()
   ElMessage.success('登录成功')
   await router.replace('/ipr')
 }
@@ -65,7 +63,7 @@ const onLogin = async () => {
       }
 
       // 必须先拿到并校验原平台会话，再进入会发起原平台请求的主页面。
-      await loginDockerPlatform()
+      // await loginDockerPlatform()
       await enterIpr(account)
     } catch (error) {
       ElMessage.error(error.message || '登录失败')

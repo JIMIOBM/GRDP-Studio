@@ -7,6 +7,7 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 
 public final class ProductivityTestModels {
@@ -27,13 +28,18 @@ public final class ProductivityTestModels {
 
     public record IprPoint(@Positive int curveNumber, @Positive int pointNumber,
                            @NotNull Double gasProduction, @NotNull Double bottomHoleFlowingPressure,
-                           boolean deleted, String dataLabel) {}
+                           boolean deleted, String dataLabel, Double formationPressure) {}
 
-    public record Result(String pressureMethod, Long evaluationId, Double darcySeepageCoefficient,
+    public record Result(@NotBlank String calculationResultType, @NotBlank String pressureMethod,
+                         Long evaluationId, Double darcySeepageCoefficient,
                          Double nonDarcySeepageCoefficient, Double openFlowCapacity,
+                         Double productivityCoefficient, Double productivityExponent,
                          Double gradient, Double intercept, Double rSquared,
                          Integer reliabilityLevel, String reliabilityDescription,
                          List<ChartPoint> chartPoints, List<IprPoint> iprPoints) {}
+
+    public record AvailableResult(String calculationResultType, String pressureMethod,
+                                  LocalDateTime updatedAt) {}
 
     public record Input(Double maximumFormationPressure, Double formationTemperature,
                         Double onePointAlpha, String gasType, Double specificGravity,
@@ -44,7 +50,7 @@ public final class ProductivityTestModels {
     public record Detail(long id, long pvtId, int testNo, String testName, LocalDate testDate,
                          String operationType, String testMethod, String wellName, String wellType,
                          String status, Input input, List<InputItem> inputItems, Result result,
-                         List<EvaluationReference> evaluations) {}
+                         List<EvaluationReference> evaluations, List<AvailableResult> availableResults) {}
 
     public record SaveRequest(Long testId, @Positive long projectId, @Positive long gasReservoirId,
                               @NotBlank String wellName, @Positive long pvtId,

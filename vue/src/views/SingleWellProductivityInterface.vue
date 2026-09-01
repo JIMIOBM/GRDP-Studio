@@ -20,14 +20,13 @@ import WorkspaceSidebar from '@/components/WorkspaceSidebar.vue'
 import BinomialPressureContent from '@/views/WellControlInventory/BinomialPressureContent.vue'
 import ModifiedIsochronalContent from '@/views/SingleWellProductivity/ModifiedIsochronalContent.vue'
 import ExponentialContent from '@/views/SingleWellProductivity/ExponentialContent.vue'
-import ProductivityComparison from '@/views/SingleWellProductivity/ProductivityComparison.vue'  
+import ProductivityComparison from '@/views/SingleWellProductivity/ProductivityComparison.vue'
 import { NODETYPE } from '@/constants/nodeType'
 import { wellApi } from '@/api/docker'
 import { pvtStorageApi } from '@/api/pvtStorage'
 import { productivityStorageApi } from '@/api/productivityStorage'
 import { productivityTestsApi } from '@/api/productivityTests'
 import {
-  ISOCHRONAL_METHOD_NODE_TYPE,
   ISOCHRONAL_RECORD_NODE_TYPE,
   loadAllIsochronalTreeNodes,
   loadIsochronalTreeNodes
@@ -36,6 +35,10 @@ import {
   loadAllModifiedIsochronalTreeNodes,
   loadModifiedIsochronalTreeNodes
 } from '@/utils/modifiedIsochronalTree'
+import {
+  ensureProductivityTestMethodGroups,
+  PRODUCTIVITY_TEST_METHOD_NODE_TYPES
+} from '@/utils/productivityTestTree'
 import {
   workspaceActiveNodeId,
   workspacePendingCommand,
@@ -48,9 +51,9 @@ import {
 } from '@/utils/workspaceTreeState'
 
 const PROJECT_ID = 6
-const GAS_RESERVOIR_ID = 1
+const GAS_RESERVOIR_ID = 4
 const MODIFIED_ISOCHRONAL_PROJECT_ID = 6
-const MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID = 1
+const MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID = 4
 
 const route = useRoute()
 const router = useRouter()
@@ -124,6 +127,7 @@ const importedDataFileName = ref('当前井产能测试数据')
 const databasePvtRecords = ref([])
 const selectedPvtDetail = ref(null)
 const pressureWorkspaceKey = ref(0)
+const modifiedIsochronalDraftKey = ref('')
 const calculationOutput = ref(null)
 const savingProductivityTest = ref(false)
 
@@ -291,7 +295,10 @@ const selectModule = (moduleName, method = '') => {
     query: {
       module: activeModule.value,
       method: activeMethod.value,
-      well: selectedWellName.value
+      well: selectedWellName.value,
+      ...(activeMethod.value === '修正等时' && modifiedIsochronalDraftKey.value
+        ? { draft: modifiedIsochronalDraftKey.value }
+        : {})
     }
   })
 }
@@ -328,6 +335,67 @@ const loadAllIsochronalNodes = async () => loadAllIsochronalTreeNodes({
   gasReservoirId: GAS_RESERVOIR_ID
 })
 
+const createModifiedIsochronalDraftNode = async wellName => {
+  if (!wellName) return null
+  const wellNode = workspaceTreeData.value.find(node => node.id === 'g-well')?.children
+    ?.find(node => (node.wellName || node.label) === wellName)
+  if (!wellNode) return null
+
+  let productivityGroup = wellNode.children?.find(node =>
+    node.type === 'single-well-productivity' || node.label === '单井产能'
+  )
+  if (!productivityGroup) {
+    productivityGroup = {
+      id: `${wellNode.id}-single-well-productivity`,
+      label: '单井产能',
+      type: 'single-well-productivity',
+      wellName,
+      children: []
+    }
+    wellNode.children = [...(wellNode.children || []), productivityGroup]
+  }
+
+  let testGroup = productivityGroup.children?.find(node =>
+    node.type === 'productivity-test' || node.label === '产能试井'
+  )
+  if (!testGroup) {
+    testGroup = {
+      id: `${wellNode.id}-single-well-productivity-productivity-test`,
+      label: '产能试井',
+      type: 'productivity-test',
+      wellName,
+      children: []
+    }
+    productivityGroup.children = [...(productivityGroup.children || []), testGroup]
+  }
+
+  const methodGroup = ensureProductivityTestMethodGroups(testGroup, wellNode, wellName)['modified-isochronal']
+  const maximumNo = methodGroup.children.reduce((maximum, node) => {
+    const labelNo = Number(String(node.label || '').match(/(\d+)$/)?.[1])
+    return Math.max(maximum, Number(node.testNo) || 0, Number.isFinite(labelNo) ? labelNo : 0)
+  }, 0)
+  const draftKey = `${wellNode.id}-modified-isochronal-draft-${Date.now()}`
+  const draftNode = {
+    id: draftKey,
+    label: `修正等时${maximumNo + 1}`,
+    type: NODETYPE.NodeType_ProductivityEvaluationModifiedIsochronalWellTest,
+    wellName,
+    testNo: maximumNo + 1,
+    draft: true,
+    children: []
+  }
+  methodGroup.children.push(draftNode)
+  wellNode.expanded = true
+  productivityGroup.expanded = true
+  testGroup.expanded = true
+  methodGroup.expanded = true
+  workspaceActiveNodeId.value = draftNode.id
+  modifiedIsochronalDraftKey.value = draftKey
+  activeProductivityTestId.value = null
+  activeEvaluationId.value = null
+  return draftNode
+}
+
 const handleCommand = async ({ group, name, parent }) => {
   // 顶部菜单栏“单井产能”板块：留在当前独立页面并切换功能模块/计算方法。
   if (group === '单井产能') {
@@ -336,8 +404,7 @@ const handleCommand = async ({ group, name, parent }) => {
       return
     }
     if (parent === '产能试井' && name === '修正等时') {
-      activeProductivityTestId.value = null
-      activeEvaluationId.value = null
+      await createModifiedIsochronalDraftNode(selectedWellName.value)
     }
     if (parent === '产能试井' && name === '等时试井') {
       activeProductivityTestId.value = null
@@ -426,7 +493,7 @@ const handleSidebarSelect = async node => {
   const isProductivityTestNode = node.type === 'productivity-test' || node.label === '产能试井'
 
   // “产能试井”仅作为目录层级，不代表一条真实试井记录。
-  if (isProductivityTestNode || node.type === ISOCHRONAL_METHOD_NODE_TYPE) return
+  if (isProductivityTestNode || PRODUCTIVITY_TEST_METHOD_NODE_TYPES.has(node.type)) return
 
   if (node.type === ISOCHRONAL_RECORD_NODE_TYPE && node.testId) {
     selectedWellName.value = node.wellName || selectedWellName.value
@@ -475,6 +542,7 @@ const handleSidebarSelect = async node => {
     selectedWellName.value = node.wellName || selectedWellName.value
     activeProductivityTestId.value = node.testId || node.resultId || null
     activeEvaluationId.value = node.evaluationId || node.raw?.ProductivityEvaluationId || null
+    modifiedIsochronalDraftKey.value = node.draft ? node.id : ''
     activeModule.value = '产能试井'
     activeMethod.value = '修正等时'
     activeContentTab.value = 'chart'
@@ -488,7 +556,7 @@ const handleSidebarSelect = async node => {
           module: '产能试井',
           method: '修正等时',
           well: targetWell,
-          testId: targetTestId,
+          ...(targetTestId ? { testId: targetTestId } : { draft: node.id }),
           ...(activeEvaluationId.value ? { evaluationId: activeEvaluationId.value } : {})
         }
       })
@@ -579,12 +647,14 @@ const toggleParamsPanel = () => {
 }
 
 const handleProductivitySaved = async saved => {
+  modifiedIsochronalDraftKey.value = ''
   activeProductivityTestId.value = saved.testId
   await loadModifiedIsochronalNodes(selectedWellName.value, { expand: true })
   const wellNode = workspaceTreeData.value.find(node => node.id === 'g-well')?.children
     ?.find(node => (node.wellName || node.label) === selectedWellName.value)
   const savedNode = wellNode?.children?.find(node => node.type === 'single-well-productivity')
     ?.children?.find(node => node.type === 'productivity-test')
+    ?.children?.find(node => node.type === 'productivity-test-modified-isochronal-method')
     ?.children?.find(node => Number(node.testId) === Number(saved.testId))
   if (savedNode) workspaceActiveNodeId.value = savedNode.id
   await router.replace({
@@ -610,6 +680,9 @@ onMounted(async () => {
     loadAllModifiedIsochronalNodes(),
     loadAllIsochronalNodes()
   ])
+  if (selectedWellName.value && route.query.method === '修正等时' && !activeProductivityTestId.value) {
+    await createModifiedIsochronalDraftNode(selectedWellName.value)
+  }
   if (selectedWellName.value && route.query.method === '等时试井' && activeProductivityTestId.value) {
     await handleSidebarSelect({
       id: `productivity-test-isochronal-${activeProductivityTestId.value}`,
@@ -640,7 +713,7 @@ onMounted(async () => {
 
         <template v-if="activeModule === '产能试井' && activeMethod">
 
-          <ModifiedIsochronalContent v-if="activeMethod === '修正等时'" :project-id="MODIFIED_ISOCHRONAL_PROJECT_ID"
+          <ModifiedIsochronalContent v-if="activeMethod === '修正等时'" :key="modifiedIsochronalDraftKey || activeProductivityTestId || selectedWellName" :project-id="MODIFIED_ISOCHRONAL_PROJECT_ID"
             :gas-reservoir-id="MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID" :well-name="selectedWellName"
             :test-id="activeProductivityTestId" :evaluation-id="activeEvaluationId" @saved="handleProductivitySaved" />
 
@@ -811,7 +884,7 @@ onMounted(async () => {
             @update:open-flow-rate="openFlowRate = $event"
           />
         </template>
-        
+
         <template v-else-if="activeModule === '产能对比'">
           <ProductivityComparison
             :well-name="selectedWellName"

@@ -7,6 +7,7 @@ let reconnectTimer = null
 let heartbeatTimer = null
 let pongTimer = null
 let manuallyClosed = false
+let activeConsumers = 0
 
 const getAccount = () => {
     try {
@@ -47,7 +48,7 @@ const startHeartbeat = () => {
 
 const scheduleReconnect = () => {
     clearReconnectTimer()
-    if (manuallyClosed || !getAccount()) return
+    if (manuallyClosed || activeConsumers === 0 || !getAccount()) return
 
     reconnectTimer = window.setTimeout(() => {
         reconnectTimer = null
@@ -66,6 +67,7 @@ const parseMessage = (data) => {
 
 export const disconnectNotifySocket = () => {
     manuallyClosed = true
+    activeConsumers = 0
     clearReconnectTimer()
     clearHeartbeat()
 
@@ -116,8 +118,15 @@ export const connectNotifySocket = () => {
     return socket
 }
 
-export const initNotifySocket = () => {
-    if (getAccount()) connectNotifySocket()
+export const acquireNotifySocket = () => {
+    activeConsumers += 1
+    connectNotifySocket()
+    let released = false
 
-    window.addEventListener('beforeunload', disconnectNotifySocket)
+    return () => {
+        if (released) return
+        released = true
+        activeConsumers = Math.max(0, activeConsumers - 1)
+        if (activeConsumers === 0) disconnectNotifySocket()
+    }
 }

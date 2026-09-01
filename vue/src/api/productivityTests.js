@@ -5,7 +5,11 @@ export const productivityTestsApi = {
     request.get('/productivity-tests', {
       params: { projectId, gasReservoirId, wellName, testMethod }
     }),
-  detail: testId => request.get(`/productivity-tests/${testId}`),
+  detail: (testId, resultType, pressureMethod) => request.get(`/productivity-tests/${testId}`, {
+    params: { ...(resultType ? { resultType } : {}), ...(pressureMethod ? { pressureMethod } : {}) }
+  }),
+  calculateModifiedIsochronalExponential: data =>
+    request.post('/productivity-tests/modified-isochronal/exponential/calculate', data),
   importFile: file => {
     const formData = new FormData()
     formData.append('file', file)

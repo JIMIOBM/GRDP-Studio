@@ -34,7 +34,18 @@ dockerRequest.interceptors.request.use(
 
 // 响应拦截：统一报错
 dockerRequest.interceptors.response.use(
-  (res) => res,
+  (res) => {
+    const contentType = String(res.headers?.['content-type'] || '').toLowerCase()
+    const htmlBody = typeof res.data === 'string' && /^\s*(?:<!doctype\s+html|<html\b)/i.test(res.data)
+    if (contentType.includes('text/html') || htmlBody) {
+      const error = new Error('原平台请求未进入计算服务（登录状态失效或代理目标异常），请重新登录原平台后再试')
+      // 不把 SPA 首页源码继续传给页面层，否则会被当作服务端错误全文弹出。
+      error.response = { ...res, data: { message: error.message } }
+      error.config = res.config
+      return Promise.reject(error)
+    }
+    return res
+  },
   (err) => {
     const msg = err.response?.data?.message || err.message || '请求失败'
     if (!err.config?.silentError) {
