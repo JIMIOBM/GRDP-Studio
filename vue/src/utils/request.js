@@ -10,6 +10,17 @@ const request = axios.create({
   withCredentials: true
 })
 
+let lastNetworkErrorTip = ''
+let lastNetworkErrorTipAt = 0
+
+const showNetworkErrorOnce = message => {
+  const now = Date.now()
+  if (message === lastNetworkErrorTip && now - lastNetworkErrorTipAt < 5000) return
+  lastNetworkErrorTip = message
+  lastNetworkErrorTipAt = now
+  ElMessage.error(message)
+}
+
 // 请求拦截：自动带上 token
 request.interceptors.request.use(
   (config) => {
@@ -46,7 +57,10 @@ request.interceptors.response.use(
     return res
   },
   (error) => {
-    ElMessage.error(error.message || '网络异常')
+    const message = error.code === 'ECONNABORTED'
+      ? '本地服务响应超时，请检查后端服务'
+      : (error.response?.data?.msg || error.message || '网络异常')
+    showNetworkErrorOnce(message)
     return Promise.reject(error)
   }
 )

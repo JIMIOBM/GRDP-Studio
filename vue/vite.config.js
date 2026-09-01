@@ -65,6 +65,14 @@ const getCsrfToken = (flow) => {
   return ''
 }
 
+const getFlowErrorMessage = (flow) => {
+  const messages = [
+    ...(flow?.ui?.messages || []),
+    ...(flow?.ui?.nodes || []).flatMap(node => node?.messages || [])
+  ]
+  return messages.map(message => message?.text).find(Boolean) || ''
+}
+
 // Match the password derivation used by the AHKs login page before submitting to Kratos.
 const hashDockerPassword = (password, username) =>
   pbkdf2Sync(password, username, 1000, 32, 'sha256').toString('hex')
@@ -169,14 +177,30 @@ const loginDockerPlatform = async ({ username, password }) => {
   })
 
   const loginCookie = toCookieHeader(getSetCookieHeaders(response.headers))
+  const responseText = await response.text().catch(() => '')
   if (response.status !== 303 && !response.ok) {
-    const text = await response.text().catch(() => '')
-    throw new Error(text || `原平台登录失败：${response.status}`)
+    let message = ''
+    try {
+      message = getFlowErrorMessage(JSON.parse(responseText))
+    } catch {
+      // Some Kratos deployments return an HTML error page.
+    }
+    const error = new Error(message || `原平台登录失败：${response.status}`)
+    error.status = response.status === 400 ? 401 : response.status
+    throw error
   }
 
   const cookie = [initCookie, loginCookie].filter(Boolean).join('; ')
   if (!cookie || !cookie.includes('ahksoil_identity_session')) {
-    throw new Error('原平台登录成功但没有拿到 ahksoil_identity_session')
+    let message = ''
+    try {
+      message = getFlowErrorMessage(JSON.parse(responseText))
+    } catch {
+      // Keep the fallback below when the response is not JSON.
+    }
+    const error = new Error(message || '原平台用户名或密码不正确')
+    error.status = 401
+    throw error
   }
 
   const session = await verifyDockerSession(cookie, baseUrl)
@@ -212,10 +236,12 @@ export default defineConfig(() => {
     // an older Kratos session. Prefer the cookie on the current browser request
     // so an inactive cached session cannot overwrite the newly active one.
     const browserCookie = req.headers?.cookie || ''
-    if (browserCookie) {
+    if (browserCookie.includes('ahksoil_identity_session')) {
       proxyReq.setHeader('Cookie', browserCookie)
     } else if (dockerSessionCookie) {
       proxyReq.setHeader('Cookie', dockerSessionCookie)
+    } else {
+      proxyReq.removeHeader('Cookie')
     }
   }
   const sendJson = (res, statusCode, data) => {
@@ -253,7 +279,7 @@ export default defineConfig(() => {
               setBrowserIdentityCookie(res, session.identityCookie, session.expiresAt)
               sendJson(res, 200, { success: true, expiresAt: session.expiresAt })
             } catch (error) {
-              sendJson(res, 500, { success: false, message: error.message || '原平台登录失败' })
+              sendJson(res, error.status || 500, { success: false, message: error.message || '原平台登录失败' })
             }
           })
         }

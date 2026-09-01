@@ -61,7 +61,7 @@ import {
   workspaceTreeKeyword
 } from '@/utils/workspaceTreeState'
 
-// 7
+// 原平台中当前演示项目的 ID；需与 Docker 平台的数据项目保持一致。
 const PROJECT_ID = 6
 // 4
 const GAS_RESERVOIR_ID = 4

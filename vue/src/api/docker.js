@@ -15,6 +15,7 @@ const dockerRequest = axios.create({
 })
 
 let lastDockerUnauthorizedTipAt = 0
+let redirectingToLogin = false
 
 dockerRequest.interceptors.request.use(
   (config) => {
@@ -54,6 +55,13 @@ dockerRequest.interceptors.response.use(
         if (now - lastDockerUnauthorizedTipAt > 3000) {
           lastDockerUnauthorizedTipAt = now
           ElMessage.error('原平台登录状态已失效，请重新登录后再试')
+        }
+        // 本地 account 只能通过前端路由守卫，不能代表原平台会话仍然有效。
+        // 会话过期后返回登录页，避免工作台目录请求全部失败并停留在空白页面。
+        localStorage.removeItem('account')
+        if (!redirectingToLogin && window.location.pathname !== '/login') {
+          redirectingToLogin = true
+          window.location.replace('/login')
         }
       } else {
         ElMessage.error(`原平台服务错误：${msg}`)

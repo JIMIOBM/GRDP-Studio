@@ -6,6 +6,7 @@ spring:
     name: grdp-backend
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
+    # 原平台 Docker 数据库映射到宿主机 32000；与 backend/.env.example 保持一致。
     url: ${MYSQL_URL:jdbc:mysql://127.0.0.1:32000/database?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false}
     username: ${MYSQL_USERNAME:root}
     password: ${MYSQL_PASSWORD:password}
