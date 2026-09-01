@@ -5,6 +5,7 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -34,8 +35,8 @@ public final class IsochronalTestDtos {
             @NotNull Double maximumFormationPressure,
             @NotNull Double formationTemperature,
             Double onePointAlpha,
-            String gasType,
-            Double specificGravity,
+            @NotBlank String gasType,
+            @NotNull @Positive Double specificGravity,
             Double hydrogenSulfide,
             Double carbonDioxide,
             Double nitrogen,
@@ -59,7 +60,7 @@ public final class IsochronalTestDtos {
             Double gradient,
             Double intercept,
             Double rSquared,
-            String reliabilityLevel,
+            Integer reliabilityLevel,
             String reliabilityDescription,
             List<@Valid CurvePoint> analysisPoints,
             List<@Valid CurvePoint> regressionLine,

@@ -5,14 +5,16 @@ CREATE TABLE IF NOT EXISTS project_well_pvt (
     pvt_no INT NOT NULL,
     pvt_name VARCHAR(100) NOT NULL,
     status VARCHAR(32) NOT NULL DEFAULT 'draft',
-    source_type VARCHAR(32) NULL,
-    last_calculated_kind VARCHAR(32) NULL,
+    source_type VARCHAR(32) NOT NULL DEFAULT 'manual',
+    last_calculated_kind VARCHAR(16) NULL,
     remark VARCHAR(500) NULL,
     created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
     PRIMARY KEY (id),
     UNIQUE KEY uk_well_pvt_no (well_id, pvt_no),
-    CONSTRAINT fk_pvt_well FOREIGN KEY (well_id) REFERENCES project_well_heads (id)
+    KEY idx_pvt_well_status (well_id, status),
+    CONSTRAINT fk_project_well_pvt_well FOREIGN KEY (well_id) REFERENCES project_well_heads (id)
+        ON UPDATE CASCADE ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE IF NOT EXISTS project_well_productivity_test (
@@ -22,23 +24,32 @@ CREATE TABLE IF NOT EXISTS project_well_productivity_test (
     well_id BIGINT NOT NULL,
     well_name VARCHAR(255) NOT NULL,
     pvt_id BIGINT NOT NULL,
-    operation_type ENUM('injection','production') NOT NULL,
-    test_method ENUM('back-pressure','isochronal','modified-isochronal','one-point') NOT NULL,
+    operation_type VARCHAR(16) NOT NULL,
+    test_method VARCHAR(32) NOT NULL,
     test_no INT NOT NULL,
     test_name VARCHAR(100) NOT NULL,
     test_date DATE NOT NULL,
-    well_type VARCHAR(64) NULL,
-    status ENUM('draft','data-ready','calculated') NOT NULL DEFAULT 'draft',
+    well_type VARCHAR(32) NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'draft',
     remark VARCHAR(500) NULL,
     created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
     PRIMARY KEY (id),
-    UNIQUE KEY uk_productivity_test_no (well_id, operation_type, test_method, test_no),
-    KEY idx_productivity_test_scope (project_id, project_gas_reservoir_id, well_name),
-    CONSTRAINT fk_productivity_test_project FOREIGN KEY (project_id) REFERENCES project_summaries (id),
-    CONSTRAINT fk_productivity_test_reservoir FOREIGN KEY (project_gas_reservoir_id) REFERENCES project_gas_reservoir (id),
-    CONSTRAINT fk_productivity_test_well FOREIGN KEY (well_id) REFERENCES project_well_heads (id),
-    CONSTRAINT fk_productivity_test_pvt FOREIGN KEY (pvt_id) REFERENCES project_well_pvt (id)
+    UNIQUE KEY uk_prod_test_identity (well_id, operation_type, test_method, test_no),
+    KEY idx_prod_test_scope (project_id, project_gas_reservoir_id, well_id),
+    KEY idx_prod_test_pvt (pvt_id),
+    KEY idx_prod_test_menu (well_id, operation_type, test_method, test_date),
+    CONSTRAINT fk_prod_test_project FOREIGN KEY (project_id) REFERENCES project_summaries (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_prod_test_reservoir FOREIGN KEY (project_gas_reservoir_id) REFERENCES project_gas_reservoir (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_prod_test_well FOREIGN KEY (well_id) REFERENCES project_well_heads (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_prod_test_pvt FOREIGN KEY (pvt_id) REFERENCES project_well_pvt (id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT chk_prod_operation_type CHECK (operation_type IN ('injection', 'production')),
+    CONSTRAINT chk_prod_test_method CHECK (test_method IN ('back-pressure', 'isochronal', 'modified-isochronal', 'one-point')),
+    CONSTRAINT chk_prod_test_no CHECK (test_no > 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE IF NOT EXISTS project_well_productivity_test_input (
@@ -47,11 +58,11 @@ CREATE TABLE IF NOT EXISTS project_well_productivity_test_input (
     maximum_formation_pressure DOUBLE NOT NULL,
     formation_temperature DOUBLE NOT NULL,
     one_point_alpha DOUBLE NULL,
-    gas_type VARCHAR(64) NULL,
-    specific_gravity DOUBLE NULL,
-    hydrogen_sulfide DOUBLE NULL,
-    carbon_dioxide DOUBLE NULL,
-    nitrogen DOUBLE NULL,
+    gas_type VARCHAR(32) NOT NULL,
+    specific_gravity DOUBLE NOT NULL,
+    hydrogen_sulfide DOUBLE NOT NULL DEFAULT 0,
+    carbon_dioxide DOUBLE NOT NULL DEFAULT 0,
+    nitrogen DOUBLE NOT NULL DEFAULT 0,
     condensate_oil_density DOUBLE NULL,
     modification_method VARCHAR(64) NULL,
     deviation_factor_method VARCHAR(64) NULL,
@@ -59,9 +70,9 @@ CREATE TABLE IF NOT EXISTS project_well_productivity_test_input (
     created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
     PRIMARY KEY (id),
-    UNIQUE KEY uk_productivity_input_test (test_id),
-    CONSTRAINT fk_productivity_input_test FOREIGN KEY (test_id)
-        REFERENCES project_well_productivity_test (id) ON DELETE CASCADE
+    UNIQUE KEY uk_prod_test_input (test_id),
+    CONSTRAINT fk_prod_test_input_test FOREIGN KEY (test_id)
+        REFERENCES project_well_productivity_test (id) ON UPDATE CASCADE ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE IF NOT EXISTS project_well_productivity_test_input_item (
@@ -74,45 +85,49 @@ CREATE TABLE IF NOT EXISTS project_well_productivity_test_input_item (
     created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
     PRIMARY KEY (id),
-    UNIQUE KEY uk_productivity_input_point (input_id, test_point_number),
-    CONSTRAINT fk_productivity_input_item FOREIGN KEY (input_id)
-        REFERENCES project_well_productivity_test_input (id) ON DELETE CASCADE
+    UNIQUE KEY uk_prod_input_point (input_id, test_point_number),
+    CONSTRAINT fk_prod_input_item_input FOREIGN KEY (input_id)
+        REFERENCES project_well_productivity_test_input (id) ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT chk_prod_input_point_no CHECK (test_point_number > 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE IF NOT EXISTS project_well_productivity_binomial_output (
     id BIGINT NOT NULL AUTO_INCREMENT,
     test_id BIGINT NOT NULL,
-    pressure_method ENUM('pseudo-pressure','pressure-squared','pressure') NOT NULL,
+    pressure_method VARCHAR(32) NOT NULL,
     darcy_seepage_coefficient DOUBLE NOT NULL,
     non_darcy_seepage_coefficient DOUBLE NOT NULL,
     open_flow_capacity DOUBLE NOT NULL,
     gradient DOUBLE NULL,
     intercept DOUBLE NULL,
     r_squared DOUBLE NULL,
-    reliability_level VARCHAR(32) NULL,
+    reliability_level INT NULL,
     reliability_description VARCHAR(255) NULL,
     calculated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
     PRIMARY KEY (id),
-    UNIQUE KEY uk_binomial_output_method (test_id, pressure_method),
-    CONSTRAINT fk_binomial_output_test FOREIGN KEY (test_id)
-        REFERENCES project_well_productivity_test (id) ON DELETE CASCADE
+    UNIQUE KEY uk_prod_binomial_method (test_id, pressure_method),
+    CONSTRAINT fk_prod_binomial_test FOREIGN KEY (test_id)
+        REFERENCES project_well_productivity_test (id) ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT chk_prod_pressure_method CHECK (pressure_method IN ('pseudo-pressure', 'pressure-squared', 'pressure'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE IF NOT EXISTS project_well_productivity_binomial_output_item (
     id BIGINT NOT NULL AUTO_INCREMENT,
     output_id BIGINT NOT NULL,
-    curve_type ENUM('regularized','stable','regression','shifted-regression') NOT NULL,
+    curve_type VARCHAR(40) NOT NULL,
     point_number INT NOT NULL,
     x_value DOUBLE NOT NULL,
     y_value DOUBLE NOT NULL,
     is_deleted TINYINT(1) NOT NULL DEFAULT 0,
-    data_label VARCHAR(100) NULL,
+    data_label VARCHAR(255) NULL,
     created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     PRIMARY KEY (id),
-    UNIQUE KEY uk_binomial_output_point (output_id, curve_type, point_number),
-    CONSTRAINT fk_binomial_output_item FOREIGN KEY (output_id)
-        REFERENCES project_well_productivity_binomial_output (id) ON DELETE CASCADE
+    UNIQUE KEY uk_prod_output_curve_point (output_id, curve_type, point_number),
+    CONSTRAINT fk_prod_output_item_output FOREIGN KEY (output_id)
+        REFERENCES project_well_productivity_binomial_output (id) ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT chk_prod_output_point_no CHECK (point_number > 0),
+    CONSTRAINT chk_prod_curve_type CHECK (curve_type IN ('regularized', 'stable', 'regression', 'shifted-regression'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE IF NOT EXISTS project_well_productivity_binomial_ipr_item (
@@ -123,10 +138,12 @@ CREATE TABLE IF NOT EXISTS project_well_productivity_binomial_ipr_item (
     gas_production DOUBLE NOT NULL,
     bottom_hole_flowing_pressure DOUBLE NOT NULL,
     is_deleted TINYINT(1) NOT NULL DEFAULT 0,
-    data_label VARCHAR(100) NULL,
+    data_label VARCHAR(255) NULL,
     created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     PRIMARY KEY (id),
-    UNIQUE KEY uk_binomial_ipr_point (output_id, curve_number, point_number),
-    CONSTRAINT fk_binomial_ipr_item FOREIGN KEY (output_id)
-        REFERENCES project_well_productivity_binomial_output (id) ON DELETE CASCADE
+    UNIQUE KEY uk_prod_ipr_curve_point (output_id, curve_number, point_number),
+    CONSTRAINT fk_prod_ipr_item_output FOREIGN KEY (output_id)
+        REFERENCES project_well_productivity_binomial_output (id) ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT chk_prod_ipr_curve_no CHECK (curve_number > 0),
+    CONSTRAINT chk_prod_ipr_point_no CHECK (point_number > 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

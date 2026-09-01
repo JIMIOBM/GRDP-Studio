@@ -77,14 +77,19 @@ public class ProductivityTestStorageService {
         validateResult(request.result());
         long wellId = findWellId(request.projectId(), request.gasReservoirId(), request.wellName());
         long pvtId = ensurePvt(wellId, request.pvtNo(), request.pvtName());
-        long testId = request.testId() == null
+        boolean created = request.testId() == null;
+        boolean replaceInput = created || inputChanged(
+                request.testId(), pvtId, request.operationType(), request.input());
+        long testId = created
                 ? insertTest(request, wellId, pvtId)
                 : updateAndValidateTest(request, wellId, pvtId);
-        // 输入或 PVT 发生变化时，旧压力方法的结果不再可信；本次保存只重建当前方法。
-        jdbc.update("DELETE FROM project_well_productivity_binomial_output WHERE test_id=?", testId);
-        jdbc.update("DELETE FROM project_well_productivity_exponential_output WHERE test_id=?", testId);
-        long inputId = replaceInput(testId, request.input());
-        replaceInputPoints(inputId, request.input().points());
+        if (replaceInput) {
+            // 输入、PVT或注采类型变化后，所有旧公式结果都不再可信。
+            jdbc.update("DELETE FROM project_well_productivity_binomial_output WHERE test_id=?", testId);
+            jdbc.update("DELETE FROM project_well_productivity_exponential_output WHERE test_id=?", testId);
+            long inputId = replaceInput(testId, request.input());
+            replaceInputPoints(inputId, request.input().points());
+        }
         long outputId = replaceOutput(testId, request.pressureMethod(), request.result());
         replaceCurvePoints(outputId, request.result());
         if ("exponential".equals(request.result().calculationResultType())) {
@@ -120,9 +125,9 @@ public class ProductivityTestStorageService {
     private long insertTest(SaveRequest request, long wellId, long pvtId) {
         Integer nextNo = jdbc.queryForObject("""
                 SELECT COALESCE(MAX(test_no),0)+1 FROM project_well_productivity_test
-                WHERE well_id=? AND test_method='isochronal'
+                WHERE well_id=? AND operation_type=? AND test_method='isochronal'
                 FOR UPDATE
-                """, Integer.class, wellId);
+                """, Integer.class, wellId, request.operationType());
         int testNo = Objects.requireNonNullElse(nextNo, 1);
         return insertAndReturnKey("""
                 INSERT INTO project_well_productivity_test
@@ -156,8 +161,8 @@ public class ProductivityTestStorageService {
                    modification_method,deviation_factor_method,viscosity_method)
                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, testId, input.maximumFormationPressure(), input.formationTemperature(), input.onePointAlpha(),
-                input.gasType(), input.specificGravity(), input.hydrogenSulfide(), input.carbonDioxide(),
-                input.nitrogen(), input.condensateOilDensity(), input.modificationMethod(),
+                input.gasType().trim(), input.specificGravity(), zero(input.hydrogenSulfide()),
+                zero(input.carbonDioxide()), zero(input.nitrogen()), input.condensateOilDensity(), input.modificationMethod(),
                 input.deviationFactorMethod(), input.viscosityMethod());
     }
 
@@ -171,6 +176,10 @@ public class ProductivityTestStorageService {
 
     private long replaceOutput(long testId, String method, Result result) {
         if ("exponential".equals(result.calculationResultType())) {
+            jdbc.update("""
+                    DELETE FROM project_well_productivity_exponential_output
+                    WHERE test_id=? AND pressure_method=?
+                    """, testId, method);
             return insertAndReturnKey("""
                     INSERT INTO project_well_productivity_exponential_output
                       (test_id,pressure_method,productivity_coefficient,productivity_exponent,
@@ -180,6 +189,10 @@ public class ProductivityTestStorageService {
                     result.openFlowCapacity(), result.rSquared(), result.reliabilityDescription(),
                     new Timestamp(System.currentTimeMillis()));
         }
+        jdbc.update("""
+                DELETE FROM project_well_productivity_binomial_output
+                WHERE test_id=? AND pressure_method=?
+                """, testId, method);
         return insertAndReturnKey("""
                 INSERT INTO project_well_productivity_binomial_output
                   (test_id,pressure_method,darcy_seepage_coefficient,non_darcy_seepage_coefficient,
@@ -325,7 +338,7 @@ public class ProductivityTestStorageService {
             List<IprCurve> curves = loadIprCurves(outputId);
             return new Result("binomial", rs.getDouble(2), rs.getDouble(3),
                     null, null, rs.getDouble(4), nullableDouble(rs, 5),
-                    nullableDouble(rs, 6), nullableDouble(rs, 7), rs.getString(8), rs.getString(9),
+                    nullableDouble(rs, 6), nullableDouble(rs, 7), nullableInteger(rs, 8), rs.getString(9),
                     analysis, regression, transientLine, curves);
         }, testId, method);
     }
@@ -436,6 +449,43 @@ public class ProductivityTestStorageService {
     private static Double nullableDouble(java.sql.ResultSet rs, int index) throws java.sql.SQLException {
         double value = rs.getDouble(index);
         return rs.wasNull() ? null : value;
+    }
+
+    private boolean inputChanged(long testId, long pvtId, String operationType, Input requested) {
+        Integer matchingTest = jdbc.queryForObject("""
+                SELECT COUNT(*) FROM project_well_productivity_test
+                WHERE id=? AND pvt_id=? AND operation_type=?
+                """, Integer.class, testId, pvtId, operationType);
+        if (matchingTest == null || matchingTest != 1) return true;
+        try {
+            return !normalizeInput(loadInput(testId)).equals(normalizeInput(requested));
+        } catch (EmptyResultDataAccessException error) {
+            return true;
+        }
+    }
+
+    private Input normalizeInput(Input value) {
+        return new Input(
+                value.maximumFormationPressure(), value.formationTemperature(), value.onePointAlpha(),
+                value.gasType() == null ? null : value.gasType().trim(), value.specificGravity(),
+                zero(value.hydrogenSulfide()), zero(value.carbonDioxide()), zero(value.nitrogen()),
+                value.condensateOilDensity(), blankToNull(value.modificationMethod()),
+                blankToNull(value.deviationFactorMethod()), blankToNull(value.viscosityMethod()),
+                value.points() == null ? List.of() : List.copyOf(value.points())
+        );
+    }
+
+    private static Integer nullableInteger(java.sql.ResultSet rs, int index) throws java.sql.SQLException {
+        int value = rs.getInt(index);
+        return rs.wasNull() ? null : value;
+    }
+
+    private static double zero(Double value) {
+        return value == null ? 0.0 : value;
+    }
+
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 
     private static Double parseFormationPressure(String label) {

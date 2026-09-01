@@ -40,7 +40,8 @@ public final class ProductivityTestModels {
                          List<ChartPoint> chartPoints, List<IprPoint> iprPoints) {}
 
     public record Input(Double maximumFormationPressure, Double formationTemperature,
-                        Double onePointAlpha, String gasType, Double specificGravity,
+                        Double onePointAlpha, @NotBlank String gasType,
+                        @NotNull @Positive Double specificGravity,
                         Double hydrogenSulfide, Double carbonDioxide, Double nitrogen,
                         Double condensateOilDensity, String modificationMethod,
                         String deviationFactorMethod, String viscosityMethod) {}
