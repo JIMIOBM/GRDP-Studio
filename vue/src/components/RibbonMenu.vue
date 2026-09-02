@@ -84,15 +84,16 @@ const defaultTabs = [
       {
         title: '项目管理',
         columns: [
-          { type: 'large', label: '新建项目', icon: '方案生成' },
+          { type: 'large', label: '新建项目', icon: '方案生成', commandId: 'software-integration.project.create' },
           {
             type: 'large',
             label: '导入模型',
             icon: '数据映射',
             dropdown: true,
-            dropdownItems: ['PIPESIM 井筒模型']
+            dropdownItems: ['PIPESIM 井筒模型'],
+            dropdownCommandIds: { 'PIPESIM 井筒模型': 'software-integration.model.import-pipesim' }
           },
-          { type: 'large', label: '保存', icon: '生成报告' }
+          { type: 'large', label: '保存', icon: '生成报告', commandId: 'software-integration.project.save' }
         ]
       },
       {
@@ -369,9 +370,9 @@ const switchTab = (idx) => { //切换页签
   emit('tab-change', tabList.value[idx]?.name || '')
 }
 
-const onItemClick = (groupTitle, label, parent = '') => { //点击菜单项
+const onItemClick = (groupTitle, label, parent = '', commandId = '') => { //点击菜单项
   if (!label) return
-  emit('command', {group: groupTitle, name: label, parent})
+  emit('command', {group: groupTitle, name: label, parent, commandId})
 }
 
 
@@ -424,7 +425,7 @@ const getIcon = (label) => iconMap[normalizeIconKey(iconAliases[label] || label)
                   class="check-item"
                   v-for="item in col.items"
                   :key="item"
-                  @click="onItemClick(group.title, item)"
+                  @click="onItemClick(group.title, item, '', col.commandIds?.[item])"
               >
                 <img
                     v-if="getIcon(item)"
@@ -448,8 +449,8 @@ const getIcon = (label) => iconMap[normalizeIconKey(iconAliases[label] || label)
                         tabindex="0"
                         role="button"
                         :aria-label="item"
-                        @click="onItemClick(group.title, item)"
-                        @keydown.enter.prevent="onItemClick(group.title, item)"
+                        @click="onItemClick(group.title, item, '', col.commandIds?.[item])"
+                        @keydown.enter.prevent="onItemClick(group.title, item, '', col.commandIds?.[item])"
                     >
                       <img
                           v-if="getIcon(item)"
@@ -497,7 +498,7 @@ const getIcon = (label) => iconMap[normalizeIconKey(iconAliases[label] || label)
                     class="ribbon-dropdown-item"
                     v-for="item in col.dropdownItems"
                     :key="item"
-                    @click="onItemClick(group.title, item, col.label)"
+                    @click="onItemClick(group.title, item, col.label, col.dropdownCommandIds?.[item])"
                 >
                   <img
                       v-if="getIcon(item)"
@@ -516,7 +517,7 @@ const getIcon = (label) => iconMap[normalizeIconKey(iconAliases[label] || label)
                 v-else-if="col.type === 'large'"
                 class="col-large"
                 :class="{ passive: col.passive }"
-                @click="!col.passive && onItemClick(group.title, col.label)"
+                @click="!col.passive && onItemClick(group.title, col.label, '', col.commandId)"
             >
               <img
                   v-if="getIcon(col.icon || col.label)"

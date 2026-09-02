@@ -16,7 +16,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete } from '@element-plus/icons-vue'
 import RibbonMenu from '@/components/RibbonMenu.vue'
 import WorkspaceSidebar from '@/components/WorkspaceSidebar.vue'
-import SoftwareIntegrationOverview from '@/views/SoftwareIntegration/SoftwareIntegrationOverview.vue'
+import SoftwareIntegrationWorkspace from '@/views/SoftwareIntegration/SoftwareIntegrationWorkspace.vue'
 import WaterInvasionContent from '@/views/WellControlInventory/WaterInvasionContent.vue'
 import MaterialBalanceContent from '@/views/WellControlInventory/MaterialBalanceContent.vue'
 import FlowBalanceContent from '@/views/WellControlInventory/FlowBalanceContent.vue'
@@ -140,6 +140,7 @@ const activeNodeId = workspaceActiveNodeId  // 当前左侧树选中的节点 ID
 const activeNode = ref(null)  // 当前选中的完整节点对象
 const currentView = ref(null)  // currentView.value = 'water-invasion'，即确定右侧部分区域所显示的界面
 const currentViewNode = ref(null)  // 传给右侧内容组件的节点对象
+const softwareIntegrationWorkspace = ref(null)
 const softwareIntegrationActiveNodeId = ref('')
 const isSoftwareIntegration = computed(
   () => route.query.workspace === SOFTWARE_INTEGRATION_WORKSPACE
@@ -3973,9 +3974,15 @@ const handleSelect = async (node) => { // 点击左侧树节点
   if (node.type === NODETYPE.NodeType_Well) return
 }
 
-const handleCommand = async ({ group, name, parent }) => { // 接收顶部菜单栏的点击事件
+const handleCommand = async ({ group, name, parent, commandId }) => { // 接收顶部菜单栏的点击事件
   if (isSoftwareIntegration.value) {
-    ElMessage.info(`${name} 功能正在开发中`)
+    if (commandId === 'software-integration.project.create') {
+      softwareIntegrationWorkspace.value?.openCreateDialog()
+    } else if (commandId === 'software-integration.model.import-pipesim') {
+      softwareIntegrationWorkspace.value?.openImportModel()
+    } else {
+      ElMessage.info(`${name} 功能正在开发中`)
+    }
     return
   }
 
@@ -4248,6 +4255,8 @@ onBeforeUnmount(() => {
 
 
     <div class="ipr-main">
+      <SoftwareIntegrationWorkspace v-if="isSoftwareIntegration" ref="softwareIntegrationWorkspace" />
+      <template v-else>
       <!-- 公共左侧目录：与单井产能工作台共用 WorkspaceSidebar.vue。 -->
       <WorkspaceSidebar
         v-model:keyword="wellKeyword"
@@ -4267,8 +4276,6 @@ onBeforeUnmount(() => {
           'pvt-yellow-theme': isPvtView
         }"
       >
-        <SoftwareIntegrationOverview v-if="isSoftwareIntegration" />
-        <template v-else>
         <PvtPropertiesContent
           v-if="currentView === 'pvt-properties'"
           :key="currentViewNode?.viewInstanceKey || currentViewNode?.id || currentViewNode?.wellName"
@@ -4321,8 +4328,8 @@ onBeforeUnmount(() => {
           :gas-reservoir-id="GAS_RESERVOIR_ID" :recalculating="dynamicBalanceRunning" @recalculate="handleDynamicBalanceRecalculate"/>
         <AGContent v-if="currentView === 'Agarwal-Gardner'" :node="currentViewNode" :project-id="PROJECT_ID"
           :gas-reservoir-id="GAS_RESERVOIR_ID" @recalculate="runAGForSelectedWell" />
-        </template>
       </main>
+      </template>
     </div>
 
     <Teleport to="body">

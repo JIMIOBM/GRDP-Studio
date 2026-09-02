@@ -10,3 +10,9 @@ vue/*.log
 backend/target/
 backend/.m2/
 backend/.env
+worker/bin/
+worker/obj/
+worker/tests/Worker/bin/
+worker/tests/Worker/obj/
+**/__pycache__/
+*.pyc

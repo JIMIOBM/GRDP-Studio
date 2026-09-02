@@ -1,33 +1,30 @@
 # GRDP-Studio Software Integration Progress
 
-Last verified: 2026-08-30
+Last verified: 2026-09-02
 
 ## Repository State
 
 - Branch: `violet/feature/software-integration-ui`
-- Stage 0 baseline protection was committed in this handoff.
-- Other Stage 1/2 software-integration work remains uncommitted.
+- Stage 0 baseline protection is committed and pushed.
+- The Stage 2 model-management foundation and Demo-01 run implementation are included in the current handoff.
 - Existing unrelated worktree changes must not be reverted.
 - Authoritative requirements: `docs/software-integration/requirements.md`
 - Multi-Agent workflow: `.opencode/README.md`
 
 ## Current Milestone
 
-Stage 0 baseline protection is complete. The implementation has also reached a partial Stage 2 model-management flow:
+Stage 0 baseline protection and the Demo-01 implementation are complete in code. Real acceptance is partial:
 
 ```text
-create software project
--> upload one .pips model version
--> persist file and SHA-256
--> asynchronously call local Worker
--> open model with PIPESIM PTK
--> validate supported single-well structure
--> read Study names
--> persist READY / INVALID / ENVIRONMENT_ERROR
--> display project/model tree and validation state
+create software project and READY model version
+-> select a persisted Study and nodal/profile/combined
+-> persist and claim a Run in Spring Boot
+-> execute real PIPESIM PTK through the loopback Worker
+-> persist events, result status, error and Artifact metadata
+-> display real phases, elapsed time, charts, tables and history
 ```
 
-Stage 1 persistent-run foundations and Stage 3 simulator execution have not been implemented.
+The Worker has completed real CSW_101 nodal runs that exactly match Golden. The complete six-run CSW_101/CSW_102 sequence was explicitly deferred by user instruction and must not be represented as passed.
 
 ## Verified Complete
 
@@ -43,6 +40,35 @@ Stage 1 persistent-run foundations and Stage 3 simulator execution have not been
 - CSW_101 results contain 30 IPR points, 30 VLP points, and 25 profile points; CSW_102 contains 30, 30, and 16 respectively.
 - Golden metadata is UTC, strictly ordered, bound to Avalonia revision `795522dfd96cfdeaf42e6549603bc8def6cdf2b6`, and contains no model copies, logs, absolute paths, or credentials.
 - Independent review concluded `PASS` for both implementation and real Golden acceptance.
+
+### Demo-01 Persistent PIPESIM Run
+
+- Spring Boot persists Run, Run Event and Artifact metadata in `software_integration_run`, `software_integration_run_event` and `software_integration_artifact`.
+- Run states cover queueing, claim, preparation, nodal/profile execution, collection, success, partial success, cancellation, timeout, failure and Worker loss.
+- Database claim and an active-slot unique constraint prevent more than one active PIPESIM Run.
+- Worker validation and execution share an in-process coordinator and the machine-wide `Global\GRDP-Pipesim-Golden-Capture` mutex.
+- Worker requests use relative storage keys and expected SHA-256 values; browser input is never trusted as a local path.
+- Worker opens an isolated task copy, leaves the source model unchanged, and checks source SHA-256 before and after execution.
+- Python executes existing Studies only with `parameters=null`; nodal, profile and combined are supported.
+- Combined nodal success with profile failure is persisted and displayed as `PARTIAL_SUCCEEDED` with `VALID_PARTIAL` result semantics.
+- A non-breakaway Windows Job Object owns the Python process tree before the PTK start gate is released.
+- Cancellation and timeout publish terminal state only after process-tree exit is confirmed.
+- Worker acceptance uncertainty, Worker busy requeue, restart recovery and cancel/success races have explicit persisted semantics.
+- Artifact publication validates manifest contents, relative paths, file sizes and SHA-256 before atomic publication.
+- Vue uses an isolated Pinia store and provides an explicit READY-model `进入计算` action as well as model double-click activation.
+- The central page contains model version, Study, run type, run/cancel controls, real phase, elapsed time, structured error, nodal/profile result tabs and run history.
+- Nodal results show IPR/VLP in one ECharts view; profile results show depth, pressure and temperature without guessing unspecified units.
+
+Real execution evidence:
+
+```text
+CSW_101 nodal, Worker run 910104
+CLAIMED -> PREPARING -> RUNNING_NODAL -> COLLECTING -> SUCCEEDED
+30 IPR points, 30 VLP points, VALID_FULL, approximately 70 seconds
+Golden exact match; source SHA unchanged; process tree exited; Worker returned idle
+```
+
+An earlier Spring Run successfully completed PIPESIM but exposed MySQL JSON numeric normalization (`110.84152977856141` became `110.8415297785614`). Migration `007_software_integration_demo01_result_precision.sql` and the current initializer change `result_json` to `LONGTEXT` so the frozen JSON double representation can be retained. The updated backend was rebuilt and restarted, but a post-deployment six-run comparison was deferred by user instruction.
 
 ### Environment And Lifecycle
 
@@ -79,7 +105,7 @@ POST   /software-integration/projects/{projectId}/model-versions/{versionId}/val
 
 - `GET /api/health` and `GET /api/capabilities` are implemented.
 - `POST /api/models/validate` launches the PIPESIM Python Toolkit validation adapter.
-- Validation is serialized with an in-process semaphore to avoid concurrent PTK license checkout.
+- Validation and execution are serialized by the shared Worker coordinator and machine-wide mutex.
 - The migrated validation rules require exactly one Well, Completion, and Tubing.
 - Approved model kinds are black-oil liquid wells and CSW_102-style vertical compositional gas wells.
 - Study names are read from the PTK model catalog.
@@ -109,41 +135,42 @@ The browser upload path was also verified with CSW_101 through multipart upload 
 - Backend package completed successfully after loading the software-integration code.
 - Worker `dotnet build` completed with zero errors.
 - Vue `npm run build` completed successfully; existing Sass deprecation and bundle-size warnings remain.
-- `python -m unittest discover -s worker/tests/PythonNormalization -p "test_*.py"` completed with 20 tests and no failures or skips.
+- Worker xUnit completed with 24 passing tests after the final Job Object and cancellation-race fixes.
+- `python -m unittest discover -s worker/tests/PythonNormalization -p "test_*.py"` completed with 31 tests and no failures.
+- Backend tests completed with 35 passing tests before the result precision migration; the current backend including migration 007 subsequently completed a successful package build.
 - `pwsh -File .\worker\tests\Golden\Verify-Golden.ps1 -VerifyLocalSources` verified all six real results and metadata sidecars against the current models and Avalonia adapter.
-- After capture, AHKs, original GRDP, Studio backend, Vue, Worker health, and Worker capabilities all returned HTTP 200.
+- The final Vue build completed successfully after adding the explicit calculation entry.
+- AHKs, original GRDP, Studio backend, Vue, Worker health and Worker capabilities returned HTTP 200 after deployment.
 
 ## Known Gaps And Risks
 
 These items are not complete and must not be represented as finished:
 
-### Stage 0 Operational Boundary
+### Demo-01 Acceptance
 
-- Golden Capture uses a machine-wide mutex and fail-closed process scans, but the current Worker does not participate in the same cross-process lock. Capture therefore requires the Worker and all other PTK consumers to be stopped first.
-- A non-participating external PTK consumer could still start after the final process scan. Durable global serialization remains a Stage 1 architecture requirement.
+- Migration 007 has been deployed by rebuilding and restarting the backend, but no new Spring Run has yet demonstrated exact Golden equality after the column conversion.
+- The formal CSW_101 nodal/profile/combined then CSW_102 nodal/profile/combined serial acceptance sequence is not complete.
+- A failed historical Run remains as audit evidence of the removed Python stdin monitor deadlock. It must not be presented as a current Worker failure.
+- Real PIPESIM cancellation and timeout are protected by Job Object integration tests but have not been intentionally triggered against the acceptance models.
 
 ### Model Management
 
 - ZIP upload is stored but ZIP extraction and validation are not implemented. Current validation rejects/non-readies ZIP versions.
 - ZIP traversal, symlink/reparse-point, file-count, depth, and expanded-size protections are not implemented.
-- `storage_key` currently stores an absolute path; requirements call for a relative storage key.
+- Existing storage keys under the configured root are normalized to relative keys; root-external values are rejected.
 - Model kind and well name returned by Worker are not persisted as model-version metadata.
 - Async validation is process-local and not represented by a durable queue. A backend restart can leave work requiring recovery.
-- Validation uses an in-memory semaphore only; cross-process or future multi-Worker serialization is not implemented.
+- Multi-Worker execution is not implemented; Demo-01 is intentionally single-machine and single-Worker.
 - Schema initialization and migration SQL both create the same tables; long-term migration ownership is unresolved.
 - Project recovery from the 30-day recycle bin and physical cleanup are not implemented.
 - Model deletion and old-version selection UI are not implemented.
-- The frontend loads each project detail separately and does not yet use the required isolated Pinia store.
+- Browser-level automation for model activation and Run controls is not implemented.
 
-### Persistent Tasks And Execution
+### Deferred Production Features
 
-- No `software_integration_run`, run-event, artifact, worker, or worker-capability persistence exists.
-- No durable queue, claim protocol, global task lock, restart recovery, or dry-run adapter exists.
-- No node-analysis, PT-profile, or combined-run Worker endpoint exists.
-- No Study selection control for creating runs exists.
-- No cancel, timeout, retry, or `WORKER_LOST` behavior exists.
-- No result curve/profile page, run history, event timeline, artifact manifest, or artifact download exists.
-- No 30-day artifact retention/expiration cleanup exists.
+- Artifact download API and 30-day expiration cleanup are not implemented.
+- Full production retry policy is not implemented; interrupted simulator Runs are not automatically retried.
+- Durable validation queueing remains separate from the persistent Run queue and is not implemented.
 
 ### UI And Regression
 
@@ -183,32 +210,16 @@ Nodal and combined runs require non-empty IPR/VLP. Profile-only runs require a n
 
 ## Next Bounded Goal
 
-Before implementation, invoke `@architect` to design the persistent execution contract and divide it into non-overlapping work packages.
-
-Required architecture output:
-
-1. Run, event, artifact, worker, and capability schema with migration ownership.
-2. Browser API and Worker API request/response DTOs.
-3. Full state transition table and allowed transition enforcement.
-4. Durable global single-task queue and claim mechanism.
-5. Cancel, timeout, process termination, restart recovery, and partial-result semantics.
-6. Artifact layout, relative storage keys, manifest, checksum, and 30-day expiration.
-7. Worker process model for opening a model and executing nodal/profile/combined without parameter overrides.
-8. Frontend Study selection, task submission, real phase display, result views, and history.
-9. Work-package file ownership and dependency order.
-10. CSW_101/CSW_102 golden acceptance and parsing/fusion regression matrix.
-
-Recommended implementation order after architecture approval:
+Run the post-migration Demo-01 acceptance sequence without changing the frozen Golden:
 
 ```text
-freeze contracts and state machine
--> implement durable dry-run task queue
--> independently review queue/recovery behavior
--> implement Worker run adapter
--> add backend result/artifact publication
--> add frontend Study/task/result flow
--> run CSW_101 and CSW_102 acceptance serially
--> reviewer PASS
+verify result_json is LONGTEXT
+-> CSW_101 nodal -> profile -> combined
+-> CSW_102 nodal -> profile -> combined
+-> compare every Spring result exactly with Golden
+-> verify history, Artifact manifest, source SHA and Worker idle after restart
+-> perform browser calculation-entry and ordinary /ipr regression checks
+-> independent Reviewer PASS
 ```
 
 ## Handoff Rule
