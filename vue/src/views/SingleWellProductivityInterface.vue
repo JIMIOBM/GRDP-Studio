@@ -79,9 +79,9 @@ const props = defineProps({
 
 const route = useRoute()
 const router = useRouter()
-const PROJECT_ID = 7
+const PROJECT_ID = 6
 const GAS_RESERVOIR_ID = 4
-const MODIFIED_ISOCHRONAL_PROJECT_ID = 7
+const MODIFIED_ISOCHRONAL_PROJECT_ID = 6
 const MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID = 4
 
 const MODULES = [

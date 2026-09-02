@@ -679,6 +679,47 @@ const exponentialAnalysisUnit = method => ({
   pressure: 'Pr - Pwf\n[MPa]'
 }[method] || '压力函数差')
 
+// IPR 曲线在 qsc=0 时必须回到该条曲线的地层压力。原平台和旧存量数据
+// 有时未带零产量点，或端点存在浮点误差；若直接交给 ECharts 平滑，
+// 曲线会看起来没有在左侧纵轴的真实压力处相交。
+const iprFormationPressure = (series, maximumPressure) => {
+  const pressureLimit = Number(maximumPressure)
+  const curveNumber = Number(series?.curveNumber)
+  // 原平台固定绘制 10 条 IPR 曲线，各曲线地层压力为用户输入上限的
+  // 1/10 ... 10/10。旧评价记录中的 originalFormationPressure 可能是井的原始压力，
+  // 不能用它代替“计算 IPR 曲线的最大地层压力”。
+  if (Number.isFinite(pressureLimit) && pressureLimit > 0 &&
+      Number.isFinite(curveNumber) && curveNumber > 0) {
+    return pressureLimit * curveNumber / 10
+  }
+  const storedPressure = Number(series?.formationPressure)
+  if (Number.isFinite(storedPressure) && storedPressure >= 0) return storedPressure
+
+  const zeroRatePoint = (series?.data || []).find(point =>
+    !point.deleted && Math.abs(Number(point.x)) <= 1e-8 && Number.isFinite(Number(point.y)))
+  if (zeroRatePoint) return Number(zeroRatePoint.y)
+
+  return null
+}
+
+const iprChartData = (series, formationPressure) => {
+  const points = (series?.data || [])
+    .filter(point => !point.deleted && Number.isFinite(Number(point.x)) &&
+      Number.isFinite(Number(point.y)) && Number(point.x) >= -1e-8)
+    .map(point => [
+      Math.max(0, Number(point.x)),
+      Number.isFinite(formationPressure)
+        ? Math.min(formationPressure, Math.max(0, Number(point.y)))
+        : Number(point.y)
+    ])
+    .sort((left, right) => left[0] - right[0])
+  if (!points.length || !Number.isFinite(formationPressure)) return points
+
+  const firstPositiveIndex = points.findIndex(point => point[0] > 1e-8)
+  const positivePoints = firstPositiveIndex < 0 ? [] : points.slice(firstPositiveIndex)
+  return [[0, formationPressure], ...positivePoints]
+}
+
 const renderChart = () => {
   if (!chartEl.value || !currentResult.value || activePanel.value !== 'analysis') return
   if (chart && chart.getDom() !== chartEl.value) {
@@ -688,13 +729,28 @@ const renderChart = () => {
   chart ||= echarts.getInstanceByDom(chartEl.value) || echarts.init(chartEl.value)
   const result = currentResult.value; const isIpr = activeChart.value === 'ipr'
   const isExponential = result.calculationResultType === 'exponential'
-  const formationPressure = Number(result.formationPressure || maximumFormationPressure.value)
+  const inputMaximumPressure = Number(maximumFormationPressure.value)
+  const resultFormationPressure = Number(result.formationPressure)
+  const formationPressure = Number.isFinite(inputMaximumPressure) && inputMaximumPressure > 0
+    ? inputMaximumPressure
+    : resultFormationPressure
+  // 与原平台坐标系一致：最高曲线截距为输入压力，纵轴顶部预留 10%。
+  // 例如输入 90 MPa 时，主刻度步长为 9 MPa，纵轴最高到 99 MPa。
+  const iprYAxisInterval = Number.isFinite(formationPressure) && formationPressure > 0
+    ? formationPressure / 10 : undefined
   const iprYAxisMax = Number.isFinite(formationPressure) && formationPressure > 0
-    ? Math.ceil(formationPressure / 10) * 10 : undefined
+    ? formationPressure * 1.1 : undefined
   const visible = points => points.filter(point => !point.deleted).map(point => [point.x, point.y])
   const series = isIpr
-    ? result.iprSeries.map(item => ({ name: `Pr${item.curveNumber}=${compact(item.formationPressure ?? formationPressure * item.curveNumber / 10)} MPa`,
-      type: 'line', smooth: true, showSymbol: false, lineStyle: { width: 2 }, data: visible(item.data) }))
+    ? result.iprSeries.map(item => {
+      const curveFormationPressure = iprFormationPressure(item, formationPressure)
+      return { name: `Pr${item.curveNumber}=${compact(curveFormationPressure)} MPa`,
+        // IPR 数据本身已按压力网格密集采样。ECharts 的单调贝塞尔平滑
+        // 会在每个离散点之间生成 S 形过渡，反而呈现不符合物理的波浪。
+        type: 'line', smooth: false, showSymbol: false,
+        lineStyle: { width: 2 },
+        data: iprChartData(item, curveFormationPressure) }
+    })
     : result.analysisSeries.map(item => ({ name: isExponential ? item.name : `${item.name}${legendUnit(result.calculationMethod)}`,
       type: (isExponential ? item.curveType === 'analysis' : ['regularized', 'stable'].includes(item.curveType)) ? 'scatter' : 'line',
       z: (isExponential ? item.curveType === 'analysis' : ['regularized', 'stable'].includes(item.curveType)) ? 5 : 2,
@@ -720,6 +776,7 @@ const renderChart = () => {
       splitLine: { lineStyle: { color: '#dfe6f1' } } },
     yAxis: { type: !isIpr && isExponential ? 'log' : 'value', scale: !isIpr, min: isIpr ? 0 : undefined,
       max: isIpr ? iprYAxisMax : undefined,
+      interval: isIpr ? iprYAxisInterval : undefined,
       name: isIpr ? 'Pwf (MPa)' : isExponential
         ? exponentialAnalysisUnit(result.calculationMethod) : analysisUnit(result.calculationMethod),
       nameLocation: 'middle', nameGap: 62, nameTextStyle: { lineHeight: 18 },

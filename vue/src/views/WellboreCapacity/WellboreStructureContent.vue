@@ -56,12 +56,87 @@ const normalizeResponse = response => {
   }
 }
 
+// 根据最大井深生成接近 1、2、5 倍数量级的整洁刻度间隔。
+const getDepthTickStep = maxDepth => {
+  const roughStep = maxDepth / 6
+  const magnitude = 10 ** Math.floor(Math.log10(roughStep))
+  const normalizedStep = roughStep / magnitude
+  const niceStep = normalizedStep <= 1 ? 1 : normalizedStep <= 2 ? 2 : normalizedStep <= 5 ? 5 : 10
+  return niceStep * magnitude
+}
+
+// 将井深文字绘制到 CanvasTexture，并包装成始终面向相机的 Three.js Sprite。
+const createTextSprite = (text, worldHeight) => {
+  const canvas = document.createElement('canvas')
+  canvas.width = 512
+  canvas.height = 128
+  const context = canvas.getContext('2d')
+  context.font = '52px "Microsoft YaHei", sans-serif'
+  context.fillStyle = '#25313c'
+  context.textAlign = 'center'
+  context.textBaseline = 'middle'
+  context.fillText(text, canvas.width / 2, canvas.height / 2)
+
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: texture,
+    transparent: true,
+    depthTest: false
+  }))
+  sprite.scale.set(worldHeight * 4, worldHeight, 1)
+  sprite.renderOrder = 10
+  return sprite
+}
+
+// 在井轨迹侧面添加向下为正的 Z 轴井深标尺、刻度线和米制标签。
+const addDepthAxis = (group, bounds, points, maximumSpan) => {
+  const maximumDepth = Math.abs(Math.min(...points.map(point => point.y), 0))
+  if (maximumDepth === 0) return
+
+  const axisX = bounds.min.x - maximumSpan * 0.12
+  const axisZ = bounds.max.z + maximumSpan * 0.06
+  const tickLength = maximumSpan * 0.025
+  const textHeight = maximumSpan * 0.028
+  const axisMaterial = new THREE.LineBasicMaterial({ color: 0x25884b })
+  const axisGeometry = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(axisX, 0, axisZ),
+    new THREE.Vector3(axisX, -maximumDepth, axisZ)
+  ])
+  group.add(new THREE.Line(axisGeometry, axisMaterial))
+
+  const tickStep = getDepthTickStep(maximumDepth)
+  for (let depth = 0; depth <= maximumDepth; depth += tickStep) {
+    const y = -depth
+    const tickGeometry = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(axisX - tickLength, y, axisZ),
+      new THREE.Vector3(axisX + tickLength, y, axisZ)
+    ])
+    group.add(new THREE.Line(tickGeometry, axisMaterial.clone()))
+
+    const label = createTextSprite(`${depth.toFixed(0)} m`, textHeight)
+    label.position.set(axisX - tickLength * 3.1, y, axisZ)
+    group.add(label)
+  }
+
+  const axisTitle = createTextSprite('Z / 井深 (m)', textHeight * 1.08)
+  axisTitle.position.set(axisX, textHeight * 1.2, axisZ)
+  group.add(axisTitle)
+}
+
 // 释放指定 Three.js 对象树中的几何体和材质，避免 WebGL 资源残留。
 const disposeObject = object => {
   object.traverse(child => {
     child.geometry?.dispose()
-    if (Array.isArray(child.material)) child.material.forEach(material => material.dispose())
-    else child.material?.dispose()
+    if (Array.isArray(child.material)) {
+      child.material.forEach(material => {
+        material.map?.dispose()
+        material.dispose()
+      })
+    } else {
+      child.material?.map?.dispose()
+      child.material?.dispose()
+    }
   })
 }
 
@@ -153,6 +228,7 @@ const renderTrajectory = () => {
 
   const axes = new THREE.AxesHelper(Math.max(maximumSpan * 0.22, 5))
   trajectoryGroup.add(axes)
+  addDepthAxis(trajectoryGroup, bounds, points, maximumSpan)
 
   const distance = maximumSpan * 1.45
   initialCameraState = {
