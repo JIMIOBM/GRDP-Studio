@@ -31,7 +31,7 @@ const defaultTabs = [
       {
         title: '井控库存',
         columns: [
-          { type: 'large', label: '诊断曲线', dropdown: true, dropdownItems: ['Blasingame', 'Transient', 'AG', 'Wattenbarger', 'NPI'] },
+        { type: 'large', label: '诊断曲线' },
           { type: 'checks', items: ['物质平衡', '流动平衡', '动态平衡'] },
           { type: 'checks', items: ['水侵分析', '解析法'], squares: 5 }
         ]
@@ -169,6 +169,11 @@ const normalizeRibbonTabs = (tabs) => tabs.map(tab => ({
     return {
       ...group,
       columns: (group.columns || []).map(col => {
+               if (col?.type === 'large' && col?.label === '诊断曲线' && !col.dropdown) {
+          shouldMoveDiagnosticItems = true
+          return col
+        }
+
         if (isDiagnosticDropdown(col)) {
           shouldMoveDiagnosticItems = true
           return {

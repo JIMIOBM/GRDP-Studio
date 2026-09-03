@@ -80,9 +80,9 @@ const props = defineProps({
 const route = useRoute()
 const router = useRouter()
 const PROJECT_ID = 6
-const GAS_RESERVOIR_ID = 4
+const GAS_RESERVOIR_ID = 1
 const MODIFIED_ISOCHRONAL_PROJECT_ID = 6
-const MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID = 4
+const MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID = 1
 
 const MODULES = [
   { name: '产能试井', methods: ['回压试井', '等时试井', '修正等时', '一点法'] },

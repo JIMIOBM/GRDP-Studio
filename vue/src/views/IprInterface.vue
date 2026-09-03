@@ -25,6 +25,7 @@ import NpiContent from '@/views/WellControlInventory/NpiContent.vue'
 import TransientContent from '@/views/WellControlInventory/TransientContent.vue'
 import DynamicBalanceContent from '@/views/WellControlInventory/DynamicBalanceContent.vue'
 import AGContent from '@/views/WellControlInventory/AGContent.vue'
+import DiagnosticCurveContent from '@/views/WellControlInventory/DiagnosticCurveContent.vue'
 import PvtPropertiesContent from '@/views/DataManagement/PvtPropertiesContent.vue'
 import RelativePermeabilityContent from '@/views/DataManagement/RelativePermeabilityContent.vue'
 import WellDataTableContent from '@/views/DataManagement/WellDataTableContent.vue'
@@ -78,7 +79,7 @@ import {
 // 7
 const PROJECT_ID = 6
 // 4
-const GAS_RESERVOIR_ID = 4
+const GAS_RESERVOIR_ID = 1
 const router = useRouter()
 const FLOW_BALANCE_NODE_TYPE = NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure
 
@@ -3224,6 +3225,16 @@ const handleDynamicBalanceRecalculate = async (params = {}) => {
   }
 }
 
+const runDiagnosticCurveForSelectedWell = () => {
+  const targetWellName = selectedWellName.value
+  if (!targetWellName) {
+    ElMessage.warning('请先在左侧选择一口井')
+    return
+  }
+  currentView.value = 'diagnostic-curve'
+  currentViewNode.value = { wellName: targetWellName }
+}
+
 const runBlasingameForSelectedWell = async (options = {}) => {
   const targetWellName = options.wellName || selectedWellName.value
 
@@ -4253,6 +4264,9 @@ const handleCommand = async ({ group, name, parent }) => { // 接收顶部菜单
     case '流动平衡':
       runFlowBalanceForSelectedWell()
       break
+    case '诊断曲线':
+      runDiagnosticCurveForSelectedWell()
+      break
     case 'Blasingame':
       runBlasingameForSelectedWell()
       break
@@ -4459,9 +4473,13 @@ onBeforeUnmount(() => {
           :gas-reservoir-id="GAS_RESERVOIR_ID" :recalculating="typicalCurveRunning"
           @recalculate="runWattenbargerForSelectedWell"/>
         <DynamicBalanceContent v-if="currentView === 'dynamic-balance'" :node="currentViewNode" :project-id="PROJECT_ID"
-          :gas-reservoir-id="GAS_RESERVOIR_ID" :recalculating="dynamicBalanceRunning" @recalculate="handleDynamicBalanceRecalculate"/>
+          :gas-reservoir-id="GAS_RESERVOIR_ID" :recalculating="dynamicBalanceRunning"
+          @recalculate="handleDynamicBalanceRecalculate" />
         <AGContent v-if="currentView === 'Agarwal-Gardner'" :node="currentViewNode" :project-id="PROJECT_ID"
           :gas-reservoir-id="GAS_RESERVOIR_ID" @recalculate="runAGForSelectedWell" />
+        <DiagnosticCurveContent v-if="currentView === 'diagnostic-curve'" :node="currentViewNode"
+          :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID"
+          @recalculate="runDiagnosticCurveForSelectedWell" />
       </main>
     </div>
 
