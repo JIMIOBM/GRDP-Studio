@@ -24,6 +24,10 @@ import ProductivityComparison from '@/views/SingleWellProductivity/ProductivityC
 import DynamicProductivityContent from '@/views/SingleWellProductivity/DynamicProductivityContent.vue'
 import TheoreticalProductivityContent from '@/views/SingleWellProductivity/TheoreticalProductivityContent.vue'
 import { NODETYPE } from '@/constants/nodeType'
+import {
+  WORKSPACE_GAS_RESERVOIR_ID as GAS_RESERVOIR_ID,
+  WORKSPACE_PROJECT_ID as PROJECT_ID
+} from '@/constants/workspaceContext'
 import { wellApi } from '@/api/docker'
 import { pvtStorageApi } from '@/api/pvtStorage'
 import { productivityStorageApi } from '@/api/productivityStorage'
@@ -79,10 +83,8 @@ const props = defineProps({
 
 const route = useRoute()
 const router = useRouter()
-const PROJECT_ID = 6
-const GAS_RESERVOIR_ID = 1
-const MODIFIED_ISOCHRONAL_PROJECT_ID = 6
-const MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID = 1
+const MODIFIED_ISOCHRONAL_PROJECT_ID = PROJECT_ID
+const MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID = GAS_RESERVOIR_ID
 
 const MODULES = [
   { name: '产能试井', methods: ['回压试井', '等时试井', '修正等时', '一点法'] },
@@ -216,6 +218,19 @@ watch([calculationMethod, calculationResult], () => {
   if (!isOwnedPressureMethod.value) return
   calculationOutput.value = null
   resultDirty.value = false
+})
+
+watch(operationType, value => {
+  if (!isOwnedPressureMethod.value) return
+  const storedOperationType = storedProductivityTest.value?.operationType
+  if (!activeProductivityTestId.value || !storedOperationType || storedOperationType === value) return
+  activeProductivityTestId.value = null
+  activeEvaluationId.value = null
+  storedProductivityTest.value = null
+  calculationOutput.value = null
+  resultDirty.value = false
+  savedInputSignature.value = ''
+  pressureWorkspaceKey.value += 1
 })
 
 const unwrapData = response => response?.data ?? response ?? {}
@@ -692,6 +707,7 @@ const handleSidebarSelect = async node => {
       const detail = unwrapData(response)
       const firstResult = detail.results?.[0] || detail.result
       storedProductivityTest.value = detail
+      operationType.value = detail.operationType === 'injection' ? 'injection' : 'production'
       maximumFormationPressure.value = String(detail.input?.maximumFormationPressure ?? '')
       formationTemperature.value = String(detail.input?.formationTemperature ?? '')
       onePointAlpha.value = String(detail.input?.onePointAlpha ?? '0.25')
@@ -1248,14 +1264,18 @@ onBeforeUnmount(() => window.removeEventListener('click', closeStableContextMenu
                     </template>
                     <template v-else>
                       <label class="field-group">
-                        <span>达西渗流系数 A</span>
+                        <span>{{ operationType === 'injection' ? '注气达西渗流系数 A' : '达西渗流系数 A' }}</span>
                         <input :value="scientific(calculationOutput.darcyCoefficient)" readonly />
                       </label>
                       <label class="field-group">
-                        <span>非达西高速流系数 B</span>
+                        <span>{{ operationType === 'injection' ? '注气非达西高速流系数 B' : '非达西高速流系数 B' }}</span>
                         <input :value="scientific(calculationOutput.nonDarcyCoefficient)" readonly />
                       </label>
                     </template>
+                    <label class="field-group">
+                      <span>{{ operationType === 'injection' ? '最大注气量(10⁴m³/d)' : '无阻流量(10⁴m³/d)' }}</span>
+                      <input :value="Number.isFinite(Number(calculationOutput.aofRate)) ? Number(calculationOutput.aofRate).toFixed(4) : ''" readonly />
+                    </label>
                   </div>
                 </div>
               </template>

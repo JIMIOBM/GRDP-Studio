@@ -32,6 +32,10 @@ import WellDataTableContent from '@/views/DataManagement/WellDataTableContent.vu
 import WellboreStructureContent from '@/views/WellboreCapacity/WellboreStructureContent.vue'
 import SingleWellProductivityInterface from '@/views/SingleWellProductivityInterface.vue'
 import { NODETYPE } from '@/constants/nodeType'
+import {
+  WORKSPACE_GAS_RESERVOIR_ID as GAS_RESERVOIR_ID,
+  WORKSPACE_PROJECT_ID as PROJECT_ID
+} from '@/constants/workspaceContext'
 import { analyticMethodApi, dataManagementApi, dynamicBalanceApi, materialBalanceApi, nodeApi, notifyApi, parametersApi, projectApi, typicalCurveApi, waterInvasionApi, wellApi } from '@/api/docker'
 import { pvtStorageApi } from '@/api/pvtStorage'
 import { dynamicProductivityApi } from '@/api/dynamicProductivity'
@@ -76,10 +80,6 @@ import {
   workspaceTreeKeyword
 } from '@/utils/workspaceTreeState'
 
-// 7
-const PROJECT_ID = 6
-// 4
-const GAS_RESERVOIR_ID = 1
 const router = useRouter()
 const FLOW_BALANCE_NODE_TYPE = NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure
 
@@ -1506,8 +1506,10 @@ const refreshProjectTree = async () => { //加在项目树
     rebuildProjectTree(normalizePayload(projectResult.value), names)
     await refreshOtherDataNodes()
     await refreshAllPvtNodes()
+    return Boolean(getWellGroup()?.children?.length)
   } catch (error) {
     console.warn('项目树加载失败', error)
+    return false
   }
 }
 
@@ -3740,8 +3742,9 @@ const openAGNode = async (node) => {
 
 const initTree = async () => {
   if (!workspaceTreeHydrated.value) {
-    await refreshProjectTree()
-    workspaceTreeHydrated.value = true
+    // 接口失败或返回空目录时不能标记为已加载，否则本次会话后续切回
+    // IPR 页面也不会再次请求，左侧会一直只剩“井 / 库 / 库群”。
+    workspaceTreeHydrated.value = await refreshProjectTree()
   }
 }
 

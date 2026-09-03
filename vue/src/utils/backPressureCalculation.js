@@ -32,6 +32,16 @@ const linearRegression = points => {
   return { intercept, slope, rSquared }
 }
 
+// 采气与注气都使用正流量。采气取储层到井底的压力函数降，
+// 注气则按资料中的方向取井底到储层的压力函数升。
+export const backPressurePotentialDifference = (
+  reservoirPotential,
+  flowingPotential,
+  operationType = 'production'
+) => operationType === 'injection'
+  ? flowingPotential - reservoirPotential
+  : reservoirPotential - flowingPotential
+
 // Back-pressure binomial equation:
 //   deltaPsi = A*q + B*q^2
 // Linearized for regression as:

@@ -6,6 +6,7 @@ import { ElMessage } from 'element-plus'
 import dockerRequest, { nodeApi, productivityEvaluationApi } from '@/api/docker'
 import { NODETYPE } from '@/constants/nodeType'
 import {
+  backPressurePotentialDifference,
   fitBackPressureBinomial,
   fitBackPressureExponential,
   solveBackPressureBinomialRate,
@@ -744,7 +745,7 @@ const exponentialAnalysisAxisName = (method, selectedOperationType = 'production
 const equationCoefficient = value => Number(value).toExponential(4).replace('e', 'E')
 const coefficientEquation = (method, darcy, nonDarcy, selectedOperationType = 'production') =>
   isOwnedTestType()
-    ? `${pressureExpression(method)} = ${equationCoefficient(darcy)} qsc + ${equationCoefficient(nonDarcy)} qsc²`
+    ? `${pressureExpression(method, selectedOperationType)} = ${equationCoefficient(darcy)} qsc + ${equationCoefficient(nonDarcy)} qsc²`
     : `${pressureExpression(method, selectedOperationType)} = ${darcy.toPrecision(6)} × qsc + ${nonDarcy.toPrecision(6)} × qsc²`
 
 const exponentialEquation = (method, coefficient, exponent, selectedOperationType = 'production') =>
@@ -772,9 +773,11 @@ const createIprCurve = (
       : pressure - (pressure - minimumPressure) * index / 40
     const reservoirPotential = pressurePotential(pressure, method, pvtCurve)
     const flowingPotential = pressurePotential(flowingPressure, method, pvtCurve)
-    const drawdown = injection
-      ? flowingPotential - reservoirPotential
-      : reservoirPotential - flowingPotential
+    const drawdown = backPressurePotentialDifference(
+      reservoirPotential,
+      flowingPotential,
+      selectedOperationType
+    )
     const flowRate = solveBinomialFlowRate(drawdown, darcy, nonDarcy)
     return { flowRate, flowingPressure }
   })
@@ -798,9 +801,11 @@ const createExponentialIprCurve = (
       : pressure - (pressure - minimumPressure) * index / 40
     const reservoirPotential = pressurePotential(pressure, method, pvtCurve)
     const flowingPotential = pressurePotential(flowingPressure, method, pvtCurve)
-    const drawdown = injection
-      ? flowingPotential - reservoirPotential
-      : reservoirPotential - flowingPotential
+    const drawdown = backPressurePotentialDifference(
+      reservoirPotential,
+      flowingPotential,
+      selectedOperationType
+    )
     return {
       flowRate: solveBackPressureExponentialRate(drawdown, coefficient, exponent),
       flowingPressure
@@ -830,7 +835,9 @@ const normalizeLocalPoints = (
       const recoveryPressure = point.recoveryPressure === null || point.recoveryPressure === ''
         ? Number(fallbackPressure)
         : Number(point.recoveryPressure)
-      if (!Number.isFinite(flowRate) || flowRate <= 0) throw new Error('测试气产量必须大于 0')
+      if (!Number.isFinite(flowRate) || flowRate <= 0) {
+        throw new Error(injection ? '测试注气量必须大于 0' : '测试气产量必须大于 0')
+      }
       if (![flowingPressure, recoveryPressure].every(Number.isFinite)) throw new Error('压力数据必须是有效数值')
       if (!injection && recoveryPressure <= flowingPressure) {
         throw new Error('采气时地层/恢复压力必须大于测试流压')
@@ -840,9 +847,11 @@ const normalizeLocalPoints = (
       }
       const reservoirPotential = pressurePotential(recoveryPressure, method, pvtCurve)
       const flowingPotential = pressurePotential(flowingPressure, method, pvtCurve)
-      const potentialDifference = injection
-        ? flowingPotential - reservoirPotential
-        : reservoirPotential - flowingPotential
+      const potentialDifference = backPressurePotentialDifference(
+        reservoirPotential,
+        flowingPotential,
+        selectedOperationType
+      )
       return {
         sequence: Number(point.sequence || index + 1),
         flowRate,
@@ -958,9 +967,6 @@ const calculateLocally = (payload) => {
   }
   const selectedCalculationMethod = normalizeCalculationMethod(payload.calculationMethod)
   const selectedOperationType = payload.operationType === 'injection' ? 'injection' : 'production'
-  if (selectedOperationType === 'injection' && payload.testType !== 'isochronal') {
-    throw new Error('当前注气计算仅支持等时试井')
-  }
   const pvtCurve = normalizePvtCurve(payload.pvtResultRows)
   const minimum = payload.testType === 'one-point' ? 1 : 2
   const points = normalizeLocalPoints(
@@ -1421,13 +1427,22 @@ const normalizeCalculationResult = (response, pvtResultRows = props.pvtResultRow
     readField(payload, ['iprCurve', 'ipr_curve', 'curve', 'iprPoints']),
     normalizeIprPoint
   ).filter(point => Number.isFinite(point.flowingPressure))
+  const maximumObservedInjectionOverpressure = Math.max(
+    0,
+    ...inputRows.value
+      .map(row => Number(row.flowingPressure) - Number(row.recoveryPressure))
+      .filter(Number.isFinite)
+  )
+  const maximumInjectionPressure = resultPressure + maximumObservedInjectionOverpressure
   if (!iprCurve.length) {
     iprCurve = createIprCurve(
       resultPressure,
       darcyCoefficient,
       nonDarcyCoefficient,
       selectedCalculationMethod,
-      pvtCurve
+      pvtCurve,
+      selectedOperationType,
+      maximumInjectionPressure
     )
   }
   let aofRate = toNumber(readField(payload, [
@@ -1435,8 +1450,17 @@ const normalizeCalculationResult = (response, pvtResultRows = props.pvtResultRow
   ]))
   if (!Number.isFinite(aofRate) && [darcyCoefficient, nonDarcyCoefficient].every(Number.isFinite)) {
     const atmosphericPressure = Math.min(resultPressure, ATMOSPHERIC_PRESSURE_MPA)
-    const maximumPotential = pressurePotential(resultPressure, selectedCalculationMethod, pvtCurve) -
-      pressurePotential(atmosphericPressure, selectedCalculationMethod, pvtCurve)
+    const reservoirPotential = pressurePotential(resultPressure, selectedCalculationMethod, pvtCurve)
+    const limitPotential = pressurePotential(
+      selectedOperationType === 'injection' ? maximumInjectionPressure : atmosphericPressure,
+      selectedCalculationMethod,
+      pvtCurve
+    )
+    const maximumPotential = backPressurePotentialDifference(
+      reservoirPotential,
+      limitPotential,
+      selectedOperationType
+    )
     aofRate = solveBinomialFlowRate(maximumPotential, darcyCoefficient, nonDarcyCoefficient)
   }
 
@@ -2428,6 +2452,7 @@ const getPersistenceSnapshot = () => {
 const storedResult = () => {
   const detail = props.storedTest
   if (!detail) return null
+  const storedOperationType = detail.operationType === 'injection' ? 'injection' : 'production'
   const candidates = Array.isArray(detail.results) && detail.results.length
     ? detail.results
     : (detail.result ? [detail.result] : [])
@@ -2483,6 +2508,7 @@ const storedResult = () => {
     methodName: methodName.value,
     calculationMethod: normalizeCalculationMethod(saved.pressureMethod),
     calculationResultType: isExponential ? 'exponential' : 'binomial',
+    operationType: storedOperationType,
     evaluationId: saved.evaluationId == null ? null : Number(saved.evaluationId),
     formationPressure: Number(detail.input?.maximumFormationPressure),
     productivityCoefficient: isExponential ? coefficient : null,
@@ -2493,8 +2519,8 @@ const storedResult = () => {
     rSquared: saved.rSquared == null ? null : Number(saved.rSquared),
     reliability: saved.reliabilityDescription || '',
     equation: isExponential
-      ? exponentialEquation(saved.pressureMethod, coefficient, exponent)
-      : coefficientEquation(saved.pressureMethod, darcy, nonDarcy),
+      ? exponentialEquation(saved.pressureMethod, coefficient, exponent, storedOperationType)
+      : coefficientEquation(saved.pressureMethod, darcy, nonDarcy, storedOperationType),
     analysisPoints: curve(['analysis', 'regularized', 'stable']),
     regressionLine: curve(['regression']),
     transientLine: curve(['transient', 'shifted-regression']),
@@ -2510,6 +2536,7 @@ const applyStoredTest = async () => {
   selectedWellName.value = detail.wellName || props.initialWellName || selectedWellName.value
   activeTestType.value = detail.testMethod || props.initialTestType
   selectedDataTable.value = activeTestType.value
+  operationType.value = detail.operationType === 'injection' ? 'injection' : 'production'
   await nextTick()
   inputRows.value = (detail.inputItems || []).map((item, index) => ({
     sequence: item.testPointNumber ?? index + 1,
@@ -2750,7 +2777,10 @@ onBeforeUnmount(() => {
           <el-form-item label="注采类型">
             <el-radio-group v-model="operationType">
               <el-radio label="production">采气</el-radio>
-              <el-radio label="injection" :disabled="activeTestType !== 'isochronal'">注气</el-radio>
+              <el-radio
+                label="injection"
+                :disabled="!['back-pressure', 'isochronal'].includes(activeTestType)"
+              >注气</el-radio>
             </el-radio-group>
           </el-form-item>
         </el-form>
@@ -2769,9 +2799,9 @@ onBeforeUnmount(() => {
             <el-input :model-value="Number(result.productivityExponent).toFixed(4)" readonly />
           </template>
           <template v-else>
-            <label>达西渗流系数 A</label>
+            <label>{{ operationType === 'injection' ? '注气达西渗流系数 A' : '达西渗流系数 A' }}</label>
             <el-input :model-value="scientific(result.darcyCoefficient)" readonly />
-            <label>非达西高速流系数 B</label>
+            <label>{{ operationType === 'injection' ? '注气非达西高速流系数 B' : '非达西高速流系数 B' }}</label>
             <el-input :model-value="scientific(result.nonDarcyCoefficient)" readonly />
             <template v-if="activeTestType === 'back-pressure'">
               <label>R²(dless)</label>
@@ -2783,6 +2813,8 @@ onBeforeUnmount(() => {
               <el-input :model-value="result.reliability" readonly />
             </template>
           </template>
+          <label>{{ operationType === 'injection' ? '最大注气量(10⁴m³/d)' : '无阻流量(10⁴m³/d)' }}</label>
+          <el-input :model-value="Number.isFinite(Number(result.aofRate)) ? Number(result.aofRate).toFixed(4) : ''" readonly />
         </div>
       </section>
 
@@ -2806,7 +2838,10 @@ onBeforeUnmount(() => {
                 <el-input v-model="scope.row.date" size="small" />
               </template>
             </el-table-column>
-            <el-table-column label="地层/恢复压力(MPa)" min-width="170">
+            <el-table-column
+              :label="operationType === 'injection' ? '地层压力(MPa)' : '地层/恢复压力(MPa)'"
+              min-width="170"
+            >
               <template #default="scope">
                 <el-input-number v-model="scope.row.recoveryPressure" :controls="false" size="small" />
               </template>
