@@ -111,6 +111,7 @@ const operationType = ref(props.externalOperationType === 'injection' ? 'injecti
 const loadingData = ref(false)
 const calculating = ref(false)
 const result = ref(null)
+const persistedIsochronalDetail = ref(null)
 const activePanel = ref('input')
 const activeChart = ref('analysis')
 const hasMethodData = ref(false)
@@ -472,6 +473,7 @@ const clearWorkspace = () => {
   inputRows.value = []
   hasMethodData.value = false
   result.value = null
+  persistedIsochronalDetail.value = null
   activePanel.value = 'input'
   activeChart.value = 'analysis'
   formationPressure.value = Number.isFinite(props.externalFormationPressure)
@@ -2559,17 +2561,23 @@ const applyStoredTest = async () => {
   return true
 }
 
+const persistedIsochronalResult = detail => {
+  const availableResults = detail?.results?.length
+    ? detail.results
+    : (detail?.result ? [detail.result] : [])
+  return availableResults.find(saved =>
+    normalizeCalculationMethod(saved.pressureMethod || detail.pressureMethod) === calculationMethod.value &&
+    (saved.calculationResultType === 'exponential' ? 'exponential' : 'binomial') === calculationResultType.value
+  ) || null
+}
+
 const restorePersisted = detail => {
-  if (!detail?.input || !detail?.result) return
+  if (!detail?.input) return false
+  persistedIsochronalDetail.value = detail
   activeTestType.value = 'isochronal'
   selectedDataTable.value = 'isochronal'
   formationPressure.value = Number(detail.input.maximumFormationPressure)
   temperature.value = Number(detail.input.formationTemperature)
-  calculationMethod.value = normalizeCalculationMethod(detail.pressureMethod)
-  calculationResultType.value = detail.result.calculationResultType === 'exponential'
-    ? 'exponential'
-    : 'binomial'
-  operationType.value = detail.record?.operationType === 'injection' ? 'injection' : 'production'
   inputRows.value = (detail.input.points || []).map(point => ({
     sequence: point.pointNumber,
     flowRate: point.gasProduction,
@@ -2578,6 +2586,14 @@ const restorePersisted = detail => {
     recoveryPressure: point.reservoirPressure
   }))
   hasMethodData.value = inputRows.value.length > 0
+  const saved = persistedIsochronalResult(detail)
+  if (!saved) {
+    result.value = null
+    emit('result-change', null, { stored: true })
+    activePanel.value = 'input'
+    activeChart.value = 'analysis'
+    return false
+  }
   const restored = {
     wellName: detail.record?.wellName || selectedWellName.value,
     testType: 'isochronal',
@@ -2586,36 +2602,36 @@ const restorePersisted = detail => {
     calculationResultType: calculationResultType.value,
     operationType: operationType.value,
     formationPressure: Number(detail.input.maximumFormationPressure),
-    darcyCoefficient: detail.result.darcyCoefficient,
-    nonDarcyCoefficient: detail.result.nonDarcyCoefficient,
-    productivityCoefficient: detail.result.productivityCoefficient,
-    productivityExponent: detail.result.productivityExponent,
+    darcyCoefficient: saved.darcyCoefficient,
+    nonDarcyCoefficient: saved.nonDarcyCoefficient,
+    productivityCoefficient: saved.productivityCoefficient,
+    productivityExponent: saved.productivityExponent,
     equation: calculationResultType.value === 'exponential'
       ? exponentialEquation(
           calculationMethod.value,
-          Number(detail.result.productivityCoefficient),
-          Number(detail.result.productivityExponent),
+          Number(saved.productivityCoefficient),
+          Number(saved.productivityExponent),
           operationType.value
         )
       : coefficientEquation(
           calculationMethod.value,
-          Number(detail.result.darcyCoefficient),
-          Number(detail.result.nonDarcyCoefficient),
+          Number(saved.darcyCoefficient),
+          Number(saved.nonDarcyCoefficient),
           operationType.value
         ),
-    aofRate: detail.result.openFlowCapacity,
-    rSquared: detail.result.rSquared,
-    reliability: detail.result.reliabilityDescription || '',
-    analysisPoints: (detail.result.analysisPoints || []).map(point => ({
+    aofRate: saved.openFlowCapacity,
+    rSquared: saved.rSquared,
+    reliability: saved.reliabilityDescription || '',
+    analysisPoints: (saved.analysisPoints || []).map(point => ({
       flowRate: point.x, transformedPressure: point.y
     })),
-    regressionLine: (detail.result.regressionLine || []).map(point => ({
+    regressionLine: (saved.regressionLine || []).map(point => ({
       flowRate: point.x, transformedPressure: point.y
     })),
-    transientLine: (detail.result.transientLine || []).map(point => ({
+    transientLine: (saved.transientLine || []).map(point => ({
       flowRate: point.x, transformedPressure: point.y
     })),
-    iprCurves: (detail.result.iprCurves || []).map(curve => ({
+    iprCurves: (saved.iprCurves || []).map(curve => ({
       formationPressure: Number(curve.formationPressure) || Number(detail.input.maximumFormationPressure),
       points: (curve.points || []).map(point => ({
         flowRate: point.gasProduction,
@@ -2625,13 +2641,14 @@ const restorePersisted = detail => {
   }
   restored.iprCurve = restored.iprCurves.at(-1)?.points || []
   result.value = restored
-  emit('result-change', restored)
+  emit('result-change', restored, { stored: true })
   activePanel.value = 'analysis'
   activeChart.value = 'analysis'
   nextTick(() => {
     if (activeChart.value === 'ipr') renderIprChart()
     else renderChart()
   })
+  return true
 }
 
 const switchChart = async (chartType) => {
@@ -2671,6 +2688,9 @@ watch(() => props.externalCalculationMethod, value => {
   if (calculationMethod.value === normalized) return
   calculationMethod.value = normalized
   if (props.storedTest) return void applyStoredTest()
+  if (activeTestType.value === 'isochronal' && persistedIsochronalDetail.value) {
+    return void restorePersisted(persistedIsochronalDetail.value)
+  }
   originalInputSyncKey = ''
   void syncOriginalInputDefaults().catch(error =>
     console.warn('智慧气藏原始试井参数同步失败', error))
@@ -2682,6 +2702,9 @@ watch(() => props.externalCalculationResult, value => {
   if (calculationResultType.value === normalized) return
   calculationResultType.value = normalized
   if (props.storedTest) return void applyStoredTest()
+  if (activeTestType.value === 'isochronal' && persistedIsochronalDetail.value) {
+    return void restorePersisted(persistedIsochronalDetail.value)
+  }
   result.value = null
   activePanel.value = 'input'
 })
@@ -2689,6 +2712,7 @@ watch(() => props.externalOperationType, value => {
   const normalized = value === 'injection' ? 'injection' : 'production'
   if (operationType.value === normalized) return
   operationType.value = normalized
+  persistedIsochronalDetail.value = null
   result.value = null
   activePanel.value = 'input'
 })
