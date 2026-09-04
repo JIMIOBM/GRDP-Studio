@@ -81,7 +81,7 @@ const props = defineProps({
 const route = useRoute()
 const router = useRouter()
 const PROJECT_ID = 6
-const GAS_RESERVOIR_ID = 4
+const GAS_RESERVOIR_ID = 5
 const MODIFIED_ISOCHRONAL_PROJECT_ID = 6
 const MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID = 4
 
@@ -887,13 +887,13 @@ const resultIprPoints = snapshot => (snapshot.result.iprCurves || []).flatMap((c
 
 const saveCalculation = async () => {
   if (!isOwnedPressureMethod.value || savingResult.value) return
-  if (!selectedPvtRecord.value) {
-    ElMessage.warning('请选择PVT表')
-    return
-  }
   const snapshot = pressureContentRef.value?.getPersistenceSnapshot?.()
   if (!snapshot?.result || !snapshot.input?.points?.length) {
     ElMessage.warning('请先完成计算')
+    return
+  }
+  if (snapshot.pressureMethod === 'pseudo-pressure' && !selectedPvtRecord.value) {
+    ElMessage.warning('拟压力方法必须选择PVT表')
     return
   }
   savingResult.value = true
@@ -905,7 +905,7 @@ const saveCalculation = async () => {
       projectId: PROJECT_ID,
       gasReservoirId: GAS_RESERVOIR_ID,
       wellName: selectedWellName.value,
-      pvtId: Number(selectedPvtTable.value),
+      pvtId: selectedPvtRecord.value ? Number(selectedPvtTable.value) : null,
       operationType: operationType.value,
       testMethod: pressureTestType.value,
       testNo: null,

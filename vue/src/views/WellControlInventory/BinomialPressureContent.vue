@@ -845,7 +845,7 @@ const normalizeLocalPoints = (
         throw new Error('采气时地层/恢复压力必须大于测试流压')
       }
       if (injection && flowingPressure <= recoveryPressure) {
-        throw new Error('注气时测试流压必须大于地层/恢复压力')
+        throw new Error(`注气时井底注入压力必须大于地层压力（当前 ${flowingPressure} MPa ≤ ${recoveryPressure} MPa）`)
       }
       const reservoirPotential = pressurePotential(recoveryPressure, method, pvtCurve)
       const flowingPotential = pressurePotential(flowingPressure, method, pvtCurve)
@@ -1800,7 +1800,7 @@ const analyze = async () => {
   }
   calculating.value = true
   try {
-    if (activeTestType.value === 'one-point') {
+    if (activeTestType.value === 'one-point' && calculationResultType.value === 'binomial') {
       await syncOriginalInputDefaults()
     }
     const payload = buildPayload()
