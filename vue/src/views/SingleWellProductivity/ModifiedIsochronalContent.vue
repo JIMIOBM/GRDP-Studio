@@ -50,6 +50,8 @@ const importing = ref(false)
 const inputDirty = ref(true)
 const resultDirty = ref(false)
 const evaluationIds = ref({})
+const equationPanelPosition = ref(null)
+const analysisLegendPosition = ref(null)
 let chart
 let loadSequence = 0
 const initializedForms = new Set()
@@ -172,6 +174,74 @@ const exponentialAnalysisCurves = [
   { curveType: 'transient', name: '不稳定辅助线', color: '#f5b642' }
 ]
 const curvesForResult = type => type === 'exponential' ? exponentialAnalysisCurves : analysisCurves
+
+// 修正等时法规定最后一个测试点为延长稳定点。指数式结果将全部测试点保存为
+// analysis 曲线，因此只在展示时将最后一点拆出，避免改变持久化数据契约。
+const visibleChartPoints = points => (points || [])
+  .filter(point => !point.deleted)
+  .map(point => [point.x, point.y])
+
+const movableFormulaPanel = (text, position) => {
+  const lines = String(text || '').split('\n')
+  const widestLine = Math.max(...lines.map(line => line.length), 1)
+  const width = Math.max(260, Math.min(420, widestLine * 7.7 + 28))
+  const height = Math.max(56, lines.length * 20 + 16)
+  return {
+    id: 'analysis-formula-panel', type: 'group', position: equationPanelPosition.value || position,
+    z: 1000, zlevel: 20, draggable: true, cursor: 'move',
+    ondrag: function () {
+      equationPanelPosition.value = [
+        Number.isFinite(this.x) ? this.x : this.position?.[0] || 0,
+        Number.isFinite(this.y) ? this.y : this.position?.[1] || 0
+      ]
+    },
+    children: [
+      { type: 'rect', z: 1000, zlevel: 20, shape: { x: 0, y: 0, width, height, r: 3 }, style: {
+        fill: 'rgba(255,255,255,.96)', stroke: '#cfd7e3', lineWidth: 1,
+        shadowBlur: 7, shadowColor: 'rgba(0,0,0,.16)', shadowOffsetY: 2
+      } },
+      { type: 'text', z: 1001, zlevel: 20, style: { x: 14, y: 10, text, fill: '#444',
+        font: '13px "Microsoft YaHei", sans-serif', lineHeight: 20, textVerticalAlign: 'top' } }
+    ]
+  }
+}
+
+const movableAnalysisLegend = (items, position) => {
+  const context = document.createElement('canvas').getContext('2d')
+  if (context) context.font = '13px "Microsoft YaHei", sans-serif'
+  const width = Math.max(250, Math.min(400, Math.max(...items.map(item =>
+    context?.measureText(item.name).width || item.name.length * 7.5), 1) + 54))
+  const rowHeight = 27
+  const height = items.length * rowHeight + 18
+  const children = [{
+    type: 'rect', z: 1000, zlevel: 20, shape: { x: 0, y: 0, width, height },
+    style: { fill: 'rgba(255,255,255,.90)', stroke: '#e5e9f0', lineWidth: 1 }
+  }]
+  items.forEach((item, index) => {
+    const y = 9 + rowHeight * index + rowHeight / 2
+    if (item.type === 'scatter') {
+      children.push({ type: 'circle', z: 1001, zlevel: 20, shape: { cx: 23, cy: y, r: 6 },
+        style: { fill: item.color } })
+    } else {
+      children.push({ type: 'line', z: 1001, zlevel: 20,
+        shape: { x1: 13, y1: y, x2: 33, y2: y },
+        style: { stroke: item.color, lineWidth: 2, lineDash: item.dotted ? [3, 3] : null } })
+    }
+    children.push({ type: 'text', z: 1001, zlevel: 20, style: { x: 40, y, text: item.name,
+      fill: '#606266', font: '13px "Microsoft YaHei", sans-serif', verticalAlign: 'middle' } })
+  })
+  return {
+    id: 'analysis-legend-panel', type: 'group', position: analysisLegendPosition.value || position,
+    z: 1000, zlevel: 20, draggable: true, cursor: 'move',
+    ondrag: function () {
+      analysisLegendPosition.value = [
+        Number.isFinite(this.x) ? this.x : this.position?.[0] || 0,
+        Number.isFinite(this.y) ? this.y : this.position?.[1] || 0
+      ]
+    },
+    children
+  }
+}
 
 const chartData = item => (item?.data || []).map(point => ({
   x: Number(point.xValue), y: Number(point.yValue), deleted: Boolean(point.isDeleted),
@@ -740,7 +810,6 @@ const renderChart = () => {
     ? formationPressure / 10 : undefined
   const iprYAxisMax = Number.isFinite(formationPressure) && formationPressure > 0
     ? formationPressure * 1.1 : undefined
-  const visible = points => points.filter(point => !point.deleted).map(point => [point.x, point.y])
   const series = isIpr
     ? result.iprSeries.map(item => {
       const curveFormationPressure = iprFormationPressure(item, formationPressure)
@@ -751,22 +820,46 @@ const renderChart = () => {
         lineStyle: { width: 2 },
         data: iprChartData(item, curveFormationPressure) }
     })
-    : result.analysisSeries.map(item => ({ name: isExponential ? item.name : `${item.name}${legendUnit(result.calculationMethod)}`,
-      type: (isExponential ? item.curveType === 'analysis' : ['regularized', 'stable'].includes(item.curveType)) ? 'scatter' : 'line',
-      z: (isExponential ? item.curveType === 'analysis' : ['regularized', 'stable'].includes(item.curveType)) ? 5 : 2,
-      symbolSize: item.curveType === 'stable' ? 12 : 10,
-      showSymbol: isExponential ? item.curveType === 'analysis' : ['regularized', 'stable'].includes(item.curveType),
-      itemStyle: { color: item.color }, lineStyle: { color: item.color, width: 2,
-        type: ['shifted-regression', 'transient'].includes(item.curveType) ? 'dotted' : 'solid' }, data: visible(item.data) }))
+    : result.analysisSeries.flatMap(item => {
+      if (isExponential && item.curveType === 'analysis') {
+        const points = visibleChartPoints(item.data)
+        const stablePoint = points.length > 1 ? points.at(-1) : null
+        return [
+          { name: item.name, type: 'scatter', z: 5, symbolSize: 10,
+            itemStyle: { color: item.color }, data: stablePoint ? points.slice(0, -1) : points },
+          ...(stablePoint ? [{ name: '稳定点', type: 'scatter', z: 6, symbolSize: 12,
+            itemStyle: { color: '#ee6666' }, data: [stablePoint] }] : [])
+        ]
+      }
+      const isScatter = ['regularized', 'stable'].includes(item.curveType)
+      return [{ name: isExponential ? item.name : `${item.name}${legendUnit(result.calculationMethod)}`,
+        type: isScatter ? 'scatter' : 'line', z: isScatter ? 5 : 2,
+        symbolSize: item.curveType === 'stable' ? 12 : 10,
+        showSymbol: isScatter,
+        itemStyle: { color: item.color }, lineStyle: { color: item.color, width: 2,
+          type: ['shifted-regression', 'transient'].includes(item.curveType) ? 'dotted' : 'solid' },
+        data: visibleChartPoints(item.data) }]
+    })
   const equation = isExponential
-    ? (result.equation || `qsc = ${scientific(result.productivityCoefficient)} × [${equationLeft(result.calculationMethod)}]^${Number(result.productivityExponent).toFixed(4)}`) +
-      `\nR² = ${Number(result.rSquared).toFixed(4)}`
-    : `${equationLeft(result.calculationMethod)} = ${scientific(result.darcyCoefficient)} qsc + ${scientific(result.nonDarcyCoefficient)} qsc²\nR² = ${Number(result.rSquared).toFixed(4)}`
+    ? (result.equation || `qsc = ${scientific(result.productivityCoefficient)} × [${equationLeft(result.calculationMethod)}]^${Number(result.productivityExponent).toFixed(4)}`)
+    : `${equationLeft(result.calculationMethod)} = ${scientific(result.darcyCoefficient)} qsc + ${scientific(result.nonDarcyCoefficient)} qsc²`
+  const formulaText = `${equation}\nR² = ${Number(result.rSquared).toFixed(4)}`
+  const formulaDefaultPosition = [
+    Math.max((chart.getWidth?.() || 900) - 510, 24),
+    Math.max((chart.getHeight?.() || 520) - 135, 55)
+  ]
+  const legendItems = series.map(item => ({
+    name: item.name,
+    type: item.type,
+    color: item.itemStyle?.color || item.lineStyle?.color || '#333',
+    dotted: item.lineStyle?.type === 'dotted'
+  }))
+  const legendDefaultPosition = [Math.max((chart.getWidth?.() || 900) - 330, 24), 52]
   chart.setOption({ animation: false, color: ['#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de', '#3ba272', '#fc8452', '#9a60b4', '#ea7ccc', '#2ec7c9'],
     title: { text: isIpr ? 'IPR曲线' : '修正等时试井分析图', left: 'center', top: 8,
       textStyle: { fontSize: 17, fontWeight: 600, color: '#333' } },
     tooltip: { trigger: isIpr ? 'axis' : 'item' },
-    legend: { type: 'scroll', orient: 'vertical', right: 22, top: 52,
+    legend: { show: isIpr, type: 'scroll', orient: 'vertical', right: 22, top: 52,
       itemWidth: 17, itemHeight: 10, backgroundColor: 'rgba(255,255,255,.9)',
       borderColor: '#e5e9f0', borderWidth: 1, padding: 9 },
     grid: { left: 92, right: isIpr ? 205 : 245, top: 70, bottom: 70 },
@@ -782,9 +875,10 @@ const renderChart = () => {
       nameLocation: 'middle', nameGap: 62, nameTextStyle: { lineHeight: 18 },
       minorTick: { show: true }, minorSplitLine: { show: true, lineStyle: { color: '#f2f5fa' } },
       splitLine: { lineStyle: { color: '#dfe6f1' } } }, series,
-    graphic: isIpr ? [] : [{ type: 'text', left: '55%', top: '73%', z: 100, zlevel: 10, silent: true,
-      style: { text: equation, fill: '#333', font: '14px sans-serif', lineHeight: 22,
-        backgroundColor: 'rgba(255,255,255,.92)', padding: [5, 8] } }] }, true)
+    graphic: isIpr ? [] : [
+      movableAnalysisLegend(legendItems, legendDefaultPosition),
+      movableFormulaPanel(formulaText, formulaDefaultPosition)
+    ] }, true)
   chart.resize()
 }
 const switchPanel = async panel => { activePanel.value = panel; if (panel === 'analysis') { await nextTick(); renderChart() } }
@@ -870,6 +964,6 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resizeChart); chart
 </template>
 
 <style lang="scss" scoped>
-.modified-workspace{display:flex;height:100%;min-height:0;background:#fff}.params-panel{width:360px;min-width:360px;display:flex;flex-direction:column;border-right:1px solid #ddd}.panel-head{height:34px;padding:0 12px;display:flex;align-items:center;background:#f2f2f2;border-bottom:1px solid #ddd;font-size:13px}.panel-body{flex:1;overflow:auto;padding:10px 14px}.field{display:block;margin-bottom:11px;font-size:12px}.field>span{display:block;margin-bottom:4px}.field select,.field input,.file-button,.inline-output input{width:100%;height:28px;box-sizing:border-box;border:1px solid #aaa;border-radius:3px;background:#fff;padding:0 8px}.file-button{text-align:left;cursor:pointer}.hidden-file{display:none}.field small{display:block;margin-top:4px;overflow:hidden;color:#777;text-overflow:ellipsis;white-space:nowrap}.section-title{display:flex;align-items:center;gap:8px;margin:5px 0 10px;font-size:13px}.section-title i{flex:1;height:1px;background:#999}.radios{margin:0 0 10px;padding:0;border:0;font-size:13px}.radios legend{margin-bottom:6px;padding:0}.radios label{margin-right:12px;white-space:nowrap}.action-buttons{display:flex;gap:8px}.calculate,.save{height:30px;padding:0 24px;border:0;border-radius:3px;color:#fff;cursor:pointer}.calculate{background:#111}.save{background:#409eff}.calculate:disabled,.save:disabled{opacity:.6;cursor:not-allowed}.inline-output{margin-top:14px}.inline-output label{display:block;margin-bottom:10px;color:#555;font-size:12px}.inline-output input{display:block;margin-top:4px;color:#333}.result-area{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column}.editable-data-grid,.analysis-view{flex:1;min-height:0;display:flex;flex-direction:column}.data-toolbar,.chart-switch{height:38px;padding:0 12px;display:flex;align-items:center;gap:14px;flex-shrink:0;border-bottom:1px solid #ddd;color:#666;font-size:12px}.data-toolbar{justify-content:space-between}.chart{flex:1;min-height:0}.grid-cell{min-height:34px;padding:8px 10px;box-sizing:border-box;line-height:18px;text-align:center;outline:none;white-space:nowrap}.grid-cell:focus{padding:7px 9px;border:1px solid #409eff;background:#fff}:deep(.el-table .cell){padding:0;text-align:center}:deep(.el-table th.el-table__cell>.cell){padding:0 10px}:deep(.el-table td.el-table__cell){padding:0;background:#fff}:deep(.el-table__row:hover>td.el-table__cell){background:#fff!important}.bottom-tabs{height:31px;display:flex;flex-shrink:0;border-top:1px solid #ddd}.bottom-tabs button{min-width:110px;border:0;border-right:1px solid #ddd;background:#fff2f4;color:#999;cursor:pointer}.bottom-tabs button.active{color:#222;box-shadow:inset 0 -2px #2b171a;font-weight:600}.bottom-tabs button:disabled{cursor:not-allowed;opacity:.5}
+.modified-workspace{display:flex;height:100%;min-height:0;background:#fff}.params-panel{width:360px;min-width:360px;display:flex;flex-direction:column;border-right:1px solid #ddd}.panel-head{height:34px;padding:0 12px;display:flex;align-items:center;background:#f2f2f2;border-bottom:1px solid #ddd;font-size:13px}.panel-body{flex:1;overflow:auto;padding:10px 14px}.field{display:block;margin-bottom:11px;font-size:12px}.field>span{display:block;margin-bottom:4px}.field select,.field input,.file-button,.inline-output input{width:100%;height:28px;box-sizing:border-box;border:1px solid #aaa;border-radius:3px;background:#fff;padding:0 8px}.file-button{text-align:left;cursor:pointer}.hidden-file{display:none}.field small{display:block;margin-top:4px;overflow:hidden;color:#777;text-overflow:ellipsis;white-space:nowrap}.section-title{display:flex;align-items:center;gap:8px;margin:5px 0 10px;font-size:13px}.section-title i{flex:1;height:1px;background:#999}.radios{margin:0 0 10px;padding:0;border:0;font-size:12px}.radios legend{margin-bottom:6px;padding:0}.radios label{margin-right:12px;white-space:nowrap}.action-buttons{display:flex;gap:8px}.calculate,.save{height:30px;padding:0 24px;border:0;border-radius:3px;color:#fff;cursor:pointer}.calculate{background:#111}.save{background:#409eff}.calculate:disabled,.save:disabled{opacity:.6;cursor:not-allowed}.inline-output{margin-top:14px}.inline-output label{display:block;margin-bottom:10px;color:#555;font-size:12px}.inline-output input{display:block;margin-top:4px;color:#333}.result-area{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column}.editable-data-grid,.analysis-view{flex:1;min-height:0;display:flex;flex-direction:column}.data-toolbar,.chart-switch{height:38px;padding:0 12px;display:flex;align-items:center;gap:14px;flex-shrink:0;border-bottom:1px solid #ddd;color:#666;font-size:12px}.data-toolbar{justify-content:space-between}.chart{flex:1;min-height:0}.grid-cell{min-height:34px;padding:8px 10px;box-sizing:border-box;line-height:18px;text-align:center;outline:none;white-space:nowrap}.grid-cell:focus{padding:7px 9px;border:1px solid #409eff;background:#fff}:deep(.el-table .cell){padding:0;text-align:center}:deep(.el-table th.el-table__cell>.cell){padding:0 10px}:deep(.el-table td.el-table__cell){padding:0;background:#fff}:deep(.el-table__row:hover>td.el-table__cell){background:#fff!important}.bottom-tabs{height:31px;display:flex;flex-shrink:0;border-top:1px solid #ddd}.bottom-tabs button{min-width:110px;border:0;border-right:1px solid #ddd;background:#fff2f4;color:#999;cursor:pointer}.bottom-tabs button.active{color:#222;box-shadow:inset 0 -2px #2b171a;font-weight:600}.bottom-tabs button:disabled{cursor:not-allowed;opacity:.5}
 .disabled-option{color:#aaa}
 </style>
