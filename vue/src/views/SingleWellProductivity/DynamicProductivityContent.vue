@@ -785,7 +785,7 @@ const renderChart = () => {
     tooltip: { trigger: 'axis' },
     legend: { type: 'scroll', orient: 'vertical', right: 20, top: 52, backgroundColor: 'rgba(255,255,255,.9)', borderColor: '#e5e9f0', borderWidth: 1, padding: 8 },
     grid: { left: 82, right: 190, top: 64, bottom: 64 },
-    xAxis: { type: 'value', min: 0, name: 'qsc(10⁴m³/d)', nameLocation: 'middle', nameGap: 40, minorTick: { show: true }, minorSplitLine: { show: true, lineStyle: { color: '#f2f5fa' } }, splitLine: { lineStyle: { color: '#dfe6f1' } } },
+    xAxis: { type: 'value', min: 0, name: activeDirection.value === 'injection' ? '注气量 qsc(10⁴m³/d)' : 'qsc(10⁴m³/d)', nameLocation: 'middle', nameGap: 40, minorTick: { show: true }, minorSplitLine: { show: true, lineStyle: { color: '#f2f5fa' } }, splitLine: { lineStyle: { color: '#dfe6f1' } } },
     yAxis: { type: 'value', min: 0, max: yMax, name: 'Pwf (MPa)', nameLocation: 'middle', nameGap: 52, minorTick: { show: true }, minorSplitLine: { show: true, lineStyle: { color: '#f2f5fa' } }, splitLine: { lineStyle: { color: '#dfe6f1' } } },
     series,
     graphic: series.length ? [] : [{ type: 'text', left: 'center', top: 'middle', style: { text: '暂无IPR曲线数据', fill: '#999', font: '14px sans-serif' } }]

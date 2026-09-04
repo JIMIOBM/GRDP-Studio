@@ -100,7 +100,7 @@ public class ProductivityTestService {
         binomialOutputs.stream().map(this::binomialResult).forEach(results::add);
         exponentialOutputs.stream().map(this::exponentialResult).forEach(results::add);
         Result result = results.isEmpty() ? null : results.getFirst();
-        return new Detail(testId, number(test.get("pvt_id")).longValue(), number(test.get("test_no")).intValue(),
+        return new Detail(testId, longValue(test.get("pvt_id")), number(test.get("test_no")).intValue(),
                 string(test.get("test_name")), date(test.get("test_date")), string(test.get("operation_type")),
                 string(test.get("test_method")), string(test.get("well_name")), string(test.get("well_type")),
                 string(test.get("status")), input(input), items, result, List.of(), results);
@@ -110,7 +110,7 @@ public class ProductivityTestService {
     public SaveResponse save(SaveRequest request) {
         validate(request);
         long wellId = requireWellId(request.projectId(), request.gasReservoirId(), request.wellName());
-        requirePvt(request.pvtId(), wellId);
+        if (request.pvtId() != null) requirePvt(request.pvtId(), wellId);
         boolean created = request.testId() == null;
         int testNo = created ? nextTestNo(wellId, request.operationType(), request.testMethod())
                 : requireTest(request.testId(), wellId);
@@ -241,9 +241,17 @@ public class ProductivityTestService {
         String resultType = resultType(result);
         if (!RESULT_TYPES.contains(resultType)) throw new BusinessException(400, "计算结果类型不正确");
         if (!PRESSURE_METHODS.contains(result.pressureMethod())) throw new BusinessException(400, "压力处理方法不正确");
+        if ("injection".equals(request.operationType()) && !"exponential".equals(resultType))
+            throw new BusinessException(400, "注气当前仅支持指数式计算");
+        if ("pseudo-pressure".equals(result.pressureMethod()) && request.pvtId() == null)
+            throw new BusinessException(400, "拟压力方法必须选择PVT");
         finite(request.input().maximumFormationPressure(), "最大地层压力");
         finite(request.input().formationTemperature(), "地层温度");
-        finite(request.input().specificGravity(), "天然气比重");
+        if ("pseudo-pressure".equals(result.pressureMethod())) {
+            if (request.input().gasType() == null || request.input().gasType().isBlank())
+                throw new BusinessException(400, "天然气类型不能为空");
+            positive(request.input().specificGravity(), "天然气比重");
+        }
         if (result.evaluationId() != null && result.evaluationId() <= 0)
             throw new BusinessException(400, "原平台计算记录编号必须大于0");
         if ("exponential".equals(resultType)) {
@@ -293,7 +301,7 @@ public class ProductivityTestService {
         return ids.getFirst();
     }
 
-    private void requirePvt(long pvtId, long wellId) {
+    private void requirePvt(Long pvtId, long wellId) {
         Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM project_well_pvt WHERE id=? AND well_id=?",
                 Integer.class, pvtId, wellId);
         if (count == null || count != 1) throw new BusinessException(400, "所选PVT不属于当前井");
@@ -333,7 +341,8 @@ public class ProductivityTestService {
                  hydrogen_sulfide,carbon_dioxide,nitrogen,condensate_oil_density,modification_method,
                  deviation_factor_method,viscosity_method) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """, testId, input.maximumFormationPressure(), input.formationTemperature(), input.onePointAlpha(),
-                input.gasType(), input.specificGravity(), zero(input.hydrogenSulfide()), zero(input.carbonDioxide()),
+                input.gasType() == null ? "" : input.gasType().trim(), zero(input.specificGravity()),
+                zero(input.hydrogenSulfide()), zero(input.carbonDioxide()),
                 zero(input.nitrogen()), input.condensateOilDensity(), blankToNull(input.modificationMethod()),
                 blankToNull(input.deviationFactorMethod()), blankToNull(input.viscosityMethod()));
         for (InputItem row : rows) jdbc.update("""
