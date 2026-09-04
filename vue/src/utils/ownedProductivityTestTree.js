@@ -54,9 +54,7 @@ export const loadOwnedProductivityTestTreeNodes = async ({
     )
     return { method, records: response?.data ?? response ?? [] }
   }))
-  // 合并旧版额外生成的“回压/一点”目录，直接复用标准的
-  // “回压试井/一点法”方法节点，避免同一 ID 在树中出现两次。
-  testGroup.children = (testGroup.children || []).filter(node => node.type !== METHOD_NODE_TYPE)
+  // 统一归并旧版“回压/一点”目录和标准方法目录，避免重复或挂错层级。
   const methodGroups = ensureProductivityTestMethodGroups(testGroup, wellNode, wellName)
   const methodNodes = responses.map(({ method, records }) => {
     const group = methodGroups[method.value]
