@@ -43,6 +43,7 @@ import {
 import {
   loadAllOwnedProductivityTestTreeNodes,
   loadOwnedProductivityTestTreeNodes,
+  OWNED_PRODUCTIVITY_METHOD_NODE_TYPES,
   OWNED_PRODUCTIVITY_METHOD_NODE_TYPE,
   OWNED_PRODUCTIVITY_RECORD_NODE_TYPE
 } from '@/utils/ownedProductivityTestTree'
@@ -220,13 +221,14 @@ watch([calculationMethod, calculationResult], () => {
 
 watch(operationType, value => {
   if (!isOwnedPressureMethod.value) return
+  // 注采方向变化后，旧方向的结果不能继续显示或保存。
+  calculationOutput.value = null
+  resultDirty.value = false
   const storedOperationType = storedProductivityTest.value?.operationType
   if (!activeProductivityTestId.value || !storedOperationType || storedOperationType === value) return
   activeProductivityTestId.value = null
   activeEvaluationId.value = null
   storedProductivityTest.value = null
-  calculationOutput.value = null
-  resultDirty.value = false
   savedInputSignature.value = ''
   pressureWorkspaceKey.value += 1
 })
@@ -666,7 +668,8 @@ const handleSidebarSelect = async node => {
   // “产能试井”仅作为目录层级，不代表一条真实试井记录。
   if (isProductivityTestNode || node.type === ISOCHRONAL_METHOD_NODE_TYPE) return
 
-  if (node.type === OWNED_PRODUCTIVITY_METHOD_NODE_TYPE) {
+  if (node.type === OWNED_PRODUCTIVITY_METHOD_NODE_TYPE ||
+      OWNED_PRODUCTIVITY_METHOD_NODE_TYPES.has(node.type)) {
     selectedWellName.value = node.wellName || selectedWellName.value
     activeModule.value = '产能试井'
     activeMethod.value = node.pageMethod || (node.testMethod === 'one-point' ? '一点法' : '回压试井')

@@ -1,12 +1,23 @@
 import { productivityTestsApi } from '@/api/productivityTests'
+import {
+  ensureProductivityTestMethodGroups,
+  PRODUCTIVITY_TEST_METHODS
+} from '@/utils/productivityTestTree'
 
 const OWNED_METHODS = [
-  { value: 'back-pressure', label: '回压', pageMethod: '回压试井' },
-  { value: 'one-point', label: '一点', pageMethod: '一点法' }
+  { value: 'back-pressure', label: '回压试井', pageMethod: '回压试井' },
+  { value: 'one-point', label: '一点法', pageMethod: '一点法' }
 ]
+const OWNED_METHOD_VALUES = new Set(OWNED_METHODS.map(method => method.value))
 
 const METHOD_NODE_TYPE = 'owned-productivity-test-method'
 const RECORD_NODE_TYPE = 'owned-productivity-test-record'
+
+export const OWNED_PRODUCTIVITY_METHOD_NODE_TYPES = new Set(
+  PRODUCTIVITY_TEST_METHODS
+    .filter(method => OWNED_METHOD_VALUES.has(method.method))
+    .map(method => method.groupType)
+)
 
 export const loadOwnedProductivityTestTreeNodes = async ({
   treeData,
@@ -43,15 +54,17 @@ export const loadOwnedProductivityTestTreeNodes = async ({
     )
     return { method, records: response?.data ?? response ?? [] }
   }))
-  const preserved = (testGroup.children || []).filter(node => node.type !== METHOD_NODE_TYPE)
-  const methodNodes = responses.map(({ method, records }) => ({
-    id: `${wellNode.id}-productivity-test-${method.value}`,
-    label: method.label,
-    type: METHOD_NODE_TYPE,
-    testMethod: method.value,
-    pageMethod: method.pageMethod,
-    wellName,
-    children: records.map(record => ({
+  // 合并旧版额外生成的“回压/一点”目录，直接复用标准的
+  // “回压试井/一点法”方法节点，避免同一 ID 在树中出现两次。
+  testGroup.children = (testGroup.children || []).filter(node => node.type !== METHOD_NODE_TYPE)
+  const methodGroups = ensureProductivityTestMethodGroups(testGroup, wellNode, wellName)
+  const methodNodes = responses.map(({ method, records }) => {
+    const group = methodGroups[method.value]
+    group.label = method.label
+    group.testMethod = method.value
+    group.pageMethod = method.pageMethod
+    group.wellName = wellName
+    group.children = records.map(record => ({
       id: `${wellNode.id}-${method.value}-${record.id}`,
       label: `${method.label}${record.testNo}`,
       type: RECORD_NODE_TYPE,
@@ -65,8 +78,8 @@ export const loadOwnedProductivityTestTreeNodes = async ({
       pressureMethods: record.pressureMethods || [],
       children: []
     }))
-  }))
-  testGroup.children = [...preserved, ...methodNodes]
+    return group
+  })
 
   if (expand) {
     wellNode.expanded = true

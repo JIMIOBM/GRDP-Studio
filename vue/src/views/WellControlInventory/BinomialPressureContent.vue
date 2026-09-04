@@ -1881,7 +1881,10 @@ const renderChart = () => {
   const minimumRate = Math.min(...rateValues)
   const maximumRate = Math.max(...rateValues)
   const clipLine = line => {
-    if (line.length < 2 || !Number.isFinite(minimumRate) || !Number.isFinite(maximumRate)) return line
+    // 一点法指数式只有一个实测点，但回归线覆盖完整产量范围。
+    // 单点时若按实测最小/最大产量裁剪，会把整条线压缩成同一个坐标。
+    if (line.length < 2 || !Number.isFinite(minimumRate) || !Number.isFinite(maximumRate) ||
+        Math.abs(maximumRate - minimumRate) <= 1e-12) return line
     const sorted = [...line]
       .filter(point => [point.flowRate, point.transformedPressure].every(value => Number.isFinite(Number(value))))
       .sort((left, right) => Number(left.flowRate) - Number(right.flowRate))
