@@ -32,10 +32,6 @@ import WellDataTableContent from '@/views/DataManagement/WellDataTableContent.vu
 import WellboreStructureContent from '@/views/WellboreCapacity/WellboreStructureContent.vue'
 import SingleWellProductivityInterface from '@/views/SingleWellProductivityInterface.vue'
 import { NODETYPE } from '@/constants/nodeType'
-import {
-  WORKSPACE_GAS_RESERVOIR_ID as GAS_RESERVOIR_ID,
-  WORKSPACE_PROJECT_ID as PROJECT_ID
-} from '@/constants/workspaceContext'
 import { analyticMethodApi, dataManagementApi, dynamicBalanceApi, materialBalanceApi, nodeApi, notifyApi, parametersApi, projectApi, typicalCurveApi, waterInvasionApi, wellApi } from '@/api/docker'
 import { pvtStorageApi } from '@/api/pvtStorage'
 import { dynamicProductivityApi } from '@/api/dynamicProductivity'
@@ -80,6 +76,9 @@ import {
   workspaceTreeKeyword
 } from '@/utils/workspaceTreeState'
 
+// 当前工作台所使用的项目和气藏。
+const PROJECT_ID = 6
+const GAS_RESERVOIR_ID = 4
 const router = useRouter()
 const FLOW_BALANCE_NODE_TYPE = NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure
 

@@ -24,10 +24,6 @@ import ProductivityComparison from '@/views/SingleWellProductivity/ProductivityC
 import DynamicProductivityContent from '@/views/SingleWellProductivity/DynamicProductivityContent.vue'
 import TheoreticalProductivityContent from '@/views/SingleWellProductivity/TheoreticalProductivityContent.vue'
 import { NODETYPE } from '@/constants/nodeType'
-import {
-  WORKSPACE_GAS_RESERVOIR_ID as GAS_RESERVOIR_ID,
-  WORKSPACE_PROJECT_ID as PROJECT_ID
-} from '@/constants/workspaceContext'
 import { wellApi } from '@/api/docker'
 import { pvtStorageApi } from '@/api/pvtStorage'
 import { productivityStorageApi } from '@/api/productivityStorage'
@@ -83,8 +79,10 @@ const props = defineProps({
 
 const route = useRoute()
 const router = useRouter()
-const MODIFIED_ISOCHRONAL_PROJECT_ID = PROJECT_ID
-const MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID = GAS_RESERVOIR_ID
+const PROJECT_ID = 6
+const GAS_RESERVOIR_ID = 4
+const MODIFIED_ISOCHRONAL_PROJECT_ID = 6
+const MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID = 4
 
 const MODULES = [
   { name: '产能试井', methods: ['回压试井', '等时试井', '修正等时', '一点法'] },

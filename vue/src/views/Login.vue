@@ -55,7 +55,7 @@ const onLogin = async () => {
     try {
       // The business backend does not own authentication. Authenticate once
       // against the original platform and use that identity locally as well.
-      await loginDockerPlatform()
+      // await loginDockerPlatform()
       const account = {
         id: form.value.username,
         username: form.value.username,
