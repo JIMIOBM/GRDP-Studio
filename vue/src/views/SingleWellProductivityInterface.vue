@@ -995,6 +995,10 @@ const handleSaveIsochronal = async () => {
     })
     const record = response?.data
     activeProductivityTestId.value = Number(record.testId)
+    const detail = (await productivityStorageApi.getIsochronal(
+      record.testId, PROJECT_ID, GAS_RESERVOIR_ID
+    ))?.data
+    pressureContentRef.value?.restorePersisted?.(detail)
     const nodes = await loadIsochronalNodes(selectedWellName.value, { expand: true })
     const savedNode = nodes.find(item => Number(item.testId) === Number(record.testId))
     if (savedNode) workspaceActiveNodeId.value = savedNode.id

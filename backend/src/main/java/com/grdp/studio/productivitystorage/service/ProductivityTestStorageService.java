@@ -67,7 +67,11 @@ public class ProductivityTestStorageService {
         Summary summary = findSummary(testId, projectId, reservoirId);
         Input input = loadInput(testId);
         String method = summary.pressureMethod().isBlank() ? "pressure" : summary.pressureMethod();
-        return new Detail(summary, input, method, loadResult(testId, method));
+        List<Result> results = loadResults(testId);
+        Result selected = results.stream()
+                .filter(result -> method.equals(resultPressureMethod(result)))
+                .findFirst().orElse(results.isEmpty() ? null : results.getFirst());
+        return new Detail(summary, input, method, selected, results);
     }
 
     @Transactional
@@ -320,35 +324,37 @@ public class ProductivityTestStorageService {
         }, testId);
     }
 
-    private Result loadResult(long testId, String method) {
-        List<Long> exponentialIds = jdbc.query("""
-                SELECT id FROM project_well_productivity_exponential_output
-                WHERE test_id=? AND pressure_method=?
-                """, (rs, rowNum) -> rs.getLong(1), testId, method);
-        if (!exponentialIds.isEmpty()) return loadExponentialResult(exponentialIds.getFirst());
-        return jdbc.queryForObject("""
-                SELECT id,darcy_seepage_coefficient,non_darcy_seepage_coefficient,open_flow_capacity,
-                       gradient,intercept,r_squared,reliability_level,reliability_description
-                FROM project_well_productivity_binomial_output WHERE test_id=? AND pressure_method=?
+    private List<Result> loadResults(long testId) {
+        List<Result> results = new ArrayList<>();
+        results.addAll(jdbc.query("""
+                SELECT id,pressure_method,darcy_seepage_coefficient,
+                       non_darcy_seepage_coefficient,open_flow_capacity,gradient,intercept,
+                       r_squared,reliability_level,reliability_description
+                FROM project_well_productivity_binomial_output WHERE test_id=? ORDER BY updated_at DESC,id DESC
                 """, (rs, rowNum) -> {
             long outputId = rs.getLong(1);
             List<CurvePoint> analysis = loadCurve(outputId, "regularized");
             List<CurvePoint> regression = loadCurve(outputId, "regression");
             List<CurvePoint> transientLine = loadCurve(outputId, "shifted-regression");
             List<IprCurve> curves = loadIprCurves(outputId);
-            return new Result("binomial", rs.getDouble(2), rs.getDouble(3),
-                    null, null, rs.getDouble(4), nullableDouble(rs, 5),
-                    nullableDouble(rs, 6), nullableDouble(rs, 7), nullableInteger(rs, 8), rs.getString(9),
+            return new Result("binomial", rs.getString(2), rs.getDouble(3), rs.getDouble(4),
+                    null, null, rs.getDouble(5), nullableDouble(rs, 6),
+                    nullableDouble(rs, 7), nullableDouble(rs, 8), nullableInteger(rs, 9), rs.getString(10),
                     analysis, regression, transientLine, curves);
-        }, testId, method);
+        }, testId));
+        results.addAll(jdbc.query("""
+                SELECT id FROM project_well_productivity_exponential_output
+                WHERE test_id=? ORDER BY updated_at DESC,id DESC
+                """, (rs, rowNum) -> loadExponentialResult(rs.getLong(1)), testId));
+        return results;
     }
 
     private Result loadExponentialResult(long outputId) {
         return jdbc.queryForObject("""
                 SELECT productivity_coefficient,productivity_exponent,open_flow_capacity,
-                       r_squared,reliability_description
+                       r_squared,reliability_description,pressure_method
                 FROM project_well_productivity_exponential_output WHERE id=?
-                """, (rs, rowNum) -> new Result("exponential", null, null, rs.getDouble(1), rs.getDouble(2),
+                """, (rs, rowNum) -> new Result("exponential", rs.getString(6), null, null, rs.getDouble(1), rs.getDouble(2),
                 rs.getDouble(3), null, null, nullableDouble(rs, 4), null, rs.getString(5),
                 loadExponentialCurve(outputId, "analysis"), loadExponentialCurve(outputId, "regression"),
                 loadExponentialCurve(outputId, "transient"), loadExponentialIprCurves(outputId)), outputId);
@@ -462,6 +468,10 @@ public class ProductivityTestStorageService {
         } catch (EmptyResultDataAccessException error) {
             return true;
         }
+    }
+
+    private String resultPressureMethod(Result result) {
+        return result == null || result.pressureMethod() == null ? "" : result.pressureMethod();
     }
 
     private Input normalizeInput(Input value) {
