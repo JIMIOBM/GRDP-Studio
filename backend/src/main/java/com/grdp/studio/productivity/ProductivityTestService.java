@@ -119,9 +119,10 @@ public class ProductivityTestService {
         long testId = created ? insertTest(request, wellId, testNo, testName) : request.testId();
         if (!created) {
             jdbc.update("""
-                    UPDATE project_well_productivity_test SET pvt_id=?,test_date=?,well_type=?,status='calculated'
+                    UPDATE project_well_productivity_test SET pvt_id=?,test_date=?,well_type=?,operation_type=?,status='calculated'
                     WHERE id=?
-                    """, request.pvtId(), Date.valueOf(request.testDate()), blankToNull(request.wellType()), testId);
+                    """, request.pvtId(), Date.valueOf(request.testDate()), blankToNull(request.wellType()),
+                    request.operationType(), testId);
         }
 
         if (created || request.replaceInput()) {
@@ -247,9 +248,9 @@ public class ProductivityTestService {
         if (result.evaluationId() != null && result.evaluationId() <= 0)
             throw new BusinessException(400, "原平台计算记录编号必须大于0");
         if ("exponential".equals(resultType)) {
-            positive(result.productivityCoefficient(), "产能系数C");
+            directional(result.productivityCoefficient(), "产能系数C", request.operationType());
             positive(result.productivityExponent(), "产能指数n");
-            positive(result.openFlowCapacity(), "无阻流量");
+            directional(result.openFlowCapacity(), "无阻流量", request.operationType());
             if (result.chartPoints() == null || result.chartPoints().isEmpty())
                 throw new BusinessException(400, "指数式结果缺少分析曲线点");
             if (result.iprPoints() == null || result.iprPoints().isEmpty())
@@ -281,6 +282,14 @@ public class ProductivityTestService {
 
     private void validateMethod(String method) {
         if (!METHODS.contains(method)) throw new BusinessException(400, "试井方法不正确");
+    }
+
+    private void directional(Double value, String name, String operationType) {
+        finite(value, name);
+        if (("injection".equals(operationType) && value >= 0) ||
+                ("production".equals(operationType) && value <= 0)) {
+            throw new BusinessException(400, name + ("injection".equals(operationType) ? "必须小于0" : "必须大于0"));
+        }
     }
 
     private long requireWellId(long projectId, long gasReservoirId, String wellName) {

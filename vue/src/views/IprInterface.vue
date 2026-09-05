@@ -30,6 +30,8 @@ import PvtPropertiesContent from '@/views/DataManagement/PvtPropertiesContent.vu
 import RelativePermeabilityContent from '@/views/DataManagement/RelativePermeabilityContent.vue'
 import WellDataTableContent from '@/views/DataManagement/WellDataTableContent.vue'
 import WellboreStructureContent from '@/views/WellboreCapacity/WellboreStructureContent.vue'
+import TemperatureModelContent from '@/views/WellboreCapacity/TempratrueModel.vue'
+import PressureConversion from '@/views/WellboreCapacity/PressureConversion.vue'
 import SingleWellProductivityInterface from '@/views/SingleWellProductivityInterface.vue'
 import { NODETYPE } from '@/constants/nodeType'
 import { analyticMethodApi, dataManagementApi, dynamicBalanceApi, materialBalanceApi, nodeApi, notifyApi, parametersApi, projectApi, typicalCurveApi, waterInvasionApi, wellApi } from '@/api/docker'
@@ -822,18 +824,18 @@ const ensureWell = (wellName, wellId) => { //确保井存在
   return wellItem
 }
 
-const openWellboreStructure = wellName => {
+const openWellboreStructure = (wellName, moduleType = 'wellbore-structure') => {
   const wellItem = ensureWell(wellName, `well-${wellName}`)
   const wellboreGroup = wellItem?.children.find(item => item.type === 'wellbore-capacity')
   if (!wellItem || !wellboreGroup) return
 
-  const nodeId = `wellbore-structure-${wellName}`
+  const nodeId = `${moduleType}-${wellName}`
   let node = wellboreGroup.children.find(item => item.id === nodeId)
   if (!node) {
     node = {
       id: nodeId,
-      label: '井身结构',
-      type: 'wellbore-structure',
+      label: moduleType === 'wellbore-temperature' ? '温度模型' : moduleType === 'wellbore-pressure' ? '压力折算-折算方法' : '井身结构',
+      type: moduleType,
       wellName,
       children: []
     }
@@ -849,7 +851,7 @@ const openWellboreStructure = wellName => {
   selectedWellName.value = wellName
   activeNodeId.value = node.id
   activeNode.value = node
-  currentView.value = 'wellbore-structure'
+  currentView.value = moduleType
   currentViewNode.value = node
 }
 
@@ -4024,8 +4026,8 @@ const handleSelect = async (node) => { // 点击左侧树节点
     return
   }
 
-  if (node.type === 'wellbore-structure') {
-    currentView.value = 'wellbore-structure'
+  if (['wellbore-structure', 'wellbore-temperature', 'wellbore-pressure'].includes(node.type)) {
+    currentView.value = node.type
     currentViewNode.value = node
     return
   }
@@ -4150,7 +4152,7 @@ const handleCommand = async ({ group, name, parent }) => { // 接收顶部菜单
     return
   }
 
-  if (group === '井筒能力' && name === '井身结构') {
+  if (group === '井筒能力' && ['井身结构', '温度模型', '折算方法'].includes(name)) {
     const activeWellName = selectedWellName.value || activeNode.value?.wellName || (
       activeNode.value?.type === NODETYPE.NodeType_Well ? activeNode.value.label : ''
     )
@@ -4159,7 +4161,7 @@ const handleCommand = async ({ group, name, parent }) => { // 接收顶部菜单
       return
     }
 
-    openWellboreStructure(activeWellName)
+    openWellboreStructure(activeWellName, name === '温度模型' ? 'wellbore-temperature' : name === '折算方法' ? 'wellbore-pressure' : 'wellbore-structure')
     return
   }
 
@@ -4447,6 +4449,9 @@ onBeforeUnmount(() => {
         <WellDataTableContent v-if="currentView === 'well-data-table'"
           :data-type="currentViewNode?.dataType" :well-name="currentViewNode?.wellName"
           :well-names="projectWellNames" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
+        <TemperatureModelContent v-if="currentView === 'wellbore-temperature'"
+          :key="currentViewNode?.id" :node="currentViewNode" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
+        <PressureConversion v-if="currentView === 'wellbore-pressure'" :key="currentViewNode?.id" :node="currentViewNode" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
         <WellboreStructureContent v-if="currentView === 'wellbore-structure'"
           :key="currentViewNode?.id" :well-name="currentViewNode?.wellName"
           :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />

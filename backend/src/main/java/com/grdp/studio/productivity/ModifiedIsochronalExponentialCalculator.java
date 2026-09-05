@@ -20,7 +20,7 @@ public class ModifiedIsochronalExponentialCalculator {
     private static final Set<String> METHODS = Set.of("pseudo-pressure", "pressure-squared", "pressure");
 
     public CalculateResponse calculate(CalculateRequest request) {
-        if (!"production".equals(request.operationType())) error("修正等时指数式当前仅支持采气");
+        if (!Set.of("production", "injection").contains(request.operationType())) error("注采类型不正确");
         if (!METHODS.contains(request.pressureMethod())) error("压力处理方法不正确");
         if (!finite(request.maximumFormationPressure()) || request.maximumFormationPressure() <= 0) {
             error("计算IPR曲线的最大地层压力必须大于0");
@@ -36,14 +36,12 @@ public class ModifiedIsochronalExponentialCalculator {
             if (!finite(item.testDailyGasProduction()) || item.testDailyGasProduction() <= 0) {
                 error("测试气产量必须大于0");
             }
-            if (!finite(item.reservoirPressure()) || !finite(item.testFlowPressure()) ||
-                    item.reservoirPressure() <= item.testFlowPressure()) {
-                error("地层/恢复压力必须大于测试流压");
+            if (!finite(item.reservoirPressure()) || !finite(item.testFlowPressure())) {
+                error("地层/恢复压力和测试流压必须为有效数值");
             }
             PressureFunctionDifference supplied = suppliedDifferences.get(item.testPointNumber());
             double drawdown = supplied == null
-                    ? potential(item.reservoirPressure(), request.pressureMethod(), pseudo) -
-                    potential(item.testFlowPressure(), request.pressureMethod(), pseudo)
+                    ? pressureFunctionDifference(item.reservoirPressure(), item.testFlowPressure(), request, pseudo)
                     : supplied.pressureFunctionDifference();
             if (!finite(drawdown) || drawdown <= 0) error("压力函数差必须大于0");
             points.add(new AnalysisPoint(item.testDailyGasProduction(), drawdown,
@@ -82,9 +80,9 @@ public class ModifiedIsochronalExponentialCalculator {
             reliability += "；产能指数n超出常用工程范围[0.5,1]";
         }
         String expression = switch (request.pressureMethod()) {
-            case "pseudo-pressure" -> "m(Pr)-m(Pwf)";
-            case "pressure-squared" -> "Pr²-Pwf²";
-            default -> "Pr-Pwf";
+            case "pseudo-pressure" -> "injection".equals(request.operationType()) ? "m(Pwf)-m(Pr)" : "m(Pr)-m(Pwf)";
+            case "pressure-squared" -> "injection".equals(request.operationType()) ? "Pwf²-Pr²" : "Pr²-Pwf²";
+            default -> "injection".equals(request.operationType()) ? "Pwf-Pr" : "Pr-Pwf";
         };
         String equation = String.format(Locale.ROOT, "qsc = %.6g × [%s]^%.6g",
                 stableCoefficient, expression, transientRegression.exponent());
@@ -182,8 +180,7 @@ public class ModifiedIsochronalExponentialCalculator {
             for (int pointNumber = 0; pointNumber <= 40; pointNumber++) {
                 double flowingPressure = formationPressure -
                         (formationPressure - minimumFlowingPressure) * pointNumber / 40.0;
-                double drawdown = potential(formationPressure, request.pressureMethod(), pseudo) -
-                        potential(flowingPressure, request.pressureMethod(), pseudo);
+                double drawdown = pressureFunctionDifference(formationPressure, flowingPressure, request, pseudo);
                 double flowRate = drawdown > 0 ? coefficient * Math.pow(drawdown, exponent) : 0;
                 points.add(new IprPoint(flowRate, flowingPressure, null));
             }
@@ -280,6 +277,13 @@ public class ModifiedIsochronalExponentialCalculator {
     }
 
     private boolean finite(Double value) { return value != null && Double.isFinite(value); }
+    private double pressureFunctionDifference(double reservoirPressure, double flowingPressure,
+                                              CalculateRequest request, List<PseudoPressurePoint> pseudo) {
+        double reservoirPotential = potential(reservoirPressure, request.pressureMethod(), pseudo);
+        double flowingPotential = potential(flowingPressure, request.pressureMethod(), pseudo);
+        return "injection".equals(request.operationType())
+                ? flowingPotential - reservoirPotential : reservoirPotential - flowingPotential;
+    }
     private void error(String message) { throw new BusinessException(400, message); }
     private record AnalysisPoint(double flowRate, double drawdown, boolean stable) {}
     private record Regression(double coefficient, double exponent, double rSquared) {}
