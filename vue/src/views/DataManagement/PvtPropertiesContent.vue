@@ -208,37 +208,54 @@ const handleSave = async () => {
     岩石性质: 'rock'
   }
   const propertyKind = kindByTab[activePropertyTab.value]
-  const section = propertyKind === 'gas'
-    ? (activeGasResultTab.value === '结果分析图' ? 'result' : 'input')
+  const resultRows = propertyKind === 'gas'
+    ? importedGasResultRows.value
     : propertyKind === 'water'
-      ? (activeWaterResultTab.value === '结果分析图' ? 'result' : 'input')
-      : importedRockResultRows.value.length ? 'result' : 'input'
+      ? importedWaterResultRows.value
+      : importedRockResultRows.value
 
   try {
-    const content = propertyKind === 'gas'
-      ? buildGasSavePayload(section)
-      : propertyKind === 'water'
-        ? buildWaterSavePayload(section)
-        : buildRockSavePayload(section)
     saving.value = true
-    const response = await pvtStorageApi.save({
+    const basePayload = {
       projectId: Number(props.projectId),
       gasReservoirId: Number(props.gasReservoirId),
       wellName: props.wellName,
       pvtNo: Number(props.pvtIndex),
       pvtName: `PVT性质${props.pvtIndex}`,
-      propertyKind,
-      section,
-      sourceType: section === 'result' ? 'calculation' : 'manual',
-      ...content
+      propertyKind
+    }
+    const buildPayload = section => propertyKind === 'gas'
+      ? buildGasSavePayload(section)
+      : propertyKind === 'water'
+        ? buildWaterSavePayload(section)
+        : buildRockSavePayload(section)
+
+    // 顶部“保存”代表保存当前性质的完整快照，不能因底部停留在“数据列表”而丢掉已计算结果。
+    const inputResponse = await pvtStorageApi.save({
+      ...basePayload,
+      section: 'input',
+      sourceType: 'manual',
+      ...buildPayload('input')
     })
-    const savedRows = response?.data?.savedRows ?? 0
+    let finalResponse = inputResponse
+    let resultSavedRows = 0
+    if (Array.isArray(resultRows) && resultRows.length) {
+      finalResponse = await pvtStorageApi.save({
+        ...basePayload,
+        section: 'result',
+        sourceType: 'calculation',
+        ...buildPayload('result')
+      })
+      resultSavedRows = finalResponse?.data?.savedRows ?? 0
+    }
+    const inputSavedRows = inputResponse?.data?.savedRows ?? 0
     emit('saved', {
-      pvtId: response?.data?.pvtId,
+      pvtId: finalResponse?.data?.pvtId ?? inputResponse?.data?.pvtId,
       pvtNo: Number(props.pvtIndex),
       wellName: props.wellName
     })
-    ElMessage.success(`${activePropertyTab.value}${section === 'result' ? '结果' : '数据'}已保存（${savedRows}条）`)
+    const resultMessage = resultSavedRows ? `，计算结果${resultSavedRows}条` : ''
+    ElMessage.success(`${activePropertyTab.value}已保存（数据${inputSavedRows}条${resultMessage}）`)
   } catch (error) {
     ElMessage.error(error?.msg || error?.response?.data?.msg || error.message || 'PVT数据保存失败')
   } finally {

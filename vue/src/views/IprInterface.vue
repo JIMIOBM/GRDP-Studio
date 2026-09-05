@@ -80,7 +80,7 @@ import {
 
 // 当前工作台所使用的项目和气藏。
 const PROJECT_ID = 6
-const GAS_RESERVOIR_ID = 5
+const GAS_RESERVOIR_ID = 4
 const router = useRouter()
 const FLOW_BALANCE_NODE_TYPE = NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure
 

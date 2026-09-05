@@ -81,7 +81,7 @@ const props = defineProps({
 const route = useRoute()
 const router = useRouter()
 const PROJECT_ID = 6
-const GAS_RESERVOIR_ID = 5
+const GAS_RESERVOIR_ID = 4
 const MODIFIED_ISOCHRONAL_PROJECT_ID = 6
 const MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID = 4
 
@@ -277,10 +277,11 @@ const loadPvtOptions = async (preferredPvtId = null) => {
     const records = unwrapData(await pvtStorageApi.list(
       PROJECT_ID, GAS_RESERVOIR_ID, selectedWellName.value
     )) || []
-    databasePvtRecords.value = records
-    const preferred = records.find(item => String(item.pvtId) === String(preferredPvtId))
-    const current = records.find(item => String(item.pvtId) === String(selectedPvtTable.value))
-    selectedPvtTable.value = String((preferred || current || records[0])?.pvtId || '')
+    const usableRecords = records.filter(item => Number(item.pvtNo) === 1)
+    databasePvtRecords.value = usableRecords
+    // 回压试井固定使用当前井的 PVT性质1，不允许切换为其他编号。
+    const match = usableRecords[0]
+    selectedPvtTable.value = String(match?.pvtId || '')
     await loadSelectedPvtDetail()
   } catch (error) {
     selectedPvtTable.value = ''
@@ -966,7 +967,7 @@ const saveCalculation = async () => {
 
 const handleCalculate = async () => {
   if (calculationMethod.value === '拟压力' && !selectedPvtTable.value) {
-    ElMessage.warning('请选择PVT表')
+    ElMessage.warning('请先计算并保存PVT表')
     return
   }
   if (!selectedDataTable.value) {
@@ -1182,8 +1183,8 @@ onBeforeUnmount(() => window.removeEventListener('click', closeStableContextMenu
                 <div class="parameter-form">
                   <label class="field-group">
                     <span>选择PVT表</span>
-                    <select v-model="selectedPvtTable" @change="loadSelectedPvtDetail">
-                      <option value="" disabled>{{ pvtTableOptions.length ? '请选择PVT性质' : '当前井暂无PVT性质' }}</option>
+                    <select v-model="selectedPvtTable" disabled>
+                      <option value="" disabled>PVT性质1</option>
                       <option v-for="option in pvtTableOptions" :key="option.value" :value="option.value">
                         {{ option.label }}
                       </option>

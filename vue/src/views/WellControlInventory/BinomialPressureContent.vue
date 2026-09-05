@@ -21,20 +21,35 @@ const getStoredToken = () => {
   }
 }
 
-const getDeliverabilityTest = (projectId, gasReservoirId, wellName) =>
-  axios.get(
-    `/docker-api/projects/${projectId}/gasreservoirs/${gasReservoirId}/wells/${encodeURIComponent(wellName)}/deliverabilitytestdata`,
-    {
-      params: { page: 1, size: -1 },
-      timeout: 30000,
-      withCredentials: true,
-      headers: {
-        'Process-Env': 'prod',
-        'X-Project-Id': String(projectId),
-        ...(getStoredToken() ? { token: getStoredToken() } : {})
-      }
+// 当前工作台属于气藏 5，但原平台的历史产能试井数据仍归档在气藏 4。
+// 优先读取当前气藏；仅当接口明确返回 404 时回退历史归档气藏，避免影响
+// 当前气藏下的计算、保存及其他数据请求。
+const DELIVERABILITY_ARCHIVE_RESERVOIR_ID = 4
+const requestDeliverabilityTest = (projectId, gasReservoirId, wellName) => axios.get(
+  `/docker-api/projects/${projectId}/gasreservoirs/${gasReservoirId}/wells/${encodeURIComponent(wellName)}/deliverabilitytestdata`,
+  {
+    params: { page: 1, size: -1 },
+    timeout: 30000,
+    withCredentials: true,
+    headers: {
+      'Process-Env': 'prod',
+      'X-Project-Id': String(projectId),
+      ...(getStoredToken() ? { token: getStoredToken() } : {})
     }
-  )
+  }
+)
+
+const getDeliverabilityTest = async (projectId, gasReservoirId, wellName) => {
+  try {
+    return await requestDeliverabilityTest(projectId, gasReservoirId, wellName)
+  } catch (error) {
+    if (
+      error.response?.status !== 404 ||
+      Number(gasReservoirId) === DELIVERABILITY_ARCHIVE_RESERVOIR_ID
+    ) throw error
+    return requestDeliverabilityTest(projectId, DELIVERABILITY_ARCHIVE_RESERVOIR_ID, wellName)
+  }
+}
 
 const props = defineProps({
   wellNames: { type: Array, default: () => [] },
@@ -439,6 +454,16 @@ const createBlankRow = (sequence) => ({
   flowingPressure: null
 })
 
+const swapInputPressureColumns = () => {
+  inputRows.value.forEach(row => {
+    const recoveryPressure = row.recoveryPressure
+    row.recoveryPressure = row.flowingPressure
+    row.flowingPressure = recoveryPressure
+  })
+  result.value = null
+  activePanel.value = 'input'
+}
+
 const applySourceRows = () => {
   originalInputSyncKey = ''
   const matching = sourceRows.value.filter(row => row.testType === activeTestType.value)
@@ -451,6 +476,7 @@ const applySourceRows = () => {
     const count = activeTestType.value === 'one-point' ? 1 : 4
     inputRows.value = Array.from({ length: count }, (_, index) => createBlankRow(index + 1))
   }
+  if (operationType.value === 'injection') swapInputPressureColumns()
 
   const pressure = inputRows.value
     .map(row => row.recoveryPressure)
@@ -2714,6 +2740,7 @@ watch(() => props.externalCalculationResult, value => {
 watch(() => props.externalOperationType, value => {
   const normalized = value === 'injection' ? 'injection' : 'production'
   if (operationType.value === normalized) return
+  swapInputPressureColumns()
   operationType.value = normalized
   persistedIsochronalDetail.value = null
   result.value = null
@@ -2802,7 +2829,7 @@ onBeforeUnmount(() => {
             </el-radio-group>
           </el-form-item>
           <el-form-item label="注采类型">
-            <el-radio-group v-model="operationType">
+            <el-radio-group v-model="operationType" @change="swapInputPressureColumns">
               <el-radio label="production">采气</el-radio>
               <el-radio
                 label="injection"
