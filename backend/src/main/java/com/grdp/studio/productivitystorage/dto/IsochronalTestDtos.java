@@ -52,6 +52,7 @@ public final class IsochronalTestDtos {
 
     public record Result(
             @NotBlank String calculationResultType,
+            String pressureMethod,
             Double darcyCoefficient,
             Double nonDarcyCoefficient,
             Double productivityCoefficient,
@@ -73,5 +74,6 @@ public final class IsochronalTestDtos {
     public record IprPoint(@NotNull Double gasProduction,
                            @NotNull Double bottomHoleFlowingPressure, String label) {}
 
-    public record Detail(Summary record, Input input, String pressureMethod, Result result) {}
+    public record Detail(Summary record, Input input, String pressureMethod,
+                         Result result, List<Result> results) {}
 }

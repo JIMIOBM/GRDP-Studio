@@ -43,6 +43,7 @@ import {
 import {
   loadAllOwnedProductivityTestTreeNodes,
   loadOwnedProductivityTestTreeNodes,
+  OWNED_PRODUCTIVITY_METHOD_NODE_TYPES,
   OWNED_PRODUCTIVITY_METHOD_NODE_TYPE,
   OWNED_PRODUCTIVITY_RECORD_NODE_TYPE
 } from '@/utils/ownedProductivityTestTree'
@@ -80,7 +81,7 @@ const props = defineProps({
 const route = useRoute()
 const router = useRouter()
 const PROJECT_ID = 6
-const GAS_RESERVOIR_ID = 4
+const GAS_RESERVOIR_ID = 5
 const MODIFIED_ISOCHRONAL_PROJECT_ID = 6
 const MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID = 4
 
@@ -220,13 +221,14 @@ watch([calculationMethod, calculationResult], () => {
 
 watch(operationType, value => {
   if (!isOwnedPressureMethod.value) return
+  // 注采方向变化后，旧方向的结果不能继续显示或保存。
+  calculationOutput.value = null
+  resultDirty.value = false
   const storedOperationType = storedProductivityTest.value?.operationType
   if (!activeProductivityTestId.value || !storedOperationType || storedOperationType === value) return
   activeProductivityTestId.value = null
   activeEvaluationId.value = null
   storedProductivityTest.value = null
-  calculationOutput.value = null
-  resultDirty.value = false
   savedInputSignature.value = ''
   pressureWorkspaceKey.value += 1
 })
@@ -666,7 +668,8 @@ const handleSidebarSelect = async node => {
   // “产能试井”仅作为目录层级，不代表一条真实试井记录。
   if (isProductivityTestNode || node.type === ISOCHRONAL_METHOD_NODE_TYPE) return
 
-  if (node.type === OWNED_PRODUCTIVITY_METHOD_NODE_TYPE) {
+  if (node.type === OWNED_PRODUCTIVITY_METHOD_NODE_TYPE ||
+      OWNED_PRODUCTIVITY_METHOD_NODE_TYPES.has(node.type)) {
     selectedWellName.value = node.wellName || selectedWellName.value
     activeModule.value = '产能试井'
     activeMethod.value = node.pageMethod || (node.testMethod === 'one-point' ? '一点法' : '回压试井')
@@ -884,13 +887,13 @@ const resultIprPoints = snapshot => (snapshot.result.iprCurves || []).flatMap((c
 
 const saveCalculation = async () => {
   if (!isOwnedPressureMethod.value || savingResult.value) return
-  if (!selectedPvtRecord.value) {
-    ElMessage.warning('请选择PVT表')
-    return
-  }
   const snapshot = pressureContentRef.value?.getPersistenceSnapshot?.()
   if (!snapshot?.result || !snapshot.input?.points?.length) {
     ElMessage.warning('请先完成计算')
+    return
+  }
+  if (snapshot.pressureMethod === 'pseudo-pressure' && !selectedPvtRecord.value) {
+    ElMessage.warning('拟压力方法必须选择PVT表')
     return
   }
   savingResult.value = true
@@ -902,7 +905,7 @@ const saveCalculation = async () => {
       projectId: PROJECT_ID,
       gasReservoirId: GAS_RESERVOIR_ID,
       wellName: selectedWellName.value,
-      pvtId: Number(selectedPvtTable.value),
+      pvtId: selectedPvtRecord.value ? Number(selectedPvtTable.value) : null,
       operationType: operationType.value,
       testMethod: pressureTestType.value,
       testNo: null,
@@ -1009,6 +1012,10 @@ const handleSaveIsochronal = async () => {
     })
     const record = response?.data
     activeProductivityTestId.value = Number(record.testId)
+    const detail = (await productivityStorageApi.getIsochronal(
+      record.testId, PROJECT_ID, GAS_RESERVOIR_ID
+    ))?.data
+    pressureContentRef.value?.restorePersisted?.(detail)
     const nodes = await loadIsochronalNodes(selectedWellName.value, { expand: true })
     const savedNode = nodes.find(item => Number(item.testId) === Number(record.testId))
     if (savedNode) workspaceActiveNodeId.value = savedNode.id

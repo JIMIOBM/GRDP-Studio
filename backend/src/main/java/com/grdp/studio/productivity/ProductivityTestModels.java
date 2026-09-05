@@ -40,19 +40,19 @@ public final class ProductivityTestModels {
                          List<ChartPoint> chartPoints, List<IprPoint> iprPoints) {}
 
     public record Input(Double maximumFormationPressure, Double formationTemperature,
-                        Double onePointAlpha, @NotBlank String gasType,
-                        @NotNull @Positive Double specificGravity,
+                        Double onePointAlpha, String gasType,
+                        Double specificGravity,
                         Double hydrogenSulfide, Double carbonDioxide, Double nitrogen,
                         Double condensateOilDensity, String modificationMethod,
                         String deviationFactorMethod, String viscosityMethod) {}
 
-    public record Detail(long id, long pvtId, int testNo, String testName, LocalDate testDate,
+    public record Detail(long id, Long pvtId, int testNo, String testName, LocalDate testDate,
                          String operationType, String testMethod, String wellName, String wellType,
                          String status, Input input, List<InputItem> inputItems, Result result,
                          List<EvaluationReference> evaluations, List<Result> results) {}
 
     public record SaveRequest(Long testId, @Positive long projectId, @Positive long gasReservoirId,
-                              @NotBlank String wellName, @Positive long pvtId,
+                              @NotBlank String wellName, @Positive Long pvtId,
                               @NotBlank String operationType, @NotBlank String testMethod,
                               Integer testNo, @NotNull LocalDate testDate, String wellType,
                               boolean replaceInput, @Valid @NotNull Input input,
