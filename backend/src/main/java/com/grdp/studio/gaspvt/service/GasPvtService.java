@@ -325,6 +325,239 @@ public class GasPvtService {
         return new GasCurveThreeResponse(toolboxId, List.copyOf(points));
     }
 
+    /**
+     * 给诊断曲线模块使用。
+     *
+     * <p>根据单个压力计算天然气 Z 因子。</p>
+     *
+     * <p>内部委托给批量版本，保证算法和输入映射只有一套实现。</p>
+     */
+    public double calculateZ(
+            long projectId,
+            double pressure,
+            double temperature,
+            int gasType,
+            double specificGravity,
+            double co2MoleFraction,
+            double n2MoleFraction,
+            double h2SMoleFraction,
+            int modificationMethod,
+            int deviationFactorMethod,
+            int viscosityMethod,
+            String token,
+            String cookie,
+            String processEnv
+    ) {
+        return calculateZValues(
+                projectId,
+                List.of(pressure),
+                temperature,
+                gasType,
+                specificGravity,
+                co2MoleFraction,
+                n2MoleFraction,
+                h2SMoleFraction,
+                modificationMethod,
+                deviationFactorMethod,
+                viscosityMethod,
+                token,
+                cookie,
+                processEnv
+        ).get(0);
+    }
+
+    /**
+     * 给诊断曲线模块使用。
+     *
+     * <p>批量计算一组压力对应的天然气 Z 因子。</p>
+     *
+     * <p>同一条诊断曲线只创建一次 GasPVT_DeviationFactor toolbox，
+     * 后续压力点复用同一个 toolbox，避免原先每一个压力点都创建 toolbox。</p>
+     */
+    public List<Double> calculateZValues(
+            long projectId,
+            List<Double> pressures,
+            double temperature,
+            int gasType,
+            double specificGravity,
+            double co2MoleFraction,
+            double n2MoleFraction,
+            double h2SMoleFraction,
+            int modificationMethod,
+            int deviationFactorMethod,
+            int viscosityMethod,
+            String token,
+            String cookie,
+            String processEnv
+    ) {
+
+        if (pressures == null || pressures.isEmpty()) {
+            throw new BusinessException(400, "Z因子计算压力点不能为空");
+        }
+
+        if (!Double.isFinite(specificGravity) || specificGravity <= 0) {
+            throw new BusinessException(400, "天然气相对密度必须大于0");
+        }
+
+        validateMoleFraction("CO2摩尔分数", co2MoleFraction);
+        validateMoleFraction("N2摩尔分数", n2MoleFraction);
+        validateMoleFraction("H2S摩尔分数", h2SMoleFraction);
+
+        if (gasType < 0 || gasType > 2) {
+            throw new BusinessException(400, "gasType 只能是 0、1、2");
+        }
+
+        if (modificationMethod < 0 || modificationMethod > 1) {
+            throw new BusinessException(400, "modificationMethod 只能是 0、1");
+        }
+
+        if (deviationFactorMethod < 0 || deviationFactorMethod > 2) {
+            throw new BusinessException(400, "deviationFactorMethod 只能是 0、1、2");
+        }
+
+        if (viscosityMethod < 0 || viscosityMethod > 2) {
+            throw new BusinessException(400, "viscosityMethod 只能是 0、1、2");
+        }
+
+        Map<String, String> headers =
+                forwardedHeaders(
+                        token,
+                        cookie,
+                        processEnv
+                );
+
+        long toolboxId =
+                createToolbox(
+                        DEVIATION_FACTOR_ALGORITHM,
+                        projectId,
+                        headers
+                );
+
+        List<Double> zFactors =
+                new ArrayList<>(pressures.size());
+
+        for (int index = 0; index < pressures.size(); index++) {
+
+            Double pressureValue = pressures.get(index);
+
+            if (pressureValue == null
+                    || !Double.isFinite(pressureValue)
+                    || pressureValue <= 0) {
+
+                throw new BusinessException(
+                        400,
+                        "第 " + (index + 1) + " 个压力点必须大于0"
+                );
+            }
+
+            double calculationPressure =
+                    Math.abs(pressureValue) < 1e-12
+                            ? ZERO_PRESSURE_CALCULATION_EPSILON_MPA
+                            : pressureValue;
+
+            Map<String, Object> input =
+                    buildZInput(
+                            calculationPressure,
+                            temperature,
+                            gasType,
+                            specificGravity,
+                            co2MoleFraction,
+                            n2MoleFraction,
+                            h2SMoleFraction,
+                            modificationMethod,
+                            deviationFactorMethod,
+                            viscosityMethod
+                    );
+
+            JsonNode result =
+                    calculateAndGetResult(
+                            toolboxId,
+                            input,
+                            headers
+                    );
+
+            double z =
+                    extractCurveValue(
+                            result,
+                            List.of(
+                                    "gasDeviationFactor",
+                                    "naturalGasDeviationFactor",
+                                    "deviationFactor",
+                                    "zFactor",
+                                    "z"
+                            ),
+                            "天然气偏差系数Z"
+                    );
+
+            if (!Double.isFinite(z) || z <= 0) {
+                throw new BusinessException(
+                        502,
+                        "第 " + (index + 1) + " 个压力点的Z因子计算结果异常"
+                );
+            }
+
+            zFactors.add(z);
+        }
+
+        return List.copyOf(zFactors);
+    }
+
+    private Map<String, Object> buildZInput(
+            double pressure,
+            double temperature,
+            int gasType,
+            double specificGravity,
+            double co2MoleFraction,
+            double n2MoleFraction,
+            double h2SMoleFraction,
+            int modificationMethod,
+            int deviationFactorMethod,
+            int viscosityMethod
+    ) {
+
+        Map<String, Object> input =
+                new LinkedHashMap<>();
+
+        input.put("gasType", gasType);
+        input.put("specificGravity", specificGravity);
+        input.put("co2MoleFraction", co2MoleFraction);
+        input.put("n2MoleFraction", n2MoleFraction);
+        input.put("h2SMoleFraction", h2SMoleFraction);
+
+        input.put("pressure", pressure);
+        input.put("temperature", temperature);
+
+        /*
+         * 保持与现有 GasPVT toolbox 的输入约定一致。
+         */
+        input.put("originalPressure", 40);
+        input.put("pseudoPressure", 4e-8);
+        input.put("regularizedPseudoPressure", 40);
+        input.put("apparentPressure", 40);
+
+        input.put("modificationMethod", modificationMethod);
+        input.put("deviationFactorMethod", deviationFactorMethod);
+        input.put("viscosityMethod", viscosityMethod);
+
+        return input;
+    }
+
+    private void validateMoleFraction(
+            String name,
+            double value
+    ) {
+        if (!Double.isFinite(value)
+                || value < 0
+                || value > 1) {
+
+            throw new BusinessException(
+                    400,
+                    name + "必须位于0~1之间"
+            );
+        }
+    }
+
+
     private int calculatePointCount(GasViscosityCurveRequest request) {
         int pointCount = (int) Math.floor(
                 (request.pressureEnd() - request.pressureStart()) / request.pressureStep() + 1e-9
