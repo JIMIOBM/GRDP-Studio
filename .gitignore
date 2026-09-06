@@ -10,3 +10,6 @@ vue/*.log
 backend/target/
 backend/.m2/
 backend/.env
+backend/*.log
+outputs/
+docs/

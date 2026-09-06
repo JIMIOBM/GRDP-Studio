@@ -192,6 +192,12 @@ public class PvtStorageService {
         if (wellPvtMapper.countProductivityTestReferences(pvtId) > 0) {
             throw new BusinessException(409, "该PVT已被产能试井引用，不能直接删除");
         }
+        if (wellPvtMapper.countTemperatureReferences(pvtId) > 0) {
+            throw new BusinessException(409, "该PVT已被温度方案引用，不能直接删除");
+        }
+        if (wellPvtMapper.countPressureReferences(pvtId) > 0) {
+            throw new BusinessException(409, "该PVT已被压力折算方案引用，不能直接删除");
+        }
 
         // 显式删除子表，使该功能不依赖不同环境中外键级联配置是否完全一致。
         gasInputMapper.delete(new LambdaQueryWrapper<PvtGasInputEntity>()

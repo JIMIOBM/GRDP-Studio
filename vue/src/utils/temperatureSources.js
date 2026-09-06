@@ -1,92 +1,61 @@
+// Source normalization is kept separate from the panel so field selection and units can be checked.
 export const unpack = response => response?.data?.data ?? response?.data ?? response ?? {}
-
-export const numberOf = value => {
-  if (value === null || value === undefined || value === '') return null
-  const number = Number(value)
-  return Number.isFinite(number) ? number : null
+export const rowsOf = response => {
+  const value = unpack(response)
+  const rows = Array.isArray(value) ? value : value.items ?? value.rows ?? value.datas ?? []
+  const fields = value.fields ?? []
+  return rows.map(row => Array.isArray(row)
+    ? Object.fromEntries(fields.map((field, index) => [field.name, row[index]])) : row)
 }
-
-export const sourceCollection = response => {
-  const payload = unpack(response)
-  return {
-    items: Array.isArray(payload)
-      ? payload
-      : Array.isArray(payload.items)
-        ? payload.items
-        : Array.isArray(payload.rows)
-          ? payload.rows
-          : Array.isArray(payload.records)
-            ? payload.records
-            : [],
-    fields: Array.isArray(payload.fields) ? payload.fields : []
-  }
-}
-
-const normalizedKey = value => String(value ?? '').replace(/[\s_()（）/·-]/g, '').toLowerCase()
-
-const fieldValue = (row, aliases, fields = []) => {
-  if (!row || typeof row !== 'object') return null
-  const expected = new Set(aliases.map(normalizedKey))
-  for (const [key, value] of Object.entries(row)) {
-    if (expected.has(normalizedKey(key))) return numberOf(value)
-  }
-
-  // Some original-platform responses use field metadata as the display-name map.
-  for (const field of fields) {
-    const names = [field?.name, field?.name_cn, field?.field, field?.label]
-    if (!names.some(name => expected.has(normalizedKey(name)))) continue
-    const key = field?.name ?? field?.field
-    if (key && Object.hasOwn(row, key)) return numberOf(row[key])
-  }
+export const read = (row, ...keys) => {
+  for (const key of keys) if (row?.[key] !== null && row?.[key] !== undefined && row?.[key] !== '') return row[key]
   return null
 }
+export const numberOf = value => value !== null && value !== '' && value !== undefined && Number.isFinite(Number(value)) ? Number(value) : null
+export const wellRows = (rows, wellName, scoped = false) => rows.filter(row => {
+  const name = read(row, 'wellName', 'well_name', '井名')
+  return name === null ? scoped : String(name).trim() === wellName.trim()
+})
+export const latestRow = rows => [...rows].sort((a, b) =>
+  String(read(b, 'date', 'productionDate', 'production_date') ?? '').localeCompare(String(read(a, 'date', 'productionDate', 'production_date') ?? '')))[0]
 
-const dateValue = row => {
-  const value = row?.date ?? row?.productionDate ?? row?.recordDate ?? row?.日期
-  const timestamp = Date.parse(value)
-  return Number.isFinite(timestamp) ? timestamp : Number.NEGATIVE_INFINITY
+export function deviationValues(response, wellName) {
+  const rows = wellRows(rowsOf(response), wellName, true).map(row => ({
+    depth: numberOf(read(row, 'measuredDepth', 'measured_depth')),
+    angle: numberOf(read(row, 'inclination', '井斜角'))
+  })).filter(row => row.depth !== null && row.depth > 0)
+  const deepest = rows.sort((a, b) => b.depth - a.depth)[0]
+  if (!deepest || deepest.angle === null) throw new Error('井斜数据缺少测深或井斜角')
+  return deepest
 }
 
-const newestFirst = rows => rows
-  .map((row, index) => ({ row, index, timestamp: dateValue(row) }))
-  .sort((left, right) => right.timestamp - left.timestamp || right.index - left.index)
-  .map(item => item.row)
-
-const firstNumber = (rows, aliases, fields) => {
-  for (const row of rows) {
-    const value = fieldValue(row, aliases, fields)
-    if (value !== null) return value
-  }
-  return null
+export function tubingRows(response, wellName) {
+  const rows = wellRows(rowsOf(response), wellName, true)
+    .filter(row => /油管|tubing/i.test(String(read(row, 'type', 'casing_type') ?? '')))
+  const latest = latestRow(rows)
+  if (!latest) throw new Error('完井数据没有可识别的油管记录（type/casing_type），不能用套管内径替代')
+  const date = read(latest, 'date')
+  return rows.filter(row => read(row, 'date') === date).map((row, index) => ({
+    key: String(read(row, 'id') ?? index),
+    diameter: numberOf(read(row, 'innerDiameter', 'inner_diameter')),
+    roughness: numberOf(read(row, 'innerRoughness', 'inner_roughness', '内壁粗糙度')),
+    label: `${read(row, 'topMeasuredDepth', 'top_measured_depth') ?? '?'}–${read(row, 'bottomMeasuredDepth', 'bottom_measured_depth') ?? '?'} m · ${read(row, 'innerDiameter', 'inner_diameter') ?? '?'} mm`,
+    date
+  }))
 }
 
-const COMMON_RATE_FIELDS = {
-  qGas: ['dailyGasProduction', 'daily_gas_production', 'gasProduction', 'gasRate', '日产气量', '气产量'],
-  qLiq: ['dailyWaterProduction', 'daily_water_production', 'waterProduction', 'liquidProduction', '日产水量', '水产量']
+export function productionValues(row, position, fields = []) {
+  const bottom = position === 'bottomhole'
+  const pressure = bottom
+    ? read(row, 'measuredBottomHolePressure', 'measured_bottom_hole_pressure', 'bottomHolePressure', 'bottom_hole_pressure')
+    : read(row, 'wellHeadTubingPressure', 'well_head_tubing_pressure')
+  const temperature = bottom
+    ? read(row, 'measuredBottomHoleTemperature', 'measured_bottom_hole_temperature', 'bottomHoleTemperature', 'bottom_hole_temperature')
+    : read(row, 'wellHeadTubingTemperature', 'well_head_tubing_temperature')
+  let gas = numberOf(read(row, 'dailyGasProduction', 'daily_gas_production'))
+  const gasUnit = fields.find(f => ['dailyGasProduction', 'daily_gas_production'].includes(f.name))?.unit_label
+  // The project's production table uses 10^4 m³/d. Convert only an explicit plain m³/d source.
+  if (gasUnit && /^(m³|m3|m\^3)\/(d|天|日)$/.test(gasUnit.replace(/\s/g, ''))) gas = gas === null ? null : gas / 10000
+  if (gasUnit && !/^(m³|m3|m\^3)\/(d|天|日)$/.test(gasUnit.replace(/\s/g, '')) && !/10[⁴^4]|万/.test(gasUnit)) throw new Error(`未识别日产气量单位：${gasUnit}`)
+  return { fWh: numberOf(pressure), tWh: numberOf(temperature), qGas: gas, qLiq: numberOf(read(row, 'dailyWaterProduction', 'daily_water_production')) }
 }
-
-const POSITION_FIELDS = {
-  wellhead: {
-    fWh: ['wellHeadTubingPressure', 'well_head_tubing_pressure', 'wellheadPressure', 'tubingPressure', '井口油压'],
-    tWh: ['wellHeadTubingTemperature', 'well_head_tubing_temperature', 'wellheadTemperature', 'tubingTemperature', '井口油温']
-  },
-  bottomhole: {
-    fWh: ['measuredBottomHolePressure', 'measured_bottom_hole_pressure', 'calculatedBottomHolePressure', 'calculated_bottom_hole_pressure', 'bottomHolePressure', 'bottomPressure', '井底压力', '井底流压'],
-    tWh: ['measuredBottomHoleTemperature', 'measured_bottom_hole_temperature', 'calculatedBottomHoleTemperature', 'calculated_bottom_hole_temperature', 'bottomHoleTemperature', 'bottomTemperature', '井底温度']
-  }
-}
-
-export const productionValues = (production, position = 'wellhead', fields = []) => {
-  const collection = sourceCollection(production)
-  const rows = newestFirst(collection.items)
-  const metadata = fields.length ? fields : collection.fields
-  const positionFields = POSITION_FIELDS[position] ?? POSITION_FIELDS.wellhead
-  return {
-    fWh: firstNumber(rows, positionFields.fWh, metadata),
-    tWh: firstNumber(rows, positionFields.tWh, metadata),
-    qGas: firstNumber(rows, COMMON_RATE_FIELDS.qGas, metadata),
-    qLiq: firstNumber(rows, COMMON_RATE_FIELDS.qLiq, metadata)
-  }
-}
-
-export const readSourceNumber = (row, aliases, fields = []) => fieldValue(row, aliases, fields)

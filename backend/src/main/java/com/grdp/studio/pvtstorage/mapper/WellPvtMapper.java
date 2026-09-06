@@ -17,4 +17,10 @@ public interface WellPvtMapper extends BaseMapper<WellPvtEntity> {
             WHERE pvt_id = #{pvtId}
             """)
     long countProductivityTestReferences(@Param("pvtId") long pvtId);
+
+    @Select("SELECT COUNT(*) FROM project_well_temperature WHERE pvt_id = #{pvtId}")
+    long countTemperatureReferences(@Param("pvtId") long pvtId);
+
+    @Select("SELECT COUNT(*) FROM project_well_pressure_conversion WHERE pvt_id = #{pvtId}")
+    long countPressureReferences(@Param("pvtId") long pvtId);
 }

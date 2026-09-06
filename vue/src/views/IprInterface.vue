@@ -681,6 +681,7 @@ const createWellborePvtPropertyNodes = (wellName, wellId, sourceNodes = []) =>
   sourceNodes.map(node => ({
     ...node,
     id: `${wellId || wellName}-wellbore-pvt-${node.pvtId || node.pvtIndex}`,
+    label: String(node.label || '').replace(/^PVT性质/, 'PVT模型'),
     pvtEntry: PVT_ENTRY_WELLBORE,
     children: []
   }))
@@ -706,7 +707,7 @@ const syncWellborePvtGroup = (well, sourceGroup, { create = false, expand = fals
     wellboreGroup.children.push(mirrorGroup)
   }
 
-  mirrorGroup.label = sourceGroup.label
+  mirrorGroup.label = 'PVT模型'
   mirrorGroup.children = createWellborePvtPropertyNodes(wellName, well.id, sourceGroup.children)
   if (expand) {
     const wellRoot = getWellGroup()
@@ -746,6 +747,25 @@ const createWellDataNodes = (wellName, wellId) =>
         }))
     }))
 
+const createDefaultWellboreNodes = (wellName, wellId) => [
+  {
+    id: `wellbore-structure-${wellName}`,
+    label: '井身结构',
+    type: 'wellbore-structure',
+    wellName,
+    children: []
+  },
+  {
+    id: `${wellId || wellName}-${WELLBORE_PVT_GROUP_TYPE}`,
+    label: 'PVT模型',
+    type: WELLBORE_PVT_GROUP_TYPE,
+    wellName,
+    pvtEntry: PVT_ENTRY_WELLBORE,
+    defaultExpanded: false,
+    children: []
+  }
+]
+
 const createEmptyWell = (wellName, wellId) => ({ //创建一口空井
   id: wellId || `well-${wellName}`,
   label: wellName,
@@ -760,7 +780,9 @@ const createEmptyWell = (wellName, wellId) => ({ //创建一口空井
     defaultExpanded: false,
     children: group.id === 'data-management'
       ? createWellDataNodes(wellName, wellId)
-      : []
+      : group.id === 'wellbore-capacity'
+        ? createDefaultWellboreNodes(wellName, wellId)
+        : []
   }))
 })
 
@@ -816,6 +838,13 @@ const ensureWell = (wellName, wellId) => { //确保井存在
         } else if (dataNode.children.length) {
           existingNode.children = dataNode.children
           existingNode.defaultExpanded = dataNode.defaultExpanded
+        }
+      })
+    } else if (group.id === 'wellbore-capacity') {
+      createDefaultWellboreNodes(wellName, wellItem.id).forEach(defaultNode => {
+        const existingNode = groupItem.children.find(item => item.type === defaultNode.type)
+        if (!existingNode) {
+          groupItem.children.push(defaultNode)
         }
       })
     }
@@ -1606,7 +1635,7 @@ const refreshPvtNodesForWell = async wellName => {
   // 目录固定存在，子节点每次整体替换并严格等于 project_well_pvt 查询结果。
   pvtGroup.children = createPvtPropertyNodes(wellName, well.id, records)
   pvtGroup.defaultExpanded = false
-  // 仅在用户通过顶部“PVT模型”创建过第二入口后维护镜像，避免默认改变目录结构。
+  // 井筒能力下的“PVT模型”固定存在，并与数据管理中的PVT数据库记录保持同步。
   syncWellborePvtGroup(well, pvtGroup)
   return pvtGroup.children
 }
