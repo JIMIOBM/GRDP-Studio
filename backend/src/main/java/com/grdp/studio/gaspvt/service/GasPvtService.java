@@ -49,8 +49,43 @@ public class GasPvtService {
     private static final int MAX_POINT_COUNT = 500;
     // 原算法不能稳定处理绝对零压力时使用的内部替代值；返回给前端的压力仍保持 0。
     private static final double ZERO_PRESSURE_CALCULATION_EPSILON_MPA = 1e-6;
+    private static final double PA_PER_MPA = 1_000_000d;
+    private static final double KELVIN_OFFSET = 273.15d;
+    private static final double FRACTION_PER_PERCENT = 0.01d;
 
     public record FlowGas(double density, double viscosity) {}
+    /**
+     * 井筒压力折算的请求内 PVT 会话。三个 toolbox 只创建一次，(P,T) 相同的
+     * 物性直接从本次请求缓存返回；不影响已有 flowSession 调用方。
+     */
+    public record FlowProperties(double volumeFactor, double density, double viscosity) {}
+    public java.util.function.BiFunction<Double, Double, FlowProperties> flowPropertiesSession(
+            GasViscosityCurveRequest base, String token, String cookie, String processEnv) {
+        validateRange(base);
+        var headers = forwardedHeaders(token, cookie, processEnv);
+        var cache = new java.util.HashMap<String, FlowProperties>();
+        long[] ids = {0, 0, 0};
+        return (pressure, temperature) -> {
+            synchronized (cache) {
+                String key = pressure + ":" + temperature;
+                if (cache.containsKey(key)) return cache.get(key);
+                if (ids[0] == 0) ids[0] = createToolbox(VOLUME_FACTOR_ALGORITHM, base.projectId(), headers);
+                if (ids[1] == 0) ids[1] = createToolbox(DENSITY_ALGORITHM, base.projectId(), headers);
+                if (ids[2] == 0) ids[2] = createToolbox(ALGORITHM, base.projectId(), headers);
+                var input = buildInput(base, pressure, VOLUME_FACTOR_ALGORITHM, temperature);
+                double bg = extractCurveValue(calculateAndGetResult(ids[0], input, headers), List.of("volumeFactor", "gasVolumeFactor"), "天然气体积系数");
+                input = buildInput(base, pressure, DENSITY_ALGORITHM, temperature);
+                double density = extractCurveValue(calculateAndGetResult(ids[1], input, headers), List.of("density"), "天然气密度");
+                input = buildInput(base, pressure, ALGORITHM, temperature);
+                double viscosity = extractViscosity(calculateAndGetResult(ids[2], input, headers));
+                if (!Double.isFinite(bg) || bg <= 0 || !Double.isFinite(density) || density <= 0 || !Double.isFinite(viscosity) || viscosity <= 0)
+                    throw new BusinessException(502, "天然气PVT物性无效");
+                var result = new FlowProperties(bg, density, viscosity);
+                cache.put(key, result);
+                return result;
+            }
+        };
+    }
     public java.util.function.BiFunction<Double, Double, FlowGas> flowSession(
             GasViscosityCurveRequest base, String token, String cookie, String processEnv) {
         validateRange(base);
@@ -63,9 +98,9 @@ public class GasPvtService {
                 if (cache.containsKey(key)) return cache.get(key);
                 if (ids[0] == 0) ids[0] = createToolbox(DENSITY_ALGORITHM, base.projectId(), headers);
                 if (ids[1] == 0) ids[1] = createToolbox(ALGORITHM, base.projectId(), headers);
-                var input = buildInput(base, pressure);
-                input.put("temperature", temperature);
+                var input = buildInput(base, pressure, DENSITY_ALGORITHM, temperature);
                 double density = extractCurveValue(calculateAndGetResult(ids[0], input, headers), List.of("density"), "天然气密度");
+                input = buildInput(base, pressure, ALGORITHM, temperature);
                 double viscosity = extractViscosity(calculateAndGetResult(ids[1], input, headers));
                 if (!Double.isFinite(density) || density <= 0 || !Double.isFinite(viscosity) || viscosity <= 0)
                     throw new BusinessException(502, "天然气物性无效");
@@ -122,7 +157,9 @@ public class GasPvtService {
             double calculationPressure = Math.abs(pressure) < 1e-12
                     ? ZERO_PRESSURE_CALCULATION_EPSILON_MPA
                     : pressure;
-            Map<String, Object> input = buildInput(request, calculationPressure);
+            Map<String, Object> input = buildInput(
+                    request, calculationPressure, ALGORITHM, request.temperature()
+            );
 
             originalPlatformClient.post(
                     "/api/toolbox/calc",
@@ -173,11 +210,14 @@ public class GasPvtService {
             double calculationPressure = Math.abs(pressure) < 1e-12
                     ? ZERO_PRESSURE_CALCULATION_EPSILON_MPA
                     : pressure;
-            Map<String, Object> input = buildInput(request, calculationPressure);
-
             JsonNode deviationFactorResult = calculateAndGetResult(
                     deviationFactorToolboxId,
-                    input,
+                    buildInput(
+                            request,
+                            calculationPressure,
+                            DEVIATION_FACTOR_ALGORITHM,
+                            request.temperature()
+                    ),
                     headers
             );
             double deviationFactor = extractCurveValue(
@@ -194,7 +234,12 @@ public class GasPvtService {
 
             JsonNode pseudoPressureResult = calculateAndGetResult(
                     pseudoPressureToolboxId,
-                    input,
+                    buildInput(
+                            request,
+                            calculationPressure,
+                            PSEUDO_PRESSURE_ALGORITHM,
+                            request.temperature()
+                    ),
                     headers
             );
             double pseudoPressure = extractCurveValue(
@@ -250,11 +295,14 @@ public class GasPvtService {
             double calculationPressure = Math.abs(pressure) < 1e-12
                     ? ZERO_PRESSURE_CALCULATION_EPSILON_MPA
                     : pressure;
-            Map<String, Object> input = buildInput(request, calculationPressure);
-
             JsonNode volumeFactorResult = calculateAndGetResult(
                     volumeFactorToolboxId,
-                    input,
+                    buildInput(
+                            request,
+                            calculationPressure,
+                            VOLUME_FACTOR_ALGORITHM,
+                            request.temperature()
+                    ),
                     headers
             );
             double volumeFactor = extractCurveValue(
@@ -265,7 +313,12 @@ public class GasPvtService {
 
             JsonNode densityResult = calculateAndGetResult(
                     densityToolboxId,
-                    input,
+                    buildInput(
+                            request,
+                            calculationPressure,
+                            DENSITY_ALGORITHM,
+                            request.temperature()
+                    ),
                     headers
             );
             double density = extractCurveValue(
@@ -308,7 +361,9 @@ public class GasPvtService {
         List<GasCurveThreePoint> points = new ArrayList<>(pointCount);
         for (int index = 0; index < pointCount; index++) {
             double pressure = request.pressureStart() + index * request.pressureStep();
-            Map<String, Object> input = buildInput(request, pressure);
+            Map<String, Object> input = buildInput(
+                    request, pressure, COMPRESSIBILITY_ALGORITHM, request.temperature()
+            );
             JsonNode result = calculateAndGetResult(toolboxId, input, headers);
             double compressibility = extractCurveValue(
                     result,
@@ -402,27 +457,35 @@ public class GasPvtService {
 
     private Map<String, Object> buildInput(
             GasViscosityCurveRequest request,
-            double pressure
+            double pressureMpa,
+            String algorithm,
+            double temperatureC
     ) {
         /*
          * 这里集中维护“本系统字段 -> 原平台字段”的映射。
-         * originalPressure 等 4 个参数是当前算法约定的固定值；界面可选项则使用请求中的编号。
+         * 当前页面使用 MPa、℃ 和百分数；原平台 toolbox 使用 Pa、K 和 0～1 摩尔分数。
+         * 各 toolbox 的输入结构并不相同，只发送该算法登记的字段，避免范围校验把
+         * 无关字段当成当前算法输入。
          */
         Map<String, Object> input = new LinkedHashMap<>();
         input.put("gasType", request.gasType());
         input.put("specificGravity", request.specificGravity());
-        input.put("co2MoleFraction", request.co2MoleFraction());
-        input.put("n2MoleFraction", request.n2MoleFraction());
-        input.put("h2SMoleFraction", request.h2SMoleFraction());
-        input.put("pressure", pressure);
-        input.put("temperature", request.temperature());
-        input.put("originalPressure", 40);
-        input.put("pseudoPressure", 4e-8);
-        input.put("regularizedPseudoPressure", 40);
-        input.put("apparentPressure", 40);
+        input.put("co2MoleFraction", request.co2MoleFraction() * FRACTION_PER_PERCENT);
+        input.put("n2MoleFraction", request.n2MoleFraction() * FRACTION_PER_PERCENT);
+        input.put("h2SMoleFraction", request.h2SMoleFraction() * FRACTION_PER_PERCENT);
+        input.put("pressure", pressureMpa * PA_PER_MPA);
+        input.put("temperature", temperatureC + KELVIN_OFFSET);
         input.put("modificationMethod", request.modificationMethod());
-        input.put("deviationFactorMethod", request.deviationFactorMethod());
-        input.put("viscosityMethod", request.viscosityMethod());
+
+        if (!COMPRESSIBILITY_ALGORITHM.equals(algorithm)) {
+            input.put("deviationFactorMethod", request.deviationFactorMethod());
+        }
+        if (ALGORITHM.equals(algorithm) || PSEUDO_PRESSURE_ALGORITHM.equals(algorithm)) {
+            input.put("viscosityMethod", request.viscosityMethod());
+        }
+        if (DENSITY_ALGORITHM.equals(algorithm) || PSEUDO_PRESSURE_ALGORITHM.equals(algorithm)) {
+            input.put("viscosity", 0d);
+        }
         return input;
     }
 

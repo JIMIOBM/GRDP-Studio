@@ -1,0 +1,1 @@
+package com.grdp.studio.wellbore.temperature.dto; import com.grdp.studio.wellbore.temperature.entity.*; import java.util.List; public record TemperatureRecordDetail(WellTemperatureEntity record,List<TemperatureProfileEntity> profile) {}
