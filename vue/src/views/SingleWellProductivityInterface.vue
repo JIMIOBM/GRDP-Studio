@@ -22,7 +22,9 @@ import ModifiedIsochronalContent from '@/views/SingleWellProductivity/ModifiedIs
 import ExponentialContent from '@/views/SingleWellProductivity/ExponentialContent.vue'
 import ProductivityComparison from '@/views/SingleWellProductivity/ProductivityComparison.vue'
 import DynamicProductivityContent from '@/views/SingleWellProductivity/DynamicProductivityContent.vue'
+import DynamicUnstableProductivityContent from '@/views/SingleWellProductivity/DynamicUnstableProductivityContent.vue'
 import TheoreticalProductivityContent from '@/views/SingleWellProductivity/TheoreticalProductivityContent.vue'
+import TheoreticalUnstableProductivityContent from '@/views/SingleWellProductivity/TheoreticalUnstableProductivityContent.vue'
 import { NODETYPE } from '@/constants/nodeType'
 import { wellApi } from '@/api/docker'
 import { pvtStorageApi } from '@/api/pvtStorage'
@@ -51,15 +53,21 @@ import {
   DYNAMIC_PRODUCTIVITY_NODE_TYPE,
   DYNAMIC_STABLE_METHOD_NODE_TYPE,
   DYNAMIC_STABLE_RECORD_NODE_TYPE,
+  DYNAMIC_UNSTABLE_METHOD_NODE_TYPE,
+  DYNAMIC_UNSTABLE_RECORD_NODE_TYPE,
   loadAllDynamicStableTreeNodes,
-  loadDynamicStableTreeNodes
+  loadDynamicStableTreeNodes,
+  loadDynamicUnstableTreeNodes
 } from '@/utils/dynamicStableTree'
 import {
   THEORETICAL_CALCULATION_NODE_TYPE,
   THEORETICAL_STABLE_METHOD_NODE_TYPE,
   THEORETICAL_STABLE_RECORD_NODE_TYPE,
+  THEORETICAL_UNSTABLE_METHOD_NODE_TYPE,
+  THEORETICAL_UNSTABLE_RECORD_NODE_TYPE,
   loadAllTheoreticalStableTreeNodes,
-  loadTheoreticalStableTreeNodes
+  loadTheoreticalStableTreeNodes,
+  loadTheoreticalUnstableTreeNodes
 } from '@/utils/theoreticalStableTree'
 import {
   workspaceActiveNodeId,
@@ -80,10 +88,10 @@ const props = defineProps({
 
 const route = useRoute()
 const router = useRouter()
-const PROJECT_ID = 6
-const GAS_RESERVOIR_ID = 1
-const MODIFIED_ISOCHRONAL_PROJECT_ID = 6
-const MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID = 1
+const PROJECT_ID = 7
+const GAS_RESERVOIR_ID = 4
+const MODIFIED_ISOCHRONAL_PROJECT_ID = 7
+const MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID = 4
 
 const MODULES = [
   { name: '产能试井', methods: ['回压试井', '等时试井', '修正等时', '一点法'] },
@@ -116,8 +124,12 @@ const wells = ref([])
 const loadingWells = ref(false)
 const keyword = workspaceTreeKeyword
 const selectedWellName = workspaceSelectedWellName
+// 左侧目录当前指向的井，仅供下一次顶部命令确定目标井。
+// 它与 selectedWellName（右侧当前展示的井）分开，避免点击井/目录就刷新右侧。
+const sidebarTargetWellName = ref(selectedWellName.value)
 if (props.embeddedNode?.wellName) selectedWellName.value = String(props.embeddedNode.wellName)
 else if (route.query.well) selectedWellName.value = String(route.query.well)
+sidebarTargetWellName.value = selectedWellName.value
 const sideTreeCollapsed = workspaceTreeCollapsed
 // 展开后适当加宽以容纳三种计算方式；收起形态对齐 PVT 的“图表数据”侧栏。
 const paramsCollapsed = ref(false)
@@ -406,13 +418,14 @@ const loadAllIsochronalNodes = async () => loadAllIsochronalTreeNodes({
   gasReservoirId: GAS_RESERVOIR_ID
 })
 
-const loadOwnedProductivityNodes = async (wellName, { expand = false } = {}) =>
+const loadOwnedProductivityNodes = async (wellName, { expand = false, testMethod = null } = {}) =>
   loadOwnedProductivityTestTreeNodes({
     treeData: workspaceTreeData.value,
     projectId: PROJECT_ID,
     gasReservoirId: GAS_RESERVOIR_ID,
     wellName,
-    expand
+    expand,
+    testMethod
   })
 
 const loadAllOwnedProductivityNodes = async () => loadAllOwnedProductivityTestTreeNodes({
@@ -423,12 +436,26 @@ const loadAllOwnedProductivityNodes = async () => loadAllOwnedProductivityTestTr
 
 const loadDynamicStableNodes = async (wellName, { expand = false } = {}) =>
   loadDynamicStableTreeNodes({
-    treeData: workspaceTreeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName, expand
+    treeData: workspaceTreeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID,
+    wellName, expand, force: expand
+  })
+
+const loadDynamicUnstableNodes = async (wellName, { expand = false } = {}) =>
+  loadDynamicUnstableTreeNodes({
+    treeData: workspaceTreeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID,
+    wellName, expand, force: expand
   })
 
 const loadTheoreticalStableNodes = async (wellName, { expand = false } = {}) =>
   loadTheoreticalStableTreeNodes({
-    treeData: workspaceTreeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName, expand
+    treeData: workspaceTreeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID,
+    wellName, expand, force: expand
+  })
+
+const loadTheoreticalUnstableNodes = async (wellName, { expand = false } = {}) =>
+  loadTheoreticalUnstableTreeNodes({
+    treeData: workspaceTreeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID,
+    wellName, expand, force: expand
   })
 
 const loadAllStableNodes = async () => {
@@ -443,7 +470,9 @@ const loadAllStableNodes = async () => {
 
 const isStableRecordNode = node => [
   THEORETICAL_STABLE_RECORD_NODE_TYPE,
-  DYNAMIC_STABLE_RECORD_NODE_TYPE
+  THEORETICAL_UNSTABLE_RECORD_NODE_TYPE,
+  DYNAMIC_STABLE_RECORD_NODE_TYPE,
+  DYNAMIC_UNSTABLE_RECORD_NODE_TYPE
 ].includes(node?.type)
 
 const closeStableContextMenu = () => { stableContextMenu.value.visible = false }
@@ -457,24 +486,76 @@ const handleStableContextMenu = (node, event) => {
   }
 }
 
-const reloadStableBranch = async (node, expand = true) => node.type === THEORETICAL_STABLE_RECORD_NODE_TYPE
-  ? loadTheoreticalStableNodes(node.wellName, { expand })
-  : loadDynamicStableNodes(node.wellName, { expand })
+const reloadStableBranch = async (node, expand = true) => {
+  if (node.type === THEORETICAL_STABLE_RECORD_NODE_TYPE) {
+    return loadTheoreticalStableNodes(node.wellName, { expand })
+  }
+  if (node.type === THEORETICAL_UNSTABLE_RECORD_NODE_TYPE) {
+    return loadTheoreticalUnstableNodes(node.wellName, { expand })
+  }
+  if (node.type === DYNAMIC_UNSTABLE_RECORD_NODE_TYPE) {
+    return loadDynamicUnstableNodes(node.wellName, { expand })
+  }
+  return loadDynamicStableNodes(node.wellName, { expand })
+}
+
+/** 展开哪个计算方法，就只加载该方法在当前井下的历史记录。 */
+const handleSidebarExpand = async node => {
+  try {
+    if (node.type === THEORETICAL_CALCULATION_NODE_TYPE) {
+      await Promise.all([
+        loadTheoreticalStableNodes(node.wellName),
+        loadTheoreticalUnstableNodes(node.wellName)
+      ])
+    } else if (node.type === DYNAMIC_PRODUCTIVITY_NODE_TYPE) {
+      await Promise.all([
+        loadDynamicStableNodes(node.wellName),
+        loadDynamicUnstableNodes(node.wellName)
+      ])
+    } else if (node.type === ISOCHRONAL_METHOD_NODE_TYPE) {
+      await loadIsochronalNodes(node.wellName)
+    } else if (node.type === 'productivity-test-modified-isochronal-method') {
+      await loadModifiedIsochronalNodes(node.wellName)
+    } else if (node.type === OWNED_PRODUCTIVITY_METHOD_NODE_TYPE) {
+      await loadOwnedProductivityNodes(node.wellName, { testMethod: node.testMethod })
+    } else if (node.type === THEORETICAL_STABLE_METHOD_NODE_TYPE) {
+      await loadTheoreticalStableNodes(node.wellName)
+    } else if (node.type === THEORETICAL_UNSTABLE_METHOD_NODE_TYPE) {
+      await loadTheoreticalUnstableNodes(node.wellName)
+    } else if (node.type === DYNAMIC_STABLE_METHOD_NODE_TYPE) {
+      await loadDynamicStableNodes(node.wellName)
+    } else if (node.type === DYNAMIC_UNSTABLE_METHOD_NODE_TYPE) {
+      await loadDynamicUnstableNodes(node.wellName)
+    }
+  } catch (error) {
+    ElMessage.warning(error?.response?.data?.msg || error?.message || '目录记录加载失败')
+  }
+}
 
 const renameStableNode = async () => {
   const node = stableContextMenu.value.node
   closeStableContextMenu()
   if (!isStableRecordNode(node)) return
   try {
-    const { value } = await ElMessageBox.prompt('请输入新的稳定流名称', '重命名', {
+    const regimeLabel = [DYNAMIC_UNSTABLE_RECORD_NODE_TYPE, THEORETICAL_UNSTABLE_RECORD_NODE_TYPE].includes(node.type) ? '不稳定流' : '稳定流'
+    const { value } = await ElMessageBox.prompt(`请输入新的${regimeLabel}名称`, '重命名', {
       inputValue: node.label,
       inputPattern: /\S+/,
       inputErrorMessage: '名称不能为空',
       confirmButtonText: '确定', cancelButtonText: '取消'
     })
-    const api = node.type === THEORETICAL_STABLE_RECORD_NODE_TYPE
-      ? theoreticalProductivityApi : dynamicProductivityApi
-    await api.renameStable(node.stableId, { stableName: String(value).trim() })
+    const identity = { projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName: node.wellName }
+    if ([DYNAMIC_UNSTABLE_RECORD_NODE_TYPE, THEORETICAL_UNSTABLE_RECORD_NODE_TYPE].includes(node.type)) {
+      const api = node.type === THEORETICAL_UNSTABLE_RECORD_NODE_TYPE
+        ? theoreticalProductivityApi : dynamicProductivityApi
+      await api.renameUnstable(node.unstableId, {
+        ...identity, unstableName: String(value).trim()
+      })
+    } else {
+      const api = node.type === THEORETICAL_STABLE_RECORD_NODE_TYPE
+        ? theoreticalProductivityApi : dynamicProductivityApi
+      await api.renameStable(node.stableId, { ...identity, stableName: String(value).trim() })
+    }
     await reloadStableBranch(node)
     ElMessage.success('重命名成功')
   } catch (error) {
@@ -489,20 +570,27 @@ const deleteStableNode = async () => {
   closeStableContextMenu()
   if (!isStableRecordNode(node)) return
   try {
+    const regimeLabel = [DYNAMIC_UNSTABLE_RECORD_NODE_TYPE, THEORETICAL_UNSTABLE_RECORD_NODE_TYPE].includes(node.type) ? '不稳定流' : '稳定流'
     await ElMessageBox.confirm(
       `删除后将同时删除“${node.label}”的输入、三种输出和IPR曲线，是否继续？`,
-      '删除稳定流',
+      `删除${regimeLabel}`,
       { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }
     )
-    const api = node.type === THEORETICAL_STABLE_RECORD_NODE_TYPE
-      ? theoreticalProductivityApi : dynamicProductivityApi
-    await api.deleteStable(node.stableId, PROJECT_ID, GAS_RESERVOIR_ID, node.wellName)
+    if ([DYNAMIC_UNSTABLE_RECORD_NODE_TYPE, THEORETICAL_UNSTABLE_RECORD_NODE_TYPE].includes(node.type)) {
+      const api = node.type === THEORETICAL_UNSTABLE_RECORD_NODE_TYPE
+        ? theoreticalProductivityApi : dynamicProductivityApi
+      await api.deleteUnstable(node.unstableId, PROJECT_ID, GAS_RESERVOIR_ID, node.wellName)
+    } else {
+      const api = node.type === THEORETICAL_STABLE_RECORD_NODE_TYPE
+        ? theoreticalProductivityApi : dynamicProductivityApi
+      await api.deleteStable(node.stableId, PROJECT_ID, GAS_RESERVOIR_ID, node.wellName)
+    }
     await reloadStableBranch(node)
-    if (Number(activeStableId.value) === Number(node.stableId)) {
+    if (Number(activeStableId.value) === Number(node.unstableId ?? node.stableId)) {
       activeStableId.value = null
       await router.replace({
         name: 'SingleWellProductivity',
-        query: { module: activeModule.value, method: '稳定流', well: selectedWellName.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID }
+        query: { module: activeModule.value, method: activeMethod.value, well: selectedWellName.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID }
       })
     }
     ElMessage.success(`${node.label}已删除`)
@@ -516,10 +604,13 @@ const deleteStableNode = async () => {
 const handleCommand = async ({ group, name, parent }) => {
   // 顶部菜单栏“单井产能”板块：留在当前独立页面并切换功能模块/计算方法。
   if (group === '单井产能') {
-    if (!selectedWellName.value) {
+    const targetWellName = sidebarTargetWellName.value || selectedWellName.value
+    if (!targetWellName) {
       ElMessage.warning('请先在左侧选择一口井')
       return
     }
+    // 点击目录本身不切换右侧；用户明确点击顶部功能后，才正式切换到目标井。
+    if (targetWellName !== selectedWellName.value) await selectWell(targetWellName)
     if (parent === '产能试井' && name === '修正等时') {
       activeProductivityTestId.value = null
       activeEvaluationId.value = null
@@ -532,7 +623,10 @@ const handleCommand = async ({ group, name, parent }) => {
       importedDataFileName.value = '当前井产能测试数据'
       await loadPvtOptions()
     }
-    autoCalculateStable.value = ['理论计算', '动态产能'].includes(parent || name) && name === '稳定流'
+    // 理论计算和动态产能的稳定流/不稳定流都在顶部点击后立即计算；
+    // 左侧历史记录仍只恢复快照，不携带该标记。
+    autoCalculateStable.value = ['理论计算', '动态产能'].includes(parent || name)
+      && ['稳定流', '不稳定流'].includes(name)
     selectModule(parent || name, parent ? name : '')
     return
   }
@@ -630,13 +724,18 @@ const selectWell = async wellName => {
 const handleSidebarSelect = async node => {
   if (!node) return
 
+  // 记录目录所指向的井，但此处不直接修改右侧组件正在使用的 selectedWellName。
+  if (node.wellName) sidebarTargetWellName.value = node.wellName
+
   // 理论计算/动态产能及其“稳定流”都是纯目录节点：TreeNode 自己负责展开、收起，
   // 这里不能改变右侧页面，也不能覆盖当前具体记录的高亮状态。
   if ([
     THEORETICAL_CALCULATION_NODE_TYPE,
     DYNAMIC_PRODUCTIVITY_NODE_TYPE,
     THEORETICAL_STABLE_METHOD_NODE_TYPE,
-    DYNAMIC_STABLE_METHOD_NODE_TYPE
+    THEORETICAL_UNSTABLE_METHOD_NODE_TYPE,
+    DYNAMIC_STABLE_METHOD_NODE_TYPE,
+    DYNAMIC_UNSTABLE_METHOD_NODE_TYPE
   ].includes(node.type)) {
     workspacePendingNode.value = null
     return
@@ -660,6 +759,24 @@ const handleSidebarSelect = async node => {
       name: 'SingleWellProductivity',
       query: {
         module: activeModule.value, method: '稳定流', well: selectedWellName.value,
+        projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, stableId: activeStableId.value
+      }
+    })
+    return
+  }
+
+  if ([DYNAMIC_UNSTABLE_RECORD_NODE_TYPE, THEORETICAL_UNSTABLE_RECORD_NODE_TYPE].includes(node.type) && node.unstableId) {
+    workspacePendingNode.value = null
+    selectedWellName.value = node.wellName || selectedWellName.value
+    activeModule.value = node.type === THEORETICAL_UNSTABLE_RECORD_NODE_TYPE ? '理论计算' : '动态产能'
+    activeMethod.value = '不稳定流'
+    activeStableId.value = Number(node.unstableId)
+    autoCalculateStable.value = false
+    await loadPvtOptions()
+    await router.replace({
+      name: 'SingleWellProductivity',
+      query: {
+        module: activeModule.value, method: '不稳定流', well: selectedWellName.value,
         projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, stableId: activeStableId.value
       }
     })
@@ -817,15 +934,15 @@ const handleSidebarSelect = async node => {
     return
   }
 
-  if (node.wellName) {
-    await selectWell(node.wellName)
-  }
-
   const isWorkspaceGroup = WORKSPACE_GROUPS.some(group => group.id === node.type)
   const isWellNode = node.wellName && node.label === node.wellName
   const isRootNode = ['g-well', 'g-reservoir', 'g-group'].includes(node.id)
 
   if (isWorkspaceGroup || isWellNode || isRootNode) return
+
+  if (node.wellName) {
+    await selectWell(node.wellName)
+  }
 
   workspacePendingNode.value = node
   await router.push({ name: 'IprInterface' })
@@ -1064,16 +1181,21 @@ const handleProductivitySaved = async saved => {
 }
 
 const handleStableSaved = async saved => {
-  activeStableId.value = Number(saved.stableId)
+  activeStableId.value = Number(saved.unstableId ?? saved.stableId)
   const nodes = activeModule.value === '理论计算'
-    ? await loadTheoreticalStableNodes(selectedWellName.value, { expand: true })
-    : await loadDynamicStableNodes(selectedWellName.value, { expand: true })
-  const savedNode = nodes.find(node => Number(node.stableId) === activeStableId.value)
+    ? activeMethod.value === '不稳定流'
+      ? await loadTheoreticalUnstableNodes(selectedWellName.value, { expand: true })
+      : await loadTheoreticalStableNodes(selectedWellName.value, { expand: true })
+    : activeMethod.value === '不稳定流'
+      ? await loadDynamicUnstableNodes(selectedWellName.value, { expand: true })
+      : await loadDynamicStableNodes(selectedWellName.value, { expand: true })
+  const savedNode = nodes.find(node => Number(node.unstableId ?? node.stableId) === activeStableId.value
+    && (activeMethod.value !== '不稳定流' || [DYNAMIC_UNSTABLE_RECORD_NODE_TYPE, THEORETICAL_UNSTABLE_RECORD_NODE_TYPE].includes(node.type)))
   if (savedNode) workspaceActiveNodeId.value = savedNode.id
   await router.replace({
     name: 'SingleWellProductivity',
     query: {
-      module: activeModule.value, method: '稳定流', well: selectedWellName.value,
+      module: activeModule.value, method: activeMethod.value, well: selectedWellName.value,
       projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, stableId: activeStableId.value
     }
   })
@@ -1081,11 +1203,15 @@ const handleStableSaved = async saved => {
 
 const handleStableRecordMissing = async () => {
   activeStableId.value = null
-  if (activeModule.value === '理论计算') await loadTheoreticalStableNodes(selectedWellName.value)
+  if (activeModule.value === '理论计算') {
+    if (activeMethod.value === '不稳定流') await loadTheoreticalUnstableNodes(selectedWellName.value)
+    else await loadTheoreticalStableNodes(selectedWellName.value)
+  }
+  else if (activeMethod.value === '不稳定流') await loadDynamicUnstableNodes(selectedWellName.value)
   else await loadDynamicStableNodes(selectedWellName.value)
   await router.replace({
     name: 'SingleWellProductivity',
-    query: { module: activeModule.value, method: '稳定流', well: selectedWellName.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID }
+    query: { module: activeModule.value, method: activeMethod.value, well: selectedWellName.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID }
   })
 }
 
@@ -1094,7 +1220,7 @@ const handleInitialStableCalculated = async () => {
   autoCalculateStable.value = false
   await router.replace({
     name: 'SingleWellProductivity',
-    query: { module: activeModule.value, method: '稳定流', well: selectedWellName.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID }
+    query: { module: activeModule.value, method: activeMethod.value, well: selectedWellName.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID }
   })
 }
 
@@ -1148,6 +1274,7 @@ onBeforeUnmount(() => window.removeEventListener('click', closeStableContextMenu
       <!-- 公共左侧目录：与 IprInterface.vue 使用同一个组件。 -->
       <WorkspaceSidebar v-if="!props.embedded" v-model:keyword="keyword" v-model:collapsed="sideTreeCollapsed" :nodes="sidebarTreeData"
         :active-id="workspaceActiveNodeId" :loading="loadingWells" @select="handleSidebarSelect"
+        @expand="handleSidebarExpand"
         @node-contextmenu="handleStableContextMenu" />
 
             <main class="productivity-content">
@@ -1375,6 +1502,36 @@ onBeforeUnmount(() => window.removeEventListener('click', closeStableContextMenu
             :pvt-table-options="pvtTableOptions"
             :pvt-records="databasePvtRecords"
             :stable-id="activeStableId"
+            :auto-calculate="autoCalculateStable"
+            @saved="handleStableSaved"
+            @record-missing="handleStableRecordMissing"
+            @initial-calculated="handleInitialStableCalculated"
+          />
+        </template>
+
+        <template v-else-if="activeModule === '理论计算' && activeMethod === '不稳定流'">
+          <TheoreticalUnstableProductivityContent
+            :well-name="selectedWellName"
+            :project-id="PROJECT_ID"
+            :gas-reservoir-id="GAS_RESERVOIR_ID"
+            :pvt-table-options="pvtTableOptions"
+            :pvt-records="databasePvtRecords"
+            :unstable-id="activeStableId"
+            :auto-calculate="autoCalculateStable"
+            @saved="handleStableSaved"
+            @record-missing="handleStableRecordMissing"
+            @initial-calculated="handleInitialStableCalculated"
+          />
+        </template>
+
+        <template v-else-if="activeModule === '动态产能' && activeMethod === '不稳定流'">
+          <DynamicUnstableProductivityContent
+            :well-name="selectedWellName"
+            :project-id="PROJECT_ID"
+            :gas-reservoir-id="GAS_RESERVOIR_ID"
+            :pvt-table-options="pvtTableOptions"
+            :pvt-records="databasePvtRecords"
+            :unstable-id="activeStableId"
             :auto-calculate="autoCalculateStable"
             @saved="handleStableSaved"
             @record-missing="handleStableRecordMissing"

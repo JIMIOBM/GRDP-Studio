@@ -1,5 +1,6 @@
 import { productivityTestsApi } from '@/api/productivityTests'
 import {
+  ensureProductivityTestTreeNodes,
   ensureProductivityTestMethodGroups,
   PRODUCTIVITY_TEST_METHODS
 } from '@/utils/productivityTestTree'
@@ -24,31 +25,17 @@ export const loadOwnedProductivityTestTreeNodes = async ({
   projectId,
   gasReservoirId,
   wellName,
-  expand = false
+  expand = false,
+  testMethod = null
 }) => {
-  const wellNode = treeData.find(node => node.id === 'g-well')?.children?.find(node =>
-    (node.wellName || node.label) === wellName
-  )
-  const productivityGroup = wellNode?.children?.find(node =>
-    node.type === 'single-well-productivity' || node.label === '单井产能'
-  )
-  if (!wellNode || !productivityGroup) return []
+  const branch = ensureProductivityTestTreeNodes(treeData, wellName)
+  if (!branch) return []
+  const { wellNode, productivityGroup, testGroup } = branch
 
-  let testGroup = productivityGroup.children?.find(node =>
-    node.type === 'productivity-test' || node.label === '产能试井'
-  )
-  if (!testGroup) {
-    testGroup = {
-      id: `${wellNode.id}-single-well-productivity-productivity-test`,
-      label: '产能试井',
-      type: 'productivity-test',
-      wellName,
-      children: []
-    }
-    productivityGroup.children = [...(productivityGroup.children || []), testGroup]
-  }
-
-  const responses = await Promise.all(OWNED_METHODS.map(async method => {
+  const requestedMethods = testMethod
+    ? OWNED_METHODS.filter(method => method.value === testMethod)
+    : OWNED_METHODS
+  const responses = await Promise.all(requestedMethods.map(async method => {
     const response = await productivityTestsApi.list(
       projectId, gasReservoirId, wellName, method.value
     )
@@ -76,6 +63,7 @@ export const loadOwnedProductivityTestTreeNodes = async ({
       pressureMethods: record.pressureMethods || [],
       children: []
     }))
+    group.loaded = true
     return group
   })
 
@@ -89,16 +77,7 @@ export const loadOwnedProductivityTestTreeNodes = async ({
 
 export const loadAllOwnedProductivityTestTreeNodes = async options => {
   const wells = options.treeData.find(node => node.id === 'g-well')?.children || []
-  const results = await Promise.allSettled(wells.map(well =>
-    loadOwnedProductivityTestTreeNodes({
-      ...options,
-      wellName: well.wellName || well.label
-    })
-  ))
-  const failures = results.filter(result => result.status === 'rejected')
-  if (failures.length) {
-    console.warn(`有 ${failures.length} 口井的回压/一点法记录加载失败`, failures)
-  }
+  wells.forEach(well => ensureProductivityTestTreeNodes(options.treeData, well.wellName || well.label))
 }
 
 export const OWNED_PRODUCTIVITY_METHOD_NODE_TYPE = METHOD_NODE_TYPE

@@ -14,6 +14,13 @@ export const dynamicProductivityApi = {
     }),
   saveDefaultParameters: data =>
     request.post('/dynamic-productivity/stable/default-parameters', data),
+  // 不稳定流拥有独立的默认参数入口，额外保存孔隙度、总压缩系数和流动时间。
+  getUnstableDefaultParameters: (projectId, gasReservoirId, wellName) =>
+    request.get('/dynamic-productivity/unstable/default-parameters', {
+      params: { projectId, gasReservoirId, wellName }
+    }),
+  saveUnstableDefaultParameters: data =>
+    request.post('/dynamic-productivity/unstable/default-parameters', data),
   // 左侧目录只展示新库中已经保存的稳定流记录。
   listStable: (projectId, gasReservoirId, wellName) => request.get('/dynamic-productivity/stable', {
     params: { projectId, gasReservoirId, wellName }
@@ -28,6 +35,23 @@ export const dynamicProductivityApi = {
     request.patch(`/dynamic-productivity/stable/${stableId}/name`, data),
   deleteStable: (stableId, projectId, gasReservoirId, wellName) =>
     request.delete(`/dynamic-productivity/stable/${stableId}`, {
+      params: { projectId, gasReservoirId, wellName }
+    }),
+
+  // 不稳定流的公式、物性工具箱调用和IPR离散均在后端执行。
+  // 拟压力要按 IPR 压力点执行多次“calc后取值”，单次计算允许更长超时。
+  calculateUnstable: data => request.post('/dynamic-productivity/unstable/calculate', data, { timeout: 180000 }),
+  listUnstable: (projectId, gasReservoirId, wellName) =>
+    request.get('/dynamic-productivity/unstable', { params: { projectId, gasReservoirId, wellName } }),
+  getUnstable: (unstableId, projectId, gasReservoirId, wellName) =>
+    request.get(`/dynamic-productivity/unstable/${unstableId}`, {
+      params: { projectId, gasReservoirId, wellName }
+    }),
+  saveUnstable: data => request.post('/dynamic-productivity/unstable/save', data),
+  renameUnstable: (unstableId, data) =>
+    request.patch(`/dynamic-productivity/unstable/${unstableId}/name`, data),
+  deleteUnstable: (unstableId, projectId, gasReservoirId, wellName) =>
+    request.delete(`/dynamic-productivity/unstable/${unstableId}`, {
       params: { projectId, gasReservoirId, wellName }
     })
 }

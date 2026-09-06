@@ -28,7 +28,7 @@ export const PRODUCTIVITY_TEST_METHODS = [
 ]
 
 export const PRODUCTIVITY_TEST_METHOD_NODE_TYPES = new Set(
-  PRODUCTIVITY_TEST_METHODS.map(item => item.groupType)
+  [...PRODUCTIVITY_TEST_METHODS.map(item => item.groupType), 'owned-productivity-test-method']
 )
 
 const METHOD_LABELS = new Map([
@@ -77,6 +77,10 @@ export const ensureProductivityTestMethodGroups = (testGroup, wellNode, wellName
     }
     group.label = method.label
     group.wellName = wellName
+    group.type = method.groupType
+    group.testMethod = method.method
+    group.lazy = true
+    if (typeof group.loaded !== 'boolean') group.loaded = false
     group.children = []
     return [method.method, group]
   }))
@@ -127,4 +131,27 @@ export const ensureProductivityTestMethodGroups = (testGroup, wellNode, wellName
     ...unrelated
   ]
   return groups
+}
+
+/** 仅创建“产能试井/四种方法”的目录骨架，不访问后端。 */
+export const ensureProductivityTestTreeNodes = (treeData, wellName) => {
+  const wellNode = treeData.find(node => node.id === 'g-well')?.children?.find(node =>
+    (node.wellName || node.label) === wellName
+  )
+  const productivityGroup = wellNode?.children?.find(node =>
+    node.type === 'single-well-productivity' || node.label === '单井产能'
+  )
+  if (!wellNode || !productivityGroup) return null
+  let testGroup = productivityGroup.children?.find(node =>
+    node.type === 'productivity-test' || node.label === '产能试井'
+  )
+  if (!testGroup) {
+    testGroup = {
+      id: `${wellNode.id}-single-well-productivity-productivity-test`,
+      label: '产能试井', type: 'productivity-test', wellName, children: []
+    }
+    productivityGroup.children = [testGroup, ...(productivityGroup.children || [])]
+  }
+  return { wellNode, productivityGroup, testGroup,
+    methodGroups: ensureProductivityTestMethodGroups(testGroup, wellNode, wellName) }
 }

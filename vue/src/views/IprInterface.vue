@@ -40,28 +40,38 @@ import { dynamicProductivityApi } from '@/api/dynamicProductivity'
 import { theoreticalProductivityApi } from '@/api/theoreticalProductivity'
 import { createPvtDraftRecord } from '@/utils/pvtRecords'
 import { acquireNotifySocket } from '@/utils/notifySocket'
-import { loadAllModifiedIsochronalTreeNodes } from '@/utils/modifiedIsochronalTree'
+import { loadAllModifiedIsochronalTreeNodes, loadModifiedIsochronalTreeNodes } from '@/utils/modifiedIsochronalTree'
 import {
   loadAllOwnedProductivityTestTreeNodes,
+  loadOwnedProductivityTestTreeNodes,
   OWNED_PRODUCTIVITY_METHOD_NODE_TYPE,
   OWNED_PRODUCTIVITY_RECORD_NODE_TYPE
 } from '@/utils/ownedProductivityTestTree'
 import {
   ISOCHRONAL_METHOD_NODE_TYPE,
   ISOCHRONAL_RECORD_NODE_TYPE,
-  loadAllIsochronalTreeNodes
+  loadAllIsochronalTreeNodes,
+  loadIsochronalTreeNodes
 } from '@/utils/isochronalTree'
 import {
+  DYNAMIC_PRODUCTIVITY_NODE_TYPE,
   DYNAMIC_STABLE_METHOD_NODE_TYPE,
   DYNAMIC_STABLE_RECORD_NODE_TYPE,
+  DYNAMIC_UNSTABLE_METHOD_NODE_TYPE,
+  DYNAMIC_UNSTABLE_RECORD_NODE_TYPE,
   loadAllDynamicStableTreeNodes,
-  loadDynamicStableTreeNodes
+  loadDynamicStableTreeNodes,
+  loadDynamicUnstableTreeNodes
 } from '@/utils/dynamicStableTree'
 import {
+  THEORETICAL_CALCULATION_NODE_TYPE,
   THEORETICAL_STABLE_METHOD_NODE_TYPE,
   THEORETICAL_STABLE_RECORD_NODE_TYPE,
+  THEORETICAL_UNSTABLE_METHOD_NODE_TYPE,
+  THEORETICAL_UNSTABLE_RECORD_NODE_TYPE,
   loadAllTheoreticalStableTreeNodes,
-  loadTheoreticalStableTreeNodes
+  loadTheoreticalStableTreeNodes,
+  loadTheoreticalUnstableTreeNodes
 } from '@/utils/theoreticalStableTree'
 import {
   getNextRelativePermeabilityIndex,
@@ -79,8 +89,8 @@ import {
 } from '@/utils/workspaceTreeState'
 
 // 当前工作台所使用的项目和气藏。
-const PROJECT_ID = 6
-const GAS_RESERVOIR_ID = 1
+const PROJECT_ID = 7
+const GAS_RESERVOIR_ID = 4
 const router = useRouter()
 const FLOW_BALANCE_NODE_TYPE = NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure
 
@@ -119,7 +129,8 @@ const WELL_DATA_NODES = [
       }
     ]
   },
-  { type: 'well-data-pvt-group', label: 'PVT性质' },
+  // PVT 子节点改为懒加载：只有用户展开“PVT性质”时才查询该井的记录。
+  { type: 'well-data-pvt-group', label: 'PVT性质', lazy: true },
   { type: 'well-data-relative-permeability-group', label: '相渗数据' }
 ]
 
@@ -1535,7 +1546,8 @@ const refreshProjectTree = async () => { //加在项目树
     }
     rebuildProjectTree(normalizePayload(projectResult.value), names)
     await refreshOtherDataNodes()
-    await refreshAllPvtNodes()
+    // 不在登录/刷新时遍历所有井请求 PVT；大量并发请求会让目录初始化变慢，
+    // 也会在单个接口异常时制造整页“全部报错”的假象。
     return Boolean(getWellGroup()?.children?.length)
   } catch (error) {
     console.warn('项目树加载失败', error)
@@ -3771,11 +3783,27 @@ const openAGNode = async (node) => {
 }
 
 const initTree = async () => {
-  if (!workspaceTreeHydrated.value) {
+  const hasWellNodes = Boolean(getWellGroup()?.children?.length)
+  if (!workspaceTreeHydrated.value || !hasWellNodes) {
     // 接口失败或返回空目录时不能标记为已加载，否则本次会话后续切回
     // IPR 页面也不会再次请求，左侧会一直只剩“井 / 库 / 库群”。
     workspaceTreeHydrated.value = await refreshProjectTree()
   }
+}
+
+// IPR 是登录后的首屏：这里只补齐两套目录骨架，不读取任何稳定流历史记录。
+// 具体接口由 handleNodeExpand 在用户展开对应方法目录时调用。
+const loadAllStableProductivityTreeNodes = async () => {
+  await loadAllTheoreticalStableTreeNodes({
+    treeData: treeData.value,
+    projectId: PROJECT_ID,
+    gasReservoirId: GAS_RESERVOIR_ID
+  })
+  await loadAllDynamicStableTreeNodes({
+    treeData: treeData.value,
+    projectId: PROJECT_ID,
+    gasReservoirId: GAS_RESERVOIR_ID
+  })
 }
 
 const loadWellChildren = async (node, force = false) => {
@@ -3795,6 +3823,8 @@ const loadWellChildren = async (node, force = false) => {
       refreshFlowBalanceNodes(wellName),
       refreshTypicalCurveNodes(wellName)
     ])
+    // 基础目录可能被刷新器替换，再补一次无请求的理论/动态目录骨架。
+    await loadAllStableProductivityTreeNodes()
     node.childrenLoaded = true
   } finally {
     node.childrenLoading = false
@@ -3958,9 +3988,23 @@ const handleSelect = async (node) => { // 点击左侧树节点
   const isWellMenuGroup = WELL_GROUPS.some(group => group.id === node.type)
   const nodeWellName = node.wellName || (node.type === NODETYPE.NodeType_Well ? node.label : '')
 
-  if (nodeWellName) selectedWellName.value = nodeWellName
   activeNodeId.value = node.id
   activeNode.value = node
+
+  // 井节点和单井产能各级目录只负责选择/展开目录，不能改变右侧正在展示的内容。
+  // nodeWellName 仍保留在 activeNode 中，用户随后点击顶部计算命令时会以该井为目标。
+  const isProductivityDirectory = [
+    THEORETICAL_CALCULATION_NODE_TYPE,
+    DYNAMIC_PRODUCTIVITY_NODE_TYPE,
+    THEORETICAL_STABLE_METHOD_NODE_TYPE,
+    THEORETICAL_UNSTABLE_METHOD_NODE_TYPE,
+    DYNAMIC_STABLE_METHOD_NODE_TYPE,
+    DYNAMIC_UNSTABLE_METHOD_NODE_TYPE
+  ].includes(node.type)
+  if (node.type === NODETYPE.NodeType_Well || isWellMenuGroup || isProductivityDirectory) return
+
+  // 只有真正打开某条记录/功能节点时，才同步右侧使用的井名。
+  if (nodeWellName) selectedWellName.value = nodeWellName
 
   if (node.type === NODETYPE.NodeType_ProductivityEvaluationModifiedIsochronalWellTest) {
     await router.push({
@@ -3971,6 +4015,33 @@ const handleSelect = async (node) => { // 点击左侧树节点
         well: nodeWellName,
         testId: node.testId || node.resultId,
         ...(node.evaluationId ? { evaluationId: node.evaluationId } : {})
+      }
+    })
+    return
+  }
+
+  // IPR 首屏也要处理理论/动态产能的具体记录。此前这里漏掉了，
+  // 用户首次点记录不会跳转也不会读取详情，先点顶部菜单后才会由另一个页面接管。
+  if ([THEORETICAL_STABLE_RECORD_NODE_TYPE, DYNAMIC_STABLE_RECORD_NODE_TYPE].includes(node.type)
+    && node.stableId) {
+    await router.push({
+      name: 'SingleWellProductivity',
+      query: {
+        module: node.type === THEORETICAL_STABLE_RECORD_NODE_TYPE ? '理论计算' : '动态产能',
+        method: '稳定流', well: nodeWellName,
+        projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, stableId: node.stableId
+      }
+    })
+    return
+  }
+
+  if ([DYNAMIC_UNSTABLE_RECORD_NODE_TYPE, THEORETICAL_UNSTABLE_RECORD_NODE_TYPE].includes(node.type) && node.unstableId) {
+    await router.push({
+      name: 'SingleWellProductivity',
+      query: {
+        module: node.type === THEORETICAL_UNSTABLE_RECORD_NODE_TYPE ? '理论计算' : '动态产能',
+        method: '不稳定流', well: nodeWellName,
+        projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, stableId: node.unstableId
       }
     })
     return
@@ -4012,8 +4083,6 @@ const handleSelect = async (node) => { // 点击左侧树节点
     }
     return
   }
-
-  if (isWellMenuGroup) return
 
   if (node.type === 'well-data-pvt-group' || node.type === WELLBORE_PVT_GROUP_TYPE) {
     // “PVT性质”只是目录：点击时仅由树组件展开或收起，不打开任何具体记录。
@@ -4124,26 +4193,34 @@ const handleSelect = async (node) => { // 点击左侧树节点
     return
   }
 
-  if (node.type === NODETYPE.NodeType_Well) return
 }
 
 const handleCommand = async ({ group, name, parent }) => { // 接收顶部菜单栏的点击事件
   // 顶部菜单栏“单井产能”板块：跳转到独立的单井产能工作台。
   if (group === '单井产能') {
-    const activeWellName = selectedWellName.value || activeNode.value?.wellName || (
+    const activeWellName = activeNode.value?.wellName || (
       activeNode.value?.type === NODETYPE.NodeType_Well ? activeNode.value.label : ''
-    )
+    ) || selectedWellName.value
     if (!activeWellName) {
       ElMessage.warning('请先在左侧选择一口井')
       return
     }
+
+    // 从登录后的 IPR 首屏第一次进入理论/动态产能时，也必须携带首次计算标记。
+    // 单井产能页内的顶部菜单原本会设置该标记，而这里漏传后就会出现：
+    // 第一次只切换页面，第二次点击同一菜单才真正调用计算接口。
+    const shouldCalculateOnEntry = ['理论计算', '动态产能'].includes(parent || name)
+      && ['稳定流', '不稳定流'].includes(name)
 
     await router.push({
       name: 'SingleWellProductivity',
       query: {
         module: parent || name,
         method: parent ? name : '',
-        well: activeWellName
+        well: activeWellName,
+        projectId: PROJECT_ID,
+        gasReservoirId: GAS_RESERVOIR_ID,
+        ...(shouldCalculateOnEntry ? { initialCalc: '1' } : {})
       }
     })
     return
@@ -4327,7 +4404,79 @@ const handleNodeExpand = async node => {
   const wellName = node?.wellName
   if (!wellName) return
 
-  if (node.type === 'data-management') {
+  try {
+    // 展开模块目录时只读取该井、该模块的记录；刷新页面不会批量请求。
+    if (node.type === THEORETICAL_CALCULATION_NODE_TYPE) {
+      await Promise.all([
+        loadTheoreticalStableTreeNodes({
+          treeData: treeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName
+        }),
+        loadTheoreticalUnstableTreeNodes({
+          treeData: treeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName
+        })
+      ])
+      return
+    }
+    if (node.type === DYNAMIC_PRODUCTIVITY_NODE_TYPE) {
+      await Promise.all([
+        loadDynamicStableTreeNodes({
+          treeData: treeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName
+        }),
+        loadDynamicUnstableTreeNodes({
+          treeData: treeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName
+        })
+      ])
+      return
+    }
+    if (node.type === ISOCHRONAL_METHOD_NODE_TYPE) {
+      await loadIsochronalTreeNodes({
+        treeData: treeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName
+      })
+      return
+    }
+    if (node.type === 'productivity-test-modified-isochronal-method') {
+      await loadModifiedIsochronalTreeNodes({
+        treeData: treeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName
+      })
+      return
+    }
+    if (node.type === OWNED_PRODUCTIVITY_METHOD_NODE_TYPE) {
+      await loadOwnedProductivityTestTreeNodes({
+        treeData: treeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID,
+        wellName, testMethod: node.testMethod
+      })
+      return
+    }
+    if (node.type === THEORETICAL_STABLE_METHOD_NODE_TYPE) {
+      await loadTheoreticalStableTreeNodes({
+        treeData: treeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName
+      })
+      return
+    }
+    if (node.type === THEORETICAL_UNSTABLE_METHOD_NODE_TYPE) {
+      await loadTheoreticalUnstableTreeNodes({
+        treeData: treeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName
+      })
+      return
+    }
+    if (node.type === DYNAMIC_STABLE_METHOD_NODE_TYPE) {
+      await loadDynamicStableTreeNodes({
+        treeData: treeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName
+      })
+      return
+    }
+    if (node.type === DYNAMIC_UNSTABLE_METHOD_NODE_TYPE) {
+      await loadDynamicUnstableTreeNodes({
+        treeData: treeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName
+      })
+      return
+    }
+  } catch (error) {
+    ElMessage.warning(error?.response?.data?.msg || error?.message || '目录记录加载失败')
+    return
+  }
+
+  if (node.type === 'well-data-pvt-group') {
     try {
       await refreshPvtNodesForWell(wellName)
     } catch (error) {
@@ -4378,7 +4527,7 @@ onMounted(async () => {
 
   try {
     await initTree()
-    void Promise.allSettled([
+    await Promise.allSettled([
       loadAllModifiedIsochronalTreeNodes({
         treeData: treeData.value,
         projectId: PROJECT_ID,
@@ -4395,6 +4544,8 @@ onMounted(async () => {
         gasReservoirId: GAS_RESERVOIR_ID
       })
     ])
+    // 产能试井加载器同样会修改“单井产能”分支，因此最后恢复稳定流记录。
+    await loadAllStableProductivityTreeNodes()
   } catch (error) {
     console.error('工作台目录初始化失败', error)
   }

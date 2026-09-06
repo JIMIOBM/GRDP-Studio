@@ -1,6 +1,6 @@
 import { productivityTestsApi } from '@/api/productivityTests'
 import { NODETYPE } from '@/constants/nodeType'
-import { ensureProductivityTestMethodGroups } from '@/utils/productivityTestTree'
+import { ensureProductivityTestTreeNodes } from '@/utils/productivityTestTree'
 
 export const loadModifiedIsochronalTreeNodes = async ({
   treeData,
@@ -9,31 +9,9 @@ export const loadModifiedIsochronalTreeNodes = async ({
   wellName,
   expand = false
 }) => {
-  const wellNode = treeData.find(node => node.id === 'g-well')?.children?.find(node =>
-    (node.wellName || node.label) === wellName
-  )
-  if (!wellNode) return
-
-  const productivityGroup = wellNode.children?.find(node =>
-    node.type === 'single-well-productivity' || node.label === '单井产能'
-  )
-  if (!productivityGroup) return
-
-  let testGroup = productivityGroup.children?.find(node =>
-    node.type === 'productivity-test' || node.label === '产能试井'
-  )
-  if (!testGroup) {
-    testGroup = {
-      id: `${wellNode.id}-single-well-productivity-productivity-test`,
-      label: '产能试井',
-      type: 'productivity-test',
-      wellName,
-      children: []
-    }
-    productivityGroup.children = [...(productivityGroup.children || []), testGroup]
-  }
-
-  const methodGroups = ensureProductivityTestMethodGroups(testGroup, wellNode, wellName)
+  const branch = ensureProductivityTestTreeNodes(treeData, wellName)
+  if (!branch) return []
+  const { wellNode, productivityGroup, testGroup, methodGroups } = branch
   const response = await productivityTestsApi.list(
     projectId, gasReservoirId, wellName, 'modified-isochronal'
   )
@@ -52,6 +30,7 @@ export const loadModifiedIsochronalTreeNodes = async ({
     children: []
   }))
   methodGroups['modified-isochronal'].children = resultNodes
+  methodGroups['modified-isochronal'].loaded = true
 
   if (expand) {
     wellNode.expanded = true
@@ -64,14 +43,5 @@ export const loadModifiedIsochronalTreeNodes = async ({
 
 export const loadAllModifiedIsochronalTreeNodes = async options => {
   const wells = options.treeData.find(node => node.id === 'g-well')?.children || []
-  const results = await Promise.allSettled(wells.map(well =>
-    loadModifiedIsochronalTreeNodes({
-      ...options,
-      wellName: well.wellName || well.label
-    })
-  ))
-  const failures = results.filter(result => result.status === 'rejected')
-  if (failures.length) {
-    console.warn(`有 ${failures.length} 口井的修正等时记录加载失败`, failures)
-  }
+  wells.forEach(well => ensureProductivityTestTreeNodes(options.treeData, well.wellName || well.label))
 }

@@ -83,7 +83,8 @@ public class DynamicStableStorageService {
                             rs.getDouble(14), nullableDouble(rs, 15), rs.getDouble(16), rs.getDouble(17))),
                     wellId);
         } catch (EmptyResultDataAccessException error) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "当前井还没有动态产能默认参数");
+            // 未保存默认参数是首次使用的正常状态；返回空数据，让前端直接进入首次计算。
+            return null;
         }
     }
 

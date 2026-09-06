@@ -26,6 +26,9 @@ const props = defineProps({
   stableId: { type: Number, default: null },
   resultData: { type: Object, default: null },
   storageMode: { type: String, default: 'dynamic' },
+  // 不稳定流复用布局，但通过独立后端完成公式计算和五张子表存储。
+  flowRegime: { type: String, default: 'stable' },
+  previewOnly: { type: Boolean, default: false },
   // 只有顶部菜单首次进入时为 true；左侧已有记录永远只恢复数据库快照。
   autoCalculate: { type: Boolean, default: false }
 })
@@ -64,8 +67,8 @@ const pvtFields = reactive({
 
 // 非 PVT 参数按采气/注气分开保存，切换方向时互不覆盖。
 const directionForms = reactive({
-  production: { permeability: '7.23428', thickness: '96.47', skin: '0', drainageRadius: '631.12', wellboreRadius: '0.09', horizontalLength: '4034.8', reservoirPressure: '55', temperature: '120' },
-  injection: { permeability: '7.23428', thickness: '96.47', skin: '0', drainageRadius: '631.12', wellboreRadius: '0.09', horizontalLength: '4034.8', reservoirPressure: '55', temperature: '120' }
+  production: { permeability: '7.23428', thickness: '96.47', skin: '0', porosity: '0.10', totalCompressibility: '0.01', drainageRadius: '631.12', wellboreRadius: '0.09', horizontalLength: '4034.8', reservoirPressure: '55', temperature: '120', time: '1' },
+  injection: { permeability: '7.23428', thickness: '96.47', skin: '0', porosity: '0.10', totalCompressibility: '0.01', drainageRadius: '631.12', wellboreRadius: '0.09', horizontalLength: '4034.8', reservoirPressure: '55', temperature: '120', time: '1' }
 })
 
 const pressureMethods = [
@@ -89,16 +92,21 @@ const calculatedSeriesByMethod = reactive({ production: {}, injection: {} })
 const calculatedFormationPressureByMethod = reactive({ production: {}, injection: {} })
 // 保留原平台返回的完整结果，用于重算时复用 evaluationId、input.id 等关联信息。
 const calculatedDetailsByMethod = reactive({ production: {}, injection: {} })
+// 保存后端返回的物性派生值；保存历史时必须和 A/B、IPR 一起写入快照。
+const calculatedUnstableOperations = reactive({ production: null, injection: null })
 
 const form = computed(() => directionForms[activeDirection.value])
+const emptyResult = { a: '', b: '', aof: '', r2: '' }
 const result = computed(() => calculatedOutputs[activeDirection.value][activePressureMethod.value]
-  || methodResults[activePressureMethod.value])
+  || (isUnstableFlow.value ? emptyResult : methodResults[activePressureMethod.value]))
 const currentMethod = computed(() => pressureMethods.find(item => item.key === activePressureMethod.value))
 const directionLabel = computed(() => activeDirection.value === 'production' ? '采气' : '注气')
 const isTheoretical = computed(() => props.storageMode === 'theoretical')
+const isUnstableFlow = computed(() => props.flowRegime === 'unstable')
 const moduleLabel = computed(() => isTheoretical.value ? '理论计算' : '动态产能')
 const storageApi = computed(() => isTheoretical.value ? theoreticalProductivityApi : dynamicProductivityApi)
-const resultTitle = computed(() => `${moduleLabel.value}-${props.wellName || '当前井'}-${stableRecord.stableName}-${directionLabel.value}分析结果`)
+const flowRecordLabel = computed(() => stableRecord.stableName)
+const resultTitle = computed(() => `${moduleLabel.value}-${props.wellName || '当前井'}-${flowRecordLabel.value}-${directionLabel.value}分析结果`)
 const normalizedWellType = computed(() => {
   if (resolvedWellType.value === 'horizontal') return '水平井'
   if (resolvedWellType.value === 'vertical') return '直井'
@@ -148,9 +156,13 @@ watch(selectedPvtRecord, record => {
 const loadDefaultParameters = async () => {
   const requestedWellName = props.wellName
   try {
-    const response = await storageApi.value.getDefaultParameters(
-      props.projectId, props.gasReservoirId, requestedWellName
-    )
+    const response = isUnstableFlow.value
+      ? await storageApi.value.getUnstableDefaultParameters(
+        props.projectId, props.gasReservoirId, requestedWellName
+      )
+      : await storageApi.value.getDefaultParameters(
+        props.projectId, props.gasReservoirId, requestedWellName
+      )
     // 快速连续切井时，较早请求的响应不能覆盖当前井。
     if (requestedWellName !== props.wellName) return
     const detail = response?.data ?? response
@@ -211,6 +223,7 @@ const clearCalculatedState = () => {
     Object.keys(calculatedSeriesByMethod[direction]).forEach(key => delete calculatedSeriesByMethod[direction][key])
     Object.keys(calculatedFormationPressureByMethod[direction]).forEach(key => delete calculatedFormationPressureByMethod[direction][key])
     Object.keys(calculatedDetailsByMethod[direction]).forEach(key => delete calculatedDetailsByMethod[direction][key])
+    calculatedUnstableOperations[direction] = null
   }
 }
 
@@ -227,15 +240,20 @@ const applySavedOperation = operation => {
   pvtFields.deviationMethod = input.deviationFactorMethod || pvtFields.deviationMethod
   pvtFields.viscosityMethod = input.viscosityMethod || pvtFields.viscosityMethod
   directionForms[direction] = {
+    ...directionForms[direction],
     permeability: displayValue(input.permeability),
     thickness: displayValue(input.formationThickness),
     skin: displayValue(input.skinFactor),
+    porosity: displayValue(input.porosity ?? directionForms[direction].porosity),
+    totalCompressibility: displayValue(input.totalCompressibility ?? directionForms[direction].totalCompressibility),
     drainageRadius: displayValue(input.drainageRadius),
     wellboreRadius: displayValue(input.wellboreRadius),
     horizontalLength: displayValue(input.horizontalSectionLength),
     reservoirPressure: displayValue(input.originalFormationPressure),
-    temperature: displayValue(input.formationTemperature)
+    temperature: displayValue(input.formationTemperature),
+    time: displayValue(input.flowTime ?? directionForms[direction].time)
   }
+  if (isUnstableFlow.value) calculatedUnstableOperations[direction] = operation
   // 新库保存的是扁平曲线点；恢复时必须按 curveNumber 重新分成10条 ECharts 序列。
   ;(operation.outputs || []).forEach(output => {
     const key = output.pressureMethod === 'pseudo_pressure' ? 'pseudoPressure'
@@ -243,8 +261,8 @@ const applySavedOperation = operation => {
     calculatedOutputs[direction][key] = {
       a: scientificValue(output.darcySeepageCoefficient),
       b: scientificValue(output.nonDarcySeepageCoefficient),
-      aof: displayValue(output.openFlowCapacity),
-      r2: displayValue(output.rSquared),
+      aof: output.openFlowCapacity == null && isUnstableFlow.value ? '' : displayValue(output.openFlowCapacity),
+      r2: output.rSquared == null && isUnstableFlow.value ? '' : displayValue(output.rSquared),
       gradient: output.gradient,
       intercept: output.intercept,
       reliabilityLevel: output.reliabilityLevel,
@@ -282,21 +300,21 @@ const loadSavedStable = async stableId => {
   if (!stableId) {
     stableRecord.stableId = null
     stableRecord.stableNo = 1
-    stableRecord.stableName = '稳定流1'
+    stableRecord.stableName = isUnstableFlow.value ? '不稳定流1' : '稳定流1'
     selectedPvtTable.value = DEFAULT_PVT_TABLE_VALUE
     activeDirection.value = 'production'
     return
   }
   try {
     restoringRecord.value = true
-    const response = await storageApi.value.getStable(
-      stableId, props.projectId, props.gasReservoirId, requestedWellName
-    )
+    const response = isUnstableFlow.value
+      ? await storageApi.value.getUnstable(stableId, props.projectId, props.gasReservoirId, requestedWellName)
+      : await storageApi.value.getStable(stableId, props.projectId, props.gasReservoirId, requestedWellName)
     if (requestedWellName !== props.wellName || Number(stableId) !== Number(props.stableId)) return
     const detail = response?.data ?? response
-    stableRecord.stableId = Number(detail.record.stableId)
-    stableRecord.stableNo = Number(detail.record.stableNo)
-    stableRecord.stableName = detail.record.stableName
+    stableRecord.stableId = Number(detail.record.unstableId ?? detail.record.stableId)
+    stableRecord.stableNo = Number(detail.record.unstableNo ?? detail.record.stableNo)
+    stableRecord.stableName = detail.record.unstableName ?? detail.record.stableName
     resolvedWellType.value = detail.wellType
     selectedPvtTable.value = detail.record.pvtId
       ? String(detail.record.pvtId)
@@ -312,7 +330,7 @@ const loadSavedStable = async stableId => {
       }
       return
     }
-    ElMessage.error(error?.msg || error?.message || `${moduleLabel.value}稳定流记录读取失败`)
+    ElMessage.error(error?.msg || error?.message || `${moduleLabel.value}${isUnstableFlow.value ? '不稳定流' : '稳定流'}记录读取失败`)
   } finally {
     restoringRecord.value = false
   }
@@ -381,6 +399,7 @@ const applyCalculatedInput = (direction, detail) => {
 
   const previous = directionForms[direction]
   directionForms[direction] = {
+    ...previous,
     permeability: displayValue(firstDefined(input.permeability, previous.permeability)),
     thickness: displayValue(firstDefined(input.thickness, input.formationThickness, previous.thickness)),
     skin: displayValue(firstDefined(input.skinFactor, input.skin, previous.skin)),
@@ -545,9 +564,38 @@ const calculatePressureMethodsConcurrently = async () => {
 const handleCalculate = async ({ useBackendDefaults = false } = {}) => {
   if (calculating.value) return
   calculating.value = true
-  const calculatingMessage = ElMessage({ message: `${props.wellName} ${moduleLabel.value}稳定流计算中，请稍候...`, type: 'info', duration: 0 })
+  const regimeLabel = isUnstableFlow.value ? '不稳定流' : '稳定流'
+  const calculatingMessage = ElMessage({ message: `${props.wellName} ${moduleLabel.value}${regimeLabel}计算中，请稍候...`, type: 'info', duration: 0 })
   try {
     const calculatedDirection = activeDirection.value
+    if (isUnstableFlow.value) {
+      // 不稳定流只向本系统后端提交输入；工具箱四类物性和三套方程均由后端完成。
+      const response = await storageApi.value.calculateUnstable({
+        projectId: Number(props.projectId),
+        gasReservoirId: Number(props.gasReservoirId),
+        wellName: props.wellName,
+        wellType: normalizedWellType.value === '水平井' ? 'horizontal' : 'vertical',
+        operationType: calculatedDirection,
+        input: buildUnstableInput(calculatedDirection)
+      })
+      const loaded = response?.data ?? response
+      applySavedOperation(loaded.operation)
+      activePanelTab.value = 'output'
+      if (useBackendDefaults) {
+        // 首次进入只保存井级默认参数，不创建“不稳定流N”。后续再次进入可恢复
+        // 孔隙度、总压缩系数和流动时间，而不是退回页面硬编码默认值。
+        await storageApi.value.saveUnstableDefaultParameters({
+          projectId: Number(props.projectId),
+          gasReservoirId: Number(props.gasReservoirId),
+          wellName: props.wellName,
+          wellType: normalizedWellType.value === '水平井' ? 'horizontal' : 'vertical',
+          input: buildUnstableInput(calculatedDirection)
+        })
+        emit('initial-calculated', loaded)
+      }
+      ElMessage.success(`${props.wellName} ${regimeLabel}三种计算完成`)
+      return
+    }
     let calculationResults
     if (useBackendDefaults) {
       // 顶部首次计算与理论稳定流完全一致：调用 flowequation/calc 三次，使用后端默认参数。
@@ -592,9 +640,9 @@ const handleCalculate = async ({ useBackendDefaults = false } = {}) => {
     }
     const failedCount = calculationResults.filter(item => item.status === 'rejected').length
     if (failedCount) ElMessage.warning(`${3 - failedCount} 种计算成功，${failedCount} 种计算失败`)
-    else ElMessage.success(`${props.wellName} ${moduleLabel.value}稳定流三种计算完成`)
+    else ElMessage.success(`${props.wellName} ${moduleLabel.value}${regimeLabel}三种计算完成`)
   } catch (error) {
-    ElMessage.error(error?.response?.data?.message || error?.message || `${moduleLabel.value}稳定流计算失败`)
+    ElMessage.error(error?.response?.data?.message || error?.msg || error?.message || `${moduleLabel.value}${regimeLabel}计算失败`)
   } finally {
     calculatingMessage.close()
     calculating.value = false
@@ -648,6 +696,17 @@ const buildStoredInput = direction => {
   }
 }
 
+const buildUnstableInput = direction => {
+  const common = buildStoredInput(direction)
+  const directionInput = directionForms[direction]
+  return {
+    ...common,
+    porosity: numericOrZero(directionInput.porosity),
+    totalCompressibility: numericOrZero(directionInput.totalCompressibility),
+    flowTime: numericOrZero(directionInput.time)
+  }
+}
+
 // 只有明确点击“保存”才写新库；重复保存同一稳定流时覆盖当前方向，另一方向保持原样。
 const handleSave = async () => {
   if (saving.value) return null
@@ -682,6 +741,33 @@ const handleSave = async () => {
   saving.value = true
   try {
     const selectedOption = availablePvtOptions.value.find(option => String(option.value) === String(selectedPvtTable.value))
+    if (isUnstableFlow.value) {
+      const calculated = calculatedUnstableOperations[activeDirection.value]
+      if (!calculated?.derived) {
+        ElMessage.warning(`请先完成${directionLabel.value}的不稳定流计算，再保存`)
+        return null
+      }
+      const response = await storageApi.value.saveUnstable({
+        projectId: Number(props.projectId),
+        gasReservoirId: Number(props.gasReservoirId),
+        wellName: props.wellName,
+        unstableId: stableRecord.stableId,
+        unstableName: stableRecord.stableId ? stableRecord.stableName : null,
+        wellType: normalizedWellType.value === '水平井' ? 'horizontal' : 'vertical',
+        pvtId: Number(selectedPvtTable.value) > 0 ? Number(selectedPvtTable.value) : null,
+        pvtName: selectedOption?.label || null,
+        parameterSource: Number(selectedPvtTable.value) > 0 ? 'pvt' : 'default',
+        // 使用后端本次计算返回的完整快照，避免计算后又编辑输入却把新输入和旧结果混存。
+        operation: calculated
+      })
+      const saved = response?.data ?? response
+      stableRecord.stableId = Number(saved.unstableId)
+      stableRecord.stableNo = Number(saved.unstableNo)
+      stableRecord.stableName = saved.unstableName
+      emit('saved', saved)
+      ElMessage.success(`${stableRecord.stableName}的${directionLabel.value}结果已保存`)
+      return saved
+    }
     const response = await storageApi.value.saveStable({
       projectId: Number(props.projectId),
       gasReservoirId: Number(props.gasReservoirId),
@@ -812,6 +898,8 @@ onMounted(async () => {
     chartResizeObserver.observe(chartElement.value)
   }
   if (props.autoCalculate && !props.stableId && !props.resultData) {
+    // 不稳定流初次进入先回填所属模块自己的井级默认参数，再提交后端计算。
+    if (isUnstableFlow.value) await loadDefaultParameters()
     await handleCalculate({ useBackendDefaults: true })
   }
 })
@@ -874,6 +962,8 @@ onBeforeUnmount(() => {
             <div class="field"><label>产层渗透率(mD)</label><el-input v-model="form.permeability" size="small" /></div>
             <div class="field"><label>产层厚度(m)</label><el-input v-model="form.thickness" size="small" /></div>
             <div class="field"><label>表皮系数(dless)</label><el-input v-model="form.skin" size="small" /></div>
+            <div v-if="isUnstableFlow" class="field"><label>孔隙度 φ(dless)</label><el-input v-model="form.porosity" size="small" inputmode="decimal" /></div>
+            <div v-if="isUnstableFlow" class="field"><label>总压缩系数 cₜ(MPa⁻¹)</label><el-input v-model="form.totalCompressibility" size="small" inputmode="decimal" /></div>
           </div>
 
           <div class="sec-label">其它数据</div>
@@ -884,6 +974,7 @@ onBeforeUnmount(() => {
             <div v-if="normalizedWellType === '水平井'" class="field"><label>水平段长度(m)</label><el-input v-model="form.horizontalLength" size="small" /></div>
             <div class="field"><label>原始地层压力(MPa)</label><el-input v-model="form.reservoirPressure" size="small" /></div>
             <div class="field"><label>地层温度(℃)</label><el-input v-model="form.temperature" size="small" /></div>
+            <div v-if="isUnstableFlow" class="field"><label>流动时间 t(天)</label><el-input v-model="form.time" size="small" inputmode="decimal" /></div>
           </div>
 
           <div class="form-actions">
@@ -904,7 +995,6 @@ onBeforeUnmount(() => {
             <div class="field"><label>达西渗流项系数A</label><el-input :model-value="result.a" size="small" readonly /></div>
             <div class="field"><label>非达西渗流项系数B</label><el-input :model-value="result.b" size="small" readonly /></div>
             <div class="field"><label>无阻流量(10⁴m³/d)</label><el-input :model-value="result.aof" size="small" readonly /></div>
-            <div class="field"><label>拟合优度R²</label><el-input :model-value="result.r2" size="small" readonly /></div>
           </div>
         </div>
 

@@ -3,78 +3,121 @@ import { dynamicProductivityApi } from '@/api/dynamicProductivity'
 export const DYNAMIC_PRODUCTIVITY_NODE_TYPE = 'dynamic-productivity'
 export const DYNAMIC_STABLE_METHOD_NODE_TYPE = 'dynamic-stable-method'
 export const DYNAMIC_STABLE_RECORD_NODE_TYPE = 'dynamic-stable-record'
+export const DYNAMIC_UNSTABLE_METHOD_NODE_TYPE = 'dynamic-unstable-method'
+export const DYNAMIC_UNSTABLE_RECORD_NODE_TYPE = 'dynamic-unstable-record'
 
 const findWellNode = (treeData, wellName) => treeData
   .find(node => node.id === 'g-well')?.children
   ?.find(node => String(node.wellName || node.label) === String(wellName))
 
-/** 展开“单井产能”时，只挂载新数据库中实际存在的稳定流记录。 */
-export const loadDynamicStableTreeNodes = async ({
-  treeData, projectId, gasReservoirId, wellName, expand = false
-}) => {
+/**
+ * 只创建动态产能目录骨架，不访问后端。
+ * 登录或刷新后目录立即可见，具体记录在展开稳定流/不稳定流时按需读取。
+ */
+export const ensureDynamicProductivityTreeNodes = ({ treeData, wellName }) => {
   const wellNode = findWellNode(treeData, wellName)
   const productivityGroup = wellNode?.children?.find(node =>
     node.type === 'single-well-productivity' || node.label === '单井产能'
   )
-  if (!wellNode || !productivityGroup) return []
+  if (!wellNode || !productivityGroup) return null
+
+  let dynamicNode = (productivityGroup.children || []).find(
+    node => node.type === DYNAMIC_PRODUCTIVITY_NODE_TYPE
+  )
+  if (!dynamicNode) {
+    dynamicNode = {
+      id: `${wellNode.id}-dynamic-productivity`, label: '动态产能',
+      type: DYNAMIC_PRODUCTIVITY_NODE_TYPE, wellName,
+      defaultExpanded: false, children: []
+    }
+    const theoreticalIndex = (productivityGroup.children || []).findIndex(
+      node => node.type === 'theoretical-calculation'
+    )
+    if (theoreticalIndex >= 0) productivityGroup.children.splice(theoreticalIndex + 1, 0, dynamicNode)
+    else productivityGroup.children = [...(productivityGroup.children || []), dynamicNode]
+  }
+
+  const ensureMethod = (type, label) => {
+    let methodNode = dynamicNode.children?.find(node => node.type === type)
+    if (!methodNode) {
+      methodNode = {
+        id: `${wellNode.id}-${type}`, label, type, wellName,
+        lazy: true, loaded: false, defaultExpanded: false, children: []
+      }
+      dynamicNode.children = [...(dynamicNode.children || []), methodNode]
+    }
+    methodNode.wellName = wellName
+    methodNode.lazy = true
+    return methodNode
+  }
+
+  const stableNode = ensureMethod(DYNAMIC_STABLE_METHOD_NODE_TYPE, '稳定流')
+  const unstableNode = ensureMethod(DYNAMIC_UNSTABLE_METHOD_NODE_TYPE, '不稳定流')
+  dynamicNode.children = [stableNode, unstableNode]
+  return { wellNode, productivityGroup, dynamicNode, stableNode, unstableNode }
+}
+
+/** 展开“动态产能/稳定流”时，只读取当前井的稳定流记录。 */
+export const loadDynamicStableTreeNodes = async ({
+  treeData, projectId, gasReservoirId, wellName, expand = false, force = false
+}) => {
+  const branch = ensureDynamicProductivityTreeNodes({ treeData, wellName })
+  if (!branch) return []
+  const { wellNode, productivityGroup, dynamicNode, stableNode } = branch
+  if (stableNode.loaded && !force) return stableNode.children || []
 
   const response = await dynamicProductivityApi.listStable(projectId, gasReservoirId, wellName)
   const records = Array.isArray(response?.data) ? response.data : []
-  // 每次都删除旧的动态产能分支后按接口结果重建，避免删除、重命名后留下脏节点。
-  productivityGroup.children = (productivityGroup.children || []).filter(node =>
-    node.type !== DYNAMIC_PRODUCTIVITY_NODE_TYPE
-  )
-  // 数据库没有已保存记录时，不显示空的“动态产能/稳定流”目录。
-  if (!records.length) return []
-
-  const recordNodes = records.map(record => ({
+  stableNode.children = records.map(record => ({
     id: `${wellNode.id}-dynamic-stable-${record.stableId}`,
     label: record.stableName || `稳定流${record.stableNo}`,
-    type: DYNAMIC_STABLE_RECORD_NODE_TYPE,
-    wellName,
-    stableId: Number(record.stableId),
-    raw: record,
-    children: []
+    type: DYNAMIC_STABLE_RECORD_NODE_TYPE, wellName,
+    stableId: Number(record.stableId), raw: record, children: []
   }))
-  const stableNode = {
-    id: `${wellNode.id}-dynamic-stable-method`,
-    label: '稳定流',
-    type: DYNAMIC_STABLE_METHOD_NODE_TYPE,
-    wellName,
-    defaultExpanded: false,
-    children: recordNodes
-  }
-  const dynamicNode = {
-    id: `${wellNode.id}-dynamic-productivity`,
-    label: '动态产能',
-    type: DYNAMIC_PRODUCTIVITY_NODE_TYPE,
-    wellName,
-    defaultExpanded: false,
-    children: [stableNode]
-  }
-  // 固定目录顺序：动态产能始终位于理论计算之后，避免刷新某一分支后顺序跳动。
-  const theoreticalIndex = productivityGroup.children.findIndex(
-    node => node.type === 'theoretical-calculation'
-  )
-  if (theoreticalIndex >= 0) {
-    productivityGroup.children.splice(theoreticalIndex + 1, 0, dynamicNode)
-  } else {
-    productivityGroup.children.push(dynamicNode)
-  }
+  stableNode.loaded = true
   if (expand) {
     wellNode.expanded = true
     productivityGroup.expanded = true
     dynamicNode.expanded = true
     stableNode.expanded = true
   }
-  return recordNodes
+  return stableNode.children
 }
 
-/** 初始化工作台时，按新库记录为所有井重建动态产能稳定流目录。 */
+/** 展开“动态产能/不稳定流”时，只读取当前井的不稳定流记录。 */
+export const loadDynamicUnstableTreeNodes = async ({
+  treeData, projectId, gasReservoirId, wellName, expand = false, force = false
+}) => {
+  const branch = ensureDynamicProductivityTreeNodes({ treeData, wellName })
+  if (!branch) return []
+  const { wellNode, productivityGroup, dynamicNode, unstableNode } = branch
+  if (unstableNode.loaded && !force) return unstableNode.children || []
+
+  const response = await dynamicProductivityApi.listUnstable(projectId, gasReservoirId, wellName)
+  const records = Array.isArray(response?.data) ? response.data : []
+  unstableNode.children = records.map(record => ({
+    id: `${wellNode.id}-dynamic-unstable-${record.unstableId}`,
+    label: record.unstableName || `不稳定流${record.unstableNo}`,
+    type: DYNAMIC_UNSTABLE_RECORD_NODE_TYPE, wellName,
+    unstableId: Number(record.unstableId), raw: record, children: []
+  }))
+  unstableNode.loaded = true
+  if (expand) {
+    wellNode.expanded = true
+    productivityGroup.expanded = true
+    dynamicNode.expanded = true
+    unstableNode.expanded = true
+  }
+  return unstableNode.children
+}
+
+/** 初始化阶段只为所有井补齐目录骨架，不触发任何动态产能接口。 */
 export const loadAllDynamicStableTreeNodes = async options => {
   const wells = options.treeData.find(node => node.id === 'g-well')?.children || []
-  return Promise.all(wells.map(well => loadDynamicStableTreeNodes({
-    ...options,
-    wellName: well.wellName || well.label
-  })))
+  return wells.map(well => {
+    ensureDynamicProductivityTreeNodes({
+      treeData: options.treeData, wellName: well.wellName || well.label
+    })
+    return []
+  })
 }
