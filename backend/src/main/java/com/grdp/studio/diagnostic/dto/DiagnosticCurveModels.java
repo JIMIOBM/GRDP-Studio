@@ -12,18 +12,27 @@ public final class DiagnosticCurveModels {
     private DiagnosticCurveModels() {
     }
 
+    /**
+     * Excel 导入的一行注采数据。
+     *
+     * <p>前端当前统一约定：
+     * 注气通常为负值，采气通常为正值。
+     * 后端不会直接拿原始正负号累加，而是先判断注/采方向，
+     * 再使用绝对气量计算库存变化。</p>
+     */
     public record ProductionDataItem(
             int sequence,
             String time,
 
             @NotNull
             Double gas,
+
             String cycle
     ) {
     }
 
     /**
-     * PVT表中的 Z(P) 点。
+     * PVT 表中的一个 Pressure-Z 数据点。
      */
     public record PvtZPoint(
             @NotNull
@@ -37,7 +46,11 @@ public final class DiagnosticCurveModels {
     }
 
     /**
-     * 所选PVT表对应的Z信息。
+     * 所选 PVT 数据。
+     *
+     * <p>优先使用 zCurve：
+     * 选定的是同一张 PVT 表，但 Z 可以随压力 P 变化。
+     * 仅当 PVT 确实只有一个 Z 时才使用 fixedZ。</p>
      */
     public record PvtData(
             Double fixedZ,
@@ -49,24 +62,30 @@ public final class DiagnosticCurveModels {
      * 计算请求。
      */
     public record CalculateRequest(
-
             @Positive
             long projectId,
+
             @Positive
             long gasReservoirId,
+
             @NotEmpty
             String wellName,
+
             @Positive
             long pvtId,
+
             @NotNull
             @Positive
             Double upperLimit,
+
             @NotNull
             @Positive
             Double lowerLimit,
+
             @NotNull
             @Valid
             PvtData pvt,
+
             @NotEmpty
             List<@Valid ProductionDataItem> productionData
     ) {
@@ -84,15 +103,12 @@ public final class DiagnosticCurveModels {
             String cycle,
             String direction,
             Double gas,
-
+            Double cumulativeNetGas,
             Double inventory,
-
+            Double stablePressureOverZ,
             Double estimatedPressure,
-
             Double zFactor,
-
             Double pressureOverZ,
-
             boolean synthetic
     ) {
     }
@@ -105,10 +121,6 @@ public final class DiagnosticCurveModels {
             List<RunningPoint> points
     ) {
     }
-
-    /**
-     * 计算结果。
-     */
     public record CalculateResponse(
             List<CycleCurve> cycleCurves,
             List<RunningPoint> runningCurve,
@@ -120,7 +132,12 @@ public final class DiagnosticCurveModels {
             Double maxPressureOverZ,
             Double standardLineSlope,
             Double lowerPressureLimit,
-            Double upperPressureLimit
+            Double upperPressureLimit,
+            Double lowerZ,
+            Double upperZ,
+            Double lowerPressureOverZ,
+            Double upperPressureOverZ,
+            String pvtMode
     ) {
     }
 }

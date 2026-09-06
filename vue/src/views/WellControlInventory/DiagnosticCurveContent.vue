@@ -259,11 +259,16 @@ const selectedPvt =
 
 const normalizeKey = value =>
     String(value ?? '')
+        .trim()
+        .toLowerCase()
+        /*
+         * 保留中文字符，只去除分隔符和单位符号。
+         * 这样“压力(MPa)”“天然气偏差系数(dless)”也能识别。
+         */
         .replace(
-            /[^A-Za-z0-9]/g,
+            /[^\p{L}\p{N}]/gu,
             ''
         )
-        .toLowerCase()
 
 const Z_KEYS = [
     'z',
@@ -271,14 +276,29 @@ const Z_KEYS = [
     'deviationFactor',
     'gasDeviationFactor',
     'naturalGasDeviationFactor',
-    'compressibilityFactor'
+    'compressibilityFactor',
+
+    /*
+     * 兼容中文字段名。
+     */
+    '天然气偏差系数',
+    '偏差系数',
+    'z系数',
+    '压缩因子'
 ]
 
 const PRESSURE_KEYS = [
     'pressure',
     'formationPressure',
     'reservoirPressure',
-    'p'
+    'p',
+
+    /*
+     * 兼容中文字段名。
+     */
+    '压力',
+    '地层压力',
+    '气藏压力'
 ]
 
 const findDirectNumber = (
@@ -304,10 +324,23 @@ const findDirectNumber = (
         of Object.entries(object)
     ) {
 
-        if (
-            candidates.includes(
-                normalizeKey(key)
+        const normalized =
+            normalizeKey(key)
+
+        const matched =
+            candidates.some(
+                candidate =>
+                    normalized === candidate ||
+                    (
+                        candidate.length > 1 &&
+                        normalized.startsWith(
+                            candidate
+                        )
+                    )
             )
+
+        if (
+            matched
         ) {
 
             const number =
@@ -324,44 +357,22 @@ const findDirectNumber = (
     return null
 }
 
-const findNumberDeep = (
+/**
+ * 查找真正的“对象级固定Z”。
+ *
+ * 这里主动跳过数组，避免把 Z(P) 曲线第一行的 Z
+ * 错当成整个 PVT 的固定 Z。
+ */
+const findFixedZDeep = (
     source,
-    candidateNames,
     depth = 0
 ) => {
 
     if (
         source === null ||
         source === undefined ||
-        depth > 7
-    ) {
-        return null
-    }
-
-    if (
-        Array.isArray(source)
-    ) {
-
-        for (const item of source) {
-
-            const found =
-                findNumberDeep(
-                    item,
-                    candidateNames,
-                    depth + 1
-                )
-
-            if (
-                found !== null
-            ) {
-                return found
-            }
-        }
-
-        return null
-    }
-
-    if (
+        depth > 7 ||
+        Array.isArray(source) ||
         typeof source !== 'object'
     ) {
         return null
@@ -370,11 +381,12 @@ const findNumberDeep = (
     const direct =
         findDirectNumber(
             source,
-            candidateNames
+            Z_KEYS
         )
 
     if (
-        direct !== null
+        direct !== null &&
+        direct > 0
     ) {
         return direct
     }
@@ -384,10 +396,15 @@ const findNumberDeep = (
         of Object.values(source)
     ) {
 
+        if (
+            Array.isArray(value)
+        ) {
+            continue
+        }
+
         const found =
-            findNumberDeep(
+            findFixedZDeep(
                 value,
-                candidateNames,
                 depth + 1
             )
 
@@ -402,7 +419,11 @@ const findNumberDeep = (
 }
 
 /**
- * 在PVT对象中查找“压力-Z”数组。
+ * 在 PVT 对象中递归查找 Pressure-Z 数组。
+ *
+ * 支持常见字段：
+ * pressure / 压力(MPa)
+ * zFactor / 天然气偏差系数(dless)
  */
 const findZCurveDeep = (
     source,
@@ -412,7 +433,7 @@ const findZCurveDeep = (
     if (
         source === null ||
         source === undefined ||
-        depth > 7
+        depth > 8
     ) {
         return null
     }
@@ -457,13 +478,51 @@ const findZCurveDeep = (
             points.length >= 2
         ) {
 
+            /*
+             * 排序 + 同压力去重。
+             */
             points.sort(
                 (a, b) =>
                     a.pressure
                     - b.pressure
             )
 
-            return points
+            const unique = []
+
+            for (
+                const point
+                of points
+            ) {
+
+                const previous =
+                    unique[
+                        unique.length - 1
+                    ]
+
+                if (
+                    previous &&
+                    Math.abs(
+                        previous.pressure
+                        - point.pressure
+                    ) < 1e-9
+                ) {
+                    previous.zFactor =
+                        (
+                            previous.zFactor
+                            + point.zFactor
+                        ) / 2
+                } else {
+                    unique.push({
+                        ...point
+                    })
+                }
+            }
+
+            if (
+                unique.length >= 2
+            ) {
+                return unique
+            }
         }
 
         for (
@@ -515,53 +574,74 @@ const findZCurveDeep = (
 
 const buildPvtData = () => {
 
-    const pvt = pvtDetail.value || selectedPvt.value
-    if (!pvt) {
+    const candidates = [
+        pvtDetail.value,
+        selectedPvt.value
+    ].filter(Boolean)
+
+    if (
+        candidates.length === 0
+    ) {
         throw new Error(
             '未找到所选PVT表'
         )
     }
 
     /*
-     * 优先使用压力-Z曲线。
-     * 这样如果PVT表里有多个压力点，不会误把其中某一个Z当成固定Z。
+     * 第一优先级：
+     * 使用整张 Pressure-Z 曲线。
+     *
+     * 固定的是“所选PVT表”，不是把Z强制当常数。
      */
-    const zCurve =
-        findZCurveDeep(
-            pvt
-        )
-
-    if (
-        zCurve &&
-        zCurve.length >= 2
+    for (
+        const pvt
+        of candidates
     ) {
-        return {
-            fixedZ: null,
-            zCurve
+
+        const zCurve =
+            findZCurveDeep(
+                pvt
+            )
+
+        if (
+            Array.isArray(zCurve) &&
+            zCurve.length >= 2
+        ) {
+            return {
+                fixedZ: null,
+                zCurve
+            }
         }
     }
 
     /*
-     * 如果PVT表只保存一个Z，则直接使用。
+     * 第二优先级：
+     * 只有PVT确实保存的是单个固定Z时才使用。
      */
-    const fixedZ =
-        findNumberDeep(
-            pvt,
-            Z_KEYS
-        )
-
-    if (
-        fixedZ !== null &&
-        fixedZ > 0
+    for (
+        const pvt
+        of candidates
     ) {
-        return {
-            fixedZ,
-            zCurve: []
+
+        const fixedZ =
+            findFixedZDeep(
+                pvt
+            )
+
+        if (
+            fixedZ !== null &&
+            Number.isFinite(fixedZ) &&
+            fixedZ > 0
+        ) {
+            return {
+                fixedZ,
+                zCurve: []
+            }
         }
     }
 
     throw new Error(
-        '所选PVT表对象中没有找到Z数据。当前代码不会让你手工输入Z；如果PVT列表接口只返回摘要，需要把PVT详情接口接到这里。'
+        '所选PVT表没有找到有效的压力-Z数据。请确认PVT详情接口返回了“压力”和“天然气偏差系数Z”数据列。'
     )
 }
 
@@ -1125,6 +1205,16 @@ const handleRecalculate = async () => {
 
     try {
 
+        /*
+         * 列表接口可能只有摘要。
+         * 点击计算时如果详情尚未加载完成，再主动读取一次。
+         */
+        if (
+            !pvtDetail.value
+        ) {
+            await loadPvtDetail()
+        }
+
         pvt =
             buildPvtData()
 
@@ -1348,6 +1438,16 @@ const updateChart = data => {
             ? data.standardLine
             : []
 
+    const lowerPressureOverZ =
+        Number(
+            data?.lowerPressureOverZ
+        )
+
+    const upperPressureOverZ =
+        Number(
+            data?.upperPressureOverZ
+        )
+
     const actualSeries =
         cycleCurves.map(
             (cycle, index) => ({
@@ -1444,7 +1544,42 @@ const updateChart = data => {
 
         itemStyle: {
             color: '#a6d608'
-        }
+        },
+
+        /*
+         * 输入压力上下限经所选 PVT 换算成 P/Z 后，
+         * 作为运行区间的上下参考线。
+         *
+         * 注意：坐标轴仍然从0开始，以保留理论线原点。
+         */
+        markLine:
+            Number.isFinite(
+                lowerPressureOverZ
+            ) &&
+            Number.isFinite(
+                upperPressureOverZ
+            )
+                ? {
+                    silent: true,
+                    symbol: 'none',
+                    label: {
+                        formatter: params =>
+                            `${params.name}: ${Number(params.value).toFixed(4)} MPa`
+                    },
+                    data: [
+                        {
+                            name: 'Pmin/Z(Pmin)',
+                            yAxis:
+                                lowerPressureOverZ
+                        },
+                        {
+                            name: 'Pmax/Z(Pmax)',
+                            yAxis:
+                                upperPressureOverZ
+                        }
+                    ]
+                }
+                : undefined
     }
 
     /*
@@ -1521,10 +1656,13 @@ const updateChart = data => {
                     blocks.push([
                         `<strong>${cycleName}</strong>`,
                         `方向：${directionText}`,
-                        `库存量：${Number(raw.inventory).toFixed(4)} ×10⁸m³`,
-                        `压力：${Number(raw.estimatedPressure).toFixed(4)} MPa`,
-                        `Z：${Number(raw.zFactor).toFixed(6)}`,
-                        `P/Z：${Number(raw.pressureOverZ).toFixed(4)} MPa`
+                        `本行气量：${Number(raw.gas).toFixed(4)} ×10⁸m³`,
+                        `累计净注采量 C：${Number(raw.cumulativeNetGas).toFixed(4)} ×10⁸m³`,
+                        `库存量 G：${Number(raw.inventory).toFixed(4)} ×10⁸m³`,
+                        `理论稳定 P/Z：${Number(raw.stablePressureOverZ).toFixed(4)} MPa`,
+                        `重建压力 P：${Number(raw.estimatedPressure).toFixed(4)} MPa`,
+                        `Z(P)：${Number(raw.zFactor).toFixed(6)}`,
+                        `运行 P/Z：${Number(raw.pressureOverZ).toFixed(4)} MPa`
                     ].join('<br/>'))
                 }
 
