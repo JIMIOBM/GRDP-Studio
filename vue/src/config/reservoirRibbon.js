@@ -18,14 +18,6 @@ export const reservoirRibbonGroups = [
       { type: 'large', label: '地层压力', dropdown: true, dropdownItems: ['测试法', '压力梯度'] },
       { type: 'large', label: '物质平衡法', dropdown: true, dropdownItems: ['物质平衡'] },
       { type: 'large', label: '水侵动态分析', dropdown: true, dropdownItems: ['水侵分析'] },
-      {
-        type: 'large',
-        label: '图版法',
-        dropdown: true,
-        // 需求图中划掉的方法保留可见，但不开放导航或计算入口。
-        dropdownItems: ['Blasingame', 'Transient', 'AG', { label: 'Wattenbarger', disabled: true }, 'NPI']
-      },
-      { type: 'large', label: '指标对比', dropdown: true, dropdownItems: ['阶段标定', '周期评估', '实时预测'] },
       { type: 'large', label: '主控因素分析' }
     ]
   },
@@ -40,14 +32,12 @@ export const reservoirRibbonGroups = [
   {
     title: '产能评价',
     columns: [
-      { type: 'large', label: '敏感性分析' },
-      { type: 'large', label: '产能对比', dropdown: true, dropdownItems: ['多周期', '多方法', '注采对比'] },
-      { type: 'large', label: '相关性分析' }
+      { type: 'large', label: '产能对比', dropdown: true, dropdownItems: ['多周期', '多方法', '注采对比'] }
     ]
   },
   {
     title: '井筒折算',
-    columns: [{ type: 'checks', items: ['井间对比', '相关性分析'] }]
+    columns: [{ type: 'checks', items: ['井间对比'] }]
   },
   {
     title: '地面管网',

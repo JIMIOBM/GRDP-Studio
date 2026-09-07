@@ -51,7 +51,7 @@ test('重复初始化不重建库目录，跨页面保留展开与库名称', ()
 
 test('库命令使用库级地址，能刷新恢复并高亮完整目录', () => {
   ensureWorkspaceReservoir({ projectId: 7, gasReservoirId: 4 })
-  const location = getReservoirCommandLocation({ group: '库存评估', parent: '图版法', name: 'Blasingame' })
+  const location = getReservoirCommandLocation({ group: '库存评估', parent: '地层压力', name: '测试法' })
   assert.equal(location.name, 'IprInterface')
   assert.equal(location.query.scope, 'reservoir')
   assert.equal(location.query.well, undefined)
@@ -60,7 +60,7 @@ test('库命令使用库级地址，能刷新恢复并高亮完整目录', () =>
   assert.equal(workspaceRibbonScope.value, 'reservoir')
   assert.equal(workspaceTreeData.value[1].expanded, true)
   assert.equal(target.reservoir.expanded, true)
-  assert.ok(decodeURIComponent(workspaceActiveNodeId.value).endsWith('/库存评估/图版法/Blasingame'))
+  assert.ok(decodeURIComponent(workspaceActiveNodeId.value).endsWith('/库存评估/地层压力/测试法'))
   assert.equal(workspaceSelectedWellName.value, 'A1-2H')
 })
 

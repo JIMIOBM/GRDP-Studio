@@ -15,17 +15,12 @@ const expectedPaths = [
   ...['测试法', '压力梯度'].map(name => ['库存评估', '地层压力', name]),
   ['库存评估', '物质平衡法', '物质平衡'],
   ['库存评估', '水侵动态分析', '水侵分析'],
-  ...['Blasingame', 'Transient', 'AG', 'NPI'].map(name => ['库存评估', '图版法', name]),
-  ...['阶段标定', '周期评估', '实时预测'].map(name => ['库存评估', '指标对比', name]),
   ['库存评估', '主控因素分析'],
   ...['微观损耗', '逸散性损耗'].map(name => ['损耗评价', '地质损耗', name]),
   ...['井筒损耗', '地面损耗'].flatMap(parent =>
     ['直接输入', '公式法'].map(name => ['损耗评价', parent, name])),
-  ['产能评价', '敏感性分析'],
   ...['多周期', '多方法', '注采对比'].map(name => ['产能评价', '产能对比', name]),
-  ['产能评价', '相关性分析'],
   ['井筒折算', '井间对比'],
-  ['井筒折算', '相关性分析'],
   ['地面管网', '管网拓扑结构'],
   ['地面管网', '相关性分析'],
   ...['单目标', '多目标'].map(name => ['协同预测', '一体化耦合优化', name]),
@@ -59,7 +54,7 @@ test('所有有效叶子均能用完整层级解析，且配置与需求无遗�
   const actualPaths = flatten(buildReservoirTreeNodes(sampleContext))
     .filter(node => node.command)
     .map(node => node.command.path)
-  assert.equal(actualPaths.length, 42)
+  assert.equal(actualPaths.length, 32)
   assert.deepEqual(actualPaths, expectedPaths)
 })
 
@@ -67,9 +62,10 @@ test('重复名称按分组和父级隔离，不把目录当作叶子命令', ()
   const wellLoss = resolveReservoirCommand({ group: '损耗评价', parent: '井筒损耗', name: '公式法' })
   const surfaceLoss = resolveReservoirCommand({ group: '损耗评价', parent: '地面损耗', name: '公式法' })
   assert.notDeepEqual(wellLoss.path, surfaceLoss.path)
-  const correlations = ['产能评价', '井筒折算', '地面管网'].map(group =>
-    resolveReservoirCommand({ group, name: '相关性分析' }))
-  assert.equal(new Set(correlations.map(command => JSON.stringify(command.path))).size, 3)
+  assert.deepEqual(
+    resolveReservoirCommand({ group: '地面管网', name: '相关性分析' }).path,
+    ['地面管网', '相关性分析']
+  )
   for (const input of [
     { group: '损耗评价', name: '公式法' },
     { group: '损耗评价', parent: '地质损耗', name: '公式法' },
@@ -81,17 +77,23 @@ test('重复名称按分组和父级隔离，不把目录当作叶子命令', ()
   ]) assert.equal(resolveReservoirCommand(input), null)
 })
 
-test('Wattenbarger 可见但禁用，不能生成可执行命令', () => {
-  const chart = reservoirRibbonGroups.find(group => group.title === '库存评估')
-    .columns.find(column => column.label === '图版法')
-  assert.deepEqual(chart.dropdownItems.find(item => typeof item === 'object'), {
-    label: 'Wattenbarger', disabled: true
-  })
-  assert.equal(resolveReservoirCommand({ group: '库存评估', parent: '图版法', name: 'Wattenbarger' }), null)
+test('需求图中蓝色功能全部删除，不能生成入口或目录节点', () => {
+  const removed = [
+    ['库存评估', '图版法', 'Blasingame'],
+    ['库存评估', '指标对比', '阶段标定'],
+    ['产能评价', '', '敏感性分析'],
+    ['产能评价', '', '相关性分析'],
+    ['井筒折算', '', '相关性分析']
+  ]
+  for (const [group, parent, name] of removed) {
+    assert.equal(resolveReservoirCommand({ group, parent, name }), null)
+  }
+  const labels = flatten(buildReservoirTreeNodes(sampleContext)).map(node => node.label)
+  for (const name of ['图版法', '指标对比', '敏感性分析', 'Blasingame', 'Wattenbarger']) {
+    assert.equal(labels.includes(name), false)
+  }
   const disabledNodes = flatten(buildReservoirTreeNodes(sampleContext)).filter(node => node.disabled)
-  assert.equal(disabledNodes.length, 1)
-  assert.equal(disabledNodes[0].label, 'Wattenbarger')
-  assert.equal(disabledNodes[0].command, null)
+  assert.equal(disabledNodes.length, 0)
 })
 
 test('库树所有节点带正确上下文，目录不自动执行、节点 ID 唯一且与其他库隔离', () => {

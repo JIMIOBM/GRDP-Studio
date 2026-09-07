@@ -624,20 +624,41 @@ $square-border: #c2c2c2;
 .ribbon-scope {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 0;
   padding: 0 8px 0 4px;
   margin-right: 4px;
   border-right: 1px solid #555;
   button {
-    min-width: 34px;
-    height: 24px;
-    border: 1px solid transparent;
-    border-radius: 3px;
-    color: #eee;
-    background: transparent;
+    min-width: 38px;
+    height: 26px;
+    border: 1px solid #555;
+    border-right-width: 0;
+    color: #d9d9d9;
+    background: #383838;
     cursor: pointer;
-    &.selected { background: #fff8d8; color: #202020; border-color: #ead36c; }
-    &:hover { border-color: #ead36c; }
+    transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+
+    &:first-child {
+      border-radius: 3px 0 0 3px;
+    }
+
+    &:last-child {
+      border-right-width: 1px;
+      border-radius: 0 3px 3px 0;
+    }
+
+    &:hover:not(.selected) {
+      background: #464646;
+      color: #fff;
+      border-color: #737373;
+    }
+
+    &.selected {
+      background: $accent-yellow;
+      color: #202020;
+      border-color: $accent-yellow;
+      font-weight: 600;
+    }
   }
 }
 
