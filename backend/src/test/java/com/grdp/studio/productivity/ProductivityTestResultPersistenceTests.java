@@ -67,15 +67,16 @@ class ProductivityTestResultPersistenceTests {
         service.save(request(testId, false, exponential("pseudo-pressure")));
         service.save(request(testId, false, exponential("pressure")));
 
-        assertThat(service.detail(testId, "binomial", "pseudo-pressure").result().calculationResultType())
+        Detail saved = service.detail(testId, 6, 4, "A1-3");
+        assertThat(findResult(saved, "binomial", "pseudo-pressure").calculationResultType())
                 .isEqualTo("binomial");
-        assertThat(service.detail(testId, "exponential", "pseudo-pressure").result().productivityExponent())
+        assertThat(findResult(saved, "exponential", "pseudo-pressure").productivityExponent())
                 .isEqualTo(.75);
-        assertThat(service.detail(testId, null, null).availableResults()).hasSize(3);
+        assertThat(saved.results()).hasSize(3);
 
         service.save(request(testId, true, exponential("pressure-squared")));
-        Detail latest = service.detail(testId, null, null);
-        assertThat(latest.availableResults()).singleElement().satisfies(item -> {
+        Detail latest = service.detail(testId, 6, 4, "A1-3");
+        assertThat(latest.results()).singleElement().satisfies(item -> {
             assertThat(item.calculationResultType()).isEqualTo("exponential");
             assertThat(item.pressureMethod()).isEqualTo("pressure-squared");
         });
@@ -87,7 +88,7 @@ class ProductivityTestResultPersistenceTests {
                 0d, "0", "0", "0");
         List<InputItem> items = List.of(new InputItem(1, 45d, 35.61, 34.93),
                 new InputItem(2, 59.1, 35.605, 34.65), new InputItem(3, 29.5, 35.68, 35.21));
-        return new SaveRequest(testId, 6, 4, "A1-3", 1, "production", "modified-isochronal",
+        return new SaveRequest(testId, 6, 4, "A1-3", 1L, "production", "modified-isochronal",
                 null, LocalDate.of(2026, 8, 30), null, replaceInput, input, items, result);
     }
 
@@ -97,12 +98,20 @@ class ProductivityTestResultPersistenceTests {
     }
 
     private Result exponential(String method) {
-        List<ChartPoint> charts = List.of(new ChartPoint("analysis", 1, 45d, 2d, false, "unstable"),
-                new ChartPoint("analysis", 2, 29.5, 1.5, false, "stable"),
-                new ChartPoint("transient", 1, 1d, 1d, false, null),
-                new ChartPoint("regression", 1, 1d, 1.2, false, null));
-        List<IprPoint> ipr = List.of(new IprPoint(1, 1, 0d, 5.634, false, null, 5.634));
+        List<ChartPoint> charts = List.of(new ChartPoint("analysis", 1, 1, 45d, 2d, false, "unstable"),
+                new ChartPoint("analysis", 2, 2, 29.5, 1.5, false, "stable"),
+                new ChartPoint("transient", 1, null, 1d, 1d, false, null),
+                new ChartPoint("regression", 1, null, 1d, 1.2, false, null));
+        List<IprPoint> ipr = List.of(new IprPoint(1, 1, 5.634, 0d, 5.634, false, null));
         return new Result("exponential", method, null, null, null, 350d, 3d, .75,
                 null, null, .96, 2, "可靠", charts, ipr);
+    }
+
+    private Result findResult(Detail detail, String resultType, String pressureMethod) {
+        return detail.results().stream()
+                .filter(item -> resultType.equals(item.calculationResultType())
+                        && pressureMethod.equals(item.pressureMethod()))
+                .findFirst()
+                .orElseThrow();
     }
 }
