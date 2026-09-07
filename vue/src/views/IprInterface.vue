@@ -9,12 +9,13 @@
  * 顶部“单井产能”命令进入独立工作台；左侧目录中的已保存记录则在
  * 当前 /ipr 页面内打开，和其它目录节点保持一致。
  */
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete } from '@element-plus/icons-vue'
 import RibbonMenu from '@/components/RibbonMenu.vue'
 import WorkspaceSidebar from '@/components/WorkspaceSidebar.vue'
+import ReservoirWorkspaceContent from '@/views/Reservoir/ReservoirWorkspaceContent.vue'
 import WaterInvasionContent from '@/views/WellControlInventory/WaterInvasionContent.vue'
 import MaterialBalanceContent from '@/views/WellControlInventory/MaterialBalanceContent.vue'
 import FlowBalanceContent from '@/views/WellControlInventory/FlowBalanceContent.vue'
@@ -85,13 +86,22 @@ import {
   workspaceTreeCollapsed,
   workspaceTreeData,
   workspaceTreeHydrated,
-  workspaceTreeKeyword
+  workspaceTreeKeyword,
+  workspaceRibbonScope,
+  ensureWorkspaceReservoir,
+  setWorkspaceRibbonScope,
+  selectWorkspaceNodeScope,
+  getReservoirCommandLocation,
+  resolveReservoirLocation,
+  activateReservoirCommand
 } from '@/utils/workspaceTreeState'
 
 // 当前工作台所使用的项目和气藏。
 const PROJECT_ID = 7
 const GAS_RESERVOIR_ID = 4
 const router = useRouter()
+const route = useRoute()
+ensureWorkspaceReservoir({ projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID })
 const FLOW_BALANCE_NODE_TYPE = NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure
 
 const WELL_GROUPS = [
@@ -185,6 +195,28 @@ const activeNodeId = workspaceActiveNodeId  // 当前左侧树选中的节点 ID
 const activeNode = ref(null)  // 当前选中的完整节点对象
 const currentView = ref(null)  // currentView.value = 'water-invasion'，即确定右侧部分区域所显示的界面
 const currentViewNode = ref(null)  // 传给右侧内容组件的节点对象
+
+// 库功能用可刷新/可回退的完整地址定位；目录选择本身不改变右侧页面。
+watch(() => route.query, query => {
+  const target = resolveReservoirLocation(query)
+  if (!target) {
+    if (currentView.value === 'reservoir-feature') {
+      currentView.value = null
+      currentViewNode.value = null
+    }
+    return
+  }
+  activateReservoirCommand(target)
+  currentView.value = 'reservoir-feature'
+  currentViewNode.value = target
+}, { immediate: true })
+
+watch(currentView, view => {
+  // 打开井的具体内容后清理旧库地址，防止刷新恢复成此前的库功能。
+  if (view && view !== 'reservoir-feature' && route.query.scope === 'reservoir') {
+    router.replace({ name: 'IprInterface' })
+  }
+})
 const WELL_CONTROL_VIEWS = new Set([
   'water-invasion',
   'analytic-method',
@@ -1291,6 +1323,22 @@ const collectWellsFromProject = (payload, allowedWellNames = null) => {
 }
 
 const rebuildProjectTree = (payload, allowedWellNames = null) => {
+  // 从已有项目详情取当前库名称，不为顶部菜单额外遍历或请求所有井。
+  const findReservoir = value => {
+    if (!value || typeof value !== 'object') return null
+    if (Number(value.nodeType) === NODETYPE.NodeType_GasReservoir
+      && Number(value.nodeId ?? value.id) === GAS_RESERVOIR_ID) return value
+    for (const child of Object.values(value)) {
+      const found = findReservoir(child)
+      if (found) return found
+    }
+    return null
+  }
+  const reservoir = findReservoir(payload)
+  if (reservoir) ensureWorkspaceReservoir({
+    projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID,
+    label: reservoir.nodeTitle || reservoir.name || reservoir.label
+  })
   const wells = collectWellsFromProject(payload, allowedWellNames)
   const wellGroup = getWellGroup()
   if (!wellGroup) return
@@ -3985,6 +4033,16 @@ const handleDeleteContextNode = async () => {
 
 const handleSelect = async (node) => { // 点击左侧树节点
   closeTreeContextMenu()
+  if (!node || node.disabled) return
+  const scope = selectWorkspaceNodeScope(node)
+  if (scope === 'reservoir') {
+    activeNodeId.value = node.id
+    if (node.command) {
+      const location = getReservoirCommandLocation(node.command)
+      if (location) await router.push(location)
+    }
+    return
+  }
   const isWellMenuGroup = WELL_GROUPS.some(group => group.id === node.type)
   const nodeWellName = node.wellName || (node.type === NODETYPE.NodeType_Well ? node.label : '')
 
@@ -4104,6 +4162,8 @@ const handleSelect = async (node) => { // 点击左侧树节点
       const fallbackGasRows = response?.data?.gasInput
         ? []
         : await getDefaultPvtGasRows(nodeWellName)
+      // 等待期间用户可能已进入库功能，迟到的井数据不能覆盖新的库页面。
+      if (activeNodeId.value !== node.id || workspaceRibbonScope.value !== 'well') return
       currentView.value = 'pvt-properties'
       currentViewNode.value = {
         ...node,
@@ -4196,6 +4256,13 @@ const handleSelect = async (node) => { // 点击左侧树节点
 }
 
 const handleCommand = async ({ group, name, parent }) => { // 接收顶部菜单栏的点击事件
+  if (workspaceRibbonScope.value === 'reservoir') {
+    const location = getReservoirCommandLocation({ group, name, parent })
+    if (location) await router.push(location)
+    else ElMessage.info('此公共功能暂未接入库工作区')
+    return // 库的物质平衡/图版法等同名菜单，不能落入下方单井计算分支。
+  }
+  if (route.query.scope === 'reservoir') await router.replace({ name: 'IprInterface' })
   // 顶部菜单栏“单井产能”板块：跳转到独立的单井产能工作台。
   if (group === '单井产能') {
     const activeWellName = activeNode.value?.wellName || (
@@ -4576,7 +4643,7 @@ onBeforeUnmount(() => {
   -->
   <div class="ipr-container">
     <!--    顶部菜单栏目-->
-    <RibbonMenu @command="handleCommand" />
+    <RibbonMenu :scope="workspaceRibbonScope" @scope-change="setWorkspaceRibbonScope" @command="handleCommand" />
 
 
     <div class="ipr-main">
@@ -4599,6 +4666,8 @@ onBeforeUnmount(() => {
           'pvt-yellow-theme': isPvtView
         }"
       >
+        <ReservoirWorkspaceContent v-if="currentView === 'reservoir-feature'"
+          :reservoir="currentViewNode.reservoir" :command="currentViewNode.command" />
         <SingleWellProductivityInterface
           v-if="currentView === 'isochronal-test'"
           :key="currentViewNode?.viewInstanceKey"

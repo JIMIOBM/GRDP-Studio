@@ -76,7 +76,12 @@ import {
   workspaceSelectedWellName,
   workspaceTreeCollapsed,
   workspaceTreeData,
-  workspaceTreeKeyword
+  workspaceTreeKeyword,
+  workspaceRibbonScope,
+  ensureWorkspaceReservoir,
+  setWorkspaceRibbonScope,
+  selectWorkspaceNodeScope,
+  getReservoirCommandLocation
 } from '@/utils/workspaceTreeState'
 
 const props = defineProps({
@@ -92,6 +97,8 @@ const PROJECT_ID = 7
 const GAS_RESERVOIR_ID = 4
 const MODIFIED_ISOCHRONAL_PROJECT_ID = 7
 const MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID = 4
+ensureWorkspaceReservoir({ projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID })
+if (!props.embedded) setWorkspaceRibbonScope('well')
 
 const MODULES = [
   { name: '产能试井', methods: ['回压试井', '等时试井', '修正等时', '一点法'] },
@@ -602,6 +609,12 @@ const deleteStableNode = async () => {
 }
 
 const handleCommand = async ({ group, name, parent }) => {
+  if (workspaceRibbonScope.value === 'reservoir') {
+    const location = getReservoirCommandLocation({ group, name, parent })
+    if (location) await router.push(location)
+    else ElMessage.info('此公共功能暂未接入库工作区')
+    return
+  }
   // 顶部菜单栏“单井产能”板块：留在当前独立页面并切换功能模块/计算方法。
   if (group === '单井产能') {
     const targetWellName = sidebarTargetWellName.value || selectedWellName.value
@@ -722,7 +735,15 @@ const selectWell = async wellName => {
 }
 
 const handleSidebarSelect = async node => {
-  if (!node) return
+  if (!node || node.disabled) return
+  if (selectWorkspaceNodeScope(node) === 'reservoir') {
+    workspaceActiveNodeId.value = node.id
+    if (node.command) {
+      const location = getReservoirCommandLocation(node.command)
+      if (location) await router.push(location)
+    }
+    return
+  }
 
   // 记录目录所指向的井，但此处不直接修改右侧组件正在使用的 selectedWellName。
   if (node.wellName) sidebarTargetWellName.value = node.wellName
@@ -1268,7 +1289,8 @@ onBeforeUnmount(() => window.removeEventListener('click', closeStableContextMenu
 <template>
   <!-- 顶部菜单栏对应板块：单井产能。 -->
   <div class="productivity-interface" :class="{ embedded: props.embedded }">
-    <RibbonMenu v-if="!props.embedded" @command="handleCommand" />
+    <RibbonMenu v-if="!props.embedded" :scope="workspaceRibbonScope"
+      @scope-change="setWorkspaceRibbonScope" @command="handleCommand" />
 
     <div class="productivity-main">
       <!-- 公共左侧目录：与 IprInterface.vue 使用同一个组件。 -->

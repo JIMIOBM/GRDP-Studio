@@ -39,6 +39,7 @@ const toggle = () => {
 }
 
 const handleClick = () => {
+  if (props.node.disabled) return
   emit('select', props.node)
   if (hasChildren()) {
     toggle()
@@ -48,6 +49,7 @@ const handleClick = () => {
 const onChildSelect = (n) => emit('select', n)
 const onChildExpand = (n) => emit('expand', n)
 const handleContextMenu = (event) => {
+  if (props.node.disabled) return
   emit('node-contextmenu', props.node, event)
 }
 const onChildContextMenu = (node, event) => emit('node-contextmenu', node, event)
@@ -57,7 +59,8 @@ const onChildContextMenu = (node, event) => emit('node-contextmenu', node, event
   <div class="tree-node">
     <div
       class="node-label"
-      :class="{ active: node.id === activeId }"
+      :class="{ active: node.id === activeId, disabled: node.disabled }"
+      :aria-disabled="Boolean(node.disabled)"
       @click="handleClick"
       @contextmenu.prevent.stop="handleContextMenu"
     >
@@ -111,6 +114,13 @@ const onChildContextMenu = (node, event) => emit('node-contextmenu', node, event
   &.active {
     background-color: #e3effd;
     color: #4084d9;
+  }
+
+  &.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    text-decoration: line-through;
+    background: transparent;
   }
 
   .caret {
