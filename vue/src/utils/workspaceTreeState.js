@@ -91,14 +91,28 @@ export function resolveReservoirLocation(query) {
   const command = resolveReservoirCommand({ group: query.group, parent: query.parent, name: query.feature })
   const reservoir = workspaceTreeData.value.find(item => item.id === 'g-reservoir')?.children.find(item =>
     Number(item.projectId) === Number(query.projectId) && Number(item.gasReservoirId) === Number(query.gasReservoirId))
-  return command && reservoir ? { command, reservoir } : null
+  return command && reservoir ? { command, reservoir, lossRecordId: query.lossRecordId ?? null } : null
 }
 
-export function activateReservoirCommand({ command, reservoir }) {
+export function activateReservoirCommand({ command, reservoir, lossRecordId = null }) {
   workspaceSelectedReservoir.value = reservoir
   setWorkspaceRibbonScope('reservoir')
+  const hasRecord = lossRecordId !== null && lossRecordId !== ''
   const reveal = node => {
-    if (node.command?.path.join('/') === command.path.join('/')) {
+    if (node.command?.path.join('/') === command.path.join('/')
+        && node.type !== 'reservoir-geological-loss-record') {
+      // 方法目录和记录共用功能路径；编辑已有记录时必须再按记录ID定位，
+      // 否则路由同步会把刚点击的记录高亮覆盖成父目录。
+      if (hasRecord && node.type === 'reservoir-geological-loss-method') {
+        node.expanded = true
+        const record = node.children?.find(child =>
+          child.type === 'reservoir-geological-loss-record'
+          && String(child.lossRecordId) === String(lossRecordId))
+        // 刷新后明细可能尚未懒加载。只预置稳定的选中ID，不伪造节点或额外调用接口；
+        // 目录加载后新节点会自然匹配高亮，且不会抢走用户后续点击的其他节点。
+        workspaceActiveNodeId.value = record?.id ?? `${node.id}/record:${lossRecordId}`
+        return true
+      }
       workspaceActiveNodeId.value = node.id
       return true
     }

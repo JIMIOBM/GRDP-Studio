@@ -54,6 +54,105 @@ public class GasPvtService {
     private static final double FRACTION_PER_PERCENT = 0.01d;
 
     public record FlowGas(double density, double viscosity) {}
+    /** 单压力点体积系数，供库级微观损耗等后端业务复用。 */
+    public record VolumeFactorResult(long toolboxId, double volumeFactor) {}
+    /** 井筒损耗公式所需的放空前、后两个天然气偏差系数。 */
+    public record DeviationFactorPairResult(long toolboxId,
+                                            double deviationFactorBefore,
+                                            double deviationFactorAfter) {}
+
+    public VolumeFactorResult calculateSingleVolumeFactor(
+            GasViscosityCurveRequest base, double pressure, double temperature,
+            String token, String cookie, String processEnv) {
+        validateRange(base);
+        if (!Double.isFinite(pressure) || pressure <= 0 || !Double.isFinite(temperature)) {
+            throw new BusinessException(400, "体积系数计算压力或温度无效");
+        }
+        var headers = forwardedHeaders(token, cookie, processEnv);
+        // 原平台工具箱会用 x-project-id 校验当前会话的项目权限；仅在请求体中传
+        // projectId 仍可能返回 401，因此服务端转调时必须同步项目上下文请求头。
+        headers.put("x-project-id", String.valueOf(base.projectId()));
+        long toolboxId = createToolbox(VOLUME_FACTOR_ALGORITHM, base.projectId(), headers);
+        var result = calculateAndGetResult(toolboxId,
+                buildLegacySinglePointInput(base, pressure, temperature), headers);
+        double volumeFactor = extractCurveValue(result,
+                List.of("volumeFactor", "gasVolumeFactor"), "天然气体积系数");
+        if (!Double.isFinite(volumeFactor) || volumeFactor <= 0) {
+            throw new BusinessException(502, "天然气体积系数计算结果无效");
+        }
+        return new VolumeFactorResult(toolboxId, volumeFactor);
+    }
+
+    /**
+     * 使用同一个偏差系数工具箱依次计算放空前、后的 Z 值。
+     * 页面只输入公式要求的开尔文温度，原平台 PVT 工具箱使用摄氏温度，换算在此处完成。
+     */
+    public DeviationFactorPairResult calculateWellboreDeviationFactors(
+            GasViscosityCurveRequest base,
+            double pressureBefore,
+            double pressureAfter,
+            double averageTemperatureK,
+            String token,
+            String cookie,
+            String processEnv
+    ) {
+        validateRange(base);
+        if (!Double.isFinite(pressureBefore) || pressureBefore <= 0
+                || !Double.isFinite(pressureAfter) || pressureAfter <= 0) {
+            throw new BusinessException(400, "放空前、后井筒平均压力必须大于0");
+        }
+        if (!Double.isFinite(averageTemperatureK) || averageTemperatureK <= 0) {
+            throw new BusinessException(400, "放空井段天然气平均温度必须大于0K");
+        }
+        var headers = forwardedHeaders(token, cookie, processEnv);
+        headers.put("x-project-id", String.valueOf(base.projectId()));
+        long toolboxId = createToolbox(DEVIATION_FACTOR_ALGORITHM, base.projectId(), headers);
+        double temperatureC = averageTemperatureK - KELVIN_OFFSET;
+        JsonNode beforeResult = calculateAndGetResult(toolboxId,
+                buildLegacySinglePointInput(base, pressureBefore, temperatureC), headers);
+        JsonNode afterResult = calculateAndGetResult(toolboxId,
+                buildLegacySinglePointInput(base, pressureAfter, temperatureC), headers);
+        double before = extractCurveValue(beforeResult,
+                List.of("deviationFactor", "gasDeviationFactor", "zFactor", "z"), "放空前天然气偏差系数");
+        double after = extractCurveValue(afterResult,
+                List.of("deviationFactor", "gasDeviationFactor", "zFactor", "z"), "放空后天然气偏差系数");
+        if (!Double.isFinite(before) || before <= 0 || !Double.isFinite(after) || after <= 0) {
+            throw new BusinessException(502, "天然气偏差系数计算结果无效");
+        }
+        return new DeviationFactorPairResult(toolboxId, before, after);
+    }
+
+    /**
+     * 原平台天然气单点 PVT 工具箱使用的公共负载。
+     *
+     * <p>该旧平台接口与曲线接口的单位约定不同：这里必须直接传 MPa、℃ 和百分数，
+     * 并保留工具箱定义中的四个压力辅助字段。不能复用 {@link #buildInput} 的
+     * Pa/K/摩尔分数换算，否则原平台会因输入范围不匹配返回 400。</p>
+     */
+    private Map<String, Object> buildLegacySinglePointInput(
+            GasViscosityCurveRequest request,
+            double pressureMpa,
+            double temperatureC
+    ) {
+        Map<String, Object> input = new LinkedHashMap<>();
+        input.put("gasType", request.gasType());
+        input.put("specificGravity", request.specificGravity());
+        input.put("co2MoleFraction", request.co2MoleFraction());
+        input.put("n2MoleFraction", request.n2MoleFraction());
+        input.put("h2SMoleFraction", request.h2SMoleFraction());
+        input.put("pressure", pressureMpa);
+        input.put("temperature", temperatureC);
+        // 以下四项沿用用户提供的原平台单点 PVT 请求中的辅助参数。
+        // 实际计算压力由 pressure 传入；体积系数和偏差系数均使用该负载格式。
+        input.put("originalPressure", 40d);
+        input.put("pseudoPressure", 4e-8d);
+        input.put("regularizedPseudoPressure", 40d);
+        input.put("apparentPressure", 40d);
+        input.put("modificationMethod", request.modificationMethod());
+        input.put("deviationFactorMethod", request.deviationFactorMethod());
+        input.put("viscosityMethod", request.viscosityMethod());
+        return input;
+    }
     /**
      * 井筒压力折算的请求内 PVT 会话。三个 toolbox 只创建一次，(P,T) 相同的
      * 物性直接从本次请求缓存返回；不影响已有 flowSession 调用方。

@@ -25,8 +25,9 @@ export const reservoirRibbonGroups = [
     title: '损耗评价',
     columns: [
       { type: 'large', label: '地质损耗', dropdown: true, dropdownItems: ['微观损耗', '逸散性损耗'] },
-      { type: 'large', label: '井筒损耗', dropdown: true, dropdownItems: ['直接输入', '公式法'] },
-      { type: 'large', label: '地面损耗', dropdown: true, dropdownItems: ['直接输入', '公式法'] }
+      // 直接输入和公式计算共用一个页面，由页面内的计算方式切换。
+      { type: 'large', label: '井筒损耗' },
+      { type: 'large', label: '地面损耗' }
     ]
   },
   {
@@ -97,11 +98,18 @@ export function buildReservoirTreeNodes({ id, label, projectId, gasReservoirId }
     const name = itemLabel(item)
     const descriptor = makeCommand(group, name, parent)
     const disabled = itemDisabled(item)
+    const isGeologicalLossMethod = group === '损耗评价'
+      && ((parent === '地质损耗' && ['微观损耗', '逸散性损耗'].includes(name))
+        || (!parent && ['井筒损耗', '地面损耗'].includes(name)))
     return {
       ...metadata,
       id: nodeId(descriptor.path),
       label: name,
-      type: 'reservoir-command',
+      type: isGeologicalLossMethod ? 'reservoir-geological-loss-method' : 'reservoir-command',
+      lazy: isGeologicalLossMethod,
+      lossType: name === '微观损耗' ? 'microscopic'
+        : name === '逸散性损耗' ? 'escape'
+          : name === '井筒损耗' ? 'wellbore' : name === '地面损耗' ? 'surface' : undefined,
       disabled,
       command: disabled ? null : resolveReservoirCommand(descriptor),
       children: []

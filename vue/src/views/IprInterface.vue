@@ -37,6 +37,8 @@ import SingleWellProductivityInterface from '@/views/SingleWellProductivityInter
 import { NODETYPE } from '@/constants/nodeType'
 import { analyticMethodApi, dataManagementApi, dynamicBalanceApi, materialBalanceApi, nodeApi, notifyApi, parametersApi, projectApi, typicalCurveApi, waterInvasionApi, wellApi } from '@/api/docker'
 import { pvtStorageApi } from '@/api/pvtStorage'
+import { wellboreLossApi } from '@/api/wellboreLoss'
+import { surfaceLossApi } from '@/api/surfaceLoss'
 import { dynamicProductivityApi } from '@/api/dynamicProductivity'
 import { theoreticalProductivityApi } from '@/api/theoreticalProductivity'
 import { createPvtDraftRecord } from '@/utils/pvtRecords'
@@ -95,6 +97,11 @@ import {
   resolveReservoirLocation,
   activateReservoirCommand
 } from '@/utils/workspaceTreeState'
+import {
+  RESERVOIR_LOSS_METHOD_NODE_TYPE,
+  RESERVOIR_LOSS_RECORD_NODE_TYPE,
+  loadReservoirLossTreeNodes
+} from '@/utils/reservoirGeologicalLossTree'
 
 // 当前工作台所使用的项目和气藏。
 const PROJECT_ID = 7
@@ -418,9 +425,13 @@ const getTypicalCurveResultName = (item) => {
 const isTypicalCurveResultNode = (item) => Boolean(getTypicalCurveResultName(item))
 const isInventoryResultNode = (item) => Boolean(getInventoryResultName(item))
 
-const isTreeContextMenuNode = (item) => isInventoryResultNode(item) || isTypicalCurveResultNode(item)
+const isVentLossRecord = item => item?.type === RESERVOIR_LOSS_RECORD_NODE_TYPE && ['wellbore', 'surface'].includes(item.lossType)
+const getVentLossApi = node => node.lossType === 'surface' ? surfaceLossApi : wellboreLossApi
+const getVentLossLabel = node => node?.lossType === 'surface' ? '地面损耗' : '井筒损耗'
+const isTreeContextMenuNode = (item) => isInventoryResultNode(item) || isTypicalCurveResultNode(item) || isVentLossRecord(item)
 
 const treeContextMenuLabel = computed(() => {
+  if (isVentLossRecord(treeContextMenu.value.node)) return `删除${getVentLossLabel(treeContextMenu.value.node)}记录`
   const resultName = getTypicalCurveResultName(treeContextMenu.value.node) || getInventoryResultName(treeContextMenu.value.node)
   if (resultName) return `删除${resultName}结果`
   return '删除水侵动态分析结果'
@@ -3891,7 +3902,7 @@ const handleNodeContextMenu = (node, event) => {
   }
 
   const menuWidth = 240
-  const menuHeight = 42
+  const menuHeight = isVentLossRecord(node) ? 84 : 42
   const x = Math.min(event.clientX, window.innerWidth - menuWidth - 8)
   const y = Math.min(event.clientY, window.innerHeight - menuHeight - 8)
 
@@ -3903,12 +3914,48 @@ const handleNodeContextMenu = (node, event) => {
   }
 }
 
+const handleRenameVentLoss = async () => {
+  const node = treeContextMenu.value.node
+  closeTreeContextMenu()
+  if (!isVentLossRecord(node)) return
+  try {
+    const { value } = await ElMessageBox.prompt('请输入记录名称', '重命名', {
+      inputValue: node.label,
+      inputValidator: value => !!value?.trim() && value.trim().length <= 100 || '名称需为1～100个字符'
+    })
+    const response = await getVentLossApi(node).rename(node.lossRecordId, value.trim(), node.projectId, node.gasReservoirId)
+    node.label = (response?.data ?? response).recordName
+    ElMessage.success('名称已修改')
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') console.error('修改损耗记录名称失败', error)
+  }
+}
+
 const handleDeleteContextNode = async () => {
   const node = treeContextMenu.value.node
   const deleteLabel = treeContextMenuLabel.value
   closeTreeContextMenu()
 
   if (!node) return
+
+  if (isVentLossRecord(node)) {
+    try {
+      await ElMessageBox.confirm(`删除“${node.label}”及其放空段数据？`, '删除记录', { type: 'warning' })
+      await getVentLossApi(node).delete(node.lossRecordId, node.projectId, node.gasReservoirId)
+      removeTreeNode(node)
+      if (route.query.feature === getVentLossLabel(node) && Number(route.query.lossRecordId) === Number(node.lossRecordId)
+          && Number(route.query.projectId) === Number(node.projectId)
+          && Number(route.query.gasReservoirId) === Number(node.gasReservoirId)) {
+        const query = { ...route.query }
+        delete query.lossRecordId
+        await router.replace({ query })
+      }
+      ElMessage.success(`${getVentLossLabel(node)}记录已删除`)
+    } catch (error) {
+      if (error !== 'cancel' && error !== 'close') console.error('删除损耗记录失败', error)
+    }
+    return
+  }
 
   if (node.type === NODETYPE.NodeType_WaterInvasionAnalysis) {
     const wellName = node.wellName || selectedWellName.value
@@ -4037,8 +4084,20 @@ const handleSelect = async (node) => { // 点击左侧树节点
   const scope = selectWorkspaceNodeScope(node)
   if (scope === 'reservoir') {
     activeNodeId.value = node.id
+    activeNode.value = node
+
+    // 损耗方法目录仅负责选择/展开；只有最末级计算记录才切换右侧界面。
+    const isReservoirLossTreeNode = [
+      RESERVOIR_LOSS_METHOD_NODE_TYPE,
+      RESERVOIR_LOSS_RECORD_NODE_TYPE
+    ].includes(node.type)
+    if (isReservoirLossTreeNode && node.type !== RESERVOIR_LOSS_RECORD_NODE_TYPE) return
+
     if (node.command) {
       const location = getReservoirCommandLocation(node.command)
+      if (location && node.type === RESERVOIR_LOSS_RECORD_NODE_TYPE) {
+        location.query.lossRecordId = node.lossRecordId
+      }
       if (location) await router.push(location)
     }
     return
@@ -4468,6 +4527,10 @@ const handleCommand = async ({ group, name, parent }) => { // 接收顶部菜单
 }
 
 const handleNodeExpand = async node => {
+  if (node?.type === RESERVOIR_LOSS_METHOD_NODE_TYPE) {
+    await loadReservoirLossTreeNodes({ treeData, node })
+    return
+  }
   const wellName = node?.wellName
   if (!wellName) return
 
@@ -4742,6 +4805,7 @@ onBeforeUnmount(() => {
     <Teleport to="body">
       <div v-if="treeContextMenu.visible" class="tree-context-menu"
         :style="{ left: `${treeContextMenu.x}px`, top: `${treeContextMenu.y}px` }" @click.stop @contextmenu.prevent>
+        <button v-if="isVentLossRecord(treeContextMenu.node)" class="tree-context-menu-item" type="button" @click="handleRenameVentLoss">重命名{{ getVentLossLabel(treeContextMenu.node) }}记录</button>
         <button class="tree-context-menu-item" type="button" @click="handleDeleteContextNode">
           <el-icon class="tree-context-menu-icon">
             <Delete />

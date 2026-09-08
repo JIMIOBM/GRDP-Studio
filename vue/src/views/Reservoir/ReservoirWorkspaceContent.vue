@@ -1,5 +1,7 @@
 <script setup>
 import { computed } from 'vue'
+import GeologicalLossContent from './GeologicalLossContent.vue'
+import WellboreLossContent from './WellboreLossContent.vue'
 
 const props = defineProps({
   reservoir: { type: Object, default: null },
@@ -15,12 +17,31 @@ const commandPath = computed(() => {
 })
 const title = computed(() => commandPath.value.at(-1) || '库级工作区')
 const tabTitle = computed(() => [reservoirLabel.value, ...commandPath.value].join(' · '))
+const isGeologicalLoss = computed(() =>
+  props.command?.group === '损耗评价'
+  && props.command?.parent === '地质损耗'
+  && ['微观损耗', '逸散性损耗'].includes(props.command?.name)
+)
+const isVentLoss = computed(() =>
+  props.command?.group === '损耗评价' && ['井筒损耗', '地面损耗'].includes(props.command?.name)
+)
 
 // 库级功能有独立的数据范围；入口页不复用单井接口，也不触发计算或保存。
 </script>
 
 <template>
-  <section class="reservoir-workspace" :aria-label="title">
+  <GeologicalLossContent
+    v-if="isGeologicalLoss"
+    :reservoir="reservoir"
+    :command="command"
+  />
+  <WellboreLossContent
+    v-else-if="isVentLoss"
+    :key="command.name"
+    :loss-kind="command.name === '地面损耗' ? 'surface' : 'wellbore'"
+    :reservoir="reservoir"
+  />
+  <section v-else class="reservoir-workspace" :aria-label="title">
     <div class="workspace-tabs">
       <div class="workspace-tab" :title="tabTitle">{{ tabTitle }}</div>
     </div>
