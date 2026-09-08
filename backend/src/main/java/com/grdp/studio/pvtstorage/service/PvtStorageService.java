@@ -89,7 +89,8 @@ public class PvtStorageService {
         if (wellName == null || wellName.isBlank()) {
             return List.of();
         }
-        List<Long> wellIds = findWellIds(projectId, gasReservoirId, wellName.trim());
+        String normalizedWellName = wellName.trim();
+        List<Long> wellIds = findWellIds(projectId, gasReservoirId, normalizedWellName);
         if (wellIds.isEmpty()) {
             return List.of();
         }
@@ -97,11 +98,16 @@ public class PvtStorageService {
             throw new BusinessException(409, "当前项目、气藏和井名对应多口井，请先清理重复井数据");
         }
 
-        return wellPvtMapper.selectList(
-                        new LambdaQueryWrapper<WellPvtEntity>()
-                                .eq(WellPvtEntity::getWellId, wellIds.getFirst())
-                                .orderByAsc(WellPvtEntity::getPvtNo)
-                ).stream()
+        List<WellPvtEntity> records = findPvtRecords(wellIds);
+        if (records.isEmpty()) {
+            // 老数据曾把 project_gas_reservoir.core_gas_reservoir_id 当成项目气藏 ID，
+            // 因而同一项目、同一井名可能保留一套历史 well_id。当前井没有 PVT 时
+            // 才回退查询历史 well_id，既保留旧数据可见性，也不覆盖当前气藏的新记录。
+            List<Long> compatibleWellIds = findProjectWellIds(projectId, normalizedWellName);
+            records = findPvtRecords(compatibleWellIds);
+        }
+
+        return records.stream()
                 .map(PvtRecordSummary::from)
                 .toList();
     }
@@ -116,15 +122,7 @@ public class PvtStorageService {
             long gasReservoirId,
             String wellName
     ) {
-        long wellId = requireWellId(projectId, gasReservoirId, wellName);
-        WellPvtEntity pvt = wellPvtMapper.selectOne(
-                new LambdaQueryWrapper<WellPvtEntity>()
-                        .eq(WellPvtEntity::getId, pvtId)
-                        .eq(WellPvtEntity::getWellId, wellId)
-        );
-        if (pvt == null) {
-            throw new BusinessException(404, "没有找到当前井对应的PVT性质");
-        }
+        WellPvtEntity pvt = requireCompatiblePvt(pvtId, projectId, gasReservoirId, wellName);
 
         PvtGasInputEntity gasInput = gasInputMapper.selectOne(
                 new LambdaQueryWrapper<PvtGasInputEntity>()
@@ -296,6 +294,60 @@ public class PvtStorageService {
                 ).stream()
                 .map(WellHeadLookupEntity::getId)
                 .toList();
+    }
+
+    private List<Long> findProjectWellIds(long projectId, String wellName) {
+        return wellHeadLookupMapper.selectList(
+                        new LambdaQueryWrapper<WellHeadLookupEntity>()
+                                .select(WellHeadLookupEntity::getId)
+                                .eq(WellHeadLookupEntity::getProjectId, projectId)
+                                .eq(WellHeadLookupEntity::getWellName, wellName)
+                                .orderByAsc(WellHeadLookupEntity::getId)
+                ).stream()
+                .map(WellHeadLookupEntity::getId)
+                .toList();
+    }
+
+    private List<WellPvtEntity> findPvtRecords(List<Long> wellIds) {
+        if (wellIds.isEmpty()) {
+            return List.of();
+        }
+        return wellPvtMapper.selectList(
+                new LambdaQueryWrapper<WellPvtEntity>()
+                        .in(WellPvtEntity::getWellId, wellIds)
+                        .orderByAsc(WellPvtEntity::getPvtNo)
+                        .orderByAsc(WellPvtEntity::getId));
+    }
+
+    private WellPvtEntity requireCompatiblePvt(
+            long pvtId,
+            long projectId,
+            long gasReservoirId,
+            String wellName
+    ) {
+        if (wellName == null || wellName.isBlank()) {
+            throw new BusinessException(400, "井名不能为空");
+        }
+
+        WellPvtEntity pvt = wellPvtMapper.selectById(pvtId);
+        if (pvt == null) {
+            throw new BusinessException(404, "没有找到当前井对应的PVT性质");
+        }
+
+        String normalizedWellName = wellName.trim();
+        List<Long> currentWellIds = findWellIds(projectId, gasReservoirId, normalizedWellName);
+        if (currentWellIds.size() > 1) {
+            throw new BusinessException(409, "当前项目、气藏和井名对应多口井，请先清理重复井数据");
+        }
+        if (currentWellIds.contains(pvt.getWellId())) {
+            return pvt;
+        }
+
+        // 只允许回退到同一项目、同一井名的历史映射，不能跨项目或跨井读取数据。
+        if (findProjectWellIds(projectId, normalizedWellName).contains(pvt.getWellId())) {
+            return pvt;
+        }
+        throw new BusinessException(404, "没有找到当前井对应的PVT性质");
     }
 
     private WellPvtEntity findOrCreatePvt(long wellId, PvtSaveRequest request) {

@@ -1665,7 +1665,10 @@ const refreshProjectTree = async () => { //加在项目树
       loadReservoirWellNames()
     ])
     if (projectResult.status === 'rejected') throw projectResult.reason
-    const names = namesResult.status === 'fulfilled' ? namesResult.value : null
+    // 气藏接口偶发返回空 wells 时，仍保留项目接口已经返回的井，避免整棵目录被空集合过滤掉。
+    const names = namesResult.status === 'fulfilled' && namesResult.value.size
+      ? namesResult.value
+      : null
     if (namesResult.status === 'rejected') {
       reservoirWellNames.value = null
       console.warn('当前气藏井列表加载失败，项目树暂按项目数据展示', namesResult.reason)
