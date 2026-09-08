@@ -13,3 +13,8 @@ backend/.env
 backend/*.log
 outputs/
 docs/
+
+# 测试与数据库部署脚本仅在本地保留，不提交到仓库。
+/backend/src/test/
+/vue/tests/
+/backend/sql/
