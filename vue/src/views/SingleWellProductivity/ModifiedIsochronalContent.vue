@@ -5,6 +5,7 @@ import { ElMessage } from 'element-plus'
 import { nodeApi, productivityEvaluationApi } from '@/api/docker'
 import { NODETYPE } from '@/constants/nodeType'
 import { pvtStorageApi } from '@/api/pvtStorage'
+import { deletedPvtRecord, matchesPvtScope } from '@/utils/pvtRecordActions'
 import { productivityTestsApi } from '@/api/productivityTests'
 
 const props = defineProps({
@@ -115,7 +116,9 @@ const normalizeMethod = value => ({ 1: 'pressure', 2: 'pressure-squared', 3: 'ps
   '压力形式': 'pressure', '压力平方形式': 'pressure-squared', '拟压力形式': 'pseudo-pressure' }[value] ||
   (['pressure', 'pressure-squared', 'pseudo-pressure'].includes(value) ? value : 'pseudo-pressure'))
 
+let pvtOptionsRequest = 0
 const loadPvtOptions = async () => {
+  const requestId = ++pvtOptionsRequest
   pvtOptions.value = []
   pvtDetailCache.clear()
   if (!props.wellName) return void (selectedPvtId.value = '')
@@ -123,6 +126,7 @@ const loadPvtOptions = async () => {
     const summaries = unwrap(await pvtStorageApi.list(
       props.projectId, props.gasReservoirId, props.wellName
     )) || []
+    if (requestId !== pvtOptionsRequest) return
     // 选项必须与当前井 project_well_pvt 主表完全一致；参数完整性在计算时校验，
     // 不能因为名称或明细缺项在修正等时页面静默隐藏数据库记录。
     pvtOptions.value = Array.isArray(summaries) ? summaries : []
@@ -131,11 +135,12 @@ const loadPvtOptions = async () => {
         const detail = unwrap(await pvtStorageApi.getDetail(
           record.pvtId, props.projectId, props.gasReservoirId, props.wellName
         ))
-        pvtDetailCache.set(String(record.pvtId), detail)
+        if (requestId === pvtOptionsRequest) pvtDetailCache.set(String(record.pvtId), detail)
       } catch (error) {
         console.warn(`PVT性质${record.pvtNo}明细读取失败`, error)
       }
     }))
+    if (requestId !== pvtOptionsRequest) return
     if (!pvtOptions.value.some(item => String(item.pvtId) === String(selectedPvtId.value))) {
       const preferred = pvtOptions.value.find(item => isValidPvtGas(
         gasFromPvtDetail(pvtDetailCache.get(String(item.pvtId)))
@@ -143,6 +148,7 @@ const loadPvtOptions = async () => {
       selectedPvtId.value = String((preferred || pvtOptions.value[0])?.pvtId || '')
     }
   } catch (error) {
+    if (requestId !== pvtOptionsRequest) return
     selectedPvtId.value = ''
     console.warn('PVT数据库记录读取失败', error)
   }
@@ -151,8 +157,11 @@ const loadPvtOptions = async () => {
 const loadPvtDetail = async () => {
   markInputDirty()
   if (!selectedPvtId.value) return void (selectedGas.value = { ...GAS_DEFAULTS })
+  const targetId = selectedPvtId.value
+  const requestId = pvtOptionsRequest
   const detail = pvtDetailCache.get(String(selectedPvtId.value)) || unwrap(await pvtStorageApi.getDetail(
     selectedPvtId.value, props.projectId, props.gasReservoirId, props.wellName))
+  if (requestId !== pvtOptionsRequest || targetId !== selectedPvtId.value) return
   selectedGas.value = gasFromPvtDetail(detail)
   const pvtTemperature = Number(detail.gasInput?.formationTemperature)
   if (Number.isFinite(pvtTemperature)) formationTemperature.value = pvtTemperature
@@ -1020,6 +1029,18 @@ const resizeChart = () => {
   else chart?.resize()
 }
 const toggleParamsPanel = async () => { paramsCollapsed.value = !paramsCollapsed.value; await nextTick(); resizeChart() }
+
+watch(deletedPvtRecord, deleted => {
+  if (!matchesPvtScope(deleted, props)) return
+  ++pvtOptionsRequest
+  pvtOptions.value = pvtOptions.value.filter(item => Number(item.pvtId) !== Number(deleted.pvtId))
+  pvtDetailCache.delete(String(deleted.pvtId))
+  if (Number(selectedPvtId.value) === Number(deleted.pvtId)) {
+    selectedPvtId.value = ''
+    selectedGas.value = { ...GAS_DEFAULTS }
+    markInputDirty()
+  }
+})
 
 watch(() => props.testId, () => loadTest())
 watch(() => props.wellName, async () => { await loadPvtOptions(); await loadTest() })

@@ -17,6 +17,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import RibbonMenu from '@/components/RibbonMenu.vue'
 import WorkspaceSidebar from '@/components/WorkspaceSidebar.vue'
+import { isLossRecord, lossRecordLabel, deleteLossRecord, removeSavedTreeRecord } from '@/utils/lossRecordActions'
 import BinomialPressureContent from '@/views/WellControlInventory/BinomialPressureContent.vue'
 import ModifiedIsochronalContent from '@/views/SingleWellProductivity/ModifiedIsochronalContent.vue'
 import ExponentialContent from '@/views/SingleWellProductivity/ExponentialContent.vue'
@@ -28,6 +29,7 @@ import TheoreticalUnstableProductivityContent from '@/views/SingleWellProductivi
 import { NODETYPE } from '@/constants/nodeType'
 import { wellApi } from '@/api/docker'
 import { pvtStorageApi } from '@/api/pvtStorage'
+import { isPvtRecord, deletePvtTreeRecord, deletedPvtRecord, matchesPvtScope } from '@/utils/pvtRecordActions'
 import { productivityStorageApi } from '@/api/productivityStorage'
 import { productivityTestsApi } from '@/api/productivityTests'
 import { dynamicProductivityApi } from '@/api/dynamicProductivity'
@@ -94,10 +96,10 @@ const props = defineProps({
 
 const route = useRoute()
 const router = useRouter()
-const PROJECT_ID = 7
-const GAS_RESERVOIR_ID = 4
-const MODIFIED_ISOCHRONAL_PROJECT_ID = 7
-const MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID = 4
+const PROJECT_ID = 6
+const GAS_RESERVOIR_ID = 3
+const MODIFIED_ISOCHRONAL_PROJECT_ID = 6
+const MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID = 3
 ensureWorkspaceReservoir({ projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID })
 if (!props.embedded) setWorkspaceRibbonScope('well')
 
@@ -337,6 +339,17 @@ const changeSelectedPvt = async () => {
   await loadSelectedPvtDetail()
 }
 
+watch(deletedPvtRecord, deleted => {
+  if (!matchesPvtScope(deleted, { projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName: selectedWellName.value })) return
+  ++pvtListRequest
+  pvtOptionsLoading.value = false
+  databasePvtRecords.value = databasePvtRecords.value.filter(item => Number(item.pvtId) !== Number(deleted.pvtId))
+  if (Number(selectedPvtTable.value) === Number(deleted.pvtId)) {
+    selectedPvtTable.value = ''
+    changeSelectedPvt()
+  }
+})
+
 const chooseDataFile = () => dataFileInput.value?.click()
 const handleDataFile = async event => {
   const file = event.target.files?.[0]
@@ -513,7 +526,7 @@ const isStableRecordNode = node => [
 
 const closeStableContextMenu = () => { stableContextMenu.value.visible = false }
 const handleStableContextMenu = (node, event) => {
-  if (!isStableRecordNode(node)) return closeStableContextMenu()
+  if (!isStableRecordNode(node) && !isLossRecord(node) && !isPvtRecord(node)) return closeStableContextMenu()
   stableContextMenu.value = {
     visible: true,
     x: Math.max(8, Math.min(event.clientX, window.innerWidth - 190)),
@@ -604,25 +617,61 @@ const renameStableNode = async () => {
 const deleteStableNode = async () => {
   const node = stableContextMenu.value.node
   closeStableContextMenu()
+  if (isPvtRecord(node)) {
+    try {
+      await ElMessageBox.confirm(`删除“${node.label}”及其天然气、地层水、岩石性质的输入和计算结果？此操作不可撤销。`, '删除PVT记录', {
+        type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消'
+      })
+      const { removedIds } = await deletePvtTreeRecord(node, workspaceTreeData.value, { projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID })
+      if (removedIds.includes(String(workspaceActiveNodeId.value))) workspaceActiveNodeId.value = ''
+      ElMessage.success('PVT记录已删除')
+    } catch (error) {
+      if (error !== 'cancel' && error !== 'close') ElMessage.error(error?.msg || error.response?.data?.msg || error.message || '删除PVT记录失败')
+    }
+    return
+  }
+  if (isLossRecord(node)) {
+    try {
+      await ElMessageBox.confirm(`删除“${node.label}”及其输入、计算结果和相关明细？此操作不可撤销。`, '删除记录', {
+        type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消'
+      })
+      await deleteLossRecord(node)
+      removeSavedTreeRecord(workspaceTreeData.value, node)
+      if (String(workspaceActiveNodeId.value) === String(node.id)) workspaceActiveNodeId.value = ''
+      ElMessage.success(`${lossRecordLabel(node)}记录已删除`)
+    } catch (error) {
+      if (error !== 'cancel' && error !== 'close') ElMessage.error(error.response?.data?.msg || error.message || '删除损耗记录失败')
+    }
+    return
+  }
   if (!isStableRecordNode(node)) return
   try {
     const regimeLabel = [DYNAMIC_UNSTABLE_RECORD_NODE_TYPE, THEORETICAL_UNSTABLE_RECORD_NODE_TYPE].includes(node.type) ? '不稳定流' : '稳定流'
     await ElMessageBox.confirm(
-      `删除后将同时删除“${node.label}”的输入、三种输出和IPR曲线，是否继续？`,
+      `删除后将同时删除“${node.label}”的输入、三种输出和IPR曲线，此操作不可撤销，是否继续？`,
       `删除${regimeLabel}`,
       { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }
     )
+    const projectId = node.projectId ?? PROJECT_ID
+    const gasReservoirId = node.gasReservoirId ?? GAS_RESERVOIR_ID
+    if (!node.wellName || !(Number(node.unstableId ?? node.stableId) > 0)) throw new Error('记录归属信息不完整，无法删除')
     if ([DYNAMIC_UNSTABLE_RECORD_NODE_TYPE, THEORETICAL_UNSTABLE_RECORD_NODE_TYPE].includes(node.type)) {
       const api = node.type === THEORETICAL_UNSTABLE_RECORD_NODE_TYPE
         ? theoreticalProductivityApi : dynamicProductivityApi
-      await api.deleteUnstable(node.unstableId, PROJECT_ID, GAS_RESERVOIR_ID, node.wellName)
+      await api.deleteUnstable(node.unstableId, projectId, gasReservoirId, node.wellName)
     } else {
       const api = node.type === THEORETICAL_STABLE_RECORD_NODE_TYPE
         ? theoreticalProductivityApi : dynamicProductivityApi
-      await api.deleteStable(node.stableId, PROJECT_ID, GAS_RESERVOIR_ID, node.wellName)
+      await api.deleteStable(node.stableId, projectId, gasReservoirId, node.wellName)
     }
-    await reloadStableBranch(node)
-    if (Number(activeStableId.value) === Number(node.unstableId ?? node.stableId)) {
+    removeSavedTreeRecord(workspaceTreeData.value, node)
+    if (String(workspaceActiveNodeId.value) === String(node.id)) workspaceActiveNodeId.value = ''
+    const deletedModule = [THEORETICAL_STABLE_RECORD_NODE_TYPE, THEORETICAL_UNSTABLE_RECORD_NODE_TYPE].includes(node.type) ? '理论计算' : '动态产能'
+    // 不同井、稳定/不稳定流及理论/动态记录可能拥有相同数字 ID，不能只比较 ID。
+    if (activeModule.value === deletedModule && activeMethod.value === regimeLabel && selectedWellName.value === node.wellName
+        && Number(projectId) === Number(PROJECT_ID) && Number(gasReservoirId) === Number(GAS_RESERVOIR_ID)
+        && Number(activeStableId.value) === Number(node.unstableId ?? node.stableId)) {
+      autoCalculateStable.value = false
       activeStableId.value = null
       await router.replace({
         name: 'SingleWellProductivity',
@@ -1611,7 +1660,7 @@ onBeforeUnmount(() => window.removeEventListener('click', closeStableContextMenu
     <div v-if="stableContextMenu.visible" class="stable-context-menu"
       :style="{ left: `${stableContextMenu.x}px`, top: `${stableContextMenu.y}px` }"
       @click.stop @contextmenu.prevent>
-      <button type="button" @click="renameStableNode">重命名</button>
+      <button v-if="isStableRecordNode(stableContextMenu.node)" type="button" @click="renameStableNode">重命名</button>
       <button type="button" class="danger" @click="deleteStableNode">删除</button>
     </div>
   </Teleport>

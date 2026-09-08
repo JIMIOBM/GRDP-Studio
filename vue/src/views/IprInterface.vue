@@ -37,8 +37,10 @@ import SingleWellProductivityInterface from '@/views/SingleWellProductivityInter
 import { NODETYPE } from '@/constants/nodeType'
 import { analyticMethodApi, dataManagementApi, dynamicBalanceApi, materialBalanceApi, nodeApi, notifyApi, parametersApi, projectApi, typicalCurveApi, waterInvasionApi, wellApi } from '@/api/docker'
 import { pvtStorageApi } from '@/api/pvtStorage'
+import { isPvtRecord, samePvtRecord, deletePvtTreeRecord } from '@/utils/pvtRecordActions'
 import { wellboreLossApi } from '@/api/wellboreLoss'
 import { surfaceLossApi } from '@/api/surfaceLoss'
+import { isLossRecord, lossRecordLabel, deleteLossRecord, removeSavedTreeRecord } from '@/utils/lossRecordActions'
 import { dynamicProductivityApi } from '@/api/dynamicProductivity'
 import { theoreticalProductivityApi } from '@/api/theoreticalProductivity'
 import { createPvtDraftRecord } from '@/utils/pvtRecords'
@@ -105,8 +107,8 @@ import {
 } from '@/utils/reservoirGeologicalLossTree'
 
 // 当前工作台所使用的项目和气藏。
-const PROJECT_ID = 7
-const GAS_RESERVOIR_ID = 4
+const PROJECT_ID = 6
+const GAS_RESERVOIR_ID = 3
 const router = useRouter()
 const route = useRoute()
 ensureWorkspaceReservoir({ projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID })
@@ -185,7 +187,7 @@ const NODE_LABEL_BY_TYPE = {
   [NODETYPE.NodeType_AnalysisMethods]: '解析法',
   [NODETYPE.NodeType_DynamicOriginalGasInplace]: '物质平衡',
   [NODETYPE.NodeType_DynamicMaterialBalanceMethodBlasingame]: '动态平衡',
-  [NODETYPE.NodeType_TypicalCurve]: '诊断曲线',
+  [NODETYPE.NodeType_TypicalCurve]: '图版法',
   [FLOW_BALANCE_NODE_TYPE]: '流动平衡',
   [NODETYPE.NodeType_TypicalCurveBlasingame]: 'Blasingame',
   [NODETYPE.NodeType_TypicalCurveWattenbarger]: 'Wattenbarger',
@@ -199,6 +201,14 @@ const NODE_LABEL_BY_TYPE = {
 }
 
 const treeData = workspaceTreeData
+// 共享目录可能仍持有旧显示名；只改典型曲线分组，不改独立的诊断曲线功能。
+const normalizeTypicalCurveLabels = nodes => {
+  nodes.forEach(node => {
+    if (Number(node.type) === NODETYPE.NodeType_TypicalCurve) node.label = '图版法'
+    if (Array.isArray(node.children)) normalizeTypicalCurveLabels(node.children)
+  })
+}
+normalizeTypicalCurveLabels(treeData.value)
 const activeNodeId = workspaceActiveNodeId  // 当前左侧树选中的节点 ID. 用于高亮显示
 const activeNode = ref(null)  // 当前选中的完整节点对象
 const currentView = ref(null)  // currentView.value = 'water-invasion'，即确定右侧部分区域所显示的界面
@@ -429,10 +439,13 @@ const isInventoryResultNode = (item) => Boolean(getInventoryResultName(item))
 const isVentLossRecord = item => item?.type === RESERVOIR_LOSS_RECORD_NODE_TYPE && ['wellbore', 'surface'].includes(item.lossType)
 const getVentLossApi = node => node.lossType === 'surface' ? surfaceLossApi : wellboreLossApi
 const getVentLossLabel = node => node?.lossType === 'surface' ? '地面损耗' : '井筒损耗'
-const isTreeContextMenuNode = (item) => isInventoryResultNode(item) || isTypicalCurveResultNode(item) || isVentLossRecord(item)
+const isTheoreticalRecord = node => [THEORETICAL_STABLE_RECORD_NODE_TYPE, THEORETICAL_UNSTABLE_RECORD_NODE_TYPE].includes(node?.type)
+const isTreeContextMenuNode = (item) => isInventoryResultNode(item) || isTypicalCurveResultNode(item) || isLossRecord(item) || isTheoreticalRecord(item) || isPvtRecord(item)
 
 const treeContextMenuLabel = computed(() => {
-  if (isVentLossRecord(treeContextMenu.value.node)) return `删除${getVentLossLabel(treeContextMenu.value.node)}记录`
+  if (isPvtRecord(treeContextMenu.value.node)) return '删除PVT记录'
+  if (isLossRecord(treeContextMenu.value.node)) return `删除${lossRecordLabel(treeContextMenu.value.node)}记录`
+  if (isTheoreticalRecord(treeContextMenu.value.node)) return '删除记录'
   const resultName = getTypicalCurveResultName(treeContextMenu.value.node) || getInventoryResultName(treeContextMenu.value.node)
   if (resultName) return `删除${resultName}结果`
   return '删除水侵动态分析结果'
@@ -725,6 +738,8 @@ const createPvtPropertyNodes = (wellName, wellId, records = []) =>
     type: 'well-data-pvt',
     wellName,
     pvtId: record.pvtId,
+    projectId: PROJECT_ID,
+    gasReservoirId: GAS_RESERVOIR_ID,
     pvtIndex: record.pvtNo,
     status: record.status,
     sourceType: record.sourceType,
@@ -941,10 +956,11 @@ const openWellboreStructure = (wellName, moduleType = 'wellbore-structure') => {
 
 const WELL_CONTROL_NODE_ORDER = new Map([
   [NODETYPE.NodeType_WaterInvasionAnalysis, 10],
-  [NODETYPE.NodeType_AnalysisMethods, 20],
-  [NODETYPE.NodeType_DynamicOriginalGasInplace, 30],
+  [NODETYPE.NodeType_DynamicOriginalGasInplace, 20],
+  [FLOW_BALANCE_NODE_TYPE, 30],
   [NODETYPE.NodeType_DynamicMaterialBalanceMethodBlasingame, 40],
-  [NODETYPE.NodeType_TypicalCurve, 50]
+  [NODETYPE.NodeType_AnalysisMethods, 50],
+  [NODETYPE.NodeType_TypicalCurve, 60]
 ])
 
 const TYPICAL_CURVE_NODE_ORDER = new Map([
@@ -963,6 +979,16 @@ const sortNodesByFixedOrder = (nodes, orderMap) => {
     return String(a?.label || '').localeCompare(String(b?.label || ''), 'zh-Hans')
   })
 }
+
+// 已加载的共享目录也按同一规则排序，不必等到重新加载结果时才更新。
+const sortExistingWellControlNodes = nodes => {
+  nodes.forEach(node => {
+    if (!Array.isArray(node.children)) return
+    if (node.type === 'well-control-inventory') sortNodesByFixedOrder(node.children, WELL_CONTROL_NODE_ORDER)
+    sortExistingWellControlNodes(node.children)
+  })
+}
+sortExistingWellControlNodes(treeData.value)
 
 const addAnalysisNode = (wellName, rawNode) => {  // 添加分析节点
   const nodeType = rawNode?.nodeType ?? rawNode?.type
@@ -1005,13 +1031,13 @@ const addBlasingameNode = (wellName, rawNode = {}) => {
 
   const parentId = `${wellItem.id}-diagnostic-curve`
   let diagnosticNode = inventoryGroup.children.find(item =>
-    item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve || item.label === '诊断曲线'
+    item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve || ['图版法', '诊断曲线'].includes(item.label)
   )
 
   if (!diagnosticNode) {
     diagnosticNode = {
       id: parentId,
-      label: '诊断曲线',
+      label: '图版法',
       type: NODETYPE.NodeType_TypicalCurve,
       wellName,
       defaultExpanded: false,
@@ -1053,12 +1079,12 @@ const addNpiNode = (wellName, rawNode = {}) => {
 
   const parentId = `${wellItem.id}-diagnostic-curve`
   let diagnosticNode = inventoryGroup.children.find(item =>
-    item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve || item.label === '诊断曲线'
+    item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve || ['图版法', '诊断曲线'].includes(item.label)
   )
   if (!diagnosticNode) {
     diagnosticNode = {
       id: parentId,
-      label: '诊断曲线',
+      label: '图版法',
       type: NODETYPE.NodeType_TypicalCurve,
       wellName,
       defaultExpanded: false,
@@ -1094,12 +1120,12 @@ const addTransientNode = (wellName, rawNode = {}) => {
 
   const parentId = `${wellItem.id}-diagnostic-curve`
   let diagnosticNode = inventoryGroup.children.find(item =>
-    item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve || item.label === '诊断曲线'
+    item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve || ['图版法', '诊断曲线'].includes(item.label)
   )
   if (!diagnosticNode) {
     diagnosticNode = {
       id: parentId,
-      label: '诊断曲线',
+      label: '图版法',
       type: NODETYPE.NodeType_TypicalCurve,
       wellName,
       defaultExpanded: false,
@@ -1135,13 +1161,13 @@ const addWattenbargerNode = (wellName, rawNode = {}) => {
 
   const parentId = `${wellItem.id}-diagnostic-curve`
   let diagnosticNode = inventoryGroup.children.find(item =>
-    item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve || item.label === '诊断曲线'
+    item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve || ['图版法', '诊断曲线'].includes(item.label)
   )
 
   if (!diagnosticNode) {
     diagnosticNode = {
       id: parentId,
-      label: '诊断曲线',
+      label: '图版法',
       type: NODETYPE.NodeType_TypicalCurve,
       wellName,
       defaultExpanded: false,
@@ -1182,7 +1208,7 @@ const findWattenbargerTreeNodeForWell = (wellName) => {
   )
   const inventoryGroup = wellItem?.children?.find(item => item.type === 'well-control-inventory')
   const diagnosticNode = inventoryGroup?.children?.find(item =>
-    item.type === NODETYPE.NodeType_TypicalCurve || item.label === '诊断曲线'
+    item.type === NODETYPE.NodeType_TypicalCurve || ['图版法', '诊断曲线'].includes(item.label)
   )
   return diagnosticNode?.children?.find(isWattenbargerNode) || null
 }
@@ -1195,7 +1221,7 @@ const revealWattenbargerNode = (wellName) => {
   )
   const inventoryGroup = wellItem?.children?.find(item => item.type === 'well-control-inventory')
   const diagnosticNode = inventoryGroup?.children?.find(item =>
-    item.type === NODETYPE.NodeType_TypicalCurve || item.label === '诊断曲线'
+    item.type === NODETYPE.NodeType_TypicalCurve || ['图版法', '诊断曲线'].includes(item.label)
   )
 
   if (wellItem) wellItem.expanded = true
@@ -1211,13 +1237,13 @@ const addAGNode = (wellName, rawNode = {}) => {
 
   const parentId = `${wellItem.id}-diagnostic-curve`
   let diagnosticNode = inventoryGroup.children.find(item =>
-    item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve || item.label === '诊断曲线'
+    item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve || ['图版法', '诊断曲线'].includes(item.label)
   )
 
   if (!diagnosticNode) {
     diagnosticNode = {
       id: parentId,
-      label: '诊断曲线',
+      label: '图版法',
       type: NODETYPE.NodeType_TypicalCurve,
       wellName,
       defaultExpanded: false,
@@ -1535,6 +1561,7 @@ const applyTypicalCurveNodes = (node, targetWellName = '') => {
     const nodeType = item?.nodeType ?? item?.type
     const nextInTypicalCurve = inTypicalCurve ||
       nodeType === NODETYPE.NodeType_TypicalCurve ||
+      nodeName === '图版法' ||
       nodeName === '典型曲线' ||
       nodeName === '诊断曲线'
 
@@ -3942,21 +3969,62 @@ const handleDeleteContextNode = async () => {
 
   if (!node) return
 
-  if (isVentLossRecord(node)) {
+  if (isPvtRecord(node)) {
     try {
-      await ElMessageBox.confirm(`删除“${node.label}”及其放空段数据？`, '删除记录', { type: 'warning' })
-      await getVentLossApi(node).delete(node.lossRecordId, node.projectId, node.gasReservoirId)
-      removeTreeNode(node)
-      if (route.query.feature === getVentLossLabel(node) && Number(route.query.lossRecordId) === Number(node.lossRecordId)
+      await ElMessageBox.confirm(`删除“${node.label}”及其天然气、地层水、岩石性质的输入和计算结果？此操作不可撤销。`, '删除PVT记录', {
+        type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消'
+      })
+      const { target, removedIds } = await deletePvtTreeRecord(node, treeData.value, { projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID })
+      if (removedIds.includes(String(activeNodeId.value))) { activeNodeId.value = ''; activeNode.value = null }
+      if (currentView.value === 'pvt-properties' && samePvtRecord(currentViewNode.value, target)) {
+        currentView.value = null
+        currentViewNode.value = null
+      }
+      ElMessage.success('PVT记录已删除')
+    } catch (error) {
+      if (error !== 'cancel' && error !== 'close') ElMessage.error(error?.msg || error.response?.data?.msg || error.message || '删除PVT记录失败')
+    }
+    return
+  }
+
+  if (isLossRecord(node)) {
+    try {
+      await ElMessageBox.confirm(`删除“${node.label}”及其输入、计算结果和相关明细？此操作不可撤销。`, '删除记录', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
+      await deleteLossRecord(node)
+      removeSavedTreeRecord(treeData.value, node)
+      if (String(activeNodeId.value) === String(node.id)) { activeNodeId.value = ''; activeNode.value = null }
+      if (route.query.feature === lossRecordLabel(node) && Number(route.query.lossRecordId) === Number(node.lossRecordId)
           && Number(route.query.projectId) === Number(node.projectId)
           && Number(route.query.gasReservoirId) === Number(node.gasReservoirId)) {
         const query = { ...route.query }
         delete query.lossRecordId
         await router.replace({ query })
       }
-      ElMessage.success(`${getVentLossLabel(node)}记录已删除`)
+      ElMessage.success(`${lossRecordLabel(node)}记录已删除`)
     } catch (error) {
-      if (error !== 'cancel' && error !== 'close') console.error('删除损耗记录失败', error)
+      if (error !== 'cancel' && error !== 'close') ElMessage.error(error.response?.data?.msg || error.message || '删除损耗记录失败')
+    }
+    return
+  }
+
+  if (isTheoreticalRecord(node)) {
+    try {
+      await ElMessageBox.confirm(`删除“${node.label}”及其输入、输出和IPR曲线？此操作不可撤销。`, '删除记录', {
+        type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消'
+      })
+      const projectId = node.projectId ?? PROJECT_ID
+      const gasReservoirId = node.gasReservoirId ?? GAS_RESERVOIR_ID
+      if (!node.wellName || !(Number(node.unstableId ?? node.stableId) > 0)) throw new Error('记录归属信息不完整，无法删除')
+      if (node.type === THEORETICAL_UNSTABLE_RECORD_NODE_TYPE) {
+        await theoreticalProductivityApi.deleteUnstable(node.unstableId, projectId, gasReservoirId, node.wellName)
+      } else {
+        await theoreticalProductivityApi.deleteStable(node.stableId, projectId, gasReservoirId, node.wellName)
+      }
+      removeSavedTreeRecord(treeData.value, node)
+      if (String(activeNodeId.value) === String(node.id)) { activeNodeId.value = ''; activeNode.value = null }
+      ElMessage.success(`${node.label}已删除`)
+    } catch (error) {
+      if (error !== 'cancel' && error !== 'close') ElMessage.error(error.response?.data?.msg || error.message || '删除记录失败')
     }
     return
   }

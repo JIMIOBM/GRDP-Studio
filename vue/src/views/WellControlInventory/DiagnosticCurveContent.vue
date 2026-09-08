@@ -12,6 +12,7 @@ import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
 
 import { pvtStorageApi } from '@/api/pvtStorage'
+import { deletedPvtRecord, matchesPvtScope } from '@/utils/pvtRecordActions'
 import { diagnosticCurveApi } from '@/api/diagnosticCurve'
 
 const props = defineProps({
@@ -255,6 +256,17 @@ const loadPvtDetail = async () => {
 }
 
 // 每次从功能入口打开（包括同一口井）都重新查询，不依赖左侧 PVT 分支懒加载。
+watch(deletedPvtRecord, deleted => {
+    if (!matchesPvtScope(deleted, { projectId: props.projectId, gasReservoirId: props.gasReservoirId, wellName: wellName.value })) return
+    ++pvtListSequence
+    pvtOptions.value = pvtOptions.value.filter(item => Number(item.pvtId) !== Number(deleted.pvtId))
+    if (Number(selectedPvtId.value) === Number(deleted.pvtId)) {
+        ++pvtDetailSequence
+        selectedPvtId.value = ''
+        pvtDetail.value = null
+    }
+})
+
 watch(
     () => [props.node, props.projectId, props.gasReservoirId],
     () => {

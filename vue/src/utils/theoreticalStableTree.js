@@ -67,7 +67,7 @@ export const loadTheoreticalUnstableTreeNodes = async ({
   unstableNode.children = records.map(record => ({
     id: `${wellNode.id}-theoretical-unstable-${record.unstableId}`,
     label: record.unstableName || `不稳定流${record.unstableNo}`,
-    type: THEORETICAL_UNSTABLE_RECORD_NODE_TYPE, wellName,
+    type: THEORETICAL_UNSTABLE_RECORD_NODE_TYPE, wellName, projectId, gasReservoirId,
     unstableId: Number(record.unstableId), raw: record, children: []
   }))
   unstableNode.loaded = true
@@ -94,7 +94,7 @@ export const loadTheoreticalStableTreeNodes = async ({
   stableNode.children = records.map(record => ({
     id: `${wellNode.id}-theoretical-stable-${record.stableId}`,
     label: record.stableName || `稳定流${record.stableNo}`,
-    type: THEORETICAL_STABLE_RECORD_NODE_TYPE, wellName,
+    type: THEORETICAL_STABLE_RECORD_NODE_TYPE, wellName, projectId, gasReservoirId,
     stableId: Number(record.stableId), raw: record, children: []
   }))
   stableNode.loaded = true
