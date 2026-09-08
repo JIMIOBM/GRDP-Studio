@@ -97,9 +97,9 @@ const props = defineProps({
 const route = useRoute()
 const router = useRouter()
 const PROJECT_ID = 6
-const GAS_RESERVOIR_ID = 3
+const GAS_RESERVOIR_ID = 1
 const MODIFIED_ISOCHRONAL_PROJECT_ID = 6
-const MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID = 3
+const MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID = 1
 ensureWorkspaceReservoir({ projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID })
 if (!props.embedded) setWorkspaceRibbonScope('well')
 

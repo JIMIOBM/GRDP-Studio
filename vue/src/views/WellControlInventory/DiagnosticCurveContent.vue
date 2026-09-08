@@ -1,13 +1,5 @@
 <script setup>
-import {
-    computed,
-    nextTick,
-    onBeforeUnmount,
-    onMounted,
-    ref,
-    watch
-} from 'vue'
-
+import {computed,nextTick, onBeforeUnmount,onMounted,ref,watch} from 'vue'
 import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
 
@@ -21,7 +13,7 @@ const props = defineProps({
     gasReservoirId: [Number, String]
 })
 
-const emit = defineEmits(['recalculate'])
+const emit = defineEmits(['recalculate', 'saved'])
 
 const unwrap = response => {
     const first =
@@ -71,30 +63,30 @@ const chartEl =
 const result =
     ref(null)
 
-let chart = null
-let chartResizeObserver = null
-const paramsCollapsed = ref(false)
-const paramsPanelWidth = ref(238)
-const resizingParamsPanel = ref(false)
-const legendSelected = ref({ '实际运行曲线': true, '理论基准线': true })
+/*
+ * 当前已经保存/打开的诊断方案。
+ * diagnosticId 为空表示当前页面还没有落库。
+ */
+const diagnosticId =
+    ref(null)
 
-// 与水侵分析共用相同的视觉规范；坐标范围、周期分组和计算结果保持原逻辑。
-const chartAxisStyle = () => ({
-    axisLine: { show: true, lineStyle: { color: '#555' } },
-    // 仅格式化刻度文本，避免浮点长尾挤占绘图区，原始数值不变。
-    axisLabel: { color: '#555', fontSize: 12,
-        formatter: value => Number.isFinite(Number(value)) ? String(Number(Number(value).toPrecision(8))) : String(value) },
-    nameTextStyle: { color: '#555', fontSize: 12 },
-    minorTick: { show: true },
-    splitLine: { show: true, lineStyle: { color: '#dce5f2' } },
-    minorSplitLine: { show: true, lineStyle: { color: '#f1f5fb' } }
-})
-const chartHeading = () => ({ text: '库存量与压力/偏差系数关系图', left: 'center', top: 8,
-    textStyle: { fontSize: 14, fontWeight: 600, color: '#333' } })
-const toggleLegend = name => {
-    legendSelected.value[name] = !legendSelected.value[name]
-    chart?.dispatchAction({ type: legendSelected.value[name] ? 'legendSelect' : 'legendUnSelect', name })
-}
+const diagnosticName =
+    ref('')
+
+const saving =
+    ref(false)
+
+/*
+ * 冻结“本次计算真正使用的PVT”。
+ * 保存时绝不重新 buildPvtData()，避免PVT详情异步变化导致保存失败。
+ */
+const calculatedPvtSnapshot =
+    ref(null)
+
+const calculatedPvtId =
+    ref(null)
+
+let chart = null
 
 /**
  * Excel无单位列时使用的固定项目约定。
@@ -145,53 +137,129 @@ const parseNumber = value => {
 
 /**
  * ============================
- * PVT
+ * PVT / 已保存诊断方案
  * ============================
  */
 
-let pvtListSequence = 0
-let pvtDetailSequence = 0
-const loadPvtOptions = async () => {
-    const sequence = ++pvtListSequence
-    ++pvtDetailSequence
-    const targetWellName = wellName.value
+const cloneJson = value =>
+    value === null || value === undefined
+        ? value
+        : JSON.parse(
+            JSON.stringify(value)
+        )
 
+const toPositiveId = value => {
+    const number =
+        Number(value)
+
+    return Number.isInteger(number) &&
+        number > 0
+        ? number
+        : null
+}
+
+const nodeDiagnosticId =
+    computed(
+        () =>
+            toPositiveId(
+                props.node?.diagnosticId
+            )
+    )
+
+const invalidateCalculatedState = () => {
+    result.value = null
+    calculatedPvtSnapshot.value = null
+    calculatedPvtId.value = null
+
+    if (
+        activePanel.value === 'analysis'
+    ) {
+        activePanel.value = 'input'
+    }
+}
+
+const loadPvtDetail = async () => {
+    pvtDetail.value = null
+
+    if (
+        !selectedPvtId.value ||
+        !wellName.value
+    ) {
+        return null
+    }
+
+    try {
+        const detail = unwrap(
+            await pvtStorageApi.getDetail(
+                selectedPvtId.value,
+                props.projectId,
+                props.gasReservoirId,
+                wellName.value
+            )
+        )
+
+        pvtDetail.value = detail
+
+        console.log(
+            'PVT详情（含Z数据）:',
+            detail
+        )
+
+        return detail
+
+    } catch (error) {
+        console.warn(
+            '加载PVT详情失败',
+            error
+        )
+
+        ElMessage.warning(
+            '加载PVT详情失败，Z数据可能不可用'
+        )
+
+        return null
+    }
+}
+
+const loadPvtOptions = async (
+    selectFirst = true
+) => {
     pvtOptions.value = []
     selectedPvtId.value = ''
+    pvtDetail.value = null
 
     if (!wellName.value) {
         return
     }
 
     try {
-
         const summaries =
             unwrap(
                 await pvtStorageApi.list(
                     props.projectId,
                     props.gasReservoirId,
-                    targetWellName
+                    wellName.value
                 )
             ) || []
 
-        if (sequence !== pvtListSequence || targetWellName !== wellName.value) return
         pvtOptions.value =
             Array.isArray(summaries)
                 ? summaries
                 : []
 
         if (
+            selectFirst &&
             pvtOptions.value.length > 0
         ) {
             selectedPvtId.value =
                 String(
                     pvtOptions.value[0].pvtId
                 )
+
+            await loadPvtDetail()
         }
 
     } catch (error) {
-
-        if (sequence !== pvtListSequence || targetWellName !== wellName.value) return
         console.warn(
             '加载PVT性质失败',
             error
@@ -203,492 +271,309 @@ const loadPvtOptions = async () => {
     }
 }
 
-/**
- * ============================
- * 加载PVT详情（含Z数据）
- * ============================
- */
-const loadPvtDetail = async () => {
-    const sequence = ++pvtDetailSequence
-    const targetWellName = wellName.value
-    const targetPvtId = selectedPvtId.value
-
-    pvtDetail.value = null
+const loadDiagnosticRecord = async id => {
+    const recordId =
+        toPositiveId(id)
 
     if (
-        !selectedPvtId.value ||
+        !recordId ||
         !wellName.value
     ) {
         return
     }
 
-    try {
+    if (
+        typeof diagnosticCurveApi.getRecord !==
+        'function'
+    ) {
+        console.warn(
+            'diagnosticCurveApi.getRecord 未定义，无法回显已保存诊断方案'
+        )
+        return
+    }
 
+    try {
         const detail = unwrap(
-            await pvtStorageApi.getDetail(
-                targetPvtId,
+            await diagnosticCurveApi.getRecord(
+                recordId,
                 props.projectId,
                 props.gasReservoirId,
-                targetWellName
+                wellName.value
             )
         )
 
-        if (sequence !== pvtDetailSequence || targetWellName !== wellName.value || targetPvtId !== selectedPvtId.value) return
-        pvtDetail.value = detail
+        diagnosticId.value =
+            detail?.record?.diagnosticId ??
+            recordId
 
-        console.log(
-            'PVT详情（含Z数据）:',
-            detail
-        )
+        diagnosticName.value =
+            detail?.record?.diagnosticName ??
+            ''
+
+        const savedPvtId =
+            toPositiveId(
+                detail?.pvtId
+            )
+
+        selectedPvtId.value =
+            savedPvtId
+                ? String(savedPvtId)
+                : ''
+
+        if (savedPvtId) {
+            await loadPvtDetail()
+        } else {
+            pvtDetail.value = null
+        }
+
+        inputUpperLimit.value =
+            detail?.upperPressureLimit ??
+            ''
+
+        inputLowerLimit.value =
+            detail?.lowerPressureLimit ??
+            ''
+
+        rows.value =
+            (
+                Array.isArray(
+                    detail?.productionData
+                )
+                    ? detail.productionData
+                    : []
+            ).map(item => ({
+                sequence:
+                    Number(
+                        item?.sequence
+                    ),
+
+                time:
+                    String(
+                        item?.time ?? ''
+                    ),
+
+                /*
+                 * 详情接口回读 gas 为10^8m3；
+                 * 页面表格按10^4m3显示。
+                 */
+                gasRaw:
+                    Number(item?.gas) *
+                    10000,
+
+                gas:
+                    Number(
+                        item?.gas
+                    ),
+
+                cycle:
+                    String(
+                        item?.cycle ?? ''
+                    )
+            }))
+
+        importedFileName.value = ''
+
+        result.value =
+            detail?.result ??
+            null
+
+        calculatedPvtSnapshot.value =
+            result.value &&
+            detail?.pvtSnapshot
+                ? cloneJson(
+                    detail.pvtSnapshot
+                )
+                : null
+
+        calculatedPvtId.value =
+            result.value
+                ? savedPvtId
+                : null
+
+        activePanel.value =
+            result.value
+                ? 'analysis'
+                : 'input'
+
+        if (result.value) {
+            await nextTick()
+            updateChart(
+                result.value
+            )
+        }
 
     } catch (error) {
-
-        if (sequence !== pvtDetailSequence || targetWellName !== wellName.value || targetPvtId !== selectedPvtId.value) return
-        console.warn(
-            '加载PVT详情失败',
+        console.error(
+            '加载诊断方案失败',
             error
         )
 
-        ElMessage.warning(
-            '加载PVT详情失败，Z数据可能不可用'
+        ElMessage.error(
+            error?.response?.data?.msg ||
+            error?.response?.data?.message ||
+            error?.message ||
+            '加载诊断方案失败'
         )
     }
 }
 
-// 每次从功能入口打开（包括同一口井）都重新查询，不依赖左侧 PVT 分支懒加载。
-watch(deletedPvtRecord, deleted => {
-    if (!matchesPvtScope(deleted, { projectId: props.projectId, gasReservoirId: props.gasReservoirId, wellName: wellName.value })) return
-    ++pvtListSequence
-    pvtOptions.value = pvtOptions.value.filter(item => Number(item.pvtId) !== Number(deleted.pvtId))
-    if (Number(selectedPvtId.value) === Number(deleted.pvtId)) {
-        ++pvtDetailSequence
-        selectedPvtId.value = ''
-        pvtDetail.value = null
+const initializePage = async () => {
+    diagnosticId.value = null
+    diagnosticName.value = ''
+    rows.value = []
+    importedFileName.value = ''
+    inputUpperLimit.value = ''
+    inputLowerLimit.value = ''
+    result.value = null
+    calculatedPvtSnapshot.value = null
+    calculatedPvtId.value = null
+    activePanel.value = 'input'
+
+    const savedId =
+        nodeDiagnosticId.value
+
+    await loadPvtOptions(
+        !savedId
+    )
+
+    if (savedId) {
+        await loadDiagnosticRecord(
+            savedId
+        )
     }
-})
+}
 
 watch(
-    () => [props.node, props.projectId, props.gasReservoirId],
+    [
+        () => props.projectId,
+        () => props.gasReservoirId,
+        () => props.node?.wellName,
+        () => props.node?.diagnosticId
+    ],
     () => {
-        loadPvtOptions()
+        initializePage()
     },
     {
         immediate: true
     }
 )
 
-watch(
-    () => selectedPvtId.value,
-    () => {
-        loadPvtDetail()
-    }
-)
-
-const selectedPvt =
-    computed(
-        () =>
-            pvtOptions.value.find(
-                item =>
-                    String(item?.pvtId) ===
-                    String(
-                        selectedPvtId.value
-                    )
-            ) || null
-    )
-
-/**
- * ============================
- * 从PVT表自动提取Z
- *
- * 页面不显示任何Z参数。
- * ============================
- */
-
-const normalizeKey = value =>
-    String(value ?? '')
-        .trim()
-        .toLowerCase()
-        /*
-         * 保留中文字符，只去除分隔符和单位符号。
-         * 这样“压力(MPa)”“天然气偏差系数(dless)”也能识别。
-         */
-        .replace(
-            /[^\p{L}\p{N}]/gu,
-            ''
-        )
-
-const Z_KEYS = [
-    'z',
-    'zFactor',
-    'deviationFactor',
-    'gasDeviationFactor',
-    'naturalGasDeviationFactor',
-    'compressibilityFactor',
-
-    /*
-     * 兼容中文字段名。
-     */
-    '天然气偏差系数',
-    '偏差系数',
-    'z系数',
-    '压缩因子'
-]
-
-const PRESSURE_KEYS = [
-    'pressure',
-    'formationPressure',
-    'reservoirPressure',
-    'p',
-
-    /*
-     * 兼容中文字段名。
-     */
-    '压力',
-    '地层压力',
-    '气藏压力'
-]
-
-const findDirectNumber = (
-    object,
-    candidateNames
-) => {
-
-    if (
-        !object ||
-        typeof object !== 'object' ||
-        Array.isArray(object)
-    ) {
-        return null
-    }
-
-    const candidates =
-        candidateNames.map(
-            normalizeKey
-        )
-
-    for (
-        const [key, value]
-        of Object.entries(object)
-    ) {
-
-        const normalized =
-            normalizeKey(key)
-
-        const matched =
-            candidates.some(
-                candidate =>
-                    normalized === candidate ||
-                    (
-                        candidate.length > 1 &&
-                        normalized.startsWith(
-                            candidate
-                        )
-                    )
-            )
-
-        if (
-            matched
-        ) {
-
-            const number =
-                parseNumber(value)
-
-            if (
-                number !== null
-            ) {
-                return number
-            }
-        }
-    }
-
-    return null
+const handlePvtSelectionChanged = async () => {
+    invalidateCalculatedState()
+    await loadPvtDetail()
 }
 
 /**
- * 查找真正的“对象级固定Z”。
+ * 从 PVT 详情接口的真实结构构造诊断计算需要的 PVT 数据。
  *
- * 这里主动跳过数组，避免把 Z(P) 曲线第一行的 Z
- * 错当成整个 PVT 的固定 Z。
+ * 后端 PvtRecordDetail.GasResultPoint 的字段是：
+ * pressure + deviationFactor。
+ * 这里不再递归猜字段名，避免保存阶段因详情结构变化而识别失败。
  */
-const findFixedZDeep = (
-    source,
-    depth = 0
-) => {
+const buildPvtData = () => {
+    const detail =
+        pvtDetail.value
 
-    if (
-        source === null ||
-        source === undefined ||
-        depth > 7 ||
-        Array.isArray(source) ||
-        typeof source !== 'object'
-    ) {
-        return null
-    }
-
-    const direct =
-        findDirectNumber(
-            source,
-            Z_KEYS
+    if (!detail) {
+        throw new Error(
+            'PVT详情尚未加载，请重新选择PVT后再试'
         )
-
-    if (
-        direct !== null &&
-        direct > 0
-    ) {
-        return direct
     }
 
-    for (
-        const value
-        of Object.values(source)
-    ) {
+    const gasResults =
+        Array.isArray(
+            detail?.gasResults
+        )
+            ? detail.gasResults
+            : []
 
-        if (
-            Array.isArray(value)
-        ) {
-            continue
-        }
+    const points =
+        gasResults
+            .map(item => {
+                const pressure =
+                    parseNumber(
+                        item?.pressure
+                    )
 
-        const found =
-            findFixedZDeep(
-                value,
-                depth + 1
-            )
-
-        if (
-            found !== null
-        ) {
-            return found
-        }
-    }
-
-    return null
-}
-
-/**
- * 在 PVT 对象中递归查找 Pressure-Z 数组。
- *
- * 支持常见字段：
- * pressure / 压力(MPa)
- * zFactor / 天然气偏差系数(dless)
- */
-const findZCurveDeep = (
-    source,
-    depth = 0
-) => {
-
-    if (
-        source === null ||
-        source === undefined ||
-        depth > 8
-    ) {
-        return null
-    }
-
-    if (
-        Array.isArray(source)
-    ) {
-
-        const points =
-            source
-                .map(item => {
-
-                    const pressure =
-                        findDirectNumber(
-                            item,
-                            PRESSURE_KEYS
-                        )
-
-                    const zFactor =
-                        findDirectNumber(
-                            item,
-                            Z_KEYS
-                        )
-
-                    if (
-                        pressure === null ||
-                        zFactor === null ||
-                        pressure <= 0 ||
-                        zFactor <= 0
-                    ) {
-                        return null
-                    }
-
-                    return {
-                        pressure,
-                        zFactor
-                    }
-                })
-                .filter(Boolean)
-
-        if (
-            points.length >= 2
-        ) {
-
-            /*
-             * 排序 + 同压力去重。
-             */
-            points.sort(
-                (a, b) =>
-                    a.pressure
-                    - b.pressure
-            )
-
-            const unique = []
-
-            for (
-                const point
-                of points
-            ) {
-
-                const previous =
-                    unique[
-                        unique.length - 1
-                    ]
+                const zFactor =
+                    parseNumber(
+                        item?.deviationFactor
+                    )
 
                 if (
-                    previous &&
-                    Math.abs(
-                        previous.pressure
-                        - point.pressure
-                    ) < 1e-9
+                    pressure === null ||
+                    zFactor === null ||
+                    pressure <= 0 ||
+                    zFactor <= 0
                 ) {
-                    previous.zFactor =
-                        (
-                            previous.zFactor
-                            + point.zFactor
-                        ) / 2
-                } else {
-                    unique.push({
-                        ...point
-                    })
+                    return null
                 }
-            }
 
-            if (
-                unique.length >= 2
-            ) {
-                return unique
-            }
-        }
+                return {
+                    pressure,
+                    zFactor
+                }
+            })
+            .filter(Boolean)
+            .sort(
+                (a, b) =>
+                    a.pressure -
+                    b.pressure
+            )
 
-        for (
-            const item
-            of source
+    const uniqueCurve = []
+
+    for (
+        const point
+        of points
+    ) {
+        const previous =
+            uniqueCurve[
+                uniqueCurve.length - 1
+            ]
+
+        if (
+            previous &&
+            Math.abs(
+                previous.pressure -
+                point.pressure
+            ) < 1e-9
         ) {
-
-            const nested =
-                findZCurveDeep(
-                    item,
-                    depth + 1
-                )
-
-            if (
-                nested
-            ) {
-                return nested
-            }
+            previous.zFactor =
+                (
+                    previous.zFactor +
+                    point.zFactor
+                ) / 2
+        } else {
+            uniqueCurve.push({
+                ...point
+            })
         }
-
-        return null
     }
 
     if (
-        typeof source === 'object'
+        uniqueCurve.length >= 2
     ) {
-
-        for (
-            const value
-            of Object.values(source)
-        ) {
-
-            const nested =
-                findZCurveDeep(
-                    value,
-                    depth + 1
-                )
-
-            if (
-                nested
-            ) {
-                return nested
-            }
+        return {
+            fixedZ: null,
+            zCurve: uniqueCurve
         }
     }
 
-    return null
-}
+    console.error(
+        '当前PVT详情:',
+        detail
+    )
 
-const buildPvtData = () => {
-
-    const candidates = [
-        pvtDetail.value,
-        selectedPvt.value
-    ].filter(Boolean)
-
-    if (
-        candidates.length === 0
-    ) {
-        throw new Error(
-            '未找到所选PVT表'
-        )
-    }
-
-    /*
-     * 第一优先级：
-     * 使用整张 Pressure-Z 曲线。
-     *
-     * 固定的是“所选PVT表”，不是把Z强制当常数。
-     */
-    for (
-        const pvt
-        of candidates
-    ) {
-
-        const zCurve =
-            findZCurveDeep(
-                pvt
-            )
-
-        if (
-            Array.isArray(zCurve) &&
-            zCurve.length >= 2
-        ) {
-            return {
-                fixedZ: null,
-                zCurve
-            }
-        }
-    }
-
-    /*
-     * 第二优先级：
-     * 只有PVT确实保存的是单个固定Z时才使用。
-     */
-    for (
-        const pvt
-        of candidates
-    ) {
-
-        const fixedZ =
-            findFixedZDeep(
-                pvt
-            )
-
-        if (
-            fixedZ !== null &&
-            Number.isFinite(fixedZ) &&
-            fixedZ > 0
-        ) {
-            return {
-                fixedZ,
-                zCurve: []
-            }
-        }
-    }
+    console.error(
+        '当前PVT天然气结果 gasResults:',
+        gasResults
+    )
 
     throw new Error(
-        '所选PVT表没有找到有效的压力-Z数据。请确认PVT详情接口返回了“压力”和“天然气偏差系数Z”数据列。'
+        `所选PVT没有有效的Pressure-Z曲线。` +
+        `当前天然气结果共 ${gasResults.length} 行，` +
+        `至少需要2行 pressure>0 且 deviationFactor>0 的数据。`
     )
 }
 
@@ -1118,6 +1003,11 @@ const handleFile = async event => {
         importedFileName.value =
             file.name
 
+        /*
+         * 新导入数据后，旧计算结果必须失效。
+         */
+        invalidateCalculatedState()
+
         if (
             invalidGasRows.length > 0
         ) {
@@ -1325,6 +1215,18 @@ const handleRecalculate = async () => {
         result.value =
             data
 
+        /*
+         * 冻结本次计算真正使用的PVT。
+         * 保存时直接使用该快照，不再重新读取PVT详情。
+         */
+        calculatedPvtSnapshot.value =
+            cloneJson(pvt)
+
+        calculatedPvtId.value =
+            toPositiveId(
+                selectedPvtId.value
+            )
+
         activePanel.value =
             'analysis'
 
@@ -1372,6 +1274,226 @@ const handleRecalculate = async () => {
 
 /**
  * ============================
+ * 保存已计算诊断方案
+ * ============================
+ */
+
+const buildProductionDataForSave = () =>
+    rows.value.map(
+        row => ({
+            sequence:
+                Number(
+                    row.sequence
+                ),
+
+            time:
+                String(
+                    row.time ?? ''
+                ),
+
+            /*
+             * 这里保持计算接口单位10^8m3。
+             * 数据库存储为10^4m3的转换由后端统一处理。
+             */
+            gas:
+                row.gas,
+
+            cycle:
+                String(
+                    row.cycle ?? ''
+                )
+        })
+    )
+
+const saveCalculated = async () => {
+    if (!result.value) {
+        ElMessage.warning(
+            '请先计算诊断曲线'
+        )
+        return
+    }
+
+    if (
+        !calculatedPvtSnapshot.value
+    ) {
+        ElMessage.error(
+            '本次计算的PVT快照不存在，请重新计算后再保存'
+        )
+        return
+    }
+
+    if (
+        typeof diagnosticCurveApi.saveRecord !==
+        'function'
+    ) {
+        ElMessage.error(
+            'diagnosticCurveApi.saveRecord 未配置'
+        )
+        return
+    }
+
+    const upperLimit =
+        parseNumber(
+            inputUpperLimit.value
+        )
+
+    const lowerLimit =
+        parseNumber(
+            inputLowerLimit.value
+        )
+
+    if (
+        upperLimit === null ||
+        lowerLimit === null ||
+        lowerLimit <= 0 ||
+        upperLimit <= lowerLimit
+    ) {
+        ElMessage.error(
+            '当前压力上下限无效，请重新计算'
+        )
+        return
+    }
+
+    const currentPvtId =
+        toPositiveId(
+            selectedPvtId.value
+        )
+
+    if (
+        calculatedPvtId.value !== null &&
+        currentPvtId !==
+        calculatedPvtId.value
+    ) {
+        ElMessage.error(
+            '当前PVT与本次计算使用的PVT不一致，请重新计算后再保存'
+        )
+        return
+    }
+
+    const productionData =
+        buildProductionDataForSave()
+
+    const invalidRows =
+        productionData.filter(
+            item =>
+                item.gas === null ||
+                !Number.isFinite(
+                    item.gas
+                ) ||
+                item.gas === 0
+        )
+
+    if (
+        invalidRows.length > 0
+    ) {
+        ElMessage.error(
+            `有 ${invalidRows.length} 行注/采气量无效，不能保存`
+        )
+        return
+    }
+
+    const payload = {
+        diagnosticId:
+            diagnosticId.value,
+
+        projectId:
+            Number(
+                props.projectId
+            ),
+
+        gasReservoirId:
+            Number(
+                props.gasReservoirId
+            ),
+
+        wellName:
+            wellName.value,
+
+        diagnosticName:
+            diagnosticName.value ||
+            props.node?.diagnosticName ||
+            null,
+
+        status:
+            'CALCULATED',
+
+        pvtId:
+            currentPvtId,
+
+        /*
+         * 核心修复：
+         * 保存计算时冻结的PVT，不再调用 buildPvtData()。
+         */
+        pvtSnapshot:
+            cloneJson(
+                calculatedPvtSnapshot.value
+            ),
+
+        upperPressureLimit:
+            upperLimit,
+
+        lowerPressureLimit:
+            lowerLimit,
+
+        remark:
+            null,
+
+        productionData,
+
+        result:
+            cloneJson(
+                result.value
+            )
+    }
+
+    saving.value = true
+
+    try {
+        const saved = unwrap(
+            await diagnosticCurveApi.saveRecord(
+                payload
+            )
+        )
+
+        diagnosticId.value =
+            saved?.diagnosticId ??
+            diagnosticId.value
+
+        diagnosticName.value =
+            saved?.diagnosticName ??
+            diagnosticName.value
+
+        emit(
+            'saved',
+            saved
+        )
+
+        ElMessage.success(
+            saved?.diagnosticName
+                ? `已保存：${saved.diagnosticName}`
+                : '诊断曲线已保存'
+        )
+
+    } catch (error) {
+        console.error(
+            '保存诊断曲线失败',
+            error
+        )
+
+        ElMessage.error(
+            error?.response?.data?.msg ||
+            error?.response?.data?.message ||
+            error?.message ||
+            '保存失败'
+        )
+
+    } finally {
+        saving.value = false
+    }
+}
+
+/**
+ * ============================
  * 图表
  * ============================
  */
@@ -1395,11 +1517,8 @@ const initChart = () => {
 
         animation: false,
 
-        backgroundColor: '#fff',
-        title: chartHeading(),
         legend: {
-            show: false,
-            selected: { ...legendSelected.value },
+            top: 8,
             data: [
                 '实际运行曲线',
                 '理论基准线'
@@ -1407,15 +1526,14 @@ const initChart = () => {
         },
 
         tooltip: {
-            trigger: 'item',
-            confine: true
+            trigger: 'item'
         },
 
         grid: {
             left: 92,
-            right: 92,
-            top: 44,
-            bottom: 56
+            right: 42,
+            top: 52,
+            bottom: 72
         },
 
         /*
@@ -1424,14 +1542,13 @@ const initChart = () => {
          * 上限/下限不是坐标轴边界。
          */
         xAxis: {
-            ...chartAxisStyle(),
             name:
                 '库存量 G (10⁸m³)',
 
             nameLocation:
                 'middle',
 
-            nameGap: 30,
+            nameGap: 44,
 
             min: 0,
 
@@ -1445,14 +1562,13 @@ const initChart = () => {
         },
 
         yAxis: {
-            ...chartAxisStyle(),
             name:
                 '压力/天然气偏差系数 P/Z (MPa)',
 
             nameLocation:
                 'middle',
 
-            nameGap: 58,
+            nameGap: 68,
 
             min: 0,
 
@@ -1616,9 +1732,6 @@ const updateChart = data => {
                     silent: true,
                     symbol: 'none',
                     label: {
-                        position: 'insideEndTop',
-                        backgroundColor: 'rgba(255,255,255,.9)',
-                        padding: [2, 4],
                         formatter: params =>
                             `${params.name}: ${Number(params.value).toFixed(4)} MPa`
                     },
@@ -1648,11 +1761,8 @@ const updateChart = data => {
 
         animation: false,
 
-        backgroundColor: '#fff',
-        title: chartHeading(),
         legend: {
-            show: false,
-            selected: { ...legendSelected.value },
+            top: 8,
             data: [
                 '实际运行曲线',
                 '理论基准线'
@@ -1662,7 +1772,6 @@ const updateChart = data => {
         tooltip: {
 
             trigger: 'axis',
-            confine: true,
 
             formatter: paramsList => {
 
@@ -1743,9 +1852,9 @@ const updateChart = data => {
 
         grid: {
             left: 92,
-            right: 92,
-            top: 44,
-            bottom: 56
+            right: 42,
+            top: 52,
+            bottom: 72
         },
 
         /*
@@ -1756,14 +1865,13 @@ const updateChart = data => {
          * 不再直接作为P/Z图像边界。
          */
         xAxis: {
-            ...chartAxisStyle(),
             name:
                 '库存量 G (10⁸m³)',
 
             nameLocation:
                 'middle',
 
-            nameGap: 30,
+            nameGap: 44,
 
             min: 0,
 
@@ -1777,14 +1885,13 @@ const updateChart = data => {
         },
 
         yAxis: {
-            ...chartAxisStyle(),
             name:
                 '压力/天然气偏差系数 P/Z (MPa)',
 
             nameLocation:
                 'middle',
 
-            nameGap: 58,
+            nameGap: 68,
 
             min: 0,
 
@@ -1835,39 +1942,8 @@ const handleResize = () => {
     chart?.resize()
 }
 
-const toggleParamsPanel = async () => {
-    paramsCollapsed.value = !paramsCollapsed.value
-    await nextTick()
-    handleResize()
-}
-let resizeStartX = 0
-let resizeStartWidth = 238
-const resizeParamsPanel = event => {
-    if (!resizingParamsPanel.value) return
-    paramsPanelWidth.value = Math.min(520, Math.max(200, resizeStartWidth + event.clientX - resizeStartX))
-}
-const stopParamsPanelResize = () => {
-    resizingParamsPanel.value = false
-    window.removeEventListener('pointermove', resizeParamsPanel)
-    window.removeEventListener('pointerup', stopParamsPanelResize)
-    window.removeEventListener('pointercancel', stopParamsPanelResize)
-}
-const startParamsPanelResize = event => {
-    if (event.button !== 0) return
-    event.preventDefault()
-    resizeStartX = event.clientX
-    resizeStartWidth = paramsPanelWidth.value
-    resizingParamsPanel.value = true
-    window.addEventListener('pointermove', resizeParamsPanel)
-    window.addEventListener('pointerup', stopParamsPanelResize)
-    window.addEventListener('pointercancel', stopParamsPanelResize)
-}
-
 onMounted(() => {
 
-    // 容器尺寸也会随侧栏折叠和拖宽改变，不能只监听浏览器窗口大小。
-    chartResizeObserver = new ResizeObserver(handleResize)
-    if (chartEl.value) chartResizeObserver.observe(chartEl.value)
     window.addEventListener(
         'resize',
         handleResize
@@ -1876,8 +1952,6 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
 
-    stopParamsPanelResize()
-    chartResizeObserver?.disconnect()
     window.removeEventListener(
         'resize',
         handleResize
@@ -1894,18 +1968,13 @@ onBeforeUnmount(() => {
 <template>
     <section class="diagnostic-workspace">
 
-        <aside class="params-panel" :class="{ collapsed: paramsCollapsed, resizing: resizingParamsPanel }"
-            :style="{ width: `${paramsCollapsed ? 22 : paramsPanelWidth}px`, minWidth: `${paramsCollapsed ? 22 : paramsPanelWidth}px` }">
+        <aside class="params-panel">
 
-            <button v-if="paramsCollapsed" type="button" class="panel-collapsed-tab" title="展开参数设置" @click="toggleParamsPanel">参数设置</button>
-            <div v-show="!paramsCollapsed" class="panel-head">
-                <span>参数设置</span>
-                <button type="button" class="panel-toggle" title="收起参数设置" aria-label="收起参数设置" @click="toggleParamsPanel">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="#777" aria-hidden="true"><path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z" /></svg>
-                </button>
+            <div class="panel-head">
+                参数设置
             </div>
 
-            <div v-show="!paramsCollapsed" class="panel-body">
+            <div class="panel-body">
 
                 <label class="field">
 
@@ -1913,12 +1982,24 @@ onBeforeUnmount(() => {
                         选择PVT表
                     </span>
 
-                    <el-select v-model="selectedPvtId" size="small" aria-label="选择PVT表"
-                        :placeholder="pvtOptions.length ? '请选择PVT性质' : '当前井暂无PVT性质'" style="width:100%">
+                    <select v-model="selectedPvtId" @change="handlePvtSelectionChanged">
 
-                        <el-option v-for="item in pvtOptions" :key="item.pvtId" :value="String(item.pvtId)"
-                            :label="item.pvtName || `PVT性质${item.pvtNo ?? item.pvtId}`" />
-                    </el-select>
+                        <option value="" disabled>
+                            {{
+                                pvtOptions.length
+                                    ? '请选择PVT性质'
+                                    : '当前井暂无PVT性质'
+                            }}
+                        </option>
+
+                        <option v-for="item in pvtOptions" :key="item.pvtId" :value="String(item.pvtId)">
+                            {{
+                                item.pvtName ||
+                                `PVT性质${item.pvtNo ?? item.pvtId}`
+                            }}
+                        </option>
+
+                    </select>
 
                 </label>
 
@@ -1954,7 +2035,7 @@ onBeforeUnmount(() => {
                         压力上限 (MPa)
                     </span>
 
-                    <el-input v-model="inputUpperLimit" size="small" placeholder="请输入上限" aria-label="压力上限" />
+                    <input v-model="inputUpperLimit" placeholder="请输入上限" @input="invalidateCalculatedState" />
 
                 </label>
 
@@ -1964,7 +2045,7 @@ onBeforeUnmount(() => {
                         压力下限 (MPa)
                     </span>
 
-                    <el-input v-model="inputLowerLimit" size="small" placeholder="请输入下限" aria-label="压力下限" />
+                    <input v-model="inputLowerLimit" placeholder="请输入下限" @input="invalidateCalculatedState" />
 
                 </label>
 
@@ -1978,23 +2059,25 @@ onBeforeUnmount(() => {
                         }}
                     </button>
 
+                    <button type="button" class="save-result" :disabled="saving || !result" @click="saveCalculated">
+                        {{
+                            saving
+                                ? '保存中…'
+                                : '保存结果'
+                        }}
+                    </button>
+
                 </div>
 
             </div>
 
-            <div v-show="!paramsCollapsed" class="params-resizer" @pointerdown="startParamsPanelResize"></div>
         </aside>
 
         <main class="result-area">
 
-            <div class="dynamic-result-tabs">
-                <div class="dynamic-result-tab active" :title="`诊断曲线${wellName ? `-${wellName}` : ''}-分析结果`">
-                    诊断曲线{{ wellName ? `-${wellName}` : '' }}-分析结果
-                </div>
-            </div>
             <div v-show="activePanel === 'input'" class="editable-data-grid">
 
-                <el-table :data="rows" size="small" border stripe height="100%">
+                <el-table :data="rows" border height="100%">
 
                     <el-table-column label="序号" width="60" align="center">
                         <template #default="{ row }">
@@ -2008,7 +2091,7 @@ onBeforeUnmount(() => {
                         </template>
                     </el-table-column>
 
-                    <el-table-column label="注/采气" min-width="180" align="center">
+                    <el-table-column label="注/采气量（10⁴m³）" min-width="180" align="center">
                         <template #default="{ row }">
                             {{ row.gasRaw }}
                         </template>
@@ -2026,13 +2109,6 @@ onBeforeUnmount(() => {
 
             <div v-show="activePanel === 'analysis'" class="analysis-view">
 
-                    <!-- 图例固定在坐标网格右上角内侧，仍可点击切换曲线显隐。 -->
-                    <div class="chart-legend">
-                        <button v-for="(selected, name) in legendSelected" :key="name" type="button"
-                            :class="{ muted: !selected }" :aria-pressed="selected" @click="toggleLegend(name)">
-                            <i :class="{ theoretical: name === '理论基准线' }"></i>{{ name }}
-                        </button>
-                    </div>
                 <div ref="chartEl" class="chart"></div>
 
             </div>
@@ -2050,7 +2126,7 @@ onBeforeUnmount(() => {
                     active:
                         activePanel === 'analysis'
                 }" @click="switchPanel('analysis')">
-                    结果分析图
+                    结果分析
                 </button>
 
             </div>
@@ -2063,71 +2139,62 @@ onBeforeUnmount(() => {
 <style lang="scss" scoped>
 .diagnostic-workspace {
     display: flex;
-    flex: 1;
     height: 100%;
     min-height: 0;
     background: #fff;
-    color: #333;
-    overflow: hidden;
 }
 
 .params-panel {
-    width: 238px;
-    min-width: 238px;
-    flex-shrink: 0;
-    min-height: 0;
+    width: 360px;
+    min-width: 360px;
     display: flex;
     flex-direction: column;
-    border-right: 1px solid #e0e0e0;
-    position: relative;
-    &.collapsed { border-right: 0; }
-    &.resizing { user-select: none; }
+    border-right: 1px solid #ddd;
 }
 
 .panel-head {
-    padding: 7px 12px 6px;
+    height: 34px;
+    padding: 0 12px;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    flex-shrink: 0;
-    background: #fff;
-    border-bottom: 1px solid #f0f0f0;
+    background: #f2f2f2;
+    border-bottom: 1px solid #ddd;
     font-size: 13px;
-}
-
-.panel-toggle {
-    width: 20px; height: 20px; padding: 0; border: 0; background: transparent;
-    display: flex; align-items: center; justify-content: center; cursor: pointer; border-radius: 2px;
-    &:hover { background: #fff8d8; }
-}
-.panel-collapsed-tab {
-    width: 22px; height: 76px; padding: 0; display: flex; align-items: center; justify-content: center;
-    writing-mode: vertical-rl; text-orientation: mixed; font: inherit; font-size: 13px; color: #333;
-    cursor: pointer; background: #fff; border: 1px solid #e0e0e0; border-left: 0;
-    &:hover { background: #fff8d8; }
-}
-.params-resizer {
-    position: absolute; top: 0; right: -3px; width: 6px; height: 100%; cursor: col-resize; z-index: 4; touch-action: none;
-    &:hover { background: rgba(242, 200, 17, .28); }
 }
 
 .panel-body {
     flex: 1;
-    min-height: 0;
     overflow: auto;
-    padding: 4px 12px 14px;
+    padding: 10px 14px;
 }
 
 .field {
     display: block;
-    margin-bottom: 9px;
+    margin-bottom: 12px;
     font-size: 12px;
 }
 
 .field>span {
     display: block;
-    margin-bottom: 3px;
-    color: #555;
+    margin-bottom: 4px;
+}
+
+.field select,
+.field input:not(.hidden-file) {
+    width: 100%;
+    height: 30px;
+    box-sizing: border-box;
+    border: 1px solid #aaa;
+    border-radius: 3px;
+    background: #fff;
+    padding: 0 8px;
+    font-size: 13px;
+    outline: none;
+}
+
+.field select:focus,
+.field input:not(.hidden-file):focus {
+    border-color: #888;
 }
 
 .hidden-file {
@@ -2136,14 +2203,12 @@ onBeforeUnmount(() => {
 
 .local-import-button {
     width: 100%;
-    height: 24px;
+    height: 30px;
     padding: 0 8px;
-    border: 1px solid #dcdfe6;
+    border: 1px solid #aaa;
     border-radius: 3px;
     background: #fff;
     color: #333;
-    font: inherit;
-    font-size: 12px;
     text-align: left;
     cursor: pointer;
 }
@@ -2171,21 +2236,31 @@ onBeforeUnmount(() => {
 
 .calculate {
     height: 32px;
-    min-width: 86px;
     padding: 0 24px;
     border: 0;
-    border-radius: 5px;
+    border-radius: 3px;
     color: #fff;
     cursor: pointer;
-    background: #252525;
-    font: inherit;
-    font-size: 13px;
-    font-weight: 600;
-    &:hover:not(:disabled) { background: #050505; }
+    background: #111;
 }
 
 .calculate:disabled {
     opacity: .6;
+    cursor: not-allowed;
+}
+
+.save-result {
+    height: 32px;
+    padding: 0 18px;
+    border: 1px solid #666;
+    border-radius: 3px;
+    background: #fff;
+    color: #222;
+    cursor: pointer;
+}
+
+.save-result:disabled {
+    opacity: .5;
     cursor: not-allowed;
 }
 
@@ -2207,59 +2282,47 @@ onBeforeUnmount(() => {
 
 .chart {
     flex: 1;
-    min-width: 0;
     min-height: 0;
 }
 
-.editable-data-grid :deep(.el-table) { flex: 1; }
+:deep(.el-table .cell) {
+    padding: 0;
+    text-align: center;
+}
 
-// 标题和底部页签占固定高度，图例悬浮在绘图区内。
-.dynamic-result-tabs {
-    height: 34px; display: flex; flex-shrink: 0; background: #fafafa;
-    overflow: hidden; border-bottom: 1px solid #e4e7ed;
+:deep(.el-table th.el-table__cell > .cell) {
+    padding: 0 10px;
 }
-.dynamic-result-tab {
-    max-width: 100%; padding: 0 12px; line-height: 34px; background: #f4d000;
-    font-size: 14px; font-weight: 600; color: #202020; white-space: nowrap; text-overflow: ellipsis; overflow: hidden;
+
+:deep(.el-table td.el-table__cell) {
+    padding: 0;
+    background: #fff;
 }
-.analysis-view { position: relative; }
-.chart-legend {
-    position: absolute; z-index: 5; top: 56px; right: 104px;
-    max-width: calc(100% - 116px); display: flex; flex-wrap: wrap;
-    background: rgba(255,255,255,.9); border: 1px solid #eee;
-    button { display: inline-flex; align-items: center; gap: 5px; padding: 6px 10px; border: 0; background: transparent;
-        color: #555; font: inherit; font-size: 12px; cursor: pointer; }
-    i { width: 18px; border-top: 2px solid #5470c6; }
-    i.theoretical { border-top: 2px dashed #a6d608; }
-    .muted { color: #aaa; i { border-color: #ccc; } }
+
+:deep(.el-table__row:hover > td.el-table__cell) {
+    background: #fff !important;
 }
 
 .bottom-tabs {
-    height: 30px;
+    height: 31px;
     display: flex;
     flex-shrink: 0;
-    border-top: 1px solid #e4e7ed;
-    background: #fff;
+    border-top: 1px solid #ddd;
 }
 
 .bottom-tabs button {
-    height: 30px;
-    min-width: 82px;
-    padding: 0 14px;
+    min-width: 110px;
     border: 0;
-    border-right: 1px solid #e4e7ed;
-    background: #fff;
-    color: #333;
-    font: inherit;
-    font-size: 13px;
-    white-space: nowrap;
+    border-right: 1px solid #ddd;
+    background: #fff2f4;
+    color: #999;
     cursor: pointer;
 }
 
 .bottom-tabs button.active {
-    color: #202020;
+    color: #222;
     box-shadow:
-        inset 0 3px 0 #f2c811;
+        inset 0 -2px #2b171a;
     font-weight: 600;
 }
 </style>
