@@ -11,6 +11,25 @@ export const workspaceTreeData = ref([
 
 export const workspaceActiveNodeId = ref('')
 export const workspaceSelectedWellName = ref('')
+// 左侧高亮表示下一次命令的目标井，与右侧已打开记录的井名分开解析。
+// 从井分支继承井名，兼容本身不带 wellName 的目录节点；只读取，不切换页面。
+export function resolveWorkspaceTargetWellName(fallback = workspaceSelectedWellName.value) {
+  const find = (nodes, inheritedWell = '') => {
+    for (const node of nodes || []) {
+      const wellName = node.wellName || inheritedWell
+      if (String(node.id) === String(workspaceActiveNodeId.value)) return wellName
+      const match = find(node.children, wellName)
+      if (match) return match
+    }
+    return ''
+  }
+  const wells = workspaceTreeData.value.find(node => node.id === 'g-well')?.children || []
+  for (const well of wells) {
+    const match = find([well], well.wellName || well.label || '')
+    if (match) return String(match).trim()
+  }
+  return String(fallback || '').trim()
+}
 export const workspaceTreeKeyword = ref('')
 export const workspaceTreeCollapsed = ref(false)
 // 单井产能跳回 IPR 工作台时携带首次点击的顶部菜单命令。

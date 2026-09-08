@@ -43,6 +43,7 @@ const testDate = ref(STATIC_DATE)
 const currentResult = ref(null)
 const activePanel = ref('input')
 const activeChart = ref('analysis')
+const paramsCollapsed = ref(false)
 const loading = ref(false)
 const calculating = ref(false)
 const saving = ref(false)
@@ -53,6 +54,7 @@ const evaluationIds = ref({})
 const equationPanelPosition = ref(null)
 const analysisLegendPosition = ref(null)
 let chart
+let chartResizeObserver
 let loadSequence = 0
 const initializedForms = new Set()
 
@@ -181,19 +183,35 @@ const visibleChartPoints = points => (points || [])
   .filter(point => !point.deleted)
   .map(point => [point.x, point.y])
 
-const movableFormulaPanel = (text, position) => {
+// 使用实际绘图区边界及面板尺寸定位；拖动后保存相对位置，缩放时仍留在图内。
+const analysisPanelBounds = (width, height) => ({
+  left: 104, top: 52,
+  right: Math.max(104, chart.getWidth() - 42 - width),
+  bottom: Math.max(52, chart.getHeight() - 70 - height)
+})
+const panelPosition = (width, height, relative, bottom = false) => {
+  const bounds = analysisPanelBounds(width, height)
+  const [x, y] = relative || [1, bottom ? 1 : 0]
+  return [bounds.left + x * (bounds.right - bounds.left), bounds.top + y * (bounds.bottom - bounds.top)]
+}
+const rememberPanelPosition = (element, width, height) => {
+  const bounds = analysisPanelBounds(width, height)
+  const clamp = value => Math.max(0, Math.min(1, value))
+  return [
+    clamp(((element.x ?? 0) - bounds.left) / (bounds.right - bounds.left || 1)),
+    clamp(((element.y ?? 0) - bounds.top) / (bounds.bottom - bounds.top || 1))
+  ]
+}
+const movableFormulaPanel = text => {
   const lines = String(text || '').split('\n')
   const widestLine = Math.max(...lines.map(line => line.length), 1)
   const width = Math.max(260, Math.min(420, widestLine * 7.7 + 28))
   const height = Math.max(56, lines.length * 20 + 16)
   return {
-    id: 'analysis-formula-panel', type: 'group', position: equationPanelPosition.value || position,
+    id: 'analysis-formula-panel', type: 'group', position: panelPosition(width, height, equationPanelPosition.value, true),
     z: 1000, zlevel: 20, draggable: true, cursor: 'move',
     ondrag: function () {
-      equationPanelPosition.value = [
-        Number.isFinite(this.x) ? this.x : this.position?.[0] || 0,
-        Number.isFinite(this.y) ? this.y : this.position?.[1] || 0
-      ]
+      equationPanelPosition.value = rememberPanelPosition(this, width, height)
     },
     children: [
       { type: 'rect', z: 1000, zlevel: 20, shape: { x: 0, y: 0, width, height, r: 3 }, style: {
@@ -206,38 +224,36 @@ const movableFormulaPanel = (text, position) => {
   }
 }
 
-const movableAnalysisLegend = (items, position) => {
+const movableAnalysisLegend = items => {
   const context = document.createElement('canvas').getContext('2d')
-  if (context) context.font = '13px "Microsoft YaHei", sans-serif'
-  const width = Math.max(250, Math.min(400, Math.max(...items.map(item =>
-    context?.measureText(item.name).width || item.name.length * 7.5), 1) + 54))
-  const rowHeight = 27
-  const height = items.length * rowHeight + 18
+  if (context) context.font = '12px "Microsoft YaHei", sans-serif'
+  const width = Math.max(190, Math.min(330, Math.max(...items.map(item =>
+    context?.measureText(item.name).width || item.name.length * 7), 1) + 49))
+  const rowHeight = 21
+  const height = items.length * rowHeight + 12
   const children = [{
     type: 'rect', z: 1000, zlevel: 20, shape: { x: 0, y: 0, width, height },
-    style: { fill: 'rgba(255,255,255,.90)', stroke: '#e5e9f0', lineWidth: 1 }
+    style: { fill: '#fff', stroke: '#cfd5dc', lineWidth: 1,
+      shadowBlur: 7, shadowColor: 'rgba(0,0,0,.14)', shadowOffsetY: 2 }
   }]
   items.forEach((item, index) => {
-    const y = 9 + rowHeight * index + rowHeight / 2
+    const y = 6 + rowHeight * index + rowHeight / 2
     if (item.type === 'scatter') {
-      children.push({ type: 'circle', z: 1001, zlevel: 20, shape: { cx: 23, cy: y, r: 6 },
+      children.push({ type: 'circle', z: 1001, zlevel: 20, shape: { cx: 17, cy: y, r: 5.5 },
         style: { fill: item.color } })
     } else {
       children.push({ type: 'line', z: 1001, zlevel: 20,
-        shape: { x1: 13, y1: y, x2: 33, y2: y },
+        shape: { x1: 8, y1: y, x2: 28, y2: y },
         style: { stroke: item.color, lineWidth: 2, lineDash: item.dotted ? [3, 3] : null } })
     }
-    children.push({ type: 'text', z: 1001, zlevel: 20, style: { x: 40, y, text: item.name,
-      fill: '#606266', font: '13px "Microsoft YaHei", sans-serif', verticalAlign: 'middle' } })
+    children.push({ type: 'text', z: 1001, zlevel: 20, style: { x: 35, y, text: item.name,
+      fill: '#303030', font: '12px "Microsoft YaHei", sans-serif', verticalAlign: 'middle' } })
   })
   return {
-    id: 'analysis-legend-panel', type: 'group', position: analysisLegendPosition.value || position,
+    id: 'analysis-legend-panel', type: 'group', position: panelPosition(width, height, analysisLegendPosition.value),
     z: 1000, zlevel: 20, draggable: true, cursor: 'move',
     ondrag: function () {
-      analysisLegendPosition.value = [
-        Number.isFinite(this.x) ? this.x : this.position?.[0] || 0,
-        Number.isFinite(this.y) ? this.y : this.position?.[1] || 0
-      ]
+      analysisLegendPosition.value = rememberPanelPosition(this, width, height)
     },
     children
   }
@@ -811,12 +827,6 @@ const handleFile = async event => {
 const addRow = () => { rows.value.push({ sequence: rows.value.length + 1, date: testDate.value,
   flowRate: null, recoveryPressure: null, flowingPressure: null }); markInputDirty() }
 const removeRow = index => { rows.value.splice(index, 1); rows.value.forEach((row, i) => { row.sequence = i + 1 }); markInputDirty() }
-const commitCell = (row, field, event, numeric = false) => {
-  const text = event.currentTarget.textContent.trim()
-  row[field] = numeric && text !== '' ? Number(text) : text
-  markInputDirty()
-}
-const finishCell = event => event.currentTarget.blur()
 const invalidateResult = () => { currentResult.value = null; resultDirty.value = false; activePanel.value = 'input' }
 const markInputDirty = () => { inputDirty.value = true; invalidateResult() }
 
@@ -897,9 +907,18 @@ const renderChart = () => {
     chart = null
   }
   chart ||= echarts.getInstanceByDom(chartEl.value) || echarts.init(chartEl.value)
+  // 先同步容器尺寸，再计算 graphic 的位置，避免首次展示沿用隐藏时的尺寸。
+  chart.resize()
   const result = currentResult.value; const isIpr = activeChart.value === 'ipr'
   const isExponential = result.calculationResultType === 'exponential'
+  // 与等时试井的指数式一致：仅在绘图时取 ln，再用 value 轴绘制均匀主/次网格。
+  // 不修改原始结果、持久化数据或 IPR 数据；非正数无法取对数，只在图上过滤。
+  const toAnalysisChartData = points => points
+    .map(([x, y]) => [Number(x), Number(y)])
+    .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y) && (!isExponential || (x > 0 && y > 0)))
+    .map(([x, y]) => isExponential ? [Math.log(x), Math.log(y)] : [x, y])
   const isInjection = operationType.value === 'injection'
+  const [exponentialAxisExpression, exponentialAxisUnit] = pressureDirectionText(exponentialAnalysisUnit(result.calculationMethod)).split('\n')
   const iprPressureDifference = pressureDirectionText(result.calculationMethod === 'pseudo-pressure'
     ? 'm(Pr) - m(Pwf)' : equationLeft(result.calculationMethod))
   const iprEquation = isExponential
@@ -932,9 +951,9 @@ const renderChart = () => {
         const stablePoint = points.length > 1 ? points.at(-1) : null
         return [
           { name: item.name, type: 'scatter', z: 5, symbolSize: 10,
-            itemStyle: { color: item.color }, data: stablePoint ? points.slice(0, -1) : points },
+            itemStyle: { color: item.color }, data: toAnalysisChartData(stablePoint ? points.slice(0, -1) : points) },
           ...(stablePoint ? [{ name: '稳定点', type: 'scatter', z: 6, symbolSize: 12,
-            itemStyle: { color: '#ee6666' }, data: [stablePoint] }] : [])
+            itemStyle: { color: '#ee6666' }, data: toAnalysisChartData([stablePoint]) }] : [])
         ]
       }
       const isScatter = ['regularized', 'stable'].includes(item.curveType)
@@ -944,72 +963,92 @@ const renderChart = () => {
         showSymbol: isScatter,
         itemStyle: { color: item.color }, lineStyle: { color: item.color, width: 2,
           type: ['shifted-regression', 'transient'].includes(item.curveType) ? 'dotted' : 'solid' },
-        data: visibleChartPoints(item.data) }]
+        data: toAnalysisChartData(visibleChartPoints(item.data)) }]
     })
   const equation = isExponential
     ? (result.equation || `qsc = ${scientific(result.productivityCoefficient)} × [${equationLeft(result.calculationMethod)}]^${Number(result.productivityExponent).toFixed(4)}`)
     : `${equationLeft(result.calculationMethod)} = ${scientific(result.darcyCoefficient)} qsc + ${scientific(result.nonDarcyCoefficient)} qsc²`
   const formulaText = `${pressureDirectionText(equation)}\nR² = ${Number(result.rSquared).toFixed(4)}`
-  const formulaDefaultPosition = [
-    Math.max((chart.getWidth?.() || 900) - 510, 24),
-    Math.max((chart.getHeight?.() || 520) - 135, 55)
-  ]
   const legendItems = series.map(item => ({
     name: item.name,
     type: item.type,
     color: item.itemStyle?.color || item.lineStyle?.color || '#333',
     dotted: item.lineStyle?.type === 'dotted'
   }))
-  const legendDefaultPosition = [Math.max((chart.getWidth?.() || 900) - 330, 24), 52]
-  chart.setOption({ animation: false, color: ['#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de', '#3ba272', '#fc8452', '#9a60b4', '#ea7ccc', '#2ec7c9'],
+  // 两种公式共用展示样式；指数式坐标值已取 ln，IPR 仍显示实际压力和气量。
+  const axisPresentation = {
+    nameTextStyle: { color: '#333', fontSize: 14, lineHeight: 18 },
+    axisLine: { show: true, lineStyle: { color: '#444', width: 1 } },
+    axisTick: { show: true, lineStyle: { color: '#555' } },
+    axisLabel: { color: '#444', fontSize: 12 },
+    splitLine: { show: true, lineStyle: { color: '#dbe4f1', width: 1 } },
+    minorTick: { show: true, splitNumber: 5 },
+    minorSplitLine: { show: true, lineStyle: { color: '#edf2f8', width: 1 } }
+  }
+  chart.setOption({ animation: false, backgroundColor: '#fff', color: ['#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de', '#3ba272', '#fc8452', '#9a60b4', '#ea7ccc', '#2ec7c9'],
     title: { text: isIpr ? (operationType.value === 'injection' ? '注气IPR曲线' : 'IPR曲线') : '修正等时试井分析图', left: 'center', top: 8,
       subtext: isIpr ? iprEquation : '',
-      textStyle: { fontSize: 17, fontWeight: 600, color: '#333' } },
-    tooltip: { trigger: isIpr ? 'axis' : 'item' },
+      textStyle: { fontSize: 14, fontWeight: 600, color: '#3f3f3f' } },
+    tooltip: { trigger: isIpr ? 'axis' : 'item', confine: true,
+      backgroundColor: 'rgba(255,255,255,.96)', borderColor: '#cfd5dc', borderWidth: 1,
+      textStyle: { color: '#333', fontSize: 12 } },
     legend: { show: isIpr, type: 'scroll', orient: 'vertical', right: 22, top: 52,
       itemWidth: 17, itemHeight: 10, backgroundColor: 'rgba(255,255,255,.9)',
       borderColor: '#e5e9f0', borderWidth: 1, padding: 9 },
-    grid: { left: 92, right: isIpr ? 205 : 245, top: 70, bottom: 70 },
-    xAxis: { type: !isIpr && isExponential ? 'log' : 'value', scale: !isIpr,
-      name: isIpr ? `${isInjection ? '注气量' : '采气量'} qsc (10⁴m³/d)` : 'qsc(10⁴m³/d)', nameLocation: 'middle', nameGap: 42,
+    grid: { left: 92, right: 30, top: isIpr ? 66 : 40, bottom: 58,
+      show: true, borderColor: '#d7dfeb', borderWidth: 1 },
+    xAxis: { ...axisPresentation, type: 'value', scale: !isIpr,
+      name: isIpr ? `${isInjection ? '注气量' : '采气量'} qsc (10⁴m³/d)` : isExponential ? 'ln(qsc(10⁴m³/d))' : 'qsc(10⁴m³/d)', nameLocation: 'middle', nameGap: 32,
       min: isIpr ? 0 : undefined,
-      minorTick: { show: true }, minorSplitLine: { show: true, lineStyle: { color: '#f2f5fa' } },
-      splitLine: { lineStyle: { color: '#dfe6f1' } } },
-    yAxis: { type: !isIpr && isExponential ? 'log' : 'value', scale: !isIpr, min: isIpr ? 0 : undefined,
+      splitNumber: 12 },
+    yAxis: { ...axisPresentation, type: 'value', scale: !isIpr, min: isIpr ? 0 : undefined,
       max: isIpr ? iprYAxisMax : undefined,
       interval: isIpr ? iprYAxisInterval : undefined,
-      name: isIpr ? '井底流压 Pwf (MPa)' : pressureDirectionText(isExponential
-        ? exponentialAnalysisUnit(result.calculationMethod) : analysisUnit(result.calculationMethod)),
-      nameLocation: 'middle', nameGap: 62, nameTextStyle: { lineHeight: 18 },
-      minorTick: { show: true }, minorSplitLine: { show: true, lineStyle: { color: '#f2f5fa' } },
-      splitLine: { lineStyle: { color: '#dfe6f1' } } }, series,
+      name: isIpr ? '井底流压 Pwf (MPa)' : isExponential
+        ? `ln(${exponentialAxisExpression})\n${exponentialAxisUnit || ''}`
+        : pressureDirectionText(analysisUnit(result.calculationMethod)),
+      nameLocation: 'middle', nameGap: 62, splitNumber: 10 }, series,
     graphic: isIpr ? [] : [
-      movableAnalysisLegend(legendItems, legendDefaultPosition),
-      movableFormulaPanel(formulaText, formulaDefaultPosition)
+      movableAnalysisLegend(legendItems),
+      movableFormulaPanel(formulaText)
     ] }, true)
-  chart.resize()
 }
 const switchPanel = async panel => { activePanel.value = panel; if (panel === 'analysis') { await nextTick(); renderChart() } }
 const switchChart = async mode => { activeChart.value = mode; await nextTick(); renderChart() }
-const resizeChart = () => chart?.resize()
+const resizeChart = () => {
+  if (activePanel.value === 'analysis' && currentResult.value) renderChart()
+  else chart?.resize()
+}
+const toggleParamsPanel = async () => { paramsCollapsed.value = !paramsCollapsed.value; await nextTick(); resizeChart() }
 
 watch(() => props.testId, () => loadTest())
 watch(() => props.wellName, async () => { await loadPvtOptions(); await loadTest() })
-onMounted(async () => { await loadPvtOptions(); await loadTest(); window.addEventListener('resize', resizeChart) })
-onBeforeUnmount(() => { window.removeEventListener('resize', resizeChart); chart?.dispose(); chart = null })
+onMounted(() => {
+  // 折叠参数栏、切换面板和外层目录变化时，图表也要按实际容器尺寸重排。
+  chartResizeObserver = new ResizeObserver(resizeChart)
+  if (chartEl.value) chartResizeObserver.observe(chartEl.value)
+  window.addEventListener('resize', resizeChart)
+  loadPvtOptions().then(() => loadTest())
+})
+onBeforeUnmount(() => { window.removeEventListener('resize', resizeChart); chartResizeObserver?.disconnect(); chart?.dispose(); chart = null })
 </script>
 
 <template>
   <section v-loading="loading" class="modified-workspace">
-    <aside class="params-panel">
-      <div class="panel-head">参数设置</div>
-      <div class="panel-body">
+    <aside class="params-panel" :class="{ collapsed: paramsCollapsed }">
+      <button v-if="paramsCollapsed" type="button" class="parameter-collapsed-tab" title="展开参数设置" @click="toggleParamsPanel">参数设置</button>
+      <div v-show="!paramsCollapsed" class="panel-head"><span>参数设置</span>
+        <button type="button" class="parameter-toggle" title="收起参数设置" aria-label="收起参数设置" @click="toggleParamsPanel">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="#777" aria-hidden="true"><path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z" /></svg>
+        </button>
+      </div>
+      <div v-show="!paramsCollapsed" class="panel-body">
         <label class="field"><span>选择PVT表</span><select v-model="selectedPvtId" @change="loadPvtDetail">
           <option value="" disabled>{{ pvtOptions.length ? '请选择PVT性质' : '当前井暂无PVT性质' }}</option>
           <option v-for="item in pvtOptions" :key="item.pvtId" :value="String(item.pvtId)">{{ item.pvtName || `PVT性质${item.pvtNo}` }}</option>
         </select></label>
         <label class="field"><span>选择数据表</span>
-          <button type="button" class="file-button" :title="importedFileName" :disabled="importing" @click="chooseFile">{{ importing ? '正在解析…' : '导入表1' }}</button>
+          <button type="button" class="file-button" :title="importedFileName" :disabled="importing" @click="chooseFile">{{ importing ? '正在解析…' : '本地导入' }}</button>
           <input ref="fileInput" class="hidden-file" type="file" accept=".xlsx,.xls,.csv" @change="handleFile" />
           <small>{{ importedFileName }} · {{ rows.length }} 行</small>
         </label>
@@ -1018,7 +1057,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resizeChart); chart
         <label class="field"><span>地层温度（℃）</span><input v-model.number="formationTemperature" @change="markInputDirty" /></label>
         <fieldset class="radios"><legend>计算方法</legend>
           <label><input v-model="calculationMethod" type="radio" value="pseudo-pressure" @change="switchPressureMethod" />拟压力</label>
-          <label><input v-model="calculationMethod" type="radio" value="pressure-squared" @change="switchPressureMethod" />压力平方法</label>
+          <label><input v-model="calculationMethod" type="radio" value="pressure-squared" @change="switchPressureMethod" />压力平方方法</label>
           <label><input v-model="calculationMethod" type="radio" value="pressure" @change="switchPressureMethod" />压力法</label>
         </fieldset>
         <fieldset class="radios"><legend>注采类型</legend>
@@ -1050,28 +1089,116 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resizeChart); chart
     </aside>
     <main class="result-area">
       <div v-show="activePanel === 'input'" class="editable-data-grid">
-        <div class="data-toolbar"><span>可直接编辑；计算时使用当前表格值</span><el-button size="small" @click="addRow">新增测点</el-button></div>
+        <div class="data-toolbar"><span>{{ wellName || '未选择井' }} - 修正等时试井数据</span><el-button size="small" @click="addRow">增加测点</el-button></div>
         <el-table :data="rows" border height="100%">
-          <el-table-column label="序号" width="70" align="center"><template #default="scope">{{ String(scope.$index + 1).padStart(2, '0') }}</template></el-table-column>
-          <el-table-column label="产能试井日期" min-width="145" align="center"><template #default="scope"><div class="grid-cell" contenteditable="true" spellcheck="false" @keydown.enter.prevent="finishCell" @blur="commitCell(scope.row, 'date', $event)">{{ scope.row.date }}</div></template></el-table-column>
-          <el-table-column label="地层/恢复压力（MPa）" min-width="175" align="center"><template #default="scope"><div class="grid-cell" contenteditable="true" spellcheck="false" @keydown.enter.prevent="finishCell" @blur="commitCell(scope.row, 'recoveryPressure', $event, true)">{{ scope.row.recoveryPressure }}</div></template></el-table-column>
-          <el-table-column label="测试气产量（10⁴m³/d）" min-width="175" align="center"><template #default="scope"><div class="grid-cell" contenteditable="true" spellcheck="false" @keydown.enter.prevent="finishCell" @blur="commitCell(scope.row, 'flowRate', $event, true)">{{ scope.row.flowRate }}</div></template></el-table-column>
-          <el-table-column label="测试流压（MPa）" min-width="150" align="center"><template #default="scope"><div class="grid-cell" contenteditable="true" spellcheck="false" @keydown.enter.prevent="finishCell" @blur="commitCell(scope.row, 'flowingPressure', $event, true)">{{ scope.row.flowingPressure }}</div></template></el-table-column>
-          <el-table-column label="操作" width="70" align="center"><template #default="scope"><el-button link type="danger" @click="removeRow(scope.$index)">删除</el-button></template></el-table-column>
+          <el-table-column type="index" label="序号" width="60" />
+          <el-table-column label="日期" min-width="130"><template #default="scope"><el-input v-model="scope.row.date" size="small" :aria-label="`第${scope.$index + 1}行日期`" @update:model-value="markInputDirty" /></template></el-table-column>
+          <el-table-column :label="operationType === 'injection' ? '地层压力(MPa)' : '地层/恢复压力(MPa)'" min-width="170"><template #default="scope"><el-input-number v-model="scope.row.recoveryPressure" :controls="false" size="small" :aria-label="`第${scope.$index + 1}行地层恢复压力`" @update:model-value="markInputDirty" /></template></el-table-column>
+          <el-table-column :label="operationType === 'injection' ? '测试注气量(10⁴m³/d)' : '测试气产量(10⁴m³/d)'" min-width="175"><template #default="scope"><el-input-number v-model="scope.row.flowRate" :controls="false" size="small" :aria-label="`第${scope.$index + 1}行测试气量`" @update:model-value="markInputDirty" /></template></el-table-column>
+          <el-table-column :label="operationType === 'injection' ? '井底注入压力(MPa)' : '测试流压(MPa)'" min-width="145"><template #default="scope"><el-input-number v-model="scope.row.flowingPressure" :controls="false" size="small" :aria-label="`第${scope.$index + 1}行测试流压`" @update:model-value="markInputDirty" /></template></el-table-column>
+          <!-- 最后一行始终是稳定点；仅标记已有行角色，不新增或改变计算参数。 -->
+          <el-table-column label="测点类型" width="90" align="center"><template #default="scope"><el-tag v-if="scope.$index === rows.length - 1" type="danger" size="small">稳定点</el-tag><span v-else>等时点</span></template></el-table-column>
+          <el-table-column label="操作" width="75" align="center"><template #default="scope"><el-button link type="danger" @click="removeRow(scope.$index)">删除</el-button></template></el-table-column>
         </el-table>
       </div>
       <div v-show="activePanel === 'analysis'" class="analysis-view">
         <div class="chart-switch"><label><input type="radio" :checked="activeChart === 'analysis'" @change="switchChart('analysis')" />结果分析图</label>
-          <label><input type="radio" :checked="activeChart === 'ipr'" @change="switchChart('ipr')" />IPR曲线</label></div>
+          <label><input type="radio" :checked="activeChart === 'ipr'" @change="switchChart('ipr')" />{{ operationType === 'injection' ? '注气IPR曲线' : 'IPR曲线' }}</label></div>
         <div ref="chartEl" class="chart" />
       </div>
       <div class="bottom-tabs"><button :class="{ active: activePanel === 'input' }" @click="switchPanel('input')">数据列表</button>
-        <button :class="{ active: activePanel === 'analysis' }" :disabled="!currentResult" @click="switchPanel('analysis')">结果分析</button></div>
+        <button :class="{ active: activePanel === 'analysis' }" :disabled="!currentResult" @click="switchPanel('analysis')">结果分析图</button></div>
     </main>
   </section>
 </template>
 
 <style lang="scss" scoped>
-.modified-workspace{display:flex;height:100%;min-height:0;background:#fff}.params-panel{width:360px;min-width:360px;display:flex;flex-direction:column;border-right:1px solid #ddd}.panel-head{height:34px;padding:0 12px;display:flex;align-items:center;background:#f2f2f2;border-bottom:1px solid #ddd;font-size:13px}.panel-body{flex:1;overflow:auto;padding:10px 14px}.field{display:block;margin-bottom:11px;font-size:12px}.field>span{display:block;margin-bottom:4px}.field select,.field input,.file-button,.inline-output input{width:100%;height:28px;box-sizing:border-box;border:1px solid #aaa;border-radius:3px;background:#fff;padding:0 8px}.file-button{text-align:left;cursor:pointer}.hidden-file{display:none}.field small{display:block;margin-top:4px;overflow:hidden;color:#777;text-overflow:ellipsis;white-space:nowrap}.section-title{display:flex;align-items:center;gap:8px;margin:5px 0 10px;font-size:13px}.section-title i{flex:1;height:1px;background:#999}.radios{margin:0 0 10px;padding:0;border:0;font-size:12px}.radios legend{margin-bottom:6px;padding:0}.radios label{margin-right:12px;white-space:nowrap}.action-buttons{display:flex;gap:8px}.calculate,.save{height:30px;padding:0 24px;border:0;border-radius:3px;color:#fff;cursor:pointer}.calculate{background:#111}.save{background:#409eff}.calculate:disabled,.save:disabled{opacity:.6;cursor:not-allowed}.inline-output{margin-top:14px}.inline-output label{display:block;margin-bottom:10px;color:#555;font-size:12px}.inline-output input{display:block;margin-top:4px;color:#333}.result-area{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column}.editable-data-grid,.analysis-view{flex:1;min-height:0;display:flex;flex-direction:column}.data-toolbar,.chart-switch{height:38px;padding:0 12px;display:flex;align-items:center;gap:14px;flex-shrink:0;border-bottom:1px solid #ddd;color:#666;font-size:12px}.data-toolbar{justify-content:space-between}.chart{flex:1;min-height:0}.grid-cell{min-height:34px;padding:8px 10px;box-sizing:border-box;line-height:18px;text-align:center;outline:none;white-space:nowrap}.grid-cell:focus{padding:7px 9px;border:1px solid #409eff;background:#fff}:deep(.el-table .cell){padding:0;text-align:center}:deep(.el-table th.el-table__cell>.cell){padding:0 10px}:deep(.el-table td.el-table__cell){padding:0;background:#fff}:deep(.el-table__row:hover>td.el-table__cell){background:#fff!important}.bottom-tabs{height:31px;display:flex;flex-shrink:0;border-top:1px solid #ddd}.bottom-tabs button{min-width:110px;border:0;border-right:1px solid #ddd;background:#fff2f4;color:#999;cursor:pointer}.bottom-tabs button.active{color:#222;box-shadow:inset 0 -2px #2b171a;font-weight:600}.bottom-tabs button:disabled{cursor:not-allowed;opacity:.5}
-.disabled-option{color:#aaa}
+$border: #dcdfe6;
+$yellow: #f4d000;
+
+.modified-workspace {
+  display: flex;
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+  background: #fff;
+  color: #303133;
+}
+
+// 参数栏与等时试井使用相同宽度和控件间距，折叠不销毁表单状态。
+.params-panel {
+  width: 280px;
+  min-width: 280px;
+  flex: 0 0 280px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #d7d7d7;
+  overflow: hidden;
+
+  &.collapsed { width: 34px; min-width: 34px; flex-basis: 34px; }
+}
+.panel-head {
+  height: 34px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  background: #f2f2f2;
+  border-bottom: 1px solid #d7d7d7;
+  font-size: 13px;
+}
+.parameter-toggle {
+  width: 20px; height: 20px; padding: 0; border: 0; border-radius: 2px;
+  background: transparent; display: flex; align-items: center; justify-content: center; cursor: pointer;
+  &:hover { background: #fff6c5; }
+}
+.parameter-collapsed-tab {
+  width: 100%; height: 76px; padding: 8px 0 0; border: 0; border-bottom: 1px solid $border;
+  background: #fff; color: #222; font: inherit; font-size: 13px; writing-mode: vertical-rl;
+  text-orientation: upright; display: flex; align-items: center; cursor: pointer;
+  &:hover { background: #fff6c5; }
+}
+.panel-body { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 12px 14px; }
+.field { display: block; margin-bottom: 9px; color: #333; }
+.field > span { display: block; margin-bottom: 3px; font-size: 12px; line-height: 18px; }
+.field select, .field input, .file-button, .inline-output input {
+  width: 100%; height: 24px; box-sizing: border-box; border: 1px solid #aaa; border-radius: 3px;
+  background: #fff; color: #333; padding: 0 8px; font: inherit; font-size: 13px; outline: none;
+  &:focus { border-color: #b99500; box-shadow: 0 0 0 2px rgba(242, 200, 17, .16); }
+}
+.file-button { height: 26px; text-align: left; cursor: pointer; }
+.hidden-file { display: none; }
+.field small { display: block; margin-top: 4px; overflow: hidden; color: #777; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.section-title { height: 22px; display: flex; align-items: center; gap: 8px; margin: 10px 0 7px; font-size: 13px; font-weight: 500; }
+.section-title i { flex: 1; height: 1px; background: #999; }
+.radios { margin: 0 0 10px; padding: 0; border: 0; }
+.radios legend { margin-bottom: 7px; padding: 0; font-size: 13px; font-weight: 500; }
+.radios label { display: inline-flex; align-items: center; gap: 4px; margin-right: 10px; font-size: 13px; white-space: nowrap; cursor: pointer; }
+.radios input, .chart-switch input { width: 14px; height: 14px; margin: 0; accent-color: #303133; }
+.action-buttons { display: flex; align-items: center; gap: 8px; }
+.calculate, .save { min-width: 86px; height: 32px; padding: 0 22px; border-radius: 5px; font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+.calculate { border: 0; background: #252525; color: #fff; }
+.calculate:hover:not(:disabled) { background: #050505; }
+.calculate:disabled { opacity: .6; cursor: not-allowed; }
+.save { border: 1px solid #252525; background: #fff; color: #252525; }
+.save:hover:not(:disabled) { background: #f5f5f5; }
+.save:disabled { border-color: #d7d7d7; color: #aaa; cursor: not-allowed; }
+.inline-output { margin-top: 14px; }
+.inline-output label { display: block; margin-bottom: 9px; color: #333; font-size: 12px; }
+.inline-output input { display: block; margin-top: 3px; }
+.result-area { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.editable-data-grid, .analysis-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.editable-data-grid :deep(.el-table) { flex: 1; }
+.data-toolbar { min-height: 42px; padding: 0 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-shrink: 0; border-bottom: 1px solid $border; font-size: 14px; font-weight: 600; }
+.chart-switch { min-height: 34px; padding: 0 12px; display: flex; align-items: center; gap: 14px; flex-shrink: 0; font-size: 13px; }
+.chart-switch label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.chart { flex: 1; min-width: 0; min-height: 0; }
+// 底部标签与水侵分析统一：靠左紧凑排列，选中项仅以顶部黄线强调。
+.bottom-tabs { height: 30px; display: flex; justify-content: flex-start; flex-shrink: 0; border-top: 1px solid #e4e7ed; background: #fff; }
+.bottom-tabs button { height: 30px; min-width: 82px; padding: 0 14px; border: 0; border-right: 1px solid #e4e7ed; background: #fff; color: #333; font: inherit; font-size: 13px; white-space: nowrap; cursor: pointer; }
+.bottom-tabs button.active { background: #fff; color: #202020; font-weight: 600; box-shadow: inset 0 3px 0 $yellow; }
+.bottom-tabs button:disabled { color: #c0c4cc; cursor: not-allowed; }
 </style>

@@ -145,7 +145,9 @@ const legendItems = computed(() => {
 })
 const legendStyle = computed(() => {
   if (legendPosition.value.x === null || legendPosition.value.y === null) {
-    return { top: '36px', right: '18px' }
+    // 默认落在坐标网格右上角内侧；保留用户拖动后的自定义位置。
+    const grid = baseGrid()
+    return { top: `${34 + (chartTabs.value.length ? 34 : 0) + grid.top + 12}px`, right: `${grid.right + 12}px` }
   }
   return {
     left: `${legendPosition.value.x}px`,

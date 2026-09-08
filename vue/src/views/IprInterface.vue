@@ -85,6 +85,7 @@ import {
   workspacePendingCommand,
   workspacePendingNode,
   workspaceSelectedWellName,
+  resolveWorkspaceTargetWellName,
   workspaceTreeCollapsed,
   workspaceTreeData,
   workspaceTreeHydrated,
@@ -3328,12 +3329,15 @@ const handleDynamicBalanceRecalculate = async (params = {}) => {
   }
 }
 
-const runDiagnosticCurveForSelectedWell = () => {
-  const targetWellName = selectedWellName.value
+const runDiagnosticCurveForSelectedWell = (commandWellName = '') => {
+  const targetWellName = (typeof commandWellName === 'string' && commandWellName.trim()) ||
+    resolveWorkspaceTargetWellName(activeNode.value?.wellName || selectedWellName.value)
   if (!targetWellName) {
     ElMessage.warning('请先在左侧选择一口井')
     return
   }
+  // 只在用户点击功能入口后提交选井，点击左侧目录仍不会刷新右侧内容。
+  selectedWellName.value = targetWellName
   currentView.value = 'diagnostic-curve'
   currentViewNode.value = { wellName: targetWellName }
 }
@@ -4314,7 +4318,7 @@ const handleSelect = async (node) => { // 点击左侧树节点
 
 }
 
-const handleCommand = async ({ group, name, parent }) => { // 接收顶部菜单栏的点击事件
+const handleCommand = async ({ group, name, parent, wellName: commandWellName }) => { // 接收顶部菜单栏的点击事件
   if (workspaceRibbonScope.value === 'reservoir') {
     const location = getReservoirCommandLocation({ group, name, parent })
     if (location) await router.push(location)
@@ -4501,7 +4505,7 @@ const handleCommand = async ({ group, name, parent }) => { // 接收顶部菜单
       runFlowBalanceForSelectedWell()
       break
     case '诊断曲线':
-      runDiagnosticCurveForSelectedWell()
+      runDiagnosticCurveForSelectedWell(commandWellName)
       break
     case 'Blasingame':
       runBlasingameForSelectedWell()

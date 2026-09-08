@@ -2163,8 +2163,8 @@ const renderChart = () => {
       {
         id: 'analysis-legend-panel',
         type: 'group',
-        right: 16,
-        top: 62,
+        right: 42,
+        top: 52,
         z: 100,
         zlevel: 20,
         draggable: true,
@@ -2174,8 +2174,8 @@ const renderChart = () => {
       {
         id: 'analysis-formula-panel',
         type: 'group',
-        right: 46,
-        bottom: 72,
+        right: 42,
+        bottom: 70,
         z: 100,
         zlevel: 20,
         draggable: true,
@@ -2689,6 +2689,15 @@ const switchChart = async (chartType) => {
 }
 
 const handleResize = () => chart?.resize()
+// 不仅监听浏览器窗口，也响应外层目录、参数栏导致的图表容器尺寸变化。
+let chartResizeObserver = null
+watch(chartEl, element => {
+  chartResizeObserver?.disconnect()
+  if (element) {
+    chartResizeObserver ||= new ResizeObserver(handleResize)
+    chartResizeObserver.observe(element)
+  }
+})
 
 watch(selectedDataTable, value => {
   if (!value) {
@@ -2746,10 +2755,11 @@ watch(() => props.externalOperationType, value => {
   result.value = null
   activePanel.value = 'input'
 })
-watch(() => props.pvtResultRows, () => {
-  if (calculationMethod.value !== 'pseudo-pressure') return
+watch(() => props.pvtRecord, () => {
+  // 任一方法更换 PVT 参数来源都要作废旧结果，但不清空用户录入的测点。
   result.value = null
   activePanel.value = 'input'
+  emit('result-change', null, { stored: false })
 })
 watch(() => props.viewKey, async () => {
   selectedWellName.value = props.initialWellName || props.wellNames[0] || ''
@@ -2775,6 +2785,7 @@ defineExpose({ analyze, loadWellData, replaceInputRows, switchPanel, getPersiste
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize)
+  chartResizeObserver?.disconnect()
   chart?.dispose()
   chart = null
 })
@@ -2969,7 +2980,7 @@ onBeforeUnmount(() => {
     <div v-if="selectedDataTable" class="bottom-tabs">
       <button :class="{ active: activePanel === 'input' }" @click="switchPanel('input')">数据列表</button>
       <button :class="{ active: activePanel === 'analysis' }" @click="switchPanel('analysis')">
-        结果分析
+        结果分析图
       </button>
     </div>
 
@@ -3180,6 +3191,11 @@ $border: #dcdfe6;
   padding: 0 12px;
   flex-shrink: 0;
 
+  // 回压、等时和一点法共用此控件，选中色与修正等时统一。
+  input[type='radio'] {
+    accent-color: #303133;
+  }
+
   label {
     display: inline-flex;
     align-items: center;
@@ -3217,17 +3233,25 @@ $border: #dcdfe6;
 }
 
 .bottom-tabs {
-  height: 38px;
+  // 回压、等时和一点法共用此标签栏，与修正等时保持相同的紧凑样式。
+  height: 30px;
   display: flex;
-  justify-content: center;
-  border-top: 1px solid $border;
+  justify-content: flex-start;
+  border-top: 1px solid #e4e7ed;
   flex-shrink: 0;
+  background: #fff;
 
   button {
-    min-width: 150px;
+    height: 30px;
+    min-width: 82px;
+    padding: 0 14px;
     border: 0;
-    border-right: 1px solid $border;
+    border-right: 1px solid #e4e7ed;
     background: #fff;
+    color: #333;
+    font: inherit;
+    font-size: 13px;
+    white-space: nowrap;
     cursor: pointer;
 
     &:disabled {
@@ -3236,9 +3260,10 @@ $border: #dcdfe6;
     }
 
     &.active {
-      background: $yellow;
-      color: #111;
+      background: #fff;
+      color: #202020;
       font-weight: 600;
+      box-shadow: inset 0 3px 0 $yellow;
     }
   }
 }

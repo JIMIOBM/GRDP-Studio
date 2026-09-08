@@ -13,6 +13,9 @@ const props = defineProps({
   fittedFormationPressure: { type: [String, Number], default: '28.99' },
   openFlowRate: { type: [String, Number], default: '5' },
   pvtRecord: { type: Object, default: null },
+  pvtTableOptions: { type: Array, default: () => [] },
+  selectedPvtTable: { type: String, default: '' },
+  pvtLoading: { type: Boolean, default: false },
   projectId: { type: [Number, String], required: true },
   gasReservoirId: { type: [Number, String], required: true },
    methodType: { 
@@ -23,6 +26,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits([
+  'select-pvt',
   'update:coefficient-c',
   'update:exponent-n',
   'update:corrected-c',
@@ -215,8 +219,9 @@ const handleResize = () => {
       <div class="parameter-form">
         <label class="field-group">
           <span>选择PVT表</span>
-          <select disabled>
-            <option>请选择</option>
+          <select :value="selectedPvtTable" :disabled="pvtLoading || !pvtTableOptions.length" @change="emit('select-pvt', $event.target.value)">
+            <option value="" disabled>{{ pvtLoading ? '正在加载PVT…' : pvtTableOptions.length ? '请选择PVT性质' : '当前井暂无已保存PVT性质' }}</option>
+            <option v-for="option in pvtTableOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
           </select>
         </label>
 

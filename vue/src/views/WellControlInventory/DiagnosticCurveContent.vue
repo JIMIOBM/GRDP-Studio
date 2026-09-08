@@ -71,6 +71,29 @@ const result =
     ref(null)
 
 let chart = null
+let chartResizeObserver = null
+const paramsCollapsed = ref(false)
+const paramsPanelWidth = ref(238)
+const resizingParamsPanel = ref(false)
+const legendSelected = ref({ '实际运行曲线': true, '理论基准线': true })
+
+// 与水侵分析共用相同的视觉规范；坐标范围、周期分组和计算结果保持原逻辑。
+const chartAxisStyle = () => ({
+    axisLine: { show: true, lineStyle: { color: '#555' } },
+    // 仅格式化刻度文本，避免浮点长尾挤占绘图区，原始数值不变。
+    axisLabel: { color: '#555', fontSize: 12,
+        formatter: value => Number.isFinite(Number(value)) ? String(Number(Number(value).toPrecision(8))) : String(value) },
+    nameTextStyle: { color: '#555', fontSize: 12 },
+    minorTick: { show: true },
+    splitLine: { show: true, lineStyle: { color: '#dce5f2' } },
+    minorSplitLine: { show: true, lineStyle: { color: '#f1f5fb' } }
+})
+const chartHeading = () => ({ text: '库存量与压力/偏差系数关系图', left: 'center', top: 8,
+    textStyle: { fontSize: 14, fontWeight: 600, color: '#333' } })
+const toggleLegend = name => {
+    legendSelected.value[name] = !legendSelected.value[name]
+    chart?.dispatchAction({ type: legendSelected.value[name] ? 'legendSelect' : 'legendUnSelect', name })
+}
 
 /**
  * Excel无单位列时使用的固定项目约定。
@@ -125,7 +148,12 @@ const parseNumber = value => {
  * ============================
  */
 
+let pvtListSequence = 0
+let pvtDetailSequence = 0
 const loadPvtOptions = async () => {
+    const sequence = ++pvtListSequence
+    ++pvtDetailSequence
+    const targetWellName = wellName.value
 
     pvtOptions.value = []
     selectedPvtId.value = ''
@@ -141,10 +169,11 @@ const loadPvtOptions = async () => {
                 await pvtStorageApi.list(
                     props.projectId,
                     props.gasReservoirId,
-                    wellName.value
+                    targetWellName
                 )
             ) || []
 
+        if (sequence !== pvtListSequence || targetWellName !== wellName.value) return
         pvtOptions.value =
             Array.isArray(summaries)
                 ? summaries
@@ -157,11 +186,11 @@ const loadPvtOptions = async () => {
                 String(
                     pvtOptions.value[0].pvtId
                 )
-            loadPvtDetail()
         }
 
     } catch (error) {
 
+        if (sequence !== pvtListSequence || targetWellName !== wellName.value) return
         console.warn(
             '加载PVT性质失败',
             error
@@ -179,6 +208,9 @@ const loadPvtOptions = async () => {
  * ============================
  */
 const loadPvtDetail = async () => {
+    const sequence = ++pvtDetailSequence
+    const targetWellName = wellName.value
+    const targetPvtId = selectedPvtId.value
 
     pvtDetail.value = null
 
@@ -193,13 +225,14 @@ const loadPvtDetail = async () => {
 
         const detail = unwrap(
             await pvtStorageApi.getDetail(
-                selectedPvtId.value,
+                targetPvtId,
                 props.projectId,
                 props.gasReservoirId,
-                wellName.value
+                targetWellName
             )
         )
 
+        if (sequence !== pvtDetailSequence || targetWellName !== wellName.value || targetPvtId !== selectedPvtId.value) return
         pvtDetail.value = detail
 
         console.log(
@@ -209,6 +242,7 @@ const loadPvtDetail = async () => {
 
     } catch (error) {
 
+        if (sequence !== pvtDetailSequence || targetWellName !== wellName.value || targetPvtId !== selectedPvtId.value) return
         console.warn(
             '加载PVT详情失败',
             error
@@ -220,8 +254,9 @@ const loadPvtDetail = async () => {
     }
 }
 
+// 每次从功能入口打开（包括同一口井）都重新查询，不依赖左侧 PVT 分支懒加载。
 watch(
-    () => props.node?.wellName,
+    () => [props.node, props.projectId, props.gasReservoirId],
     () => {
         loadPvtOptions()
     },
@@ -1348,8 +1383,11 @@ const initChart = () => {
 
         animation: false,
 
+        backgroundColor: '#fff',
+        title: chartHeading(),
         legend: {
-            top: 8,
+            show: false,
+            selected: { ...legendSelected.value },
             data: [
                 '实际运行曲线',
                 '理论基准线'
@@ -1357,14 +1395,15 @@ const initChart = () => {
         },
 
         tooltip: {
-            trigger: 'item'
+            trigger: 'item',
+            confine: true
         },
 
         grid: {
             left: 92,
-            right: 42,
-            top: 52,
-            bottom: 72
+            right: 92,
+            top: 44,
+            bottom: 56
         },
 
         /*
@@ -1373,13 +1412,14 @@ const initChart = () => {
          * 上限/下限不是坐标轴边界。
          */
         xAxis: {
+            ...chartAxisStyle(),
             name:
                 '库存量 G (10⁸m³)',
 
             nameLocation:
                 'middle',
 
-            nameGap: 44,
+            nameGap: 30,
 
             min: 0,
 
@@ -1393,13 +1433,14 @@ const initChart = () => {
         },
 
         yAxis: {
+            ...chartAxisStyle(),
             name:
                 '压力/天然气偏差系数 P/Z (MPa)',
 
             nameLocation:
                 'middle',
 
-            nameGap: 68,
+            nameGap: 58,
 
             min: 0,
 
@@ -1563,6 +1604,9 @@ const updateChart = data => {
                     silent: true,
                     symbol: 'none',
                     label: {
+                        position: 'insideEndTop',
+                        backgroundColor: 'rgba(255,255,255,.9)',
+                        padding: [2, 4],
                         formatter: params =>
                             `${params.name}: ${Number(params.value).toFixed(4)} MPa`
                     },
@@ -1592,8 +1636,11 @@ const updateChart = data => {
 
         animation: false,
 
+        backgroundColor: '#fff',
+        title: chartHeading(),
         legend: {
-            top: 8,
+            show: false,
+            selected: { ...legendSelected.value },
             data: [
                 '实际运行曲线',
                 '理论基准线'
@@ -1603,6 +1650,7 @@ const updateChart = data => {
         tooltip: {
 
             trigger: 'axis',
+            confine: true,
 
             formatter: paramsList => {
 
@@ -1683,9 +1731,9 @@ const updateChart = data => {
 
         grid: {
             left: 92,
-            right: 42,
-            top: 52,
-            bottom: 72
+            right: 92,
+            top: 44,
+            bottom: 56
         },
 
         /*
@@ -1696,13 +1744,14 @@ const updateChart = data => {
          * 不再直接作为P/Z图像边界。
          */
         xAxis: {
+            ...chartAxisStyle(),
             name:
                 '库存量 G (10⁸m³)',
 
             nameLocation:
                 'middle',
 
-            nameGap: 44,
+            nameGap: 30,
 
             min: 0,
 
@@ -1716,13 +1765,14 @@ const updateChart = data => {
         },
 
         yAxis: {
+            ...chartAxisStyle(),
             name:
                 '压力/天然气偏差系数 P/Z (MPa)',
 
             nameLocation:
                 'middle',
 
-            nameGap: 68,
+            nameGap: 58,
 
             min: 0,
 
@@ -1773,8 +1823,39 @@ const handleResize = () => {
     chart?.resize()
 }
 
+const toggleParamsPanel = async () => {
+    paramsCollapsed.value = !paramsCollapsed.value
+    await nextTick()
+    handleResize()
+}
+let resizeStartX = 0
+let resizeStartWidth = 238
+const resizeParamsPanel = event => {
+    if (!resizingParamsPanel.value) return
+    paramsPanelWidth.value = Math.min(520, Math.max(200, resizeStartWidth + event.clientX - resizeStartX))
+}
+const stopParamsPanelResize = () => {
+    resizingParamsPanel.value = false
+    window.removeEventListener('pointermove', resizeParamsPanel)
+    window.removeEventListener('pointerup', stopParamsPanelResize)
+    window.removeEventListener('pointercancel', stopParamsPanelResize)
+}
+const startParamsPanelResize = event => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    resizeStartX = event.clientX
+    resizeStartWidth = paramsPanelWidth.value
+    resizingParamsPanel.value = true
+    window.addEventListener('pointermove', resizeParamsPanel)
+    window.addEventListener('pointerup', stopParamsPanelResize)
+    window.addEventListener('pointercancel', stopParamsPanelResize)
+}
+
 onMounted(() => {
 
+    // 容器尺寸也会随侧栏折叠和拖宽改变，不能只监听浏览器窗口大小。
+    chartResizeObserver = new ResizeObserver(handleResize)
+    if (chartEl.value) chartResizeObserver.observe(chartEl.value)
     window.addEventListener(
         'resize',
         handleResize
@@ -1783,6 +1864,8 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
 
+    stopParamsPanelResize()
+    chartResizeObserver?.disconnect()
     window.removeEventListener(
         'resize',
         handleResize
@@ -1799,13 +1882,18 @@ onBeforeUnmount(() => {
 <template>
     <section class="diagnostic-workspace">
 
-        <aside class="params-panel">
+        <aside class="params-panel" :class="{ collapsed: paramsCollapsed, resizing: resizingParamsPanel }"
+            :style="{ width: `${paramsCollapsed ? 22 : paramsPanelWidth}px`, minWidth: `${paramsCollapsed ? 22 : paramsPanelWidth}px` }">
 
-            <div class="panel-head">
-                参数设置
+            <button v-if="paramsCollapsed" type="button" class="panel-collapsed-tab" title="展开参数设置" @click="toggleParamsPanel">参数设置</button>
+            <div v-show="!paramsCollapsed" class="panel-head">
+                <span>参数设置</span>
+                <button type="button" class="panel-toggle" title="收起参数设置" aria-label="收起参数设置" @click="toggleParamsPanel">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="#777" aria-hidden="true"><path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z" /></svg>
+                </button>
             </div>
 
-            <div class="panel-body">
+            <div v-show="!paramsCollapsed" class="panel-body">
 
                 <label class="field">
 
@@ -1813,24 +1901,12 @@ onBeforeUnmount(() => {
                         选择PVT表
                     </span>
 
-                    <select v-model="selectedPvtId">
+                    <el-select v-model="selectedPvtId" size="small" aria-label="选择PVT表"
+                        :placeholder="pvtOptions.length ? '请选择PVT性质' : '当前井暂无PVT性质'" style="width:100%">
 
-                        <option value="" disabled>
-                            {{
-                                pvtOptions.length
-                                    ? '请选择PVT性质'
-                                    : '当前井暂无PVT性质'
-                            }}
-                        </option>
-
-                        <option v-for="item in pvtOptions" :key="item.pvtId" :value="String(item.pvtId)">
-                            {{
-                                item.pvtName ||
-                                `PVT性质${item.pvtNo ?? item.pvtId}`
-                            }}
-                        </option>
-
-                    </select>
+                        <el-option v-for="item in pvtOptions" :key="item.pvtId" :value="String(item.pvtId)"
+                            :label="item.pvtName || `PVT性质${item.pvtNo ?? item.pvtId}`" />
+                    </el-select>
 
                 </label>
 
@@ -1866,7 +1942,7 @@ onBeforeUnmount(() => {
                         压力上限 (MPa)
                     </span>
 
-                    <input v-model="inputUpperLimit" placeholder="请输入上限" />
+                    <el-input v-model="inputUpperLimit" size="small" placeholder="请输入上限" aria-label="压力上限" />
 
                 </label>
 
@@ -1876,7 +1952,7 @@ onBeforeUnmount(() => {
                         压力下限 (MPa)
                     </span>
 
-                    <input v-model="inputLowerLimit" placeholder="请输入下限" />
+                    <el-input v-model="inputLowerLimit" size="small" placeholder="请输入下限" aria-label="压力下限" />
 
                 </label>
 
@@ -1894,13 +1970,19 @@ onBeforeUnmount(() => {
 
             </div>
 
+            <div v-show="!paramsCollapsed" class="params-resizer" @pointerdown="startParamsPanelResize"></div>
         </aside>
 
         <main class="result-area">
 
+            <div class="dynamic-result-tabs">
+                <div class="dynamic-result-tab active" :title="`诊断曲线${wellName ? `-${wellName}` : ''}-分析结果`">
+                    诊断曲线{{ wellName ? `-${wellName}` : '' }}-分析结果
+                </div>
+            </div>
             <div v-show="activePanel === 'input'" class="editable-data-grid">
 
-                <el-table :data="rows" border height="100%">
+                <el-table :data="rows" size="small" border stripe height="100%">
 
                     <el-table-column label="序号" width="60" align="center">
                         <template #default="{ row }">
@@ -1932,6 +2014,13 @@ onBeforeUnmount(() => {
 
             <div v-show="activePanel === 'analysis'" class="analysis-view">
 
+                    <!-- 图例固定在坐标网格右上角内侧，仍可点击切换曲线显隐。 -->
+                    <div class="chart-legend">
+                        <button v-for="(selected, name) in legendSelected" :key="name" type="button"
+                            :class="{ muted: !selected }" :aria-pressed="selected" @click="toggleLegend(name)">
+                            <i :class="{ theoretical: name === '理论基准线' }"></i>{{ name }}
+                        </button>
+                    </div>
                 <div ref="chartEl" class="chart"></div>
 
             </div>
@@ -1949,7 +2038,7 @@ onBeforeUnmount(() => {
                     active:
                         activePanel === 'analysis'
                 }" @click="switchPanel('analysis')">
-                    结果分析
+                    结果分析图
                 </button>
 
             </div>
@@ -1962,62 +2051,71 @@ onBeforeUnmount(() => {
 <style lang="scss" scoped>
 .diagnostic-workspace {
     display: flex;
+    flex: 1;
     height: 100%;
     min-height: 0;
     background: #fff;
+    color: #333;
+    overflow: hidden;
 }
 
 .params-panel {
-    width: 360px;
-    min-width: 360px;
+    width: 238px;
+    min-width: 238px;
+    flex-shrink: 0;
+    min-height: 0;
     display: flex;
     flex-direction: column;
-    border-right: 1px solid #ddd;
+    border-right: 1px solid #e0e0e0;
+    position: relative;
+    &.collapsed { border-right: 0; }
+    &.resizing { user-select: none; }
 }
 
 .panel-head {
-    height: 34px;
-    padding: 0 12px;
+    padding: 7px 12px 6px;
     display: flex;
     align-items: center;
-    background: #f2f2f2;
-    border-bottom: 1px solid #ddd;
+    justify-content: space-between;
+    flex-shrink: 0;
+    background: #fff;
+    border-bottom: 1px solid #f0f0f0;
     font-size: 13px;
+}
+
+.panel-toggle {
+    width: 20px; height: 20px; padding: 0; border: 0; background: transparent;
+    display: flex; align-items: center; justify-content: center; cursor: pointer; border-radius: 2px;
+    &:hover { background: #fff8d8; }
+}
+.panel-collapsed-tab {
+    width: 22px; height: 76px; padding: 0; display: flex; align-items: center; justify-content: center;
+    writing-mode: vertical-rl; text-orientation: mixed; font: inherit; font-size: 13px; color: #333;
+    cursor: pointer; background: #fff; border: 1px solid #e0e0e0; border-left: 0;
+    &:hover { background: #fff8d8; }
+}
+.params-resizer {
+    position: absolute; top: 0; right: -3px; width: 6px; height: 100%; cursor: col-resize; z-index: 4; touch-action: none;
+    &:hover { background: rgba(242, 200, 17, .28); }
 }
 
 .panel-body {
     flex: 1;
+    min-height: 0;
     overflow: auto;
-    padding: 10px 14px;
+    padding: 4px 12px 14px;
 }
 
 .field {
     display: block;
-    margin-bottom: 12px;
+    margin-bottom: 9px;
     font-size: 12px;
 }
 
 .field>span {
     display: block;
-    margin-bottom: 4px;
-}
-
-.field select,
-.field input:not(.hidden-file) {
-    width: 100%;
-    height: 30px;
-    box-sizing: border-box;
-    border: 1px solid #aaa;
-    border-radius: 3px;
-    background: #fff;
-    padding: 0 8px;
-    font-size: 13px;
-    outline: none;
-}
-
-.field select:focus,
-.field input:not(.hidden-file):focus {
-    border-color: #888;
+    margin-bottom: 3px;
+    color: #555;
 }
 
 .hidden-file {
@@ -2026,12 +2124,14 @@ onBeforeUnmount(() => {
 
 .local-import-button {
     width: 100%;
-    height: 30px;
+    height: 24px;
     padding: 0 8px;
-    border: 1px solid #aaa;
+    border: 1px solid #dcdfe6;
     border-radius: 3px;
     background: #fff;
     color: #333;
+    font: inherit;
+    font-size: 12px;
     text-align: left;
     cursor: pointer;
 }
@@ -2059,12 +2159,17 @@ onBeforeUnmount(() => {
 
 .calculate {
     height: 32px;
+    min-width: 86px;
     padding: 0 24px;
     border: 0;
-    border-radius: 3px;
+    border-radius: 5px;
     color: #fff;
     cursor: pointer;
-    background: #111;
+    background: #252525;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    &:hover:not(:disabled) { background: #050505; }
 }
 
 .calculate:disabled {
@@ -2090,47 +2195,59 @@ onBeforeUnmount(() => {
 
 .chart {
     flex: 1;
+    min-width: 0;
     min-height: 0;
 }
 
-:deep(.el-table .cell) {
-    padding: 0;
-    text-align: center;
-}
+.editable-data-grid :deep(.el-table) { flex: 1; }
 
-:deep(.el-table th.el-table__cell > .cell) {
-    padding: 0 10px;
+// 标题和底部页签占固定高度，图例悬浮在绘图区内。
+.dynamic-result-tabs {
+    height: 34px; display: flex; flex-shrink: 0; background: #fafafa;
+    overflow: hidden; border-bottom: 1px solid #e4e7ed;
 }
-
-:deep(.el-table td.el-table__cell) {
-    padding: 0;
-    background: #fff;
+.dynamic-result-tab {
+    max-width: 100%; padding: 0 12px; line-height: 34px; background: #f4d000;
+    font-size: 14px; font-weight: 600; color: #202020; white-space: nowrap; text-overflow: ellipsis; overflow: hidden;
 }
-
-:deep(.el-table__row:hover > td.el-table__cell) {
-    background: #fff !important;
+.analysis-view { position: relative; }
+.chart-legend {
+    position: absolute; z-index: 5; top: 56px; right: 104px;
+    max-width: calc(100% - 116px); display: flex; flex-wrap: wrap;
+    background: rgba(255,255,255,.9); border: 1px solid #eee;
+    button { display: inline-flex; align-items: center; gap: 5px; padding: 6px 10px; border: 0; background: transparent;
+        color: #555; font: inherit; font-size: 12px; cursor: pointer; }
+    i { width: 18px; border-top: 2px solid #5470c6; }
+    i.theoretical { border-top: 2px dashed #a6d608; }
+    .muted { color: #aaa; i { border-color: #ccc; } }
 }
 
 .bottom-tabs {
-    height: 31px;
+    height: 30px;
     display: flex;
     flex-shrink: 0;
-    border-top: 1px solid #ddd;
+    border-top: 1px solid #e4e7ed;
+    background: #fff;
 }
 
 .bottom-tabs button {
-    min-width: 110px;
+    height: 30px;
+    min-width: 82px;
+    padding: 0 14px;
     border: 0;
-    border-right: 1px solid #ddd;
-    background: #fff2f4;
-    color: #999;
+    border-right: 1px solid #e4e7ed;
+    background: #fff;
+    color: #333;
+    font: inherit;
+    font-size: 13px;
+    white-space: nowrap;
     cursor: pointer;
 }
 
 .bottom-tabs button.active {
-    color: #222;
+    color: #202020;
     box-shadow:
-        inset 0 -2px #2b171a;
+        inset 0 3px 0 #f2c811;
     font-weight: 600;
 }
 </style>

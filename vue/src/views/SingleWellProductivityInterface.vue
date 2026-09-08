@@ -74,6 +74,7 @@ import {
   workspacePendingCommand,
   workspacePendingNode,
   workspaceSelectedWellName,
+  resolveWorkspaceTargetWellName,
   workspaceTreeCollapsed,
   workspaceTreeData,
   workspaceTreeKeyword,
@@ -275,37 +276,65 @@ const normalizePvtDetail = detail => {
   }
 }
 
+const pvtOptionsLoading = ref(false)
+let pvtListRequest = 0
+let pvtDetailRequest = 0
 const loadSelectedPvtDetail = async () => {
+  const requestId = ++pvtDetailRequest
+  const wellName = selectedWellName.value
+  const pvtId = selectedPvtTable.value
   selectedPvtDetail.value = null
-  if (!selectedPvtTable.value || !selectedWellName.value) return
+  if (!pvtId || !wellName) return
   try {
     const detail = unwrapData(await pvtStorageApi.getDetail(
-      selectedPvtTable.value, PROJECT_ID, GAS_RESERVOIR_ID, selectedWellName.value
+      pvtId, PROJECT_ID, GAS_RESERVOIR_ID, wellName
     ))
+    // 快速切井/切表时，只接受最后一次选择对应的明细，避免旧请求覆盖新表。
+    if (requestId !== pvtDetailRequest || wellName !== selectedWellName.value || pvtId !== selectedPvtTable.value) return
     selectedPvtDetail.value = normalizePvtDetail(detail)
   } catch (error) {
+    if (requestId !== pvtDetailRequest || wellName !== selectedWellName.value || pvtId !== selectedPvtTable.value) return
     ElMessage.warning(error?.msg || error?.message || 'PVT性质明细读取失败')
   }
 }
 
 const loadPvtOptions = async (preferredPvtId = null) => {
+  const requestId = ++pvtListRequest
+  ++pvtDetailRequest
+  const wellName = selectedWellName.value
+  const preferredId = preferredPvtId ?? selectedPvtTable.value
+  pvtOptionsLoading.value = false
   databasePvtRecords.value = []
   selectedPvtDetail.value = null
-  if (!selectedWellName.value) return void (selectedPvtTable.value = '')
+  selectedPvtTable.value = ''
+  if (!wellName) return
+  pvtOptionsLoading.value = true
   try {
     const records = unwrapData(await pvtStorageApi.list(
-      PROJECT_ID, GAS_RESERVOIR_ID, selectedWellName.value
+      PROJECT_ID, GAS_RESERVOIR_ID, wellName
     )) || []
-    const usableRecords = records.filter(item => Number(item.pvtNo) === 1)
+    if (requestId !== pvtListRequest || wellName !== selectedWellName.value) return
+    // 列表直接来自当前井的数据库记录，与左侧目录是否展开无关，不限制 PVT 编号。
+    const usableRecords = Array.isArray(records) ? records : []
     databasePvtRecords.value = usableRecords
-    // 回压试井固定使用当前井的 PVT性质1，不允许切换为其他编号。
-    const match = usableRecords[0]
+    const match = usableRecords.find(record => String(record.pvtId) === String(preferredId)) || usableRecords[0]
     selectedPvtTable.value = String(match?.pvtId || '')
     await loadSelectedPvtDetail()
   } catch (error) {
+    if (requestId !== pvtListRequest || wellName !== selectedWellName.value) return
     selectedPvtTable.value = ''
     console.warn('当前井PVT性质读取失败', error)
+    ElMessage.warning('当前井PVT列表读取失败，请重新进入功能重试')
+  } finally {
+    if (requestId === pvtListRequest) pvtOptionsLoading.value = false
   }
+}
+
+const changeSelectedPvt = async () => {
+  // 更换参数来源后旧结果不能继续保存；保留当前表格输入，等待用户重新计算。
+  calculationOutput.value = null
+  resultDirty.value = false
+  await loadSelectedPvtDetail()
 }
 
 const chooseDataFile = () => dataFileInput.value?.click()
@@ -624,6 +653,7 @@ const handleCommand = async ({ group, name, parent }) => {
     }
     // 点击目录本身不切换右侧；用户明确点击顶部功能后，才正式切换到目标井。
     if (targetWellName !== selectedWellName.value) await selectWell(targetWellName)
+    else await loadPvtOptions(selectedPvtTable.value)
     if (parent === '产能试井' && name === '修正等时') {
       activeProductivityTestId.value = null
       activeEvaluationId.value = null
@@ -634,7 +664,6 @@ const handleCommand = async ({ group, name, parent }) => {
       pressureWorkspaceKey.value += 1
       selectedDataTable.value = 'local-import'
       importedDataFileName.value = '当前井产能测试数据'
-      await loadPvtOptions()
     }
     // 理论计算和动态产能的稳定流/不稳定流都在顶部点击后立即计算；
     // 左侧历史记录仍只恢复快照，不携带该标记。
@@ -645,7 +674,9 @@ const handleCommand = async ({ group, name, parent }) => {
   }
 
   // 将本次点击一并交给 IPR 工作台，避免用户切换后还要再点第二次。
-  workspacePendingCommand.value = { group, name, parent }
+  // 跨工作台的命令携带左侧目标井，不依赖先打开该井的 PVT/其他记录。
+  workspacePendingCommand.value = { group, name, parent,
+    wellName: resolveWorkspaceTargetWellName(sidebarTargetWellName.value || selectedWellName.value) }
   await router.push({ name: 'IprInterface' })
 }
 
@@ -1332,8 +1363,8 @@ onBeforeUnmount(() => window.removeEventListener('click', closeStableContextMenu
                 <div class="parameter-form">
                   <label class="field-group">
                     <span>选择PVT表</span>
-                    <select v-model="selectedPvtTable" disabled>
-                      <option value="" disabled>PVT性质1</option>
+                    <select v-model="selectedPvtTable" :disabled="pvtOptionsLoading || !pvtTableOptions.length" @change="changeSelectedPvt">
+                      <option value="" disabled>{{ pvtOptionsLoading ? '正在加载PVT…' : pvtTableOptions.length ? '请选择PVT性质' : '当前井暂无已保存PVT性质' }}</option>
                       <option v-for="option in pvtTableOptions" :key="option.value" :value="option.value">
                         {{ option.label }}
                       </option>
@@ -1479,6 +1510,10 @@ onBeforeUnmount(() => window.removeEventListener('click', closeStableContextMenu
         </template>
         <template v-else-if="activeModule === '产能系数'">
           <ExponentialContent
+            :pvt-table-options="pvtTableOptions"
+            :selected-pvt-table="selectedPvtTable"
+            :pvt-loading="pvtOptionsLoading"
+            @select-pvt="selectedPvtTable = $event; changeSelectedPvt()"
             :well-name="selectedWellName"
             :maximum-formation-pressure="maximumFormationPressure"
             :formation-temperature="formationTemperature"
@@ -2003,8 +2038,9 @@ $accent-soft: #fff8d8;
 }
 
 .bottom-chart-tabs {
-  height: 34px;
-  flex: 0 0 34px;
+  // 未加载数据时的占位标签也沿用正式试井页面的尺寸和选中样式。
+  height: 30px;
+  flex: 0 0 30px;
   display: flex;
   align-items: stretch;
   border-top: 1px solid #e4e7ed;
@@ -2012,8 +2048,8 @@ $accent-soft: #fff8d8;
 }
 
 .bottom-chart-tab {
-  min-width: 104px;
-  height: 34px;
+  min-width: 82px;
+  height: 30px;
   padding: 0 14px;
   border: 0;
   border-right: 1px solid #e4e7ed;

@@ -119,7 +119,7 @@ const availablePvtOptions = computed(() => [
     ? props.pvtTableOptions.map(option => typeof option === 'object'
     ? { label: String(option.label ?? option.value ?? ''), value: String(option.value ?? option.label ?? '') }
     : { label: String(option), value: String(option) })
-    : [{ label: 'PVT性质1', value: 'demo-1' }, { label: 'PVT性质2', value: 'demo-2' }])
+    : []) // 没有已保存记录时仅保留真实的“默认PVT”来源，不伪造示例表。
 ])
 const selectedPvtRecord = computed(() => props.pvtRecords.find(record =>
   String(record?.pvtId ?? record?.id ?? '') === String(selectedPvtTable.value)
