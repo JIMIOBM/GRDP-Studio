@@ -16,5 +16,23 @@ docs/
 
 # 测试与数据库部署脚本仅在本地保留，不提交到仓库。
 /backend/src/test/
+!/backend/src/test/
+/backend/src/test/*
+!/backend/src/test/java/
+/backend/src/test/java/*
+!/backend/src/test/java/com/
+/backend/src/test/java/com/*
+!/backend/src/test/java/com/grdp/
+/backend/src/test/java/com/grdp/*
+!/backend/src/test/java/com/grdp/studio/
+/backend/src/test/java/com/grdp/studio/*
+!/backend/src/test/java/com/grdp/studio/productivity/
+/backend/src/test/java/com/grdp/studio/productivity/*
+!/backend/src/test/java/com/grdp/studio/productivity/ProductivityTestValidationTests.java
 /vue/tests/
+!/vue/tests/
+/vue/tests/*
+!/vue/tests/backPressureCalculation.test.js
+!/vue/tests/workspaceContext.test.js
+!/vue/tests/pvtSelection.test.js
 /backend/sql/

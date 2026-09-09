@@ -234,7 +234,7 @@ public class ProductivityTestService {
         return Arrays.stream(candidates).anyMatch(value::contains);
     }
 
-    private void validate(SaveRequest request) {
+    void validate(SaveRequest request) {
         validateMethod(request.testMethod());
         if (!Set.of("injection", "production").contains(request.operationType()))
             throw new BusinessException(400, "注采类型不正确");
@@ -242,11 +242,9 @@ public class ProductivityTestService {
         String resultType = resultType(result);
         if (!RESULT_TYPES.contains(resultType)) throw new BusinessException(400, "计算结果类型不正确");
         if (!PRESSURE_METHODS.contains(result.pressureMethod())) throw new BusinessException(400, "压力处理方法不正确");
-        if ("injection".equals(request.operationType()) && !"exponential".equals(resultType))
-            throw new BusinessException(400, "注气当前仅支持指数式计算");
         if ("pseudo-pressure".equals(result.pressureMethod()) && request.pvtId() == null)
             throw new BusinessException(400, "拟压力方法必须选择PVT");
-        finite(request.input().maximumFormationPressure(), "最大地层压力");
+        positive(request.input().maximumFormationPressure(), "最大地层压力");
         finite(request.input().formationTemperature(), "地层温度");
         if ("pseudo-pressure".equals(result.pressureMethod())) {
             if (request.input().gasType() == null || request.input().gasType().isBlank())
@@ -256,23 +254,39 @@ public class ProductivityTestService {
         if (result.evaluationId() != null && result.evaluationId() <= 0)
             throw new BusinessException(400, "原平台计算记录编号必须大于0");
         if ("exponential".equals(resultType)) {
-            directional(result.productivityCoefficient(), "产能系数C", request.operationType());
+            positive(result.productivityCoefficient(),
+                    "injection".equals(request.operationType()) ? "注气能力系数C" : "产能系数C");
             positive(result.productivityExponent(), "产能指数n");
-            directional(result.openFlowCapacity(), "无阻流量", request.operationType());
+            positive(result.openFlowCapacity(),
+                    "injection".equals(request.operationType()) ? "最大注气量" : "无阻流量");
             if (result.chartPoints() == null || result.chartPoints().isEmpty())
                 throw new BusinessException(400, "指数式结果缺少分析曲线点");
             if (result.iprPoints() == null || result.iprPoints().isEmpty())
                 throw new BusinessException(400, "指数式结果缺少IPR曲线点");
         } else {
-            finite(result.darcySeepageCoefficient(), "达西渗流系数A");
-            finite(result.nonDarcySeepageCoefficient(), "非达西渗流系数B");
-            finite(result.openFlowCapacity(), "无阻流量");
+            nonNegative(result.darcySeepageCoefficient(), "达西渗流系数A");
+            nonNegative(result.nonDarcySeepageCoefficient(), "非达西渗流系数B");
+            positive(result.openFlowCapacity(),
+                    "injection".equals(request.operationType()) ? "最大注气量" : "无阻流量");
         }
+        int minimumPoints = "one-point".equals(request.testMethod()) ? 1 : 2;
+        if (request.inputItems().size() < minimumPoints)
+            throw new BusinessException(400, methodLabel(request.testMethod()) + "试井有效测试点不足");
         request.inputItems().forEach(item -> {
-            finite(item.testDailyGasProduction(), "测试气产量");
-            finite(item.reservoirPressure(), "地层/恢复压力");
-            finite(item.testFlowPressure(), "测试流压");
+            positive(item.testDailyGasProduction(),
+                    "injection".equals(request.operationType()) ? "测试注气量" : "测试气产量");
+            positive(item.reservoirPressure(), "地层/恢复压力");
+            nonNegative(item.testFlowPressure(), "测试流压");
+            if ("injection".equals(request.operationType()) &&
+                    item.testFlowPressure() <= item.reservoirPressure())
+                throw new BusinessException(400, "注气时井底注入压力必须大于地层压力");
+            if ("production".equals(request.operationType()) &&
+                    item.reservoirPressure() <= item.testFlowPressure())
+                throw new BusinessException(400, "采气时地层/恢复压力必须大于测试流压");
         });
+        long distinctPoints = request.inputItems().stream().map(InputItem::testPointNumber).distinct().count();
+        if (distinctPoints != request.inputItems().size())
+            throw new BusinessException(400, "测点序号不能重复");
         Set<String> curveTypes = "exponential".equals(resultType)
                 ? EXPONENTIAL_CURVE_TYPES : BINOMIAL_CURVE_TYPES;
         if (result.chartPoints() != null) result.chartPoints().forEach(point -> {
@@ -290,14 +304,6 @@ public class ProductivityTestService {
 
     private void validateMethod(String method) {
         if (!METHODS.contains(method)) throw new BusinessException(400, "试井方法不正确");
-    }
-
-    private void directional(Double value, String name, String operationType) {
-        finite(value, name);
-        if (("injection".equals(operationType) && value >= 0) ||
-                ("production".equals(operationType) && value <= 0)) {
-            throw new BusinessException(400, name + ("injection".equals(operationType) ? "必须小于0" : "必须大于0"));
-        }
     }
 
     private long requireWellId(long projectId, long gasReservoirId, String wellName) {
@@ -503,6 +509,7 @@ public class ProductivityTestService {
     private double parse(String value) { return Double.parseDouble(value.replace(",", "").trim()); }
     private void finite(Double value, String field) { if (value == null || !Double.isFinite(value)) throw new BusinessException(400, field + "必须是有效数字"); }
     private void positive(Double value, String field) { finite(value, field); if (value <= 0) throw new BusinessException(400, field + "必须大于0"); }
+    private void nonNegative(Double value, String field) { finite(value, field); if (value < 0) throw new BusinessException(400, field + "不能小于0"); }
     private String resultType(Result result) { return result.calculationResultType() == null || result.calculationResultType().isBlank() ? "binomial" : result.calculationResultType().trim(); }
     private Integer nullableInteger(java.sql.ResultSet resultSet, int column) throws java.sql.SQLException { int value = resultSet.getInt(column); return resultSet.wasNull() ? null : value; }
     private Number number(Object value) { return (Number) value; }

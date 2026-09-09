@@ -9,6 +9,7 @@ import {
   backPressurePotentialDifference,
   fitBackPressureBinomial,
   fitBackPressureExponential,
+  resequenceBackPressurePoints,
   solveBackPressureBinomialRate,
   solveBackPressureExponentialRate
 } from '@/utils/backPressureCalculation'
@@ -468,10 +469,7 @@ const applySourceRows = () => {
   originalInputSyncKey = ''
   const matching = sourceRows.value.filter(row => row.testType === activeTestType.value)
   hasMethodData.value = matching.length > 0
-  inputRows.value = matching.map((row, index) => ({
-    ...row,
-    sequence: row.sequence ?? index + 1
-  }))
+  inputRows.value = resequenceBackPressurePoints(matching)
   if (!inputRows.value.length) {
     const count = activeTestType.value === 'one-point' ? 1 : 4
     inputRows.value = Array.from({ length: count }, (_, index) => createBlankRow(index + 1))
@@ -595,7 +593,7 @@ const buildPayload = () => ({
   pvtResultRows: props.pvtResultRows,
   migrationNonDarcyCoefficient: null,
   points: inputRows.value.map((row, index) => ({
-    sequence: Number(row.sequence || index + 1),
+    sequence: index + 1,
     flowRate: row.flowRate === '' || row.flowRate === null ? null : Number(row.flowRate),
     equivalentFlowRate: row.equivalentFlowRate === '' || row.equivalentFlowRate === null
       ? null
@@ -611,7 +609,7 @@ const buildPayload = () => ({
     ? sourceRows.value
       .filter(row => row.testType === 'back-pressure')
       .map((row, index) => ({
-        sequence: Number(row.sequence || index + 1),
+        sequence: index + 1,
         flowRate: row.flowRate,
         flowingPressure: row.flowingPressure,
         recoveryPressure: row.recoveryPressure
@@ -895,6 +893,12 @@ const normalizeLocalPoints = (
     })
     .sort((left, right) => left.sequence - right.sequence)
   if (normalized.length < minimum) throw new Error(`${methodName.value}至少需要 ${minimum} 个有效测试点`)
+  if (normalized.some(point => !Number.isInteger(point.sequence) || point.sequence <= 0)) {
+    throw new Error('测点序号必须为大于 0 的整数')
+  }
+  if (new Set(normalized.map(point => point.sequence)).size !== normalized.length) {
+    throw new Error('测点序号不能重复')
+  }
   return normalized
 }
 

@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test:back-pressure": "node --test tests/backPressureCalculation.test.js"
+    "test:back-pressure": "node --test tests/backPressureCalculation.test.js",
+    "test:workspace-context": "node --test tests/workspaceContext.test.js",
+    "test:pvt-selection": "node --test tests/pvtSelection.test.js"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.1",

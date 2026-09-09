@@ -110,8 +110,8 @@ import {
 } from '@/utils/reservoirGeologicalLossTree'
 
 // 当前工作台所使用的项目和气藏。
-const PROJECT_ID = 7
-const GAS_RESERVOIR_ID = 4
+const PROJECT_ID = 6
+const GAS_RESERVOIR_ID = 1
 const router = useRouter()
 const route = useRoute()
 ensureWorkspaceReservoir({ projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID })
