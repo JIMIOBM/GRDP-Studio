@@ -49,9 +49,7 @@ public class GasPvtService {
     private static final int MAX_POINT_COUNT = 500;
     // 原算法不能稳定处理绝对零压力时使用的内部替代值；返回给前端的压力仍保持 0。
     private static final double ZERO_PRESSURE_CALCULATION_EPSILON_MPA = 1e-6;
-    private static final double PA_PER_MPA = 1_000_000d;
     private static final double KELVIN_OFFSET = 273.15d;
-    private static final double FRACTION_PER_PERCENT = 0.01d;
 
     public record FlowGas(double density, double viscosity) {}
     /** 单压力点体积系数，供库级微观损耗等后端业务复用。 */
@@ -795,30 +793,11 @@ public class GasPvtService {
     ) {
         /*
          * 这里集中维护“本系统字段 -> 原平台字段”的映射。
-         * 当前页面使用 MPa、℃ 和百分数；原平台 toolbox 使用 Pa、K 和 0～1 摩尔分数。
-         * 各 toolbox 的输入结构并不相同，只发送该算法登记的字段，避免范围校验把
-         * 无关字段当成当前算法输入。
+         * 原平台 /api/toolbox/calc 的 GasPVT 系列算法使用 MPa、℃ 和摩尔百分数。
+         * 曲线计算与单点计算调用的是同一接口，必须保持同一单位和完整输入结构；
+         * 若换算成 Pa、K 和 0～1 小数，原平台会因压力超出范围而返回 HTTP 400。
          */
-        Map<String, Object> input = new LinkedHashMap<>();
-        input.put("gasType", request.gasType());
-        input.put("specificGravity", request.specificGravity());
-        input.put("co2MoleFraction", request.co2MoleFraction() * FRACTION_PER_PERCENT);
-        input.put("n2MoleFraction", request.n2MoleFraction() * FRACTION_PER_PERCENT);
-        input.put("h2SMoleFraction", request.h2SMoleFraction() * FRACTION_PER_PERCENT);
-        input.put("pressure", pressureMpa * PA_PER_MPA);
-        input.put("temperature", temperatureC + KELVIN_OFFSET);
-        input.put("modificationMethod", request.modificationMethod());
-
-        if (!COMPRESSIBILITY_ALGORITHM.equals(algorithm)) {
-            input.put("deviationFactorMethod", request.deviationFactorMethod());
-        }
-        if (ALGORITHM.equals(algorithm) || PSEUDO_PRESSURE_ALGORITHM.equals(algorithm)) {
-            input.put("viscosityMethod", request.viscosityMethod());
-        }
-        if (DENSITY_ALGORITHM.equals(algorithm) || PSEUDO_PRESSURE_ALGORITHM.equals(algorithm)) {
-            input.put("viscosity", 0d);
-        }
-        return input;
+        return buildLegacySinglePointInput(request, pressureMpa, temperatureC);
     }
 
     private long extractToolboxId(JsonNode source) {

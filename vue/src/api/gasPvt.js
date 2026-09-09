@@ -12,6 +12,7 @@ export const gasPvtApi = {
   calculateCurveOne: (data) =>
     request.post('/pvt/gas/curve-one', data, {
       timeout: 600000,
+      silentError: true,
       headers: {
         'Process-Env': 'prod'
       }
@@ -20,6 +21,7 @@ export const gasPvtApi = {
   calculateCurveTwo: (data) =>
     request.post('/pvt/gas/curve-two', data, {
       timeout: 600000,
+      silentError: true,
       headers: {
         'Process-Env': 'prod'
       }
@@ -28,6 +30,7 @@ export const gasPvtApi = {
   calculateCurveThree: (data) =>
     request.post('/pvt/gas/curve-three', data, {
       timeout: 600000,
+      silentError: true,
       headers: {
         'Process-Env': 'prod'
       }
@@ -36,6 +39,7 @@ export const gasPvtApi = {
   calculateViscosityCurve: (data) =>
     request.post('/pvt/gas/viscosity-curve', data, {
       timeout: 600000,
+      silentError: true,
       headers: {
         'Process-Env': 'prod'
       }

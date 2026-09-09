@@ -3,3 +3,12 @@
 // 否则路由切换时后加载页面会用另一气藏的结果覆盖共享目录。
 export const WORKSPACE_PROJECT_ID = 6
 export const WORKSPACE_GAS_RESERVOIR_ID = 4
+
+export const resolveWorkspaceContextId = (...candidates) => {
+  for (const candidate of candidates) {
+    if (candidate === null || candidate === undefined || candidate === '') continue
+    const value = Number(candidate)
+    if (Number.isSafeInteger(value) && value > 0) return value
+  }
+  return null
+}

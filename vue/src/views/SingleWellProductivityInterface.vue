@@ -27,9 +27,15 @@ import DynamicUnstableProductivityContent from '@/views/SingleWellProductivity/D
 import TheoreticalProductivityContent from '@/views/SingleWellProductivity/TheoreticalProductivityContent.vue'
 import TheoreticalUnstableProductivityContent from '@/views/SingleWellProductivity/TheoreticalUnstableProductivityContent.vue'
 import { NODETYPE } from '@/constants/nodeType'
+import {
+  WORKSPACE_PROJECT_ID,
+  WORKSPACE_GAS_RESERVOIR_ID,
+  resolveWorkspaceContextId
+} from '@/constants/workspaceContext'
 import { wellApi } from '@/api/docker'
 import { pvtStorageApi } from '@/api/pvtStorage'
 import { isPvtRecord, deletePvtTreeRecord, deletedPvtRecord, matchesPvtScope } from '@/utils/pvtRecordActions'
+import { selectDefaultPvtRecord } from '@/utils/pvtSelection'
 import { productivityStorageApi } from '@/api/productivityStorage'
 import { productivityTestsApi } from '@/api/productivityTests'
 import { dynamicProductivityApi } from '@/api/dynamicProductivity'
@@ -96,10 +102,18 @@ const props = defineProps({
 
 const route = useRoute()
 const router = useRouter()
-const PROJECT_ID = 6
-const GAS_RESERVOIR_ID = 1
-const MODIFIED_ISOCHRONAL_PROJECT_ID = 6
-const MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID = 1
+const PROJECT_ID = resolveWorkspaceContextId(
+  props.projectId,
+  route.query.projectId,
+  WORKSPACE_PROJECT_ID
+)
+const GAS_RESERVOIR_ID = resolveWorkspaceContextId(
+  props.gasReservoirId,
+  route.query.gasReservoirId,
+  WORKSPACE_GAS_RESERVOIR_ID
+)
+const MODIFIED_ISOCHRONAL_PROJECT_ID = PROJECT_ID
+const MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID = GAS_RESERVOIR_ID
 ensureWorkspaceReservoir({ projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID })
 if (!props.embedded) setWorkspaceRibbonScope('well')
 
@@ -319,7 +333,7 @@ const loadPvtOptions = async (preferredPvtId = null) => {
     // 列表直接来自当前井的数据库记录，与左侧目录是否展开无关，不限制 PVT 编号。
     const usableRecords = Array.isArray(records) ? records : []
     databasePvtRecords.value = usableRecords
-    const match = usableRecords.find(record => String(record.pvtId) === String(preferredId)) || usableRecords[0]
+    const match = selectDefaultPvtRecord(usableRecords, preferredId)
     selectedPvtTable.value = String(match?.pvtId || '')
     await loadSelectedPvtDetail()
   } catch (error) {
@@ -947,7 +961,7 @@ const handleSidebarSelect = async node => {
           reservoirPressure: item.reservoirPressure,
           flowPressure: item.testFlowPressure
         }))
-      })
+      }, detail.pvtId)
       await loadPvtOptions(detail.pvtId)
       pressureWorkspaceKey.value += 1
       await router.replace({
@@ -1049,10 +1063,16 @@ const handleSidebarSelect = async node => {
   await router.push({ name: 'IprInterface' })
 }
 
-const inputSignature = input => JSON.stringify({
+const inputSignature = (input, pvtId = null) => JSON.stringify({
+  pvtId: pvtId == null || pvtId === '' ? null : Number(pvtId),
   maximumFormationPressure: Number(input?.maximumFormationPressure),
   formationTemperature: Number(input?.formationTemperature),
   onePointAlpha: Number(input?.onePointAlpha),
+  gasType: input?.gasType || null,
+  specificGravity: Number(input?.specificGravity) || null,
+  hydrogenSulfide: Number(input?.hydrogenSulfide) || 0,
+  carbonDioxide: Number(input?.carbonDioxide) || 0,
+  nitrogen: Number(input?.nitrogen) || 0,
   points: (input?.points || []).map(point => [
     Number(point.pointNumber),
     Number(point.gasProduction),
@@ -1117,7 +1137,7 @@ const saveCalculation = async () => {
   }
   savingResult.value = true
   try {
-    const signature = inputSignature(snapshot.input)
+    const signature = inputSignature(snapshot.input, selectedPvtTable.value)
     const replaceInput = !activeProductivityTestId.value || signature !== savedInputSignature.value
     const response = await productivityTestsApi.save({
       testId: activeProductivityTestId.value,
@@ -1411,13 +1431,13 @@ onBeforeUnmount(() => window.removeEventListener('click', closeStableContextMenu
                 </div>
                 <div class="parameter-form">
                   <label class="field-group">
-                    <span>选择PVT表</span>
-                    <select v-model="selectedPvtTable" :disabled="pvtOptionsLoading || !pvtTableOptions.length" @change="changeSelectedPvt">
-                      <option value="" disabled>{{ pvtOptionsLoading ? '正在加载PVT…' : pvtTableOptions.length ? '请选择PVT性质' : '当前井暂无已保存PVT性质' }}</option>
-                      <option v-for="option in pvtTableOptions" :key="option.value" :value="option.value">
-                        {{ option.label }}
-                      </option>
-                    </select>
+                    <span>当前PVT表</span>
+                    <input
+                      :value="pvtOptionsLoading
+                        ? '正在加载PVT…'
+                        : selectedPvtOption ? 'PVT性质1' : '当前井暂无已保存PVT性质'"
+                      readonly
+                    />
                   </label>
 
                   <label class="field-group">
