@@ -497,11 +497,11 @@ onBeforeUnmount(() => {
           </template>
         </div>
 
-        <el-alert
-          title="当前温度模块独立计算，未启用压力耦合和JT压力项。"
-          type="info"
-          :closable="false"
-        />
+<!--        <el-alert-->
+<!--          title="当前温度模块独立计算，未启用压力耦合和JT压力项。"-->
+<!--          type="info"-->
+<!--          :closable="false"-->
+<!--        />-->
         <div ref="chartEl" class="chart" />
       </main>
     </div>
