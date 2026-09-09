@@ -90,6 +90,7 @@ const defaultTabs = [
             label: '导入模型',
             icon: '数据映射',
             dropdown: true,
+            popperClass: 'software-model-import-popover',
             dropdownItems: ['PIPESIM 井筒模型', 'PIPESIM Network 模型'],
             dropdownCommandIds: {
               'PIPESIM 井筒模型': 'software-integration.model.import-pipesim',
@@ -479,7 +480,7 @@ const getIcon = (label) => iconMap[normalizeIconKey(iconAliases[label] || label)
                 v-else-if="col.type === 'large' && col.dropdown && col.dropdownItems?.length"
                 placement="bottom-start"
                 trigger="click"
-                popper-class="ribbon-popover"
+                :popper-class="['ribbon-popover', col.popperClass].filter(Boolean).join(' ')"
                 :show-arrow="false"
             >
               <template #reference>
@@ -1069,6 +1070,47 @@ $square-border: #c2c2c2;
 
     .d-label {
       line-height: 1;
+    }
+  }
+}
+
+.software-model-import-popover.el-popover {
+  width: max-content !important;
+  max-width: calc(100vw - 16px) !important;
+  padding: 6px !important;
+  box-sizing: border-box;
+  box-shadow: 0 4px 14px rgba(31, 41, 55, 0.16) !important;
+  border-color: #d8dde6 !important;
+  border-radius: 6px !important;
+
+  .ribbon-dropdown-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+
+    .ribbon-dropdown-item {
+      display: grid;
+      grid-template-columns: 18px max-content;
+      column-gap: 8px;
+      min-height: 32px;
+      padding: 6px 10px 6px 8px;
+      box-sizing: border-box;
+      border-radius: 4px;
+      transition: background-color 0.12s ease, color 0.12s ease;
+
+      .d-checkbox {
+        justify-self: center;
+      }
+
+      .dropdown-icon {
+        width: 18px;
+        height: 18px;
+        justify-self: center;
+      }
+
+      .d-label {
+        line-height: 18px;
+      }
     }
   }
 }
