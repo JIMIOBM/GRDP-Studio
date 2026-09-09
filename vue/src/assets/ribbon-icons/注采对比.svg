@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="注采对比">
+  <title>注采对比</title>
+  <rect width="64" height="64" rx="10" fill="#f0f7ff"/>
+  <g fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 22h39m-9-9 9 9-9 9" stroke="#1677ff" stroke-width="4"/><path d="M52 43H13m9-9-9 9 9 9" stroke="#13c2c2" stroke-width="4"/>
+  </g>
+</svg>

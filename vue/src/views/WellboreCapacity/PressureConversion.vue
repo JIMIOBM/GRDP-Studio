@@ -39,8 +39,59 @@ const error = ref('')
 const sourceLoading = ref(false)
 const busy = ref(false)
 const chartEl = ref(null)
+const chartAreaEl = ref(null)
+const legendEl = ref(null)
+const legendPosition = ref(null)
+const draggingLegend = ref(false)
+const legendItems = computed(() => Object.keys(result.value?.methods || {}).map((code, index) => ({
+  name: code === 'HB' ? 'Hagedorn & Brown' : 'Mukherjee & Brill',
+  color: ['#5470c6', '#91cc75'][index % 2]
+})))
+const legendSelected = reactive({ 'Hagedorn & Brown': true, 'Mukherjee & Brill': true })
+const legendStyle = computed(() => legendPosition.value
+  ? { left: legendPosition.value.x + 'px', top: legendPosition.value.y + 'px' }
+  : { right: '38px', top: '52px' })
+let legendDragOffset = { x: 0, y: 0 }
+
+function clampLegendPosition (x, y) {
+  const area = chartAreaEl.value
+  const legend = legendEl.value
+  if (!area || !legend) return
+  legendPosition.value = {
+    x: Math.max(0, Math.min(Math.max(0, area.clientWidth - legend.offsetWidth), x)),
+    y: Math.max(0, Math.min(Math.max(0, area.clientHeight - legend.offsetHeight), y))
+  }
+}
+function moveLegend (event) {
+  if (!draggingLegend.value || !chartAreaEl.value) return
+  const area = chartAreaEl.value.getBoundingClientRect()
+  clampLegendPosition(event.clientX - area.left - legendDragOffset.x, event.clientY - area.top - legendDragOffset.y)
+}
+function stopLegendDrag () {
+  draggingLegend.value = false
+  window.removeEventListener('pointermove', moveLegend)
+  window.removeEventListener('pointerup', stopLegendDrag)
+  window.removeEventListener('pointercancel', stopLegendDrag)
+}
+function startLegendDrag (event) {
+  if (event.button !== 0 || !legendEl.value) return
+  event.preventDefault()
+  const rect = legendEl.value.getBoundingClientRect()
+  legendDragOffset = { x: event.clientX - rect.left, y: event.clientY - rect.top }
+  draggingLegend.value = true
+  window.addEventListener('pointermove', moveLegend)
+  window.addEventListener('pointerup', stopLegendDrag)
+  window.addEventListener('pointercancel', stopLegendDrag)
+}
+function toggleLegend (name) {
+  legendSelected[name] = !legendSelected[name]
+  chart?.dispatchAction({ type: legendSelected[name] ? 'legendSelect' : 'legendUnSelect', name })
+}
 const panel = ref(null)
 const panelWidth = ref(238)
+const paramsCollapsed = ref(false)
+const activeParamTab = ref('input')
+watch(paramsCollapsed, async () => { await nextTick(); chart?.resize() })
 
 let chart
 let observer
@@ -237,14 +288,14 @@ async function draw () {
   const current = result.value
   chart.setOption({
     animation: false,
-    color: ['#0037b5', '#333'],
+    color: ['#5470c6', '#91cc75'],
     title: {
       text: '压力分布曲线',
       left: 'center',
-      top: 12,
-      textStyle: { fontSize: 16, color: '#333' }
+      top: 2,
+      textStyle: { fontSize: 14, color: '#333', fontWeight: 600 }
     },
-    legend: { top: 43 },
+    legend: { show: false, selected: { ...legendSelected } },
     tooltip: {
       trigger: 'axis',
       axisPointer: { axis: 'y' },
@@ -267,14 +318,18 @@ async function draw () {
         return `<strong>井深 ${depthText} m</strong><br/>${methodRows}`
       }
     },
-    grid: { left: 70, right: 28, top: 80, bottom: 58 },
+    grid: { left: 64, right: 26, top: 40, bottom: 46 },
     xAxis: {
       type: 'value',
       name: '压力 (MPa)',
       scale: true,
       nameLocation: 'middle',
       nameGap: 34,
-      splitLine: { lineStyle: { color: '#dfe7f2' } }
+      axisLine: { show: true, lineStyle: { color: '#888' } },
+      axisLabel: { color: '#555', fontSize: 12 },
+      minorTick: { show: true },
+      minorSplitLine: { show: true, lineStyle: { color: '#f1f5fb' } },
+      splitLine: { lineStyle: { color: '#dce5f2' } }
     },
     yAxis: {
       type: 'value',
@@ -284,7 +339,11 @@ async function draw () {
       max: current.depth?.at(-1),
       nameLocation: 'middle',
       nameGap: 48,
-      splitLine: { lineStyle: { color: '#dfe7f2' } }
+      axisLine: { show: true, lineStyle: { color: '#888' } },
+      axisLabel: { color: '#555', fontSize: 12 },
+      minorTick: { show: true },
+      minorSplitLine: { show: true, lineStyle: { color: '#f1f5fb' } },
+      splitLine: { lineStyle: { color: '#dce5f2' } }
     },
     series: Object.entries(current.methods || {}).map(([code, method]) => ({
       name: code === 'HB' ? 'Hagedorn & Brown' : 'Mukherjee & Brill',
@@ -379,7 +438,10 @@ watch(form, () => { calculatedInput.value = null }, { deep: true })
 
 onMounted(() => {
   refresh()
-  observer = new ResizeObserver(() => chart?.resize())
+  observer = new ResizeObserver(() => {
+    chart?.resize()
+    if (legendPosition.value) clampLegendPosition(legendPosition.value.x, legendPosition.value.y)
+  })
   observer.observe(chartEl.value)
 })
 
@@ -387,6 +449,7 @@ onBeforeUnmount(() => {
   disposed = true
   loadSequence++
   stop()
+  stopLegendDrag()
   observer?.disconnect()
   chart?.dispose()
 })
@@ -397,11 +460,18 @@ onBeforeUnmount(() => {
     <aside
       ref="panel"
       class="params-panel"
-      :style="{ width: panelWidth + 'px', minWidth: panelWidth + 'px' }"
+      :class="{ collapsed: paramsCollapsed }"
+      :style="{ width: paramsCollapsed ? '22px' : panelWidth + 'px', minWidth: paramsCollapsed ? '22px' : panelWidth + 'px' }"
     >
-      <div class="panel-head">参数设置</div>
+      <button v-if="paramsCollapsed" class="panel-collapsed-tab" type="button" @click="paramsCollapsed = false">参数设置</button>
+      <div v-show="!paramsCollapsed" class="panel-head">
+        <span>参数设置</span>
+        <button class="panel-toggle" type="button" title="收起参数设置" aria-label="收起参数设置" @click="paramsCollapsed = true">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="#777"><path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z"/></svg>
+        </button>
+      </div>
 
-      <div class="panel-body">
+      <div v-show="!paramsCollapsed && activeParamTab === 'input'" class="panel-body">
         <section class="method-section">
           <div class="section-title">折算方法</div>
           <el-checkbox-group v-model="form.models" :disabled="busy || sourceLoading">
@@ -422,8 +492,9 @@ onBeforeUnmount(() => {
               :key="key"
               class="field"
             >
-              <label>{{ label }}</label>
+              <label :for="`pressure-${key}`">{{ label }}</label>
               <el-input-number
+                :id="`pressure-${key}`"
                 v-model="form[key]"
                 :min="min"
                 :max="max"
@@ -436,7 +507,7 @@ onBeforeUnmount(() => {
         </section>
 
         <div class="boundary-selector">
-<!--          <span class="boundary-label">压力/温度位置</span>-->
+          <span class="boundary-label">压力／温度位置</span>
           <el-radio-group
             v-model="form.boundaryPosition"
             :disabled="busy || sourceLoading"
@@ -459,6 +530,7 @@ onBeforeUnmount(() => {
             :loading="busy"
             :disabled="sourceLoading"
             size="small"
+            class="calculate-button"
             @click="calculate"
           >
             计算压力折算
@@ -473,11 +545,30 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <div class="resizer" @pointerdown="resize" />
+      <div v-show="!paramsCollapsed && activeParamTab === 'output'" class="panel-body">
+        <div v-if="!result" class="section-title">请先计算压力分布</div>
+        <section v-for="(method, code) in result?.methods || {}" :key="code" class="parameter-section">
+          <div class="section-title">{{ code === 'HB' ? 'Hagedorn & Brown' : 'Mukherjee & Brill' }}</div>
+          <div class="field">
+            <label>井底压力（MPa）</label>
+            <el-input :model-value="method.profile?.at(-1)?.pressure?.toFixed(4) ?? '—'" readonly size="small" />
+          </div>
+          <div class="field">
+            <label>井段收敛状态</label>
+            <el-input :model-value="method.allSegmentsConverged ? '全部井段收敛' : `未收敛井段 ${method.nonconvergedSegmentCount}`" readonly size="small" />
+          </div>
+        </section>
+      </div>
+      <div v-show="!paramsCollapsed" class="param-tabs" role="tablist" aria-label="参数面板">
+        <button v-for="tab in [['input', '输入'], ['output', '输出']]" :key="tab[0]" type="button" role="tab" class="param-tab" :class="{ active: activeParamTab === tab[0] }" :aria-selected="activeParamTab === tab[0]" @click="activeParamTab = tab[0]">{{ tab[1] }}</button>
+      </div>
+      <div v-if="!paramsCollapsed" class="resizer" @pointerdown="resize" />
     </aside>
 
     <main v-loading="busy">
-      <header>{{ node.wellName }} · 压力折算 · 折算方法</header>
+      <div class="dynamic-result-tabs">
+        <div class="dynamic-result-tab active" :title="`${node.wellName}-压力折算-折算方法-分析结果`">{{ node.wellName }}-压力折算-折算方法-分析结果</div>
+      </div>
 
       <div v-if="result" class="summary">
         <span v-for="(method, code) in result.methods" :key="code">
@@ -489,7 +580,16 @@ onBeforeUnmount(() => {
         </span>
       </div>
 
-      <div ref="chartEl" class="chart" />
+      <div ref="chartAreaEl" class="chart-container">
+          <div ref="chartEl" class="chart" />
+          <div v-if="result" ref="legendEl" class="floating-chart-legend" :class="{ dragging: draggingLegend }" :style="legendStyle" title="拖动调整图例位置" @pointerdown="startLegendDrag">
+            <button v-for="item in legendItems" :key="item.name" type="button" class="floating-legend-item" :class="{ hidden: !legendSelected[item.name] }" :aria-pressed="legendSelected[item.name]" :title="legendSelected[item.name] ? '点击隐藏曲线' : '点击显示曲线'" @pointerdown.stop @click="toggleLegend(item.name)">
+              <span class="legend-dot" :style="{ backgroundColor: legendSelected[item.name] ? item.color : 'transparent', borderColor: item.color }"></span>
+              <span>{{ item.name }}</span>
+            </button>
+          </div>
+          <div v-if="!result" class="chart-empty">请输入参数并计算压力分布</div>
+        </div>
     </main>
   </section>
 </template>
@@ -501,7 +601,9 @@ onBeforeUnmount(() => {
   min-height: 0;
   background: #fff;
   color: #333;
-  font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+  font-family: Arial, sans-serif;
+  font-size: 13px;
+  overflow: hidden;
 }
 
 .params-panel {
@@ -519,6 +621,7 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
   align-items: center;
   padding: 7px 12px 6px;
+  justify-content: space-between;
   border-bottom: 1px solid #f0f0f0;
   color: #333;
   font-size: 13px;
@@ -532,20 +635,19 @@ onBeforeUnmount(() => {
 }
 
 .section-title {
-  margin: 11px 0 7px;
+  margin: 10px 0 7px;
   color: #333;
   font-size: 13px;
   font-weight: 500;
 }
 
-.section-title:first-child {
-  margin-top: 4px;
-}
+.parameter-section { margin: 0; padding: 0; border: 0; }
+.section-title:first-child { margin-top: 4px; }
 
-.parameter-section {
-  margin-top: 10px;
-  padding-top: 1px;
-  border-top: 1px solid #ebeef5;
+.parameter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  column-gap: 24px;
 }
 
 .field {
@@ -559,6 +661,122 @@ onBeforeUnmount(() => {
   font-size: 12px;
 }
 
+.el-select,
+.el-input-number {
+  width: 100%;
+}
+
+:deep(.el-input-number .el-input__inner) {
+  text-align: left !important;
+}
+
+/* 数字框、普通输出框和下拉框统一基线，覆盖数字控件默认的 15px 留白。 */
+.params-panel :deep(.el-input__wrapper),
+.params-panel :deep(.el-input-number.is-without-controls .el-input__wrapper),
+.params-panel :deep(.el-select__wrapper) {
+  box-sizing: border-box;
+  min-height: 24px;
+  height: 24px;
+  padding: 0 6px;
+  font-family: Arial, sans-serif;
+  font-size: 12px;
+}
+.params-panel :deep(.el-input__inner),
+.params-panel :deep(.el-select__selected-item),
+.params-panel :deep(.el-radio-button__inner),
+.params-panel :deep(.el-button) {
+  font-family: Arial, sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+}
+.params-panel :deep(.el-input__inner) {
+  height: 22px;
+  line-height: 22px;
+  text-align: left;
+}
+.params-panel :deep(.el-select__selected-item) { line-height: 22px; }
+
+.actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.boundary-selector {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #ebeef5;
+}
+
+.boundary-label {
+  flex-shrink: 0;
+  color: #555;
+  font-size: 12px;
+}
+
+.actions .el-button + .el-button {
+  margin-left: 0;
+}
+
+.resizer {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+}
+
+.resizer:hover {
+  background: rgba(64, 132, 217, 0.18);
+}
+
+main {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.chart {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  width: 100%;
+}
+
+main :deep(.el-alert) {
+  border-radius: 0;
+}
+
+/* 参数栏沿用水侵分析的分组间距与控件默认样式，右侧仅保留原有摘要和曲线。 */
+.panel-toggle { width: 20px; height: 20px; padding: 0; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.panel-collapsed-tab { width: 22px; height: 76px; padding: 0; writing-mode: vertical-rl; border: 1px solid #e0e0e0; border-left: 0; background: #fff; color: #333; font: inherit; cursor: pointer; }
+.params-panel.collapsed { border-right: 0; }
+.panel-toggle:hover, .panel-collapsed-tab:hover { background: #fff8d8; }
+.param-tabs { display: flex; height: 30px; flex-shrink: 0; border-top: 1px solid #e0e0e0; }
+.param-tab { flex: 1; border: 0; border-right: 1px solid #e0e0e0; background: #fff; color: #555; font: inherit; cursor: pointer; }
+.param-tab.active { background: #f4d000; color: #1a1a1a; font-weight: 600; }
+.dynamic-result-tabs { display: flex; height: 34px; flex-shrink: 0; border-bottom: 1px solid #e4e7ed; background: #fafafa; }
+.dynamic-result-tab { display: flex; align-items: center; max-width: 340px; padding: 0 12px; background: #f4d000; color: #202020; font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chart-container { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+.floating-chart-legend { position: absolute; z-index: 5; display: flex; flex-direction: column; gap: 5px; max-width: 280px; padding: 7px 10px; border: 1px solid #eee; background: rgba(255,255,255,.9); color: #333; font-size: 12px; line-height: 1.2; cursor: move; touch-action: none; user-select: none; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+.floating-chart-legend.dragging { box-shadow: 0 4px 12px rgba(0,0,0,.14); }
+.floating-legend-item { display: flex; align-items: center; gap: 5px; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; white-space: nowrap; cursor: pointer; }
+.floating-legend-item.hidden { color: #999; opacity: .55; }
+.legend-dot { width: 10px; height: 10px; border: 1px solid transparent; border-radius: 50%; flex-shrink: 0; box-sizing: border-box; }
+.chart-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #999; pointer-events: none; }
+.summary { display: flex; flex-shrink: 0; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 5px 12px; font-size: 12px; line-height: 18px; color: #333; background: #fafafa; border-bottom: 1px solid #eef0f3; }
+.summary > span + span { padding-left: 12px; border-left: 1px solid #dfe3e8; }
+.actions :deep(.el-button) { margin-left: 0; border-radius: 4px; color: #202020; background: #fff; border-color: #c9cdd3; }
+.actions :deep(.calculate-button) { background: #f4d000; border-color: #d5b900; }
+.boundary-selector :deep(.el-radio-button__original-radio:checked + .el-radio-button__inner) { background: #f4d000; border-color: #d5b900; color: #202020; box-shadow: -1px 0 0 #d5b900; }
 .method-section :deep(.el-checkbox) {
   display: flex;
   height: 24px;
@@ -583,91 +801,6 @@ onBeforeUnmount(() => {
   color: #303133;
 }
 
-.parameter-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  column-gap: 24px;
-}
 
-.el-input-number {
-  width: 100%;
-}
-
-:deep(.el-input-number .el-input__inner) {
-  text-align: left !important;
-}
-
-.actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 12px;
-}
-
-.actions .el-button + .el-button {
-  margin-left: 0;
-}
-
-.boundary-selector {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid #ebeef5;
-}
-
-.boundary-label {
-  flex-shrink: 0;
-  color: #555;
-  font-size: 12px;
-}
-
-.resizer {
-  position: absolute;
-  z-index: 2;
-  top: 0;
-  right: -3px;
-  width: 6px;
-  height: 100%;
-  cursor: col-resize;
-}
-
-.resizer:hover {
-  background: rgba(64, 132, 217, 0.18);
-}
-
-main {
-  display: flex;
-  flex: 1;
-  min-width: 0;
-  flex-direction: column;
-}
-
-main header {
-  padding: 7px 12px;
-  border-bottom: 1px solid #e4e7ed;
-  background: #fafafa;
-  color: #409eff;
-  font-size: 13px;
-}
-
-.summary {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
-  padding: 8px 12px;
-  font-size: 12px;
-}
-
-.chart {
-  flex: 1;
-  min-height: 250px;
-}
-
-:global(.pressure-tooltip-value) {
-  float: right;
-  margin-left: 24px;
-  font-weight: 600;
-}
+:global(.pressure-tooltip-value) { float: right; margin-left: 24px; font-weight: 600; }
 </style>

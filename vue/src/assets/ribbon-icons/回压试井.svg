@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="回压试井">
+  <title>回压试井</title>
+  <rect width="64" height="64" rx="10" fill="#f0f7ff"/>
+  <g fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M13 15v36h40" stroke="#345"/><path d="M19 21c7 1 12 6 17 14s9 10 15 11" stroke="#1677ff"/><circle cx="21" cy="22" r="3" fill="#13c2c2" stroke="none"/><circle cx="33" cy="31" r="3" fill="#13c2c2" stroke="none"/><circle cx="46" cy="43" r="3" fill="#13c2c2" stroke="none"/>
+  </g>
+</svg>
