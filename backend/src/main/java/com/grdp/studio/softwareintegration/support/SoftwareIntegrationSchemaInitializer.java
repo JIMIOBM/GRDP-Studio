@@ -8,6 +8,7 @@ import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.stereotype.Component;
 
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 
@@ -35,18 +36,20 @@ public class SoftwareIntegrationSchemaInitializer implements ApplicationRunner {
                 CREATE TABLE IF NOT EXISTS software_integration_model_version (
                   id BIGINT AUTO_INCREMENT PRIMARY KEY, model_id BIGINT NOT NULL, version_no INT NOT NULL, original_name VARCHAR(255) NOT NULL,
                   storage_key VARCHAR(1024) NOT NULL, sha256 CHAR(64) NOT NULL, size_bytes BIGINT NOT NULL, status VARCHAR(50) NOT NULL,
-                  validation_message VARCHAR(1000), studies_json TEXT, created_at DATETIME(3) NOT NULL, updated_at DATETIME(3) NOT NULL,
+                  model_kind VARCHAR(50), validation_message VARCHAR(1000), studies_json TEXT, created_at DATETIME(3) NOT NULL, updated_at DATETIME(3) NOT NULL,
                   UNIQUE KEY uk_software_integration_model_version (model_id, version_no), KEY idx_software_integration_model_version_model (model_id)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """);
+        ensureModelVersionKindColumn();
+        backfillModelVersionKinds();
         String database = jdbcTemplate.execute((ConnectionCallback<String>)
                 connection -> connection.getMetaData().getDatabaseProductName());
         boolean h2 = database != null && database.toLowerCase().contains("h2");
         String jsonType = h2 ? "CLOB" : "JSON";
         String resultType = h2 ? "CLOB" : "LONGTEXT";
         String generated = h2
-                ? "GENERATED ALWAYS AS (CASE WHEN status IN ('CLAIMED','PREPARING','RUNNING_NODAL','RUNNING_PROFILE','COLLECTING','CANCEL_REQUESTED') THEN 1 ELSE NULL END)"
-                : "GENERATED ALWAYS AS (CASE WHEN status IN ('CLAIMED','PREPARING','RUNNING_NODAL','RUNNING_PROFILE','COLLECTING','CANCEL_REQUESTED') THEN 1 ELSE NULL END) STORED";
+                ? "GENERATED ALWAYS AS (CASE WHEN status IN ('CLAIMED','PREPARING','RUNNING_NODAL','RUNNING_PROFILE','RUNNING_NETWORK','COLLECTING','CANCEL_REQUESTED') THEN 1 ELSE NULL END)"
+                : "GENERATED ALWAYS AS (CASE WHEN status IN ('CLAIMED','PREPARING','RUNNING_NODAL','RUNNING_PROFILE','RUNNING_NETWORK','COLLECTING','CANCEL_REQUESTED') THEN 1 ELSE NULL END) STORED";
         jdbcTemplate.execute("""
                 CREATE TABLE IF NOT EXISTS software_integration_run (
                   id BIGINT AUTO_INCREMENT PRIMARY KEY, project_id BIGINT NOT NULL, model_id BIGINT NOT NULL, model_version_id BIGINT NOT NULL,
@@ -67,6 +70,7 @@ public class SoftwareIntegrationSchemaInitializer implements ApplicationRunner {
         ensureRunColumn("acceptance_recovery_deadline_at",
                 "ALTER TABLE software_integration_run ADD COLUMN acceptance_recovery_deadline_at DATETIME(3) NULL");
         ensureResultJsonTextType(h2);
+        ensureNetworkActiveSlot(h2);
         jdbcTemplate.execute("""
                 CREATE TABLE IF NOT EXISTS software_integration_run_event (
                   id BIGINT AUTO_INCREMENT PRIMARY KEY, run_id BIGINT NOT NULL, event_sequence BIGINT NOT NULL, worker_sequence BIGINT,
@@ -97,6 +101,38 @@ public class SoftwareIntegrationSchemaInitializer implements ApplicationRunner {
         }
     }
 
+    private void ensureModelVersionKindColumn() {
+        boolean exists = Boolean.TRUE.equals(jdbcTemplate.execute((ConnectionCallback<Boolean>) connection ->
+                columnType(connection, "software_integration_model_version", "model_kind") != null));
+        if (exists) return;
+        try {
+            jdbcTemplate.execute("ALTER TABLE software_integration_model_version ADD COLUMN model_kind VARCHAR(50) NULL");
+        } catch (DataAccessException exception) {
+            boolean nowExists = Boolean.TRUE.equals(jdbcTemplate.execute((ConnectionCallback<Boolean>) connection ->
+                    columnType(connection, "software_integration_model_version", "model_kind") != null));
+            if (!nowExists) throw exception;
+        }
+    }
+
+    private void backfillModelVersionKinds() {
+        jdbcTemplate.update("""
+                UPDATE software_integration_model_version
+                SET model_kind = 'network'
+                WHERE model_kind IS NULL AND status = 'READY'
+                  AND model_id IN (
+                    SELECT id FROM software_integration_model WHERE simulator_type = 'PIPESIM_NETWORK'
+                  )
+                """);
+        jdbcTemplate.update("""
+                UPDATE software_integration_model_version
+                SET model_kind = 'legacy_well'
+                WHERE model_kind IS NULL AND status = 'READY'
+                  AND model_id IN (
+                    SELECT id FROM software_integration_model WHERE simulator_type = 'PIPESIM_WELL'
+                  )
+                """);
+    }
+
     private boolean runColumnExists(String columnName) {
         return runColumnType(columnName) != null;
     }
@@ -114,9 +150,44 @@ public class SoftwareIntegrationSchemaInitializer implements ApplicationRunner {
         }
     }
 
+    private void ensureNetworkActiveSlot(boolean h2) {
+        // Test H2 databases are ephemeral; altering an indexed generated column leaves H2 2.4
+        // with an expression bound to the closed DDL session. Fresh H2 schemas already use the new expression.
+        if (h2) return;
+        if (!runColumnExists("active_slot")) return;
+        String expression = runColumnGenerationExpression();
+        if (expression != null && expression.toUpperCase().contains("RUNNING_NETWORK")) return;
+        String statuses = "('CLAIMED','PREPARING','RUNNING_NODAL','RUNNING_PROFILE','RUNNING_NETWORK','COLLECTING','CANCEL_REQUESTED')";
+        String ddl = "ALTER TABLE software_integration_run MODIFY COLUMN active_slot TINYINT GENERATED ALWAYS AS (CASE WHEN status IN "
+                + statuses + " THEN 1 ELSE NULL END) STORED";
+        try {
+            jdbcTemplate.execute(ddl);
+        } catch (DataAccessException exception) {
+            String current = runColumnGenerationExpression();
+            if (current == null || !current.toUpperCase().contains("RUNNING_NETWORK")) throw exception;
+        }
+    }
+
     private String runColumnType(String columnName) {
         return jdbcTemplate.execute((ConnectionCallback<String>) connection ->
                 columnType(connection, "software_integration_run", columnName));
+    }
+
+    private String runColumnGenerationExpression() {
+        return jdbcTemplate.execute((ConnectionCallback<String>) connection -> {
+            boolean h2 = connection.getMetaData().getDatabaseProductName().toLowerCase().contains("h2");
+            String schema = h2 ? connection.getSchema() : connection.getCatalog();
+            try (PreparedStatement statement = connection.prepareStatement("""
+                    SELECT generation_expression FROM information_schema.columns
+                    WHERE LOWER(table_schema) = LOWER(?) AND LOWER(table_name) = 'software_integration_run'
+                      AND LOWER(column_name) = 'active_slot'
+                    """)) {
+                statement.setString(1, schema);
+                try (ResultSet result = statement.executeQuery()) {
+                    return result.next() ? result.getString(1) : null;
+                }
+            }
+        });
     }
 
     private static boolean isResultTextType(String type, boolean h2) {

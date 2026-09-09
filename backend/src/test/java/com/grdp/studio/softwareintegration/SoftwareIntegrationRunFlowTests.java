@@ -16,6 +16,7 @@ import com.grdp.studio.softwareintegration.entity.SoftwareIntegrationModelEntity
 import com.grdp.studio.softwareintegration.entity.SoftwareIntegrationModelVersionEntity;
 import com.grdp.studio.softwareintegration.entity.SoftwareIntegrationProjectEntity;
 import com.grdp.studio.softwareintegration.execution.PipesimWellResultValidator;
+import com.grdp.studio.softwareintegration.execution.PipesimResultValidator;
 import com.grdp.studio.softwareintegration.execution.SoftwareIntegrationRunDispatcher;
 import com.grdp.studio.softwareintegration.execution.SoftwareIntegrationRunStatus;
 import com.grdp.studio.softwareintegration.execution.SoftwareIntegrationRunStore;
@@ -98,7 +99,7 @@ class SoftwareIntegrationRunFlowTests {
     @Autowired SoftwareIntegrationService softwareIntegrationService;
     @Autowired SoftwareIntegrationProperties integrationProperties;
     @Autowired SoftwareIntegrationStorageKeyNormalizer normalizer;
-    @Autowired PipesimWellResultValidator resultValidator;
+    @Autowired PipesimResultValidator resultValidator;
     @Autowired SoftwareIntegrationArtifactPublisher artifactPublisher;
     @Autowired ObjectMapper objectMapper;
     @Autowired FakeWorkerRunClient fakeWorker;
@@ -145,6 +146,63 @@ class SoftwareIntegrationRunFlowTests {
         assertThatThrownBy(() -> runService.create(seed.version().getId(), request("Study 1", "combined")))
                 .isInstanceOf(RunException.class).satisfies(error ->
                         assertThat(((RunException) error).status()).isEqualTo(HttpStatus.CONFLICT));
+    }
+
+    @Test
+    void runTypeMustMatchPersistedSimulatorType() throws Exception {
+        Seed well = seed("READY", "models/well/1/model.pips");
+        assertThatThrownBy(() -> runService.create(well.version().getId(), request("Study 1", "network")))
+                .isInstanceOf(RunException.class).satisfies(error ->
+                        assertThat(((RunException) error).status()).isEqualTo(HttpStatus.BAD_REQUEST));
+
+        Seed network = seed("READY", "models/network/1/model.pips", "PIPESIM_NETWORK");
+        for (String runType : List.of("nodal", "profile", "combined")) {
+            assertThatThrownBy(() -> runService.create(network.version().getId(), request("Study 1", runType)))
+                    .isInstanceOf(RunException.class).satisfies(error ->
+                            assertThat(((RunException) error).status()).isEqualTo(HttpStatus.BAD_REQUEST));
+        }
+
+        var created = runService.create(network.version().getId(), request("Study 1", "network"));
+        assertThat(created.runType()).isEqualTo("network");
+        assertThat(runStore.find(created.id()).getParametersJson()).isEqualTo("null");
+    }
+
+    @Test
+    void versionModelKindOverridesMutableParentSimulatorType() throws Exception {
+        Seed historicalWell = seed("READY", "models/versioned/1/model.pips", "PIPESIM_NETWORK");
+        historicalWell.version().setModelKind("black_oil_liquid");
+        versionMapper.updateById(historicalWell.version());
+
+        var created = runService.create(historicalWell.version().getId(), request("Study 1", "nodal"));
+
+        assertThat(created.runType()).isEqualTo("nodal");
+        assertThatThrownBy(() -> runService.create(
+                historicalWell.version().getId(), request("Network Study", "network")))
+                .isInstanceOf(RunException.class)
+                .satisfies(error -> assertThat(((RunException) error).status()).isEqualTo(HttpStatus.BAD_REQUEST));
+    }
+
+    @Test
+    void sanitizedStudyNameRoundTripsToTheRawWorkerStudyWithoutBrowserDisclosure() throws Exception {
+        Seed seed = seed("READY", "models/versioned/sensitive-study.pips");
+        seed.version().setStudiesJson("C:\\Users\\operator\\private-study");
+        versionMapper.updateById(seed.version());
+
+        var created = runService.create(seed.version().getId(), request("[local path]", "nodal"));
+
+        assertThat(created.study()).isEqualTo("[local path]");
+        assertThat(runStore.find(created.id()).getStudyName()).isEqualTo("C:\\Users\\operator\\private-study");
+    }
+
+    @Test
+    void readyVersionWithoutKindRequiresRevalidationInsteadOfUsingParentType() throws Exception {
+        Seed version = seed("READY", "models/versioned/missing-kind.pips", "PIPESIM_NETWORK");
+        jdbcTemplate.update("UPDATE software_integration_model_version SET model_kind = NULL WHERE id = ?",
+                version.version().getId());
+
+        assertThatThrownBy(() -> runService.create(version.version().getId(), request("Network Study", "network")))
+                .isInstanceOf(RunException.class)
+                .satisfies(error -> assertThat(((RunException) error).status()).isEqualTo(HttpStatus.CONFLICT));
     }
 
     @Test
@@ -216,6 +274,52 @@ class SoftwareIntegrationRunFlowTests {
             assertThat(artifact.getSha256()).isEqualTo(sha256Unchecked(output));
         });
         assertThat(fakeWorker.transactionActiveDuringHttp).isFalse();
+    }
+
+    @Test
+    void networkWorkerPhaseAndFullResultArePersisted() throws Exception {
+        Seed seed = seed("READY", "models/network/1/network.pips", "PIPESIM_NETWORK");
+        long runId = runService.create(seed.version().getId(), request("Network Study", "network")).id();
+        SoftwareIntegrationRunDispatcher dispatcher = dispatcher();
+        dispatcher.dispatch();
+        assertThat(fakeWorker.lastExecuteRequest.runTask()).isEqualTo("network");
+        assertThat(fakeWorker.lastExecuteRequest.parameters()).isNull();
+
+        Path manifest = STORAGE_ROOT.resolve("jobs/" + runId + "/output/manifest.json");
+        Files.createDirectories(manifest.getParent());
+        Files.writeString(manifest, """
+                {"schemaVersion":"grdp-worker-artifact-manifest/1","runId":%d,
+                 "generatedAtUtc":"2026-09-08T00:00:00Z","files":[]}
+                """.formatted(runId));
+        fakeWorker.snapshot = new WorkerRunSnapshot(runId, "SUCCEEDED", 4, "worker-1", "generation-1",
+                List.of(
+                        new WorkerRunEvent(1, "CLAIMED", Instant.now(), "claimed"),
+                        new WorkerRunEvent(2, "PREPARING", Instant.now(), "preparing"),
+                        new WorkerRunEvent(3, "RUNNING_NETWORK", Instant.now(),
+                                "network at net.pipe://localhost/pipe/private-event"),
+                        new WorkerRunEvent(4, "COLLECTING", Instant.now(), "collecting")),
+                networkResult(), null,
+                List.of(new WorkerRunArtifact("jobs/" + runId + "/output/manifest.json",
+                        Files.size(manifest), sha256(manifest), "application/json")),
+                objectMapper.readTree("{\"processTreeExitConfirmed\":true}"));
+
+        dispatcher.poll();
+
+        assertThat(runStore.find(runId).getStatus()).isEqualTo("SUCCEEDED");
+        assertThat(runStore.find(runId).getResultContract()).isEqualTo("VALID_FULL");
+        assertThat(runStore.find(runId).getResultJson()).contains("pipesim-network-result/1");
+        var detail = runService.get(runId);
+        assertThat(detail.result().toString())
+                .contains("[local path]")
+                .contains("[redacted]")
+                .doesNotContain("C:\\\\Users", "private-result");
+        assertThat(detail.events()).allSatisfy(event -> {
+            if (event.message() != null) assertThat(event.message()).doesNotContain("private-event", "net.pipe://localhost/pipe/private-event");
+        });
+        assertThat(runStore.events(runId)).anySatisfy(event -> {
+            assertThat(event.getStatus()).isEqualTo("RUNNING_NETWORK");
+            assertThat(event.getMessage()).isEqualTo("Worker 正在执行管网模拟");
+        });
     }
 
     @Test
@@ -492,6 +596,29 @@ class SoftwareIntegrationRunFlowTests {
     }
 
     @Test
+    void runningNetworkRetainsGlobalSlotBlocksDeletionAndRecoversAsWorkerLost() throws Exception {
+        Seed network = seed("READY", "models/network/recovery.pips", "PIPESIM_NETWORK");
+        long networkRunId = runService.create(network.version().getId(), request("Network Study", "network")).id();
+        assertThat(runStore.claimOldest("network-recovery-dispatcher").getId()).isEqualTo(networkRunId);
+        runStore.acceptWorker(networkRunId, "worker-1", "generation-1");
+        runStore.transition(networkRunId, SoftwareIntegrationRunStatus.PREPARING, null, "preparing", null);
+        runStore.transition(networkRunId, SoftwareIntegrationRunStatus.RUNNING_NETWORK, null, "network", null);
+
+        Seed well = seed("READY", "models/well/queued.pips");
+        long queuedRunId = runService.create(well.version().getId(), request("Study 1", "nodal")).id();
+        assertThat(runStore.claimOldest("blocked-by-network")).isNull();
+        MockMvc projectMvc = MockMvcBuilders.standaloneSetup(new SoftwareIntegrationController(softwareIntegrationService))
+                .setControllerAdvice(new SoftwareIntegrationRunExceptionHandler()).build();
+        projectMvc.perform(delete("/software-integration/projects/{id}", network.project().getId()))
+                .andExpect(status().isConflict());
+
+        runStore.recoverOnStartup();
+
+        assertThat(runStore.find(networkRunId).getStatus()).isEqualTo("WORKER_LOST");
+        assertThat(runStore.claimOldest("after-network-recovery").getId()).isEqualTo(queuedRunId);
+    }
+
+    @Test
     void cancelCasWinningDiscardsLaterWorkerSuccess() throws Exception {
         Seed seed = seed("READY", "models/1/1/model.pips");
         long runId = runService.create(seed.version().getId(), request("Study 1", "combined")).id();
@@ -668,6 +795,10 @@ class SoftwareIntegrationRunFlowTests {
     }
 
     private Seed seed(String status, String storageKey) throws IOException {
+        return seed(status, storageKey, "PIPESIM_WELL");
+    }
+
+    private Seed seed(String status, String storageKey, String simulatorType) throws IOException {
         LocalDateTime now = LocalDateTime.now();
         SoftwareIntegrationProjectEntity project = new SoftwareIntegrationProjectEntity();
         project.setName("project-" + UUID.randomUUID());
@@ -678,7 +809,7 @@ class SoftwareIntegrationRunFlowTests {
         SoftwareIntegrationModelEntity model = new SoftwareIntegrationModelEntity();
         model.setProjectId(project.getId());
         model.setName("model-" + UUID.randomUUID());
-        model.setSimulatorType("PIPESIM_WELL");
+        model.setSimulatorType(simulatorType);
         model.setCreatedAt(now);
         model.setUpdatedAt(now);
         modelMapper.insert(model);
@@ -690,7 +821,8 @@ class SoftwareIntegrationRunFlowTests {
         version.setSha256("a".repeat(64));
         version.setSizeBytes(5L);
         version.setStatus(status);
-        version.setStudiesJson("Study 1\nStudy 2");
+        version.setModelKind("PIPESIM_NETWORK".equals(simulatorType) ? "network" : "black_oil_liquid");
+        version.setStudiesJson("Study 1\nStudy 2\nNetwork Study");
         version.setCreatedAt(now);
         version.setUpdatedAt(now);
         versionMapper.insert(version);
@@ -716,6 +848,27 @@ class SoftwareIntegrationRunFlowTests {
                  "units":{"flow":{"displayUnit":null,"semantics":"unspecified"},"pressure":{"displayUnit":null,"semantics":"unspecified"},
                           "depth":{"displayUnit":null,"semantics":"unspecified"},"temperature":{"displayUnit":null,"semantics":"unspecified"}},
                  "ipr":[{"flow":1.0,"pressure":2.0}],"vlp":[{"flow":1.0,"pressure":2.0}],"profile":[]}
+                """);
+    }
+
+    private JsonNode networkResult() {
+        return objectMapper.readTree("""
+                {"schemaVersion":"pipesim-network-result/1","model_kind":"network","runTask":"network",
+                 "resultContract":"VALID_FULL","study":"Network Study","simulationState":"Completed",
+                 "topology":{"nodes":[{"id":"Source 1","componentType":"SOURCE"},{"id":"Sink 1","componentType":"SINK"}],
+                   "edges":[{"source":"Source 1","destination":"Sink 1","sourcePort":"OUTLET"}],
+                   "counts":{"nodes":2,"edges":1,"sources":1,"sinks":1,"flowlines":1}},
+                  "system":[{"variable":"Pressure","unit":"bar","values":[{"name":"Network","value":{"C:\\\\Users\\\\operator\\\\secret":100.0}}]}],
+                 "node":[{"variable":"Pressure","unit":"bar","values":[{"name":"Sink 1","value":null}]}],
+                 "profiles":[{"branch":"Source 1 -> Sink 1","pointCount":2,"variables":[
+                   {"variable":"TotalDistance","unit":"m","values":[0.0,100.0]},
+                   {"variable":"Pressure","unit":"bar","values":[100.0,null]},
+                   {"variable":"Temperature","unit":"degC","values":[20.0]}]}],
+                  "summary":{"info":["completed"],"warnings":[],"errors":[]},
+                   "messages":["Processing C:\\\\Users\\\\operator\\\\network.tnt","Using net.pipe://localhost/pipe/private-result"],
+                  "quality":[
+                    {"path":"node.Pressure.Sink 1","code":"UNAVAILABLE"},
+                    {"path":"profiles.Source 1 -> Sink 1.Pressure[1]","code":"NON_FINITE"}]}
                 """);
     }
 
@@ -755,6 +908,7 @@ class SoftwareIntegrationRunFlowTests {
         int cancelCalls;
         boolean transactionActiveDuringHttp;
         WorkerRunSnapshot snapshot;
+        WorkerRunExecuteRequest lastExecuteRequest;
 
         void reset() {
             executeError = null;
@@ -764,6 +918,7 @@ class SoftwareIntegrationRunFlowTests {
             cancelCalled = false;
             cancelCalls = 0;
             transactionActiveDuringHttp = false;
+            lastExecuteRequest = null;
             snapshot = new WorkerRunSnapshot(-1, "PREPARING", 0, "worker-1", "generation-1",
                     List.of(), null, null, List.of(), null);
         }
@@ -777,6 +932,7 @@ class SoftwareIntegrationRunFlowTests {
         @Override
         public WorkerRunAccepted execute(WorkerRunExecuteRequest request) {
             observeTransaction();
+            lastExecuteRequest = request;
             if (executeHook != null) executeHook.accept(request.runId());
             if (executeError != null) throw executeError;
             assertThat(request.modelStorageKey()).doesNotMatch("^[A-Za-z]:.*");

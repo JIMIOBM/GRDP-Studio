@@ -17,6 +17,11 @@ class SoftwareIntegrationRunStateMachineTests {
         assertThat(SoftwareIntegrationRunStateMachine.allows(
                 SoftwareIntegrationRunStatus.COLLECTING, SoftwareIntegrationRunStatus.PARTIAL_SUCCEEDED)).isTrue();
         assertThat(SoftwareIntegrationRunStateMachine.allows(
+                SoftwareIntegrationRunStatus.PREPARING, SoftwareIntegrationRunStatus.RUNNING_NETWORK)).isTrue();
+        assertThat(SoftwareIntegrationRunStateMachine.allows(
+                SoftwareIntegrationRunStatus.RUNNING_NETWORK, SoftwareIntegrationRunStatus.COLLECTING)).isTrue();
+        assertThat(SoftwareIntegrationRunStatus.RUNNING_NETWORK.isActive()).isTrue();
+        assertThat(SoftwareIntegrationRunStateMachine.allows(
                 SoftwareIntegrationRunStatus.CANCEL_REQUESTED, SoftwareIntegrationRunStatus.SUCCEEDED)).isFalse();
         assertThat(SoftwareIntegrationRunStateMachine.allows(
                 SoftwareIntegrationRunStatus.CANCEL_REQUESTED, SoftwareIntegrationRunStatus.PARTIAL_SUCCEEDED)).isFalse();
@@ -25,6 +30,9 @@ class SoftwareIntegrationRunStateMachineTests {
                 .isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> SoftwareIntegrationRunStateMachine.requireAllowed(
                 SoftwareIntegrationRunStatus.QUEUED, SoftwareIntegrationRunStatus.RUNNING_NODAL))
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> SoftwareIntegrationRunStateMachine.requireAllowed(
+                SoftwareIntegrationRunStatus.RUNNING_NETWORK, SoftwareIntegrationRunStatus.RUNNING_PROFILE))
                 .isInstanceOf(IllegalStateException.class);
     }
 }

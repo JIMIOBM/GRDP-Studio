@@ -104,9 +104,15 @@ public sealed class PtkRunRegistry
     private static bool IsAllowedTransition(Entry entry, string next) => entry.State switch
     {
         "CLAIMED" => next == "PREPARING",
-        "PREPARING" => entry.Request.RunTask == "profile" ? next == "RUNNING_PROFILE" : next == "RUNNING_NODAL",
+        "PREPARING" => entry.Request.RunTask switch
+        {
+            "profile" => next == "RUNNING_PROFILE",
+            "network" => next == "RUNNING_NETWORK",
+            _ => next == "RUNNING_NODAL"
+        },
         "RUNNING_NODAL" => entry.Request.RunTask == "combined" ? next == "RUNNING_PROFILE" : next == "COLLECTING",
         "RUNNING_PROFILE" => next == "COLLECTING",
+        "RUNNING_NETWORK" => next == "COLLECTING",
         _ => false
     };
 

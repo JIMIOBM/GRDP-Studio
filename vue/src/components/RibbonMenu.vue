@@ -90,8 +90,11 @@ const defaultTabs = [
             label: '导入模型',
             icon: '数据映射',
             dropdown: true,
-            dropdownItems: ['PIPESIM 井筒模型'],
-            dropdownCommandIds: { 'PIPESIM 井筒模型': 'software-integration.model.import-pipesim' }
+            dropdownItems: ['PIPESIM 井筒模型', 'PIPESIM Network 模型'],
+            dropdownCommandIds: {
+              'PIPESIM 井筒模型': 'software-integration.model.import-pipesim',
+              'PIPESIM Network 模型': 'software-integration.model.import-pipesim'
+            }
           },
           { type: 'large', label: '保存', icon: '生成报告', commandId: 'software-integration.project.save' }
         ]
@@ -107,7 +110,7 @@ const defaultTabs = [
       {
         title: '井筒模拟',
         columns: [
-          { type: 'large', label: 'PIPESIM 井筒', icon: 'PIPESIM' },
+          { type: 'large', label: 'PIPESIM 井筒', icon: 'PIPESIM', commandId: 'software-integration.model.import-pipesim' },
           { type: 'large', label: 'wellcat', icon: '井身结构' },
           { type: 'large', label: '扩展接口', icon: '接口配置' }
         ]
@@ -115,7 +118,7 @@ const defaultTabs = [
       {
         title: '管网模拟',
         columns: [
-          { type: 'large', label: 'PIPESIM Network', icon: '管流计算' },
+          { type: 'large', label: 'PIPESIM Network', icon: '管流计算', commandId: 'software-integration.model.import-pipesim' },
           { type: 'large', label: 'wellcat', icon: '约束条件' },
           { type: 'large', label: '扩展接口', icon: '接口配置' }
         ]
@@ -361,6 +364,7 @@ const iconAliases = {
   '3D可视化': '云图',
   曲线: '曲线图',
   'PIPESIM 井筒模型': 'PIPESIM',
+  'PIPESIM Network 模型': '管流计算',
   模型组合: '一体化耦合优化',
   方案构建: '方案生成'
 }

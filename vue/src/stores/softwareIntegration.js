@@ -12,6 +12,8 @@ export const SOFTWARE_INTEGRATION_TERMINAL_STATUSES = Object.freeze([
 ])
 
 const terminalStatuses = new Set(SOFTWARE_INTEGRATION_TERMINAL_STATUSES)
+const wellRunTypes = new Set(['nodal', 'profile', 'combined'])
+const wellModelKinds = new Set(['black_oil_liquid', 'basic_gas', 'legacy_well'])
 export const isTerminalRunStatus = status => terminalStatuses.has(status)
 const isValidationPending = status => status === 'UPLOADED' || status === 'VALIDATING'
 const unwrap = response => response?.data ?? response
@@ -54,6 +56,9 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
   const versions = computed(() => [...(activeModel.value?.versions || [])].sort(byNewestVersion))
   const readyVersions = computed(() => versions.value.filter(version => version.status === 'READY'))
   const activeVersion = computed(() => versions.value.find(version => version.id === activeVersionId.value) || null)
+  const activeModelKind = computed(() => activeVersion.value?.modelKind || '')
+  const isNetworkModel = computed(() => activeModelKind.value === 'network')
+  const isWellModel = computed(() => wellModelKinds.has(activeModelKind.value))
   const persistedStudies = computed(() => activeVersion.value?.status === 'READY' && Array.isArray(activeVersion.value.studies)
     ? activeVersion.value.studies
     : [])
@@ -114,6 +119,13 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
     projectDetails.value = { ...projectDetails.value, [projectId]: detail }
   }
 
+  const syncRunTypeForModel = () => {
+    if (!activeModel.value) return
+    if (isNetworkModel.value) runType.value = 'network'
+    else if (isWellModel.value && !wellRunTypes.has(runType.value)) runType.value = 'nodal'
+    else if (!isWellModel.value) runType.value = ''
+  }
+
   const loadProjectDetail = async projectId => {
     const detail = unwrap(await softwareIntegrationApi.getProject(projectId))
     setProjectDetail(detail)
@@ -158,6 +170,7 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
         activeVersionId.value = null
       }
       if (!activeProjectId.value && projects.value[0]) activeProjectId.value = projects.value[0].id
+      syncRunTypeForModel()
       scheduleValidationPolling()
       return details
     } finally {
@@ -354,6 +367,7 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
     if (!model) return null
     activeProjectId.value = projectId
     activeModelId.value = modelId
+    syncRunTypeForModel()
     const sorted = [...(model?.versions || [])].sort(byNewestVersion)
     const defaultVersion = sorted.find(version => version.status === 'READY') || sorted[0]
     return applyVersionSelection(defaultVersion?.id || null, generation)
@@ -364,6 +378,9 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
     if (!version || version.status !== 'READY' || !persistedStudies.value.includes(selectedStudy.value)) {
       throw new Error('请选择 READY 模型版本及其已有 Study')
     }
+    if (!isNetworkModel.value && !isWellModel.value) throw new Error('模型版本缺少已验证类型，请重新验证')
+    syncRunTypeForModel()
+    const requestedRunType = isNetworkModel.value ? 'network' : runType.value
     const expectedNavigation = navigationGeneration
     const expectedProjectId = activeProjectId.value
     const expectedModelId = activeModelId.value
@@ -373,7 +390,7 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
     loadingHistory.value = false
     submittingRun.value = true
     try {
-      const summary = unwrap(await softwareIntegrationApi.createRun(version.id, selectedStudy.value, runType.value))
+      const summary = unwrap(await softwareIntegrationApi.createRun(version.id, selectedStudy.value, requestedRunType))
       if (detailRequestGeneration !== runDetailGeneration || expectedNavigation !== navigationGeneration ||
         activeProjectId.value !== expectedProjectId || activeModelId.value !== expectedModelId ||
         activeVersionId.value !== expectedVersionId || summary?.modelVersionId !== expectedVersionId) return null
@@ -457,6 +474,9 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
     activeProjectDetail,
     activeProject,
     activeModel,
+    activeModelKind,
+    isNetworkModel,
+    isWellModel,
     versions,
     readyVersions,
     activeVersion,

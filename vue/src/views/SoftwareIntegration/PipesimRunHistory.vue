@@ -23,9 +23,10 @@ const statusMeta = {
   PREPARING: ['准备中', 'primary'],
   RUNNING_NODAL: ['节点分析中', 'primary'],
   RUNNING_PROFILE: ['PT 剖面中', 'primary'],
+  RUNNING_NETWORK: ['管网模拟中', 'primary'],
   COLLECTING: ['收集结果', 'primary']
 }
-const runTypeLabel = { nodal: '节点分析', profile: 'PT 剖面', combined: '组合运行' }
+const runTypeLabel = { nodal: '节点分析', profile: 'PT 剖面', combined: '组合运行', network: '管网模拟' }
 const rows = computed(() => props.runs || [])
 const formatTime = value => value ? String(value).replace('T', ' ') : '-'
 const formatElapsed = value => {

@@ -104,7 +104,7 @@ public class SoftwareIntegrationServiceImpl implements SoftwareIntegrationServic
         if (!exists) throw new BusinessException(404, "软件集成项目不存在");
         Integer active = jdbcTemplate.queryForObject("""
                 SELECT COUNT(*) FROM software_integration_run
-                WHERE project_id = ? AND status IN ('CLAIMED','PREPARING','RUNNING_NODAL','RUNNING_PROFILE','COLLECTING','CANCEL_REQUESTED')
+                WHERE project_id = ? AND status IN ('CLAIMED','PREPARING','RUNNING_NODAL','RUNNING_PROFILE','RUNNING_NETWORK','COLLECTING','CANCEL_REQUESTED')
                 """, Integer.class, projectId);
         if (active != null && active > 0) throw new BusinessException(409, "项目存在活动运行，不能删除");
         SoftwareIntegrationProjectEntity entity = requireProject(projectId);

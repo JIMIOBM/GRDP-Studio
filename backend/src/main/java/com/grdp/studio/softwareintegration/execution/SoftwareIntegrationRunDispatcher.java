@@ -34,7 +34,7 @@ public class SoftwareIntegrationRunDispatcher {
     private final SoftwareIntegrationModelVersionMapper versionMapper;
     private final SoftwareIntegrationStorageKeyNormalizer normalizer;
     private final WorkerRunClient workerClient;
-    private final PipesimWellResultValidator resultValidator;
+    private final PipesimResultValidator resultValidator;
     private final SoftwareIntegrationArtifactPublisher artifactPublisher;
     private final SoftwareIntegrationProperties properties;
     private final AtomicBoolean dispatching = new AtomicBoolean();
@@ -46,7 +46,7 @@ public class SoftwareIntegrationRunDispatcher {
                                             SoftwareIntegrationModelVersionMapper versionMapper,
                                             SoftwareIntegrationStorageKeyNormalizer normalizer,
                                             WorkerRunClient workerClient,
-                                            PipesimWellResultValidator resultValidator,
+                                            PipesimResultValidator resultValidator,
                                             SoftwareIntegrationArtifactPublisher artifactPublisher,
                                             SoftwareIntegrationProperties properties) {
         this.runStore = runStore;
@@ -357,6 +357,7 @@ public class SoftwareIntegrationRunDispatcher {
             case "PREPARING" -> phase(run, SoftwareIntegrationRunStatus.PREPARING, "Worker 正在准备模型");
             case "RUNNING_NODAL" -> phase(run, SoftwareIntegrationRunStatus.RUNNING_NODAL, "Worker 正在执行节点分析");
             case "RUNNING_PROFILE" -> phase(run, SoftwareIntegrationRunStatus.RUNNING_PROFILE, "Worker 正在执行 PT 剖面");
+            case "RUNNING_NETWORK" -> phase(run, SoftwareIntegrationRunStatus.RUNNING_NETWORK, "Worker 正在执行管网模拟");
             case "COLLECTING" -> phase(run, SoftwareIntegrationRunStatus.COLLECTING, "Worker 正在收集结果");
             default -> { }
         }
@@ -396,6 +397,7 @@ public class SoftwareIntegrationRunDispatcher {
             case "PREPARING" -> phase(run, SoftwareIntegrationRunStatus.PREPARING, "Worker 正在准备模型");
             case "RUNNING_NODAL" -> phase(run, SoftwareIntegrationRunStatus.RUNNING_NODAL, "Worker 正在执行节点分析");
             case "RUNNING_PROFILE" -> phase(run, SoftwareIntegrationRunStatus.RUNNING_PROFILE, "Worker 正在执行 PT 剖面");
+            case "RUNNING_NETWORK" -> phase(run, SoftwareIntegrationRunStatus.RUNNING_NETWORK, "Worker 正在执行管网模拟");
             case "COLLECTING" -> phase(run, SoftwareIntegrationRunStatus.COLLECTING, "Worker 正在收集结果");
             case "SUCCEEDED", "PARTIAL_SUCCEEDED" -> publishResult(runStore.find(run.getId()), snapshot);
             case "FAILED" -> finishFailure(runStore.find(run.getId()), snapshot);
@@ -451,7 +453,8 @@ public class SoftwareIntegrationRunDispatcher {
     private void publishResult(SoftwareIntegrationRunEntity run, WorkerRunSnapshot snapshot) {
         PublishedArtifacts published = null;
         try {
-            PipesimWellResultValidator.ValidatedResult validated = resultValidator.validate(run.getRunType(), snapshot.result());
+            PipesimResultValidator.ValidatedResult validated =
+                    resultValidator.validate(run.getRunType(), run.getStudyName(), snapshot.result());
             SoftwareIntegrationRunStatus current = SoftwareIntegrationRunStatus.valueOf(run.getStatus());
             if (current != SoftwareIntegrationRunStatus.CANCEL_REQUESTED && current != SoftwareIntegrationRunStatus.COLLECTING) {
                 run = runStore.transition(run.getId(), SoftwareIntegrationRunStatus.COLLECTING, null,
@@ -471,10 +474,12 @@ public class SoftwareIntegrationRunDispatcher {
             boolean completed = runStore.complete(run.getId(), validated.terminalStatus(), validated.contract(),
                     validated.result(), error, snapshot.cleanup(), published);
             if (!completed) artifactPublisher.discard(published);
-        } catch (PipesimWellResultValidator.ResultValidationException exception) {
+        } catch (PipesimResultValidator.ResultValidationException exception) {
             if (published != null) artifactPublisher.discard(published);
             if (finishCancellationThatWonDuringPublication(run.getId(), snapshot)) return;
-            fail(run.getId(), "RESULT_CONTRACT_INVALID", "Worker 结果不符合 pipesim-well-result/1");
+            String schema = "network".equals(run.getRunType())
+                    ? "pipesim-network-result/1" : "pipesim-well-result/1";
+            fail(run.getId(), "RESULT_CONTRACT_INVALID", "Worker 结果不符合 " + schema);
         } catch (SoftwareIntegrationArtifactPublisher.ArtifactPublicationException exception) {
             if (published != null) artifactPublisher.discard(published);
             if (finishCancellationThatWonDuringPublication(run.getId(), snapshot)) return;

@@ -15,5 +15,6 @@
     <Content Include="ptk_validate.py" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="ptk_run.py" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="ptk_normalization.py" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="ptk_network.py" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

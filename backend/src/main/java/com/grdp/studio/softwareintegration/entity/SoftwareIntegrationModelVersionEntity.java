@@ -17,6 +17,7 @@ public class SoftwareIntegrationModelVersionEntity {
     private String sha256;
     private Long sizeBytes;
     private String status;
+    private String modelKind;
     private String validationMessage;
     private String studiesJson;
     private LocalDateTime createdAt;
@@ -37,6 +38,8 @@ public class SoftwareIntegrationModelVersionEntity {
     public void setSizeBytes(Long sizeBytes) { this.sizeBytes = sizeBytes; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
+    public String getModelKind() { return modelKind; }
+    public void setModelKind(String modelKind) { this.modelKind = modelKind; }
     public String getValidationMessage() { return validationMessage; }
     public void setValidationMessage(String validationMessage) { this.validationMessage = validationMessage; }
     public String getStudiesJson() { return studiesJson; }

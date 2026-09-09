@@ -3,9 +3,15 @@ import os
 import sys
 
 _PROTOCOL_OUTPUT = sys.stdout
+SCRIPT_DIRECTORY = os.path.dirname(os.path.abspath(__file__))
+if SCRIPT_DIRECTORY not in sys.path:
+    sys.path.insert(0, SCRIPT_DIRECTORY)
+
 ptk_path = os.environ.get("PIPESIM_PTK_PATH")
 if ptk_path:
     sys.path.insert(0, ptk_path)
+
+from ptk_network import format_validation_issues, inspect_network  # noqa: E402
 
 
 def result(status, message, model_kind=None, well=None, studies=None, error=None):
@@ -29,6 +35,50 @@ def validate(path):
         from sixgill.definitions import Constants, Parameters
 
         model = Model.open(path)
+        studies = [study.name for study in model._catalog.lookup_entries_by_class_ids([ModelClasses.STUDY])]
+        if not studies:
+            return result("INVALID", "模型中未找到可运行的研究方案")
+
+        network = inspect_network(model)
+        if network["candidate"]:
+            if not network["valid"]:
+                return result(
+                    "INVALID",
+                    "PIPESIM Network 模型缺少必要管网组件：{0}".format(", ".join(network["missing"])),
+                    "network",
+                )
+            model_issues = model.validate()
+            if model_issues:
+                return result(
+                    "INVALID",
+                    "PIPESIM Network 模型验证失败：{0}".format(format_validation_issues(model_issues)),
+                    "network",
+                )
+            runnable_studies = []
+            rejected_issues = []
+            for study in studies:
+                issues = model.tasks.networksimulation.validate(study=study, validate_model=False)
+                if issues:
+                    rejected_issues.extend(issues)
+                else:
+                    runnable_studies.append(study)
+            if not runnable_studies:
+                return result(
+                    "INVALID",
+                    "Network Simulation 研究方案验证失败：{0}".format(format_validation_issues(rejected_issues)),
+                    "network",
+                )
+            counts = network["components"]
+            message = "Network 模型验证完成（上游 {0}、出口 {1}、管线 {2}、连接 {3}）".format(
+                len(counts["Source"]) + len(counts["Well"]),
+                len(counts["Sink"]),
+                len(counts["Flowline"]),
+                len(network["connections"]),
+            )
+            if len(runnable_studies) != len(studies):
+                message += "；仅返回通过 Network Simulation 验证的研究方案"
+            return result("READY", message, "network", studies=runnable_studies)
+
         components = {kind: list(model.find(component=kind)) for kind in ("Well", "BlackOilFluid", "Completion", "Tubing")}
         for required in ("Well", "Completion", "Tubing"):
             if len(components[required]) != 1:
@@ -47,9 +97,6 @@ def validate(path):
             model_kind = "black_oil_liquid"
         else:
             return result("INVALID", "首版仅支持黑油液体或组合流体基础气井生产模型")
-        studies = [study.name for study in model._catalog.lookup_entries_by_class_ids([ModelClasses.STUDY])]
-        if not studies:
-            return result("INVALID", "模型中未找到可运行的研究方案")
         return result("READY", "模型验证完成", model_kind, components["Well"][0], studies)
     except (ImportError, ModuleNotFoundError):
         return result("ENVIRONMENT_ERROR", "PIPESIM Python Toolkit 不可用", error={

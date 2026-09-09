@@ -253,7 +253,9 @@ public sealed partial class PtkRunService : IDisposable
             terminalError = envelopeStatus == "partial" ? parsedWarning : null;
             terminalMessage = terminalState == "PARTIAL_SUCCEEDED"
                 ? "Nodal result succeeded; profile failed and was retained as an empty partial result."
-                : "PIPESIM result completed successfully.";
+                : request.RunTask == "network"
+                    ? "PIPESIM Network result completed successfully."
+                    : "PIPESIM result completed successfully.";
 
             var sourceShaAfter = await storage.ComputeSha256Async(sourceModel, CancellationToken.None);
             if (!string.Equals(sourceShaAfter, request.ExpectedModelSha256, StringComparison.Ordinal))
@@ -419,8 +421,8 @@ public sealed partial class PtkRunService : IDisposable
             return WorkerApiError.Request("INVALID_EXPECTED_SHA256", "expectedModelSha256 must be 64 lowercase hexadecimal characters.");
         if (string.IsNullOrWhiteSpace(request.Study) || request.Study.Length > 256 || request.Study.Any(char.IsControl))
             return WorkerApiError.Request("INVALID_STUDY", "study is required and must be a controlled model Study name.");
-        if (request.RunTask is not ("nodal" or "profile" or "combined"))
-            return WorkerApiError.Request("INVALID_RUN_TASK", "runTask must be nodal, profile, or combined.");
+        if (request.RunTask is not ("nodal" or "profile" or "combined" or "network"))
+            return WorkerApiError.Request("INVALID_RUN_TASK", "runTask must be nodal, profile, combined, or network.");
         if (request.Parameters.ValueKind != JsonValueKind.Null)
             return WorkerApiError.Request("PARAMETERS_NOT_NULL", "parameters is required and must be explicitly null.");
         if (request.TimeoutSeconds <= 0 || request.TimeoutSeconds > options.MaxRunTimeoutSeconds)
@@ -454,6 +456,30 @@ public sealed partial class PtkRunService : IDisposable
         }
 
         if (status is not ("ok" or "partial") || !envelope.TryGetProperty("result", out var resultElement) || resultElement.ValueKind != JsonValueKind.Object) return false;
+        if (expectedRunTask == "network")
+        {
+            if (status != "ok" ||
+                !resultElement.TryGetProperty("schemaVersion", out var networkSchema) || networkSchema.GetString() != "pipesim-network-result/1" ||
+                !resultElement.TryGetProperty("model_kind", out var modelKind) || modelKind.GetString() != "network" ||
+                !resultElement.TryGetProperty("runTask", out var networkTask) || networkTask.GetString() != "network" ||
+                !resultElement.TryGetProperty("resultContract", out var networkContract) || networkContract.GetString() != "VALID_FULL" ||
+                !resultElement.TryGetProperty("study", out var study) || study.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(study.GetString()) ||
+                !resultElement.TryGetProperty("simulationState", out var simulationState) || simulationState.GetString() != "Completed" ||
+                !resultElement.TryGetProperty("topology", out var topology) || topology.ValueKind != JsonValueKind.Object ||
+                !topology.TryGetProperty("nodes", out var topologyNodes) || topologyNodes.ValueKind != JsonValueKind.Array || topologyNodes.GetArrayLength() == 0 ||
+                !topology.TryGetProperty("edges", out var topologyEdges) || topologyEdges.ValueKind != JsonValueKind.Array || topologyEdges.GetArrayLength() == 0 ||
+                !resultElement.TryGetProperty("system", out var system) || system.ValueKind != JsonValueKind.Array ||
+                !resultElement.TryGetProperty("node", out var node) || node.ValueKind != JsonValueKind.Array ||
+                !resultElement.TryGetProperty("profiles", out var profiles) || profiles.ValueKind != JsonValueKind.Array || profiles.GetArrayLength() == 0 ||
+                !resultElement.TryGetProperty("summary", out var summary) || summary.ValueKind != JsonValueKind.Object ||
+                !resultElement.TryGetProperty("messages", out var messages) || messages.ValueKind != JsonValueKind.Array ||
+                !resultElement.TryGetProperty("quality", out var quality) || quality.ValueKind != JsonValueKind.Array)
+            {
+                return false;
+            }
+            result = resultElement.Clone();
+            return true;
+        }
         if (!resultElement.TryGetProperty("schemaVersion", out var schema) || schema.GetString() != "pipesim-well-result/1" ||
             !resultElement.TryGetProperty("runTask", out var runTask) || runTask.GetString() != expectedRunTask ||
             !resultElement.TryGetProperty("resultContract", out var contract)) return false;
@@ -487,6 +513,7 @@ public sealed partial class PtkRunService : IDisposable
     {
         "RUNNING_NODAL" => "Running the selected Study nodal analysis.",
         "RUNNING_PROFILE" => "Running the selected Study pressure-temperature profile.",
+        "RUNNING_NETWORK" => "Running the selected Study network simulation.",
         "COLLECTING" => "Collecting and normalizing PIPESIM result arrays.",
         _ => throw new InvalidOperationException("The PIPESIM adapter emitted an unknown phase state.")
     };

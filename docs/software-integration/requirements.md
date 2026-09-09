@@ -8,20 +8,20 @@
 
 ## 2. 已确认目标
 
-在当前 Windows 主机上，将 Avalonia 桌面端已经实现的本地模拟器联动能力迁移到 B/S 架构，使浏览器可以通过 GRDP-Studio 后端提交任务，由本机 Windows Worker 调用 PIPESIM、后续的 PIPESIM Network 和 ECLIPSE，并返回可追溯的计算结果。
+在当前 Windows 主机上，将 Avalonia 桌面端已经实现的本地模拟器联动能力迁移到 B/S 架构，使浏览器可以通过 GRDP-Studio 后端提交任务，由本机 Windows Worker 调用 PIPESIM 井筒及 PIPESIM Network，并返回可追溯的计算结果。ECLIPSE 保留为后续能力。
 
 首个完整闭环为：
 
 ```text
-浏览器上传 PIPESIM 模型
+浏览器上传 PIPESIM 井筒或管网模型
     -> 后端保存模型版本
     -> Worker 异步验证模型并读取 Study
-    -> 用户选择 Study 和运行类型
+    -> 用户选择已有 Study 和与模型版本匹配的运行类型
     -> 后端创建持久任务
-    -> Worker 调用本机 PIPESIM 2022.1
+    -> Worker 调用本机 PIPESIM 2022.1 井筒或 Network Simulation
     -> Worker 使用冻结的解析逻辑生成结果
     -> 后端保存结果和 Artifact
-    -> 浏览器展示曲线、剖面、日志和运行历史
+    -> 浏览器展示井筒曲线/剖面或管网拓扑/支路剖面，以及诊断和运行历史
 ```
 
 ## 3. 强制变更边界
@@ -206,9 +206,11 @@ GRDP-Studio Vue :5173
 
 ```text
 软件项目名称
-└── 井筒模型
-    ├── 模型A.pips
-    └── 模型B.pips
+├── 井筒模型
+│   ├── 模型A.pips
+│   └── 模型B.pips
+└── 管网模型
+    └── 模型C.pips
 ```
 
 规则：
@@ -231,17 +233,21 @@ GRDP-Studio Vue :5173
 - 支持 Avalonia 已批准的 CSW_102 型基础气井。
 - 不支持复杂气井、水平井、人工举升和其他未被 Avalonia 批准的模型。
 - `PIPESIM Network` 指 PIPESIM 2022.1 内置 Network Simulation，不是独立产品。
+- 支持包含上游 Source/Well、Sink、Flowline 和有效 Connection 的 PIPESIM 管网模型。
+- 管网验收基线使用 PIPESIM 2022.1 官方 `CSN_302_Gas Transmission Network.pips`。
 
 ### 8.2 首版计算能力
 
 - 节点分析。
 - PT 剖面。
 - 节点分析和 PT 剖面组合运行。
+- PIPESIM Network 稳态管网模拟。
+- 管网拓扑、系统结果、节点结果和全部返回支路剖面归一化。
 - 只允许选择模型已有 Study。
 - 首版不允许网页覆盖模型参数。
 - 首版不包含敏感性分析。
 - 首版不包含模板模型创建。
-- 首版不包含 PIPESIM Network 和 ECLIPSE 的正式迁移实现。
+- 首版不包含 ECLIPSE 的正式迁移实现。
 
 ### 8.3 并发与超时
 
@@ -293,8 +299,11 @@ Worker 验证：
 - PIPESIM/PTK 环境。
 - 模型可打开。
 - 模型属于首版支持范围。
-- 模型类型是黑油单井或批准的基础气井。
+- 模型类型是黑油单井、批准的基础气井或满足必需拓扑约束的 PIPESIM Network。
 - Study 列表可读取。
+- Network Study 可通过 PIPESIM `networksimulation.validate`。
+
+验证成功后必须将 `modelKind` 持久化到模型版本。历史 READY 版本不得通过可变的父模型类型推断；迁移前无法区分黑油和基础气井的历史井筒版本使用明确的 `legacy_well` 标记。
 
 只有 READY 模型可以创建运行任务。
 
@@ -341,6 +350,7 @@ CLAIMED
 PREPARING
 RUNNING_NODAL
 RUNNING_PROFILE
+RUNNING_NETWORK
 COLLECTING
 SUCCEEDED
 FAILED
@@ -359,6 +369,7 @@ WORKER_LOST
 - 用户可以基于原参数快照手动重试。
 - 前端显示真实阶段和已用时间，不伪造求解百分比。
 - 组合运行明确显示节点分析和 PT 剖面阶段。
+- 管网运行明确显示 `RUNNING_NETWORK` 阶段。
 
 ## 12. 结果与 Artifact
 
@@ -368,8 +379,35 @@ WORKER_LOST
 - 展示 PT 剖面表格和曲线。
 - 展示运行状态、阶段、耗时、错误和清理结果。
 - 展示模型版本、Study、运行类型和运行历史。
+- 管网结果展示有向拓扑、节点/连接统计、系统变量、节点变量和全部支路剖面。
+- 管网支路可切换并绘制 PIPESIM 返回的距离、压力、温度、速度、密度和气体 Z 因子等序列。
+- 展示 PIPESIM summary、messages 和结构化 quality 诊断。
 
-### 12.2 原始结果包
+### 12.2 管网结果契约
+
+管网成功结果使用固定根契约：
+
+```text
+schemaVersion = pipesim-network-result/1
+model_kind = network
+runTask = network
+resultContract = VALID_FULL
+study = requested existing Study
+simulationState = Completed
+topology / system / node / profiles / summary / messages / quality
+```
+
+规则：
+
+- `topology` 包含节点、连接及 nodes/edges/sources/sinks/flowlines 计数。
+- `system` 和 `node` 保留 PTK 返回的全部变量、名称和值。
+- `profiles` 保留 PTK 返回的全部支路；每支路必须有非空且等长的 `TotalDistance` 和 `Pressure`。
+- 单位直接来自 PTK，不猜测、不换算未批准单位。
+- 非有限值、PIPESIM 缺失哨兵 `1.2345e25`/`-1e31` 和数值型原生缺失值统一写为 `null`。
+- 每个清洗后的数值 `null` 必须有且只有一个同路径 quality 项，code 为 `NON_FINITE` 或 `UNAVAILABLE`。
+- 本机盘符路径及私有 `net.pipe` 标识必须在 Worker Artifact 和浏览器 API 返回前脱敏。
+
+### 12.3 原始结果包
 
 完整结果 Artifact 包括：
 
@@ -386,7 +424,7 @@ WORKER_LOST
 - 本机敏感配置。
 - 重复的输入模型副本；输入模型由 modelVersion 引用。
 
-### 12.3 保留策略
+### 12.4 保留策略
 
 - 模型版本长期保留。
 - 解析结果和原始结果包保留 30 天。
@@ -456,12 +494,12 @@ GET    /software-integration/runs/{runId}/artifacts
 首版为本机受控接口，至少包括：
 
 ```text
-GET  /worker/health
-GET  /worker/capabilities
-POST /worker/models/validate
-POST /worker/runs/execute
-POST /worker/runs/{runId}/cancel
-GET  /worker/runs/{runId}
+GET  /api/health
+GET  /api/capabilities
+POST /api/models/validate
+POST /api/runs/execute
+POST /api/runs/{runId}/cancel
+GET  /api/runs/{runId}
 ```
 
 Spring Boot 负责持久任务状态；Worker 不作为业务数据库的直接写入者。
@@ -473,6 +511,7 @@ Spring Boot 负责持久任务状态；Worker 不作为业务数据库的直接�
 ```text
 C:\Program Files\Schlumberger\PIPESIM2022.1\Case Studies\Well Models\CSW_101_Basic Oil Well.pips
 C:\Program Files\Schlumberger\PIPESIM2022.1\Case Studies\Well Models\CSW_102_Basic Gas Well.pips
+C:\Program Files\Schlumberger\PIPESIM2022.1\Case Studies\Network Models\CSN_302_Gas Transmission Network.pips
 ```
 
 验收要求：
@@ -487,8 +526,11 @@ C:\Program Files\Schlumberger\PIPESIM2022.1\Case Studies\Well Models\CSW_102_Bas
 8. 验证取消、超时和 Worker 重启后的清理。
 9. 验证结果 Artifact 可下载且清单校验通过。
 10. 验证软件集成改动没有影响解析融合及其他页面。
+11. 验证 CSN_302 自动识别为 `network`，错误井筒运行类型被拒绝。
+12. 验证管网结果契约、全部支路、PTK 单位、quality-null 对应和浏览器展示。
+13. 验证 API、事件、验证消息和 Artifact 不暴露本机敏感路径或私有管道标识。
 
-仓库当前只记录了 CSW_101/CSW_102 的历史通过结论，没有保存基线结果文件；实施时必须重新生成可比较的脱敏黄金结果。
+仓库已保存 CSW_101/CSW_102 的六组脱敏 Golden 结果及 metadata sidecar。Network 以官方 CSN_302 的真实 B/S Run、Artifact 清单、源 SHA 和契约校验作为当前验收证据，不得用人工构造结果替代。
 
 ## 16. 分阶段开发顺序
 
@@ -524,17 +566,24 @@ C:\Program Files\Schlumberger\PIPESIM2022.1\Case Studies\Well Models\CSW_102_Bas
 - 结果展示和下载。
 - 取消、超时、清理和重启恢复。
 
-### 阶段 4：后续能力
+### 阶段 4：PIPESIM Network
+
+- 管网模型自动识别和 Study 验证。
+- Network Simulation 串行运行及 `RUNNING_NETWORK` 状态。
+- 拓扑、系统、节点、支路剖面和 quality 结果契约。
+- B/S 拓扑图、支路曲线、变量表和诊断展示。
+- 官方 CSN_302 真实闭环验收。
+
+### 阶段 5：后续能力
 
 - 敏感性分析。
 - 模板模型创建。
-- PIPESIM Network。
 - ECLIPSE。
 - 多用户权限。
 - 远程或多计算节点。
 - 显式发布结果到解析融合。
 
-阶段 4 内容不属于当前首版，不得提前混入首版实现。
+阶段 5 内容不属于当前首版，不得提前混入首版实现。
 
 ## 17. 当前非阻塞环境核对项
 
@@ -548,6 +597,7 @@ C:\Program Files\Schlumberger\PIPESIM2022.1\Case Studies\Well Models\CSW_102_Bas
 - `C:\GRDP-Data` 磁盘空间和目录权限。
 - Spring 数据库迁移执行机制。
 - CSW_101/CSW_102 的具体 Study 名称和黄金结果文件。
+- CSN_302 的 Network Study、拓扑规模、支路结果和 source SHA-256。
 
 这些是环境验证项，不得成为修改其他业务代码的理由。
 
@@ -557,11 +607,11 @@ C:\Program Files\Schlumberger\PIPESIM2022.1\Case Studies\Well Models\CSW_102_Bas
 
 - 用户可创建独立软件项目。
 - 用户可上传 `.pips` 或 ZIP，并形成模型版本。
-- Worker 可异步验证 CSW_101/CSW_102 类型模型并读取 Study。
-- 用户可选择 Study，提交节点分析、PT 剖面或组合任务。
+- Worker 可异步验证 CSW_101/CSW_102 类型井筒模型及合规 Network 模型并读取 Study。
+- 用户可选择 Study，提交节点分析、PT 剖面、组合任务或管网模拟。
 - PIPESIM 严格单任务执行，其他任务排队。
 - 支持取消、10 分钟超时和异常重启恢复。
-- 页面显示真实阶段、曲线、剖面、运行历史和错误。
+- 页面显示真实阶段、井筒曲线/剖面、管网拓扑/支路结果、运行历史和错误。
 - 原始结果包可下载。
 - 文件保留、回收站和 30 天清理策略生效。
 - Worker 纳入统一一键启停。

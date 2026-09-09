@@ -10,6 +10,7 @@ import com.grdp.studio.softwareintegration.entity.SoftwareIntegrationRunEventEnt
 import com.grdp.studio.softwareintegration.mapper.SoftwareIntegrationArtifactMapper;
 import com.grdp.studio.softwareintegration.mapper.SoftwareIntegrationRunEventMapper;
 import com.grdp.studio.softwareintegration.mapper.SoftwareIntegrationRunMapper;
+import com.grdp.studio.softwareintegration.support.SoftwareIntegrationDiagnosticSanitizer;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
@@ -28,7 +29,7 @@ import java.util.function.Consumer;
 @Component
 public class SoftwareIntegrationRunStore {
     private static final List<String> ACTIVE_STATUSES = List.of(
-            "CLAIMED", "PREPARING", "RUNNING_NODAL", "RUNNING_PROFILE", "COLLECTING", "CANCEL_REQUESTED");
+            "CLAIMED", "PREPARING", "RUNNING_NODAL", "RUNNING_PROFILE", "RUNNING_NETWORK", "COLLECTING", "CANCEL_REQUESTED");
     private final SoftwareIntegrationRunMapper runMapper;
     private final SoftwareIntegrationRunEventMapper eventMapper;
     private final SoftwareIntegrationArtifactMapper artifactMapper;
@@ -469,7 +470,9 @@ public class SoftwareIntegrationRunStore {
         event.setWorkerSequence(workerSequence);
         event.setEventType(type == null ? "WORKER" : type);
         event.setStatus(status);
-        event.setMessage(message == null ? null : message.substring(0, Math.min(message.length(), 1000)));
+        String sanitizedMessage = SoftwareIntegrationDiagnosticSanitizer.sanitize(message);
+        event.setMessage(sanitizedMessage == null ? null
+                : sanitizedMessage.substring(0, Math.min(sanitizedMessage.length(), 1000)));
         event.setErrorJson(json(error));
         event.setOccurredAt(occurredAt == null ? LocalDateTime.now() : occurredAt);
         event.setCreatedAt(LocalDateTime.now());

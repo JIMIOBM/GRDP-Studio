@@ -30,32 +30,49 @@ const selectedTreeProjectId = ref(null)
 let workspaceMounted = false
 
 const activeModels = computed(() => activeProjectDetail.value?.models || [])
+const wellModelKinds = new Set(['black_oil_liquid', 'basic_gas', 'legacy_well'])
+const latestKnownModelKind = model => model?.versions?.find(version => version.status === 'READY' && version.modelKind)?.modelKind ||
+  model?.versions?.find(version => version.modelKind)?.modelKind || ''
+const modelFamily = model => latestKnownModelKind(model) === 'network'
+  ? 'network'
+  : (wellModelKinds.has(latestKnownModelKind(model)) ? 'well' : 'unknown')
+const simulatorTypeLabel = model => modelFamily(model) === 'network'
+  ? 'PIPESIM 管网模型'
+  : (modelFamily(model) === 'well' ? 'PIPESIM 井筒模型' : '待识别 PIPESIM 模型')
 const resourceTree = computed(() => projects.value
   .map(project => projectDetails.value[project.id] || { project, models: [] })
   .filter(detail => detail.project.name.toLowerCase().includes(treeKeyword.value.trim().toLowerCase()) ||
     (detail.models || []).some(model => model.name.toLowerCase().includes(treeKeyword.value.trim().toLowerCase())))
-  .map(detail => ({
-    id: `project-${detail.project.id}`,
-    label: detail.project.name,
-    type: 'project',
-    projectId: detail.project.id,
-    defaultExpanded: true,
-    children: [{
-      id: `models-${detail.project.id}`,
-      label: '井筒模型',
-      type: 'model-category',
+  .map(detail => {
+    const models = detail.models || []
+    const categories = [
+      { key: 'well-models', label: '井筒模型', models: models.filter(model => modelFamily(model) === 'well') },
+      { key: 'network-models', label: '管网模型', models: models.filter(model => modelFamily(model) === 'network') },
+      { key: 'pending-models', label: '待识别模型', models: models.filter(model => modelFamily(model) === 'unknown') }
+    ].filter(category => category.models.length)
+    return {
+      id: `project-${detail.project.id}`,
+      label: detail.project.name,
+      type: 'project',
+      projectId: detail.project.id,
       defaultExpanded: true,
-      children: (detail.models || []).map(model => ({
-        id: `model-${model.id}`,
-        label: model.name,
-        type: 'model',
-        projectId: detail.project.id,
-        modelId: model.id,
-        activatable: true
+      children: categories.map(category => ({
+        id: `${category.key}-${detail.project.id}`,
+        label: `${category.label}（${category.models.length}）`,
+        type: 'model-category',
+        defaultExpanded: true,
+        children: category.models.map(model => ({
+          id: `model-${model.id}`,
+          label: model.name,
+          type: 'model',
+          projectId: detail.project.id,
+          modelId: model.id,
+          activatable: true
+        }))
       }))
-    }]
-  })))
-const defaultExpandedTreeIds = computed(() => resourceTree.value.flatMap(project => [project.id, project.children[0].id]))
+    }
+  }))
+const defaultExpandedTreeIds = computed(() => resourceTree.value.flatMap(project => [project.id, ...project.children.map(category => category.id)]))
 
 const loadProjects = async () => {
   try {
@@ -232,7 +249,7 @@ defineExpose({ openCreateDialog, openImportModel })
 
     <template v-else>
       <div class="workspace-toolbar">
-        <div><strong>PIPESIM 井筒模型</strong><span>双击模型或点击“进入计算”；支持单个 .pips 或包含依赖文件的 ZIP 包</span></div>
+        <div><strong>PIPESIM 模型</strong><span>双击模型或点击“进入计算”；井筒与管网 .pips 已可验证和运行，ZIP 包暂仅保存</span></div>
         <input ref="fileInput" accept=".pips,.zip" class="hidden-input" type="file" @change="uploadModel" />
         <el-button :loading="uploading" plain @click="chooseModel"><el-icon><UploadFilled /></el-icon>导入模型</el-button>
       </div>
@@ -241,7 +258,7 @@ defineExpose({ openCreateDialog, openImportModel })
         <p>暂无模型资源。导入模型后 Worker 将异步读取 Study 并验证兼容性。</p>
       </div>
       <el-table v-else :data="activeModels" row-key="id" class="models-table" :row-class-name="({ row }) => row.id === selectedModelId ? 'selected-model-row' : ''" @row-dblclick="row => activateResource({ type: 'model', id: `model-${row.id}`, projectId: activeProject.id, modelId: row.id })">
-        <el-table-column label="模型" min-width="220"><template #default="{ row }"><strong>{{ row.name }}</strong><small>{{ row.simulatorType }}</small></template></el-table-column>
+        <el-table-column label="模型" min-width="220"><template #default="{ row }"><strong>{{ row.name }}</strong><small>{{ simulatorTypeLabel(row) }}</small></template></el-table-column>
         <el-table-column label="版本" min-width="90"><template #default="{ row }">v{{ row.versions?.[0]?.versionNo || '-' }}</template></el-table-column>
         <el-table-column label="验证状态" min-width="150"><template #default="{ row }"><el-tooltip :content="row.versions?.[0]?.validationMessage || '等待 Worker 验证'" placement="top"><el-tag :type="row.versions?.[0]?.status === 'READY' ? 'success' : row.versions?.[0]?.status === 'VALIDATING' ? 'primary' : 'warning'">{{ row.versions?.[0]?.status || 'UPLOADED' }}</el-tag></el-tooltip></template></el-table-column>
         <el-table-column label="Study" min-width="260"><template #default="{ row }"><span v-if="row.versions?.[0]?.studies?.length">{{ row.versions[0].studies.join('、') }}</span><span v-else class="muted">等待 Worker 验证</span></template></el-table-column>

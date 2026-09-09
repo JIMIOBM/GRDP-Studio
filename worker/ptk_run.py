@@ -17,6 +17,15 @@ from ptk_normalization import (  # noqa: E402
     normalize_profile,
     validate_result_contract,
 )
+from ptk_network import (  # noqa: E402
+    build_network_result,
+    extract_topology,
+    format_validation_issues,
+    inspect_network,
+    network_failure_message,
+    network_profile_variables,
+    validate_network_result,
+)
 
 
 class AdapterFailure(Exception):
@@ -123,6 +132,78 @@ def _study_names(model):
     ]
 
 
+def _execute_network(model, study, emit_event):
+    inspection = inspect_network(model)
+    if not inspection["valid"]:
+        raise AdapterFailure(
+            "MODEL",
+            "UNSUPPORTED_NETWORK_MODEL",
+            "The model is missing required network components: {0}.".format(
+                ", ".join(inspection["missing"])
+            ),
+        )
+    try:
+        issues = model.tasks.networksimulation.validate(study=study)
+    except Exception as exc:
+        failure = _classify_exception(exc, "NETWORK_VALIDATION_FAILED")
+        if failure.category == "EXECUTION":
+            failure = AdapterFailure(
+                "MODEL",
+                "NETWORK_VALIDATION_FAILED",
+                "The selected Network Simulation Study could not be validated.",
+            )
+        raise failure
+    if issues:
+        raise AdapterFailure(
+            "MODEL",
+            "NETWORK_VALIDATION_FAILED",
+            "The selected Network Simulation Study has validation issues: {0}".format(
+                format_validation_issues(issues)
+            ),
+        )
+
+    topology = extract_topology(model, inspection)
+    emit_event("RUNNING_NETWORK", "Running the selected Study network simulation.")
+    try:
+        simulation = model.tasks.networksimulation.run(
+            study=study,
+            profile_variables=network_profile_variables(),
+        )
+    except Exception as exc:
+        failure = _classify_exception(exc, "NETWORK_RUN_FAILED")
+        if failure.category == "EXECUTION":
+            failure = AdapterFailure(
+                "EXECUTION",
+                "NETWORK_RUN_FAILED",
+                "PIPESIM Network simulation failed.",
+            )
+        raise failure
+
+    if str(getattr(simulation, "state", "")) != "Completed":
+        raise AdapterFailure(
+            "EXECUTION",
+            "NETWORK_SIMULATION_FAILED",
+            network_failure_message(simulation),
+        )
+
+    emit_event("COLLECTING", "Collecting and normalizing PIPESIM result arrays.")
+    try:
+        result = build_network_result(simulation, topology, study)
+    except Exception as exc:
+        raise AdapterFailure(
+            "PROTOCOL",
+            "NETWORK_RESULT_NORMALIZATION_FAILED",
+            "The PIPESIM Network result could not be normalized ({0}).".format(type(exc).__name__),
+        )
+    if not validate_network_result(result, study):
+        raise AdapterFailure(
+            "PROTOCOL",
+            "INVALID_NETWORK_RESULT_CONTRACT",
+            "The normalized Network result does not satisfy the result contract.",
+        )
+    return result
+
+
 def execute_request(request, model_factory=None, emit_event=None):
     emit_event = emit_event or (lambda state, message: None)
     model = None
@@ -134,8 +215,8 @@ def execute_request(request, model_factory=None, emit_event=None):
         if request["parameters"] is not None:
             raise AdapterFailure("PROTOCOL", "PARAMETERS_NOT_NULL", "Run parameters must be explicitly null.")
         run_task = request["runTask"]
-        if run_task not in ("nodal", "profile", "combined"):
-            raise AdapterFailure("PROTOCOL", "INVALID_RUN_TASK", "runTask must be nodal, profile, or combined.")
+        if run_task not in ("nodal", "profile", "combined", "network"):
+            raise AdapterFailure("PROTOCOL", "INVALID_RUN_TASK", "runTask must be nodal, profile, combined, or network.")
         study = request["study"]
         model_path = request["modelPath"]
         if not isinstance(study, str) or not study.strip():
@@ -152,10 +233,19 @@ def execute_request(request, model_factory=None, emit_event=None):
 
         try:
             model = model_factory(model_path)
-            components, model_kind = _run_components(model)
-            well_name = components["Well"][0]
             if study not in _study_names(model):
                 raise AdapterFailure("MODEL", "STUDY_NOT_FOUND", "The selected Study does not exist in the model.")
+            if run_task == "network":
+                result = _execute_network(model, study, emit_event)
+                return {
+                    "type": "result",
+                    "status": "ok",
+                    "result": result,
+                    "error": None,
+                    "warnings": [],
+                }
+            components, model_kind = _run_components(model)
+            well_name = components["Well"][0]
         except AdapterFailure:
             raise
         except Exception as exc:

@@ -197,6 +197,22 @@ public sealed class CoordinatorAndRegistryTests
         Assert.False(coordinator.IsBusy);
     }
 
+    [Fact]
+    public void NetworkRunUsesDedicatedExecutionPhase()
+    {
+        var registry = Registry();
+        var request = Request(23, "network");
+        Assert.Equal(ClaimStatus.Created, registry.TryClaim(request, "network").Status);
+
+        registry.Transition(23, "PREPARING", "prepare");
+        registry.Transition(23, "RUNNING_NETWORK", "network");
+        registry.Transition(23, "COLLECTING", "collect");
+
+        Assert.Equal(
+            new[] { "CLAIMED", "PREPARING", "RUNNING_NETWORK", "COLLECTING" },
+            registry.GetSnapshot(23, 0)!.Events.Select(item => item.State));
+    }
+
     private static PtkRunRegistry Registry() => new(
         new WorkerIdentity(Options.Create(new WorkerOptions { WorkerId = "test-worker" })));
 

@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { ElMessage } from 'element-plus'
 import { useSoftwareIntegrationStore } from '@/stores/softwareIntegration'
+import PipesimNetworkResult from './PipesimNetworkResult.vue'
 import PipesimNodalResult from './PipesimNodalResult.vue'
 import PipesimProfileResult from './PipesimProfileResult.vue'
 import PipesimRunHistory from './PipesimRunHistory.vue'
@@ -13,6 +14,8 @@ const {
   activeVersion,
   activeVersionId,
   versions,
+  isNetworkModel,
+  isWellModel,
   persistedStudies,
   selectedStudy,
   runType,
@@ -34,6 +37,7 @@ const statusMeta = {
   PREPARING: ['准备模型', 'primary'],
   RUNNING_NODAL: ['节点分析', 'primary'],
   RUNNING_PROFILE: ['PT 剖面', 'primary'],
+  RUNNING_NETWORK: ['管网模拟中', 'primary'],
   COLLECTING: ['收集结果', 'primary'],
   CANCEL_REQUESTED: ['正在取消', 'warning'],
   SUCCEEDED: ['运行成功', 'success'],
@@ -43,14 +47,19 @@ const statusMeta = {
   TIMED_OUT: ['运行超时', 'danger'],
   WORKER_LOST: ['Worker 失联', 'danger']
 }
-const runTypeOptions = [
+const wellRunTypeOptions = [
   { value: 'nodal', label: '节点分析' },
   { value: 'profile', label: 'PT 剖面' },
   { value: 'combined', label: '组合运行' }
 ]
+const runTypeOptions = computed(() => {
+  if (isNetworkModel.value) return [{ value: 'network', label: '管网模拟' }]
+  return isWellModel.value ? wellRunTypeOptions : []
+})
 const displayRun = computed(() => activeRun.value || selectedRun.value)
 const isFiniteNumber = value => typeof value === 'number' && Number.isFinite(value)
-const validResult = computed(() => {
+const validWellResult = computed(() => {
+  if (!isWellModel.value) return null
   const result = selectedRun.value?.result
   if (!result || result.schemaVersion !== 'pipesim-well-result/1') return null
   if (!['VALID_FULL', 'VALID_PARTIAL'].includes(result.resultContract)) return null
@@ -65,15 +74,62 @@ const validResult = computed(() => {
     isFiniteNumber(point?.pressure) && isFiniteNumber(point?.temperature))) return null
   return result
 })
+const isNetworkVariable = entry => entry && typeof entry.variable === 'string' &&
+  (entry.unit === null || typeof entry.unit === 'string') && Array.isArray(entry.values)
+const isNetworkTableVariable = entry => isNetworkVariable(entry) && entry.values.every(value =>
+  value && typeof value.name === 'string' && Object.prototype.hasOwnProperty.call(value, 'value'))
+const isNetworkProfile = profile => {
+  if (!profile || typeof profile.branch !== 'string' || !Number.isInteger(profile.pointCount) ||
+    profile.pointCount < 0 || !Array.isArray(profile.variables) ||
+    !profile.variables.every(isNetworkVariable)) return false
+  const distance = profile.variables.find(variable => variable.variable === 'TotalDistance')?.values
+  const pressure = profile.variables.find(variable => variable.variable === 'Pressure')?.values
+  const finiteOrGap = value => value === null || isFiniteNumber(value)
+  return Array.isArray(distance) && distance.length > 0 && Array.isArray(pressure) &&
+    distance.length === pressure.length && profile.pointCount >= distance.length &&
+    distance.every(finiteOrGap) && pressure.every(finiteOrGap)
+}
+const validNetworkResult = computed(() => {
+  if (!isNetworkModel.value) return null
+  const result = selectedRun.value?.result
+  const topology = result?.topology
+  const counts = topology?.counts
+  if (!result || result.schemaVersion !== 'pipesim-network-result/1' || result.model_kind !== 'network' ||
+    result.runTask !== 'network' || result.resultContract !== 'VALID_FULL' || result.simulationState !== 'Completed') return null
+  if (selectedRun.value?.runType !== 'network' || selectedRun.value?.resultContract !== 'VALID_FULL' ||
+    result.study !== selectedRun.value?.study) return null
+  if (!Array.isArray(topology?.nodes) || !topology.nodes.every(node =>
+    typeof node?.id === 'string' && typeof node.componentType === 'string')) return null
+  if (!Array.isArray(topology?.edges) || !topology.edges.every(edge =>
+    typeof edge?.source === 'string' && typeof edge.destination === 'string' &&
+    (edge.sourcePort === null || typeof edge.sourcePort === 'string'))) return null
+  if (!counts || !['nodes', 'edges', 'sources', 'sinks', 'flowlines'].every(field =>
+    Number.isInteger(counts[field]) && counts[field] >= 0)) return null
+  if (!Array.isArray(result.system) || !result.system.every(isNetworkTableVariable) ||
+    !Array.isArray(result.node) || !result.node.every(isNetworkTableVariable) ||
+    !Array.isArray(result.profiles) || !result.profiles.every(isNetworkProfile)) return null
+  if (!result.summary || !['info', 'warnings', 'errors'].every(field => Array.isArray(result.summary[field])) ||
+    !Array.isArray(result.messages) || !Array.isArray(result.quality) || !result.quality.every(item =>
+      typeof item?.path === 'string' && typeof item.code === 'string')) return null
+  return result
+})
 const isPartial = computed(() => selectedRun.value?.status === 'PARTIAL_SUCCEEDED' &&
-  validResult.value?.resultContract === 'VALID_PARTIAL')
+  validWellResult.value?.resultContract === 'VALID_PARTIAL')
 const canRun = computed(() => activeVersion.value?.status === 'READY' &&
-  persistedStudies.value.includes(selectedStudy.value) && !hasActiveRun.value && !submittingRun.value)
+  (isNetworkModel.value || isWellModel.value) && persistedStudies.value.includes(selectedStudy.value) &&
+  !hasActiveRun.value && !submittingRun.value)
+const modelTypeLabel = computed(() => {
+  if (isNetworkModel.value) return 'PIPESIM 管网模型'
+  return isWellModel.value ? 'PIPESIM 井筒模型' : '待识别 PIPESIM 模型'
+})
 const stages = computed(() => {
   const type = displayRun.value?.runType || runType.value
   const values = ['PREPARING']
-  if (type === 'nodal' || type === 'combined') values.push('RUNNING_NODAL')
-  if (type === 'profile' || type === 'combined') values.push('RUNNING_PROFILE')
+  if (type === 'network') values.push('RUNNING_NETWORK')
+  else {
+    if (type === 'nodal' || type === 'combined') values.push('RUNNING_NODAL')
+    if (type === 'profile' || type === 'combined') values.push('RUNNING_PROFILE')
+  }
   values.push('COLLECTING')
   return values.map(status => ({ status, label: statusMeta[status][0] }))
 })
@@ -96,7 +152,7 @@ const submitRun = async () => {
   try {
     const detail = await store.createRun()
     if (!detail) return
-    activeTab.value = runType.value === 'profile' ? 'profile' : 'nodal'
+    activeTab.value = isNetworkModel.value ? 'network' : (runType.value === 'profile' ? 'profile' : 'nodal')
     ElMessage.success('运行任务已创建')
   } catch (error) {
     ElMessage.error(errorMessage(error))
@@ -114,16 +170,28 @@ const selectHistoryRun = async runId => {
   try {
     const detail = await store.selectRun(runId)
     if (!detail) return
-    if (detail.runType === 'profile') activeTab.value = 'profile'
+    if (detail.runType === 'network') activeTab.value = 'network'
+    else if (detail.runType === 'profile') activeTab.value = 'profile'
   } catch (error) {
     ElMessage.error(errorMessage(error))
   }
 }
 
 watch(() => selectedRun.value?.id, () => {
-  if (selectedRun.value?.runType === 'profile') activeTab.value = 'profile'
+  if (selectedRun.value?.runType === 'network') activeTab.value = 'network'
+  else if (selectedRun.value?.runType === 'profile') activeTab.value = 'profile'
   else if (activeTab.value === 'profile' && selectedRun.value?.runType === 'nodal') activeTab.value = 'nodal'
 })
+watch([isNetworkModel, isWellModel], ([networkModel, wellModel]) => {
+  if (networkModel) {
+    runType.value = 'network'
+    activeTab.value = 'network'
+    return
+  }
+  if (wellModel && runType.value === 'network') runType.value = 'nodal'
+  else if (!wellModel) runType.value = ''
+  if (activeTab.value === 'network') activeTab.value = selectedRun.value?.runType === 'profile' ? 'profile' : 'nodal'
+}, { immediate: true })
 </script>
 
 <template>
@@ -134,7 +202,7 @@ watch(() => selectedRun.value?.id, () => {
           <h1>{{ activeModel.name }}</h1>
           <el-tag :type="activeVersion?.status === 'READY' ? 'success' : 'warning'">{{ activeVersion?.status || '无版本' }}</el-tag>
         </div>
-        <p>PIPESIM 井筒模型 · v{{ activeVersion?.versionNo || '-' }}</p>
+        <p>{{ modelTypeLabel }} · v{{ activeVersion?.versionNo || '-' }}</p>
       </div>
       <div v-if="displayRun" class="run-summary">
         <el-tag :type="statusMeta[displayRun.status]?.[1] || 'info'">{{ statusMeta[displayRun.status]?.[0] || displayRun.status }}</el-tag>
@@ -194,11 +262,14 @@ watch(() => selectedRun.value?.id, () => {
     </div>
 
     <el-tabs v-model="activeTab" class="result-tabs">
-      <el-tab-pane label="节点分析" name="nodal">
-        <PipesimNodalResult :result="validResult" />
+       <el-tab-pane v-if="isWellModel" label="节点分析" name="nodal">
+        <PipesimNodalResult :result="validWellResult" />
       </el-tab-pane>
-      <el-tab-pane label="PT 剖面" name="profile">
-        <PipesimProfileResult :result="validResult" :partial="isPartial" />
+       <el-tab-pane v-if="isWellModel" label="PT 剖面" name="profile">
+        <PipesimProfileResult :result="validWellResult" :partial="isPartial" />
+      </el-tab-pane>
+      <el-tab-pane v-if="isNetworkModel" label="管网结果" name="network">
+        <PipesimNetworkResult :result="validNetworkResult" />
       </el-tab-pane>
       <el-tab-pane label="运行记录" name="history">
         <PipesimRunHistory

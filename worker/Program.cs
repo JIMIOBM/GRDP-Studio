@@ -88,6 +88,16 @@ app.MapGet("/api/capabilities", (WorkerIdentity identity, PtkRunRegistry registr
             status = installationFound && pythonToolkitFound && pythonFound ? "AVAILABLE" : "UNAVAILABLE",
             runTasks = new[] { "nodal", "profile", "combined" },
             maxTimeoutSeconds = options.MaxRunTimeoutSeconds
+        },
+        pipesimNetwork = new
+        {
+            version = "2022.1",
+            installationFound,
+            pythonToolkitFound,
+            pythonFound,
+            status = installationFound && pythonToolkitFound && pythonFound ? "AVAILABLE" : "UNAVAILABLE",
+            runTasks = new[] { "network" },
+            maxTimeoutSeconds = options.MaxRunTimeoutSeconds
         }
     });
 });

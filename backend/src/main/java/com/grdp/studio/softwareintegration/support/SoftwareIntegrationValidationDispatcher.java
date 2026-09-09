@@ -1,7 +1,10 @@
 package com.grdp.studio.softwareintegration.support;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.grdp.studio.softwareintegration.entity.SoftwareIntegrationModelEntity;
 import com.grdp.studio.softwareintegration.entity.SoftwareIntegrationModelVersionEntity;
+import com.grdp.studio.softwareintegration.mapper.SoftwareIntegrationModelMapper;
 import com.grdp.studio.softwareintegration.mapper.SoftwareIntegrationModelVersionMapper;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
@@ -21,15 +24,18 @@ import java.util.List;
 @Component
 public class SoftwareIntegrationValidationDispatcher {
     private final SoftwareIntegrationModelVersionMapper versionMapper;
+    private final SoftwareIntegrationModelMapper modelMapper;
     private final SoftwareIntegrationProperties properties;
     private final ObjectMapper objectMapper;
     private final SoftwareIntegrationStorageKeyNormalizer storageKeyNormalizer;
     private final HttpClient httpClient;
 
     public SoftwareIntegrationValidationDispatcher(SoftwareIntegrationModelVersionMapper versionMapper,
+                                                     SoftwareIntegrationModelMapper modelMapper,
                                                      SoftwareIntegrationProperties properties, ObjectMapper objectMapper,
                                                      SoftwareIntegrationStorageKeyNormalizer storageKeyNormalizer) {
         this.versionMapper = versionMapper;
+        this.modelMapper = modelMapper;
         this.properties = properties;
         this.objectMapper = objectMapper;
         this.storageKeyNormalizer = storageKeyNormalizer;
@@ -56,9 +62,18 @@ public class SoftwareIntegrationValidationDispatcher {
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             JsonNode payload = objectMapper.readTree(response.body());
             if (response.statusCode() == 200 && "READY".equals(payload.path("status").asText())) {
+                String simulatorType = simulatorType(payload.path("modelKind").asText());
+                if (simulatorType == null) {
+                    update(version, "INVALID", "Worker 返回不支持的 PIPESIM 模型类型", null);
+                    return;
+                }
                 List<String> studies = new ArrayList<>();
                 payload.path("studies").forEach(study -> studies.add(study.asText()));
-                update(version, "READY", payload.path("message").asText("模型验证完成"), String.join("\n", studies));
+                if (!persistReady(version, payload.path("modelKind").asText(), simulatorType,
+                        payload.path("message").asText("模型验证完成"), String.join("\n", studies))) {
+                    update(version, "INVALID", "模型版本所属模型不存在", null);
+                    return;
+                }
             } else {
                 String status = response.statusCode() == 409 || response.statusCode() == 503
                         || "ENVIRONMENT_ERROR".equals(payload.path("status").asText()) ? "ENVIRONMENT_ERROR" : "INVALID";
@@ -67,6 +82,38 @@ public class SoftwareIntegrationValidationDispatcher {
         } catch (Exception exception) {
             update(version, "ENVIRONMENT_ERROR", "无法连接软件集成 Worker", null);
         }
+    }
+
+    private boolean persistSimulatorType(long modelId, String simulatorType) {
+        return modelMapper.update(null, new LambdaUpdateWrapper<SoftwareIntegrationModelEntity>()
+                .eq(SoftwareIntegrationModelEntity::getId, modelId)
+                .isNull(SoftwareIntegrationModelEntity::getDeletedAt)
+                .set(SoftwareIntegrationModelEntity::getSimulatorType, simulatorType)
+                .set(SoftwareIntegrationModelEntity::getUpdatedAt, LocalDateTime.now())) == 1;
+    }
+
+    private synchronized boolean persistReady(SoftwareIntegrationModelVersionEntity version, String modelKind,
+                                               String simulatorType, String message, String studies) {
+        SoftwareIntegrationModelEntity model = modelMapper.selectById(version.getModelId());
+        if (model == null || model.getDeletedAt() != null) return false;
+        update(version, "READY", message, studies, modelKind);
+        SoftwareIntegrationModelVersionEntity newestReady = versionMapper.selectOne(
+                new LambdaQueryWrapper<SoftwareIntegrationModelVersionEntity>()
+                        .eq(SoftwareIntegrationModelVersionEntity::getModelId, version.getModelId())
+                        .eq(SoftwareIntegrationModelVersionEntity::getStatus, "READY")
+                        .orderByDesc(SoftwareIntegrationModelVersionEntity::getVersionNo)
+                        .last("LIMIT 1"));
+        String newestType = newestReady == null ? simulatorType : simulatorType(newestReady.getModelKind());
+        return persistSimulatorType(version.getModelId(), newestType == null ? simulatorType : newestType);
+    }
+
+    private static String simulatorType(String modelKind) {
+        if (modelKind == null) return null;
+        return switch (modelKind) {
+            case "network" -> "PIPESIM_NETWORK";
+            case "black_oil_liquid", "basic_gas", "legacy_well" -> "PIPESIM_WELL";
+            default -> null;
+        };
     }
 
     private String normalizeAndPersist(SoftwareIntegrationModelVersionEntity version) {
@@ -83,11 +130,20 @@ public class SoftwareIntegrationValidationDispatcher {
     }
 
     private void update(SoftwareIntegrationModelVersionEntity version, String status, String message, String studies) {
-        versionMapper.update(null, new LambdaUpdateWrapper<SoftwareIntegrationModelVersionEntity>()
+        update(version, status, message, studies, null);
+    }
+
+    private void update(SoftwareIntegrationModelVersionEntity version, String status, String message,
+                        String studies, String modelKind) {
+        LambdaUpdateWrapper<SoftwareIntegrationModelVersionEntity> update =
+                new LambdaUpdateWrapper<SoftwareIntegrationModelVersionEntity>()
                 .eq(SoftwareIntegrationModelVersionEntity::getId, version.getId())
                 .set(SoftwareIntegrationModelVersionEntity::getStatus, status)
-                .set(SoftwareIntegrationModelVersionEntity::getValidationMessage, message)
+                .set(SoftwareIntegrationModelVersionEntity::getValidationMessage,
+                        SoftwareIntegrationDiagnosticSanitizer.sanitize(message))
                 .set(SoftwareIntegrationModelVersionEntity::getStudiesJson, studies)
-                .set(SoftwareIntegrationModelVersionEntity::getUpdatedAt, LocalDateTime.now()));
+                .set(SoftwareIntegrationModelVersionEntity::getUpdatedAt, LocalDateTime.now());
+        if (modelKind != null) update.set(SoftwareIntegrationModelVersionEntity::getModelKind, modelKind);
+        versionMapper.update(null, update);
     }
 }

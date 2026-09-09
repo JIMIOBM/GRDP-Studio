@@ -18,6 +18,7 @@ import com.grdp.studio.softwareintegration.mapper.SoftwareIntegrationModelMapper
 import com.grdp.studio.softwareintegration.mapper.SoftwareIntegrationModelVersionMapper;
 import com.grdp.studio.softwareintegration.mapper.SoftwareIntegrationProjectMapper;
 import com.grdp.studio.softwareintegration.service.SoftwareIntegrationRunService;
+import com.grdp.studio.softwareintegration.support.SoftwareIntegrationDiagnosticSanitizer;
 import com.grdp.studio.softwareintegration.support.SoftwareIntegrationProperties;
 import com.grdp.studio.softwareintegration.support.SoftwareIntegrationRunExceptionHandler.RunException;
 import com.grdp.studio.softwareintegration.support.SoftwareIntegrationStorageKeyNormalizer;
@@ -25,6 +26,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -34,7 +37,8 @@ import java.util.Set;
 
 @Service
 public class SoftwareIntegrationRunServiceImpl implements SoftwareIntegrationRunService {
-    private static final Set<String> RUN_TYPES = Set.of("nodal", "profile", "combined");
+    private static final Set<String> WELL_RUN_TYPES = Set.of("nodal", "profile", "combined");
+    private static final Set<String> RUN_TYPES = Set.of("nodal", "profile", "combined", "network");
     private final SoftwareIntegrationRunStore runStore;
     private final SoftwareIntegrationModelVersionMapper versionMapper;
     private final SoftwareIntegrationModelMapper modelMapper;
@@ -68,15 +72,28 @@ public class SoftwareIntegrationRunServiceImpl implements SoftwareIntegrationRun
             throw new RunException(HttpStatus.BAD_REQUEST, "parameters 必须显式为 null");
         }
         String runType = request.getRunType();
-        if (!RUN_TYPES.contains(runType)) throw new RunException(HttpStatus.BAD_REQUEST, "runType 必须为 nodal、profile 或 combined");
+        if (!RUN_TYPES.contains(runType)) {
+            throw new RunException(HttpStatus.BAD_REQUEST, "runType 必须为 nodal、profile、combined 或 network");
+        }
         SoftwareIntegrationModelVersionEntity version = requireVersion(versionId);
         if (!"READY".equals(version.getStatus())) throw new RunException(HttpStatus.CONFLICT, "只有 READY 模型版本可以创建运行");
-        String study = request.getStudy();
-        boolean studyExists = version.getStudiesJson() != null && Arrays.stream(version.getStudiesJson().split("\\n", -1))
-                .anyMatch(study::equals);
-        if (!studyExists) throw new RunException(HttpStatus.BAD_REQUEST, "Study 不存在或名称不精确匹配");
+        List<String> matchingStudies = version.getStudiesJson() == null ? List.of()
+                : Arrays.stream(version.getStudiesJson().split("\\n", -1))
+                .filter(study -> SoftwareIntegrationDiagnosticSanitizer.sanitize(study).equals(request.getStudy()))
+                .toList();
+        if (matchingStudies.size() != 1) {
+            throw new RunException(HttpStatus.BAD_REQUEST, "Study 不存在、名称不精确匹配或脱敏后不唯一");
+        }
+        String study = matchingStudies.get(0);
         SoftwareIntegrationModelEntity model = modelMapper.selectById(version.getModelId());
         if (model == null || model.getDeletedAt() != null) throw new RunException(HttpStatus.NOT_FOUND, "模型不存在");
+        String versionSimulatorType = simulatorType(version.getModelKind());
+        if (versionSimulatorType == null) {
+            throw new RunException(HttpStatus.CONFLICT, "模型版本缺少已验证类型，请重新验证");
+        }
+        boolean compatible = "PIPESIM_NETWORK".equals(versionSimulatorType) && "network".equals(runType)
+                || "PIPESIM_WELL".equals(versionSimulatorType) && WELL_RUN_TYPES.contains(runType);
+        if (!compatible) throw new RunException(HttpStatus.BAD_REQUEST, "runType 与模型 simulatorType 不兼容");
         SoftwareIntegrationProjectEntity project = projectMapper.selectById(model.getProjectId());
         if (project == null || project.getDeletedAt() != null) throw new RunException(HttpStatus.NOT_FOUND, "软件集成项目不存在");
         normalizeStoredKey(version);
@@ -92,13 +109,15 @@ public class SoftwareIntegrationRunServiceImpl implements SoftwareIntegrationRun
         SoftwareIntegrationModelEntity model = modelMapper.selectById(run.getModelId());
         return new SoftwareIntegrationRunDetailResponse(
                 run.getId(), run.getProjectId(), run.getModelId(), run.getModelVersionId(), model.getName(), version.getVersionNo(),
-                run.getStatus(), run.getStudyName(), run.getRunType(), nullNode(), run.getCreatedAt(), run.getQueuedAt(),
+                run.getStatus(), SoftwareIntegrationDiagnosticSanitizer.sanitize(run.getStudyName()),
+                run.getRunType(), nullNode(), run.getCreatedAt(), run.getQueuedAt(),
                 run.getClaimedAt(), run.getStartedAt(), run.getDeadlineAt(), run.getFinishedAt(), run.getTimeoutSeconds(),
-                elapsed(run), cancellable(run), parse(run.getErrorJson()), parse(run.getCleanupJson()), run.getResultContract(),
-                parse(run.getResultJson()),
+                elapsed(run), cancellable(run), sanitize(parse(run.getErrorJson())), sanitize(parse(run.getCleanupJson())), run.getResultContract(),
+                sanitize(parse(run.getResultJson())),
                 runStore.events(runId).stream().map(event -> new SoftwareIntegrationRunEventResponse(
                         event.getId(), event.getEventSequence(), event.getWorkerSequence(), event.getEventType(), event.getStatus(),
-                        event.getMessage(), parse(event.getErrorJson()), event.getOccurredAt())).toList(),
+                        SoftwareIntegrationDiagnosticSanitizer.sanitize(event.getMessage()),
+                        sanitize(parse(event.getErrorJson())), event.getOccurredAt())).toList(),
                 runStore.artifacts(runId).stream().map(artifact -> new SoftwareIntegrationArtifactResponse(
                         artifact.getId(), artifact.getArtifactName(), artifact.getArtifactType(), artifact.getContentType(),
                         artifact.getSizeBytes(), artifact.getSha256(), artifact.getCreatedAt(), artifact.getExpiresAt())).toList());
@@ -149,7 +168,8 @@ public class SoftwareIntegrationRunServiceImpl implements SoftwareIntegrationRun
                                                           SoftwareIntegrationModelEntity model,
                                                           SoftwareIntegrationModelVersionEntity version) {
         return new SoftwareIntegrationRunSummaryResponse(run.getId(), run.getProjectId(), run.getModelId(), run.getModelVersionId(),
-                model.getName(), version.getVersionNo(), run.getStudyName(), run.getRunType(), nullNode(), run.getStatus(),
+                model.getName(), version.getVersionNo(), SoftwareIntegrationDiagnosticSanitizer.sanitize(run.getStudyName()),
+                run.getRunType(), nullNode(), run.getStatus(),
                 run.getCreatedAt(), run.getQueuedAt(), run.getStartedAt(), run.getFinishedAt(), elapsed(run), cancellable(run));
     }
 
@@ -201,4 +221,35 @@ public class SoftwareIntegrationRunServiceImpl implements SoftwareIntegrationRun
     }
 
     private JsonNode nullNode() { return objectMapper.readTree("null"); }
+
+    private JsonNode sanitize(JsonNode value) {
+        if (value == null || value.isNull() || value.isNumber() || value.isBoolean()) return value;
+        if (value.isTextual()) {
+            return objectMapper.getNodeFactory().textNode(
+                    SoftwareIntegrationDiagnosticSanitizer.sanitize(value.asText()));
+        }
+        if (value.isArray()) {
+            ArrayNode result = objectMapper.createArrayNode();
+            value.forEach(item -> result.add(sanitize(item)));
+            return result;
+        }
+        if (value.isObject()) {
+            ObjectNode result = objectMapper.createObjectNode();
+            value.properties().forEach(field -> {
+                String sanitizedKey = SoftwareIntegrationDiagnosticSanitizer.sanitize(field.getKey());
+                String uniqueKey = sanitizedKey;
+                for (int suffix = 2; result.has(uniqueKey); suffix++) uniqueKey = sanitizedKey + "#" + suffix;
+                result.set(uniqueKey, sanitize(field.getValue()));
+            });
+            return result;
+        }
+        return value;
+    }
+
+    private static String simulatorType(String modelKind) {
+        if ("network".equals(modelKind)) return "PIPESIM_NETWORK";
+        if ("black_oil_liquid".equals(modelKind) || "basic_gas".equals(modelKind)
+                || "legacy_well".equals(modelKind)) return "PIPESIM_WELL";
+        return null;
+    }
 }
