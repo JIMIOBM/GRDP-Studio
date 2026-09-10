@@ -852,6 +852,21 @@ $square-border: #c2c2c2;
   }
 }
 
+/* 已配置图标的小按钮不再使用灰色占位底；只影响两组小方块命令。 */
+.col-checks .square-row .command-square,
+.col-squares .pad-square.command-square {
+  background: #fff;
+  border-color: #aeb8c4;
+  border-radius: 2px;
+
+  .square-icon {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    filter: contrast(1.3) saturate(1.15);
+  }
+}
+
 /* ===== 大图标按钮列 ===== */
 .col-large {
   display: flex;

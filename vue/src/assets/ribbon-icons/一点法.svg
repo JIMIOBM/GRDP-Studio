@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="一点法">
+  <title>一点法</title>
+  <rect width="64" height="64" rx="10" fill="#f0f7ff"/>
+  <g fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M13 15v36h40" stroke="#345"/><path d="M19 20c14 4 25 14 31 25" stroke="#1677ff"/><circle cx="35" cy="30" r="6" fill="#13c2c2" stroke="#fff" stroke-width="2"/>
+  </g>
+</svg>
