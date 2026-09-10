@@ -176,13 +176,13 @@ const maximumFormationPressure = ref('56.34')
 const formationTemperature = ref('120')
 const onePointAlpha = ref('0.25')
 // 产能系数
-const productivityCoefficientC = ref('1.0877')
-const productivityExponentN = ref('3.8453')
-const correctedCoefficientC = ref('2.099')
-const correctedExponentN = ref('6.096')
-const fittedFormationPressure = ref('28.99')
+const productivityCoefficientC = ref('')
+const productivityExponentN = ref('')
+const correctedCoefficientC = ref('')
+const correctedExponentN = ref('')
+const fittedFormationPressure = ref('')
 const exponentialCalculationMethod = ref('拟压力')
-const openFlowRate = ref('5')
+const openFlowRate = ref('')
 
 const calculationMethod = ref('拟压力')
 const calculationResult = ref('二项式')
@@ -1583,6 +1583,7 @@ onBeforeUnmount(() => window.removeEventListener('click', closeStableContextMenu
             :selected-pvt-table="selectedPvtTable"
             :pvt-loading="pvtOptionsLoading"
             @select-pvt="selectedPvtTable = $event; changeSelectedPvt()"
+            :operation-type="operationType"
             :well-name="selectedWellName"
             :maximum-formation-pressure="maximumFormationPressure"
             :formation-temperature="formationTemperature"
@@ -1602,6 +1603,7 @@ onBeforeUnmount(() => window.removeEventListener('click', closeStableContextMenu
             @update:corrected-n="correctedExponentN = $event"
             @update:fitted-pressure="fittedFormationPressure = $event"
             @update:open-flow-rate="openFlowRate = $event"
+            @update:operation-type="operationType = $event"
           />
         </template>
 

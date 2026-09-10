@@ -1,21 +1,28 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
+import { ElMessage } from 'element-plus'
+import { calculateExponentialCoefficientCurve } from '@/utils/productivityCoefficientCalculation'
 
 const props = defineProps({
   wellName: { type: String, default: '' },
   maximumFormationPressure: { type: [String, Number], default: '56.34' },
   formationTemperature: { type: [String, Number], default: '120' },
-  productivityCoefficientC: { type: [String, Number], default: '1.0877' },
-  productivityExponentN: { type: [String, Number], default: '3.8453' },
-  correctedCoefficientC: { type: [String, Number], default: '2.099' },
-  correctedExponentN: { type: [String, Number], default: '6.096' },
-  fittedFormationPressure: { type: [String, Number], default: '28.99' },
-  openFlowRate: { type: [String, Number], default: '5' },
+  productivityCoefficientC: { type: [String, Number], default: '' },
+  productivityExponentN: { type: [String, Number], default: '' },
+  correctedCoefficientC: { type: [String, Number], default: '' },
+  correctedExponentN: { type: [String, Number], default: '' },
+  fittedFormationPressure: { type: [String, Number], default: '' },
+  openFlowRate: { type: [String, Number], default: '' },
   pvtRecord: { type: Object, default: null },
   pvtTableOptions: { type: Array, default: () => [] },
   selectedPvtTable: { type: String, default: '' },
   pvtLoading: { type: Boolean, default: false },
+  operationType: {
+    type: String,
+    default: 'production',
+    validator: value => ['production', 'injection'].includes(value)
+  },
   projectId: { type: [Number, String], required: true },
   gasReservoirId: { type: [Number, String], required: true },
    methodType: { 
@@ -32,7 +39,8 @@ const emit = defineEmits([
   'update:corrected-c',
   'update:corrected-n',
   'update:fitted-pressure',
-  'update:open-flow-rate'
+  'update:open-flow-rate',
+  'update:operation-type'
 ])
 
 const chartEl = ref(null)
@@ -40,6 +48,8 @@ const chartType = ref('ipr-curve')
 const calculationMethod = ref('拟压力')
 const darcyCoefficient = ref('')
 const nonDarcyCoefficient = ref('')
+const maximumInjectionPressure = ref('')
+const calculatedRequest = ref(null)
 
 const binomialCoefficientA = ref('1.0877')
 const binomialCoefficientB = ref('3.8453')
@@ -47,40 +57,58 @@ const correctedBinomialA = ref('2.099')
 const correctedBinomialB = ref('6.096')
 let chart = null
 
-const scientific = value => {
-  const number = Number(value)
-  if (!Number.isFinite(number)) return ''
-  return number === 0 ? '0.0000' : number.toExponential(4).replace('e', 'E')
-}
+const isInjection = computed(() => props.operationType === 'injection')
+const operationLabel = computed(() => isInjection.value ? '注气' : '采气')
+const activeCalculatedCurve = computed(() => chartType.value === 'ipr-curve'
+  ? calculatedRequest.value?.iprCurve
+  : calculatedRequest.value?.fittedCurve)
 
-const displayFittedPressure = computed(() => Number(props.fittedFormationPressure) || 25.99)
+const calculateCurve = (coefficient, exponent) => calculateExponentialCoefficientCurve({
+  reservoirPressure: props.maximumFormationPressure,
+  coefficient,
+  exponent,
+  calculationMethod: calculationMethod.value,
+  operationType: props.operationType,
+  maximumFlowingPressure: maximumInjectionPressure.value,
+  pvtResultRows: props.pvtRecord?.gasResultRows || []
+})
 
-const parseScientific = (val, fallback) => {
-  const num = Number(val)
-  return Number.isFinite(num) && num > 0 ? num : fallback
+const legacyIPRData = () => {
+  const reservoirPressure = Number(props.maximumFormationPressure) || 56.34
+  return Array.from({ length: 501 }, (_, index) => {
+    const ratio = index / 500
+    return [120 * ratio, reservoirPressure * (1 - ratio * ratio)]
+  })
 }
 
 const generateIPRData = () => {
-  const pR = Number(props.maximumFormationPressure) || 56.34
-  const points = []
-  const steps = 500
-  
-  for (let i = 0; i <= steps; i++) {
-    const t = i / steps
-    const qsc = 120 * t
-    const pwf = pR * (1 - t * t)  
-    points.push([qsc, pwf])
-  }
-  
-  return points
+  if (props.methodType !== '指数式') return legacyIPRData()
+  return activeCalculatedCurve.value?.points.map(point => [point.flowRate, point.flowingPressure]) || []
 }
 
 const generateFitPoint = () => {
-  const pR = Number(props.maximumFormationPressure) || 56.34
-  const fittedP = Number(props.fittedFormationPressure) || 25.99
-  const t = Math.sqrt(1 - fittedP / pR)  
-  const qsc = 120 * t
-  return [[qsc, fittedP]]
+  const fittedPressureText = String(props.fittedFormationPressure ?? '').trim()
+  const fittedPressure = props.methodType !== '指数式' && !fittedPressureText
+    ? 28.99
+    : Number(fittedPressureText)
+  if (!Number.isFinite(fittedPressure)) return []
+  if (props.methodType !== '指数式') {
+    const reservoirPressure = Number(props.maximumFormationPressure) || 56.34
+    const ratio = Math.sqrt(1 - fittedPressure / reservoirPressure)
+    return Number.isFinite(ratio) ? [[120 * ratio, fittedPressure]] : []
+  }
+  const curve = activeCalculatedCurve.value
+  if (!curve) return []
+  const minimumPressure = Math.min(...curve.points.map(point => point.flowingPressure))
+  const maximumPressure = Math.max(...curve.points.map(point => point.flowingPressure))
+  if (fittedPressure < minimumPressure || fittedPressure > maximumPressure) return []
+  const point = curve.points.reduce((closest, current) =>
+    Math.abs(current.flowingPressure - fittedPressure) <
+      Math.abs(closest.flowingPressure - fittedPressure)
+      ? current
+      : closest
+  )
+  return [[point.flowRate, point.flowingPressure]]
 }
 
 const initChart = () => {
@@ -96,7 +124,12 @@ const initChart = () => {
 
 const updateChart = () => {
   if (!chart) return
-  
+  const exponential = props.methodType === '指数式'
+  const flowAxisName = exponential
+    ? `${operationLabel.value}量 qsc(10⁴m³/d)`
+    : 'qsc(10⁴m³/d)'
+  const curveName = exponential ? `${operationLabel.value}IPR曲线` : 'IPR曲线'
+
   const option = {
     grid: {
       left: 60,
@@ -107,7 +140,7 @@ const updateChart = () => {
     },
     xAxis: {
       type: 'value',
-      name: 'qsc(10⁴m³/d)',
+      name: flowAxisName,
       nameLocation: 'middle',
       nameGap: 30,
       nameTextStyle: { fontSize: 12, color: '#555' },
@@ -118,6 +151,7 @@ const updateChart = () => {
     },
     yAxis: {
       type: 'value',
+      scale: exponential && isInjection.value,
       name: 'pwf(MPa)',
       nameLocation: 'middle',
       nameGap: 40,
@@ -128,12 +162,25 @@ const updateChart = () => {
       splitLine: { show: false }
     },
     tooltip: { show: false },
+    graphic: exponential && !calculatedRequest.value
+      ? [{
+          type: 'text',
+          left: 'center',
+          top: 'middle',
+          silent: true,
+          style: {
+            text: '请填写参数后点击计算',
+            fill: '#999',
+            fontSize: 14
+          }
+        }]
+      : [],
     series: [
       {
-        name: 'IPR曲线',
+        name: curveName,
         type: 'line',
         data: generateIPRData(),
-        smooth: true,
+        smooth: !exponential,
         symbol: 'none',
         lineStyle: { color: '#d946ef', width: 2.8 },
         itemStyle: { color: '#d946ef' }
@@ -148,11 +195,47 @@ const updateChart = () => {
     ]
   }
   
-  chart.setOption(option)
+  chart.setOption(option, true)
 }
 
 const handleCalculate = () => {
-  updateChart()
+  if (props.methodType !== '指数式') {
+    updateChart()
+    return
+  }
+  try {
+    const fittedCurve = calculateCurve(props.productivityCoefficientC, props.productivityExponentN)
+    let iprCurve
+    try {
+      iprCurve = calculateCurve(props.correctedCoefficientC, props.correctedExponentN)
+    } catch (error) {
+      const message = String(error?.message || '')
+        .replace('注气能力系数 C', '修正注气能力系数 C′')
+        .replace('产能系数 C', '修正产能系数 C′')
+        .replace('注气指数 n', '修正注气指数 n′')
+        .replace('产能指数 n', '修正产能指数 n′')
+      throw new Error(message || '修正参数无法生成IPR曲线')
+    }
+    const fittedPressureText = String(props.fittedFormationPressure ?? '').trim()
+    if (fittedPressureText) {
+      const fittedPressure = Number(fittedPressureText)
+      if (!Number.isFinite(fittedPressure)) throw new Error('拟合点井底压力必须是有效数值')
+      const pressureValues = fittedCurve.points.map(point => point.flowingPressure)
+      const minimumPressure = Math.min(...pressureValues)
+      const maximumPressure = Math.max(...pressureValues)
+      if (fittedPressure < minimumPressure || fittedPressure > maximumPressure) {
+        throw new Error(`${operationLabel.value}拟合点井底压力应在 ${minimumPressure.toFixed(4)}～${maximumPressure.toFixed(4)} MPa 之间`)
+      }
+    }
+    calculatedRequest.value = { fittedCurve, iprCurve }
+    emit('update:open-flow-rate', Number(iprCurve.limitRate.toFixed(4)).toString())
+    updateChart()
+  } catch (error) {
+    calculatedRequest.value = null
+    emit('update:open-flow-rate', '')
+    updateChart()
+    ElMessage.error(error.message || '当前参数无法生成IPR曲线')
+  }
 }
 
 const handleCoefficientCChange = e => {
@@ -180,16 +263,27 @@ const handleOpenFlowRateChange = e => {
 }
 
 watch([
+  () => props.methodType,
+  () => props.selectedPvtTable,
   () => props.maximumFormationPressure,
   () => props.productivityCoefficientC,
   () => props.productivityExponentN,
   () => props.correctedCoefficientC,
   () => props.correctedExponentN,
   () => props.fittedFormationPressure,
-  () => chartType
+  () => props.operationType,
+  () => props.pvtRecord?.gasResultRows,
+  maximumInjectionPressure,
+  calculationMethod
 ], () => {
-  nextTick(() => updateChart())
+  if (props.methodType === '指数式') {
+    calculatedRequest.value = null
+    emit('update:open-flow-rate', '')
+  }
+  nextTick(updateChart)
 }, { deep: true })
+
+watch(chartType, () => nextTick(updateChart))
 
 onMounted(() => {
   nextTick(() => initChart())
@@ -243,28 +337,28 @@ const handleResize = () => {
                 <!-- ========== 指数式========== -->
         <template v-if="methodType === '指数式'">
           <label class="field-group">
-            <span>产能系数C</span>
-            <input :value="productivityCoefficientC" @input="handleCoefficientCChange" inputmode="decimal" />
+            <span>{{ isInjection ? '注气能力系数C' : '产能系数C' }}</span>
+            <input :value="productivityCoefficientC" placeholder="请输入实际系数" @input="handleCoefficientCChange" inputmode="decimal" />
           </label>
 
           <label class="field-group">
-            <span>产能指数n</span>
-            <input :value="productivityExponentN" @input="handleExponentNChange" inputmode="decimal" />
+            <span>{{ isInjection ? '注气指数n' : '产能指数n' }}</span>
+            <input :value="productivityExponentN" placeholder="请输入实际指数" @input="handleExponentNChange" inputmode="decimal" />
           </label>
 
           <label class="field-group">
-            <span>修正产能系数C'</span>
-            <input :value="correctedCoefficientC" @input="handleCorrectedCChange" inputmode="decimal" />
+            <span>{{ isInjection ? "修正注气能力系数C'" : "修正产能系数C'" }}</span>
+            <input :value="correctedCoefficientC" placeholder="请输入实际修正系数" @input="handleCorrectedCChange" inputmode="decimal" />
           </label>
 
           <label class="field-group">
-            <span>修正产能指数n'</span>
-            <input :value="correctedExponentN" @input="handleCorrectedNChange" inputmode="decimal" />
+            <span>{{ isInjection ? "修正注气指数n'" : "修正产能指数n'" }}</span>
+            <input :value="correctedExponentN" placeholder="请输入实际修正指数" @input="handleCorrectedNChange" inputmode="decimal" />
           </label>
 
           <label class="field-group">
-            <span>拟合产量的地层压力</span>
-            <input :value="fittedFormationPressure" @input="handleFittedPressureChange" inputmode="decimal" />
+            <span>{{ isInjection ? '注气拟合点井底压力(MPa)' : '采气拟合点井底流压(MPa)' }}</span>
+            <input :value="fittedFormationPressure" placeholder="可选" @input="handleFittedPressureChange" inputmode="decimal" />
           </label>
         </template>
 
@@ -294,7 +388,31 @@ const handleResize = () => {
             <input :value="fittedFormationPressure" @input="handleFittedPressureChange" inputmode="decimal" />
           </label>
         </template>
-        
+
+        <fieldset v-if="methodType === '指数式'" class="radio-group">
+          <legend>注采类型</legend>
+          <label>
+            <input
+              :checked="operationType === 'production'"
+              type="radio"
+              value="production"
+              @change="emit('update:operation-type', 'production')"
+            />采气
+          </label>
+          <label>
+            <input
+              :checked="operationType === 'injection'"
+              type="radio"
+              value="injection"
+              @change="emit('update:operation-type', 'injection')"
+            />注气
+          </label>
+        </fieldset>
+
+        <label v-if="methodType === '指数式' && isInjection" class="field-group">
+          <span>最大井底注入压力(MPa)</span>
+          <input v-model="maximumInjectionPressure" :placeholder="`必须大于 ${maximumFormationPressure} MPa`" inputmode="decimal" />
+        </label>
 
         <fieldset class="radio-group">
           <legend>计算方法</legend>
@@ -314,8 +432,19 @@ const handleResize = () => {
         </button>
 
         <label class="field-group">
-          <span>无阻流量(10⁴m³/d)</span>
-          <input :value="openFlowRate" @input="handleOpenFlowRateChange" inputmode="decimal" />
+          <span>{{ methodType === '指数式' && isInjection ? '最大注气量' : '无阻流量' }}(10⁴m³/d)</span>
+          <input
+            v-if="methodType === '指数式'"
+            :value="calculatedRequest ? openFlowRate : ''"
+            readonly
+            inputmode="decimal"
+          />
+          <input
+            v-else
+            :value="openFlowRate || '5'"
+            inputmode="decimal"
+            @input="handleOpenFlowRateChange"
+          />
         </label>
       </div>
     </aside>
@@ -329,7 +458,7 @@ const handleResize = () => {
               :value="'production-fit'" 
               v-model="chartType"
             />
-            <span>产量拟合</span>
+            <span>{{ methodType === '指数式' ? `${operationLabel}量拟合` : '产量拟合' }}</span>
           </label>
           <label class="chart-type-toggle">
             <input 
@@ -338,7 +467,7 @@ const handleResize = () => {
               v-model="chartType"
               checked
             />
-            <span>IPR曲线</span>
+            <span>{{ methodType === '指数式' ? `${operationLabel}IPR曲线` : 'IPR曲线' }}</span>
           </label>
         </div>
       </div>
