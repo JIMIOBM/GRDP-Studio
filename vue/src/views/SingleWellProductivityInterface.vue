@@ -181,6 +181,7 @@ const productivityExponentN = ref('')
 const correctedCoefficientC = ref('')
 const correctedExponentN = ref('')
 const fittedFormationPressure = ref('')
+// 产能系数二项式参数点横坐标 q
 const fittedFlowRate = ref('')
 const exponentialCalculationMethod = ref('拟压力')
 const openFlowRate = ref('')
@@ -684,8 +685,8 @@ const deleteStableNode = async () => {
     const deletedModule = [THEORETICAL_STABLE_RECORD_NODE_TYPE, THEORETICAL_UNSTABLE_RECORD_NODE_TYPE].includes(node.type) ? '理论计算' : '动态产能'
     // 不同井、稳定/不稳定流及理论/动态记录可能拥有相同数字 ID，不能只比较 ID。
     if (activeModule.value === deletedModule && activeMethod.value === regimeLabel && selectedWellName.value === node.wellName
-        && Number(projectId) === Number(PROJECT_ID) && Number(gasReservoirId) === Number(GAS_RESERVOIR_ID)
-        && Number(activeStableId.value) === Number(node.unstableId ?? node.stableId)) {
+      && Number(projectId) === Number(PROJECT_ID) && Number(gasReservoirId) === Number(GAS_RESERVOIR_ID)
+      && Number(activeStableId.value) === Number(node.unstableId ?? node.stableId)) {
       autoCalculateStable.value = false
       activeStableId.value = null
       await router.replace({
@@ -739,8 +740,10 @@ const handleCommand = async ({ group, name, parent }) => {
 
   // 将本次点击一并交给 IPR 工作台，避免用户切换后还要再点第二次。
   // 跨工作台的命令携带左侧目标井，不依赖先打开该井的 PVT/其他记录。
-  workspacePendingCommand.value = { group, name, parent,
-    wellName: resolveWorkspaceTargetWellName(sidebarTargetWellName.value || selectedWellName.value) }
+  workspacePendingCommand.value = {
+    group, name, parent,
+    wellName: resolveWorkspaceTargetWellName(sidebarTargetWellName.value || selectedWellName.value)
+  }
   await router.push({ name: 'IprInterface' })
 }
 
@@ -903,7 +906,7 @@ const handleSidebarSelect = async node => {
   if (isProductivityTestNode || node.type === ISOCHRONAL_METHOD_NODE_TYPE) return
 
   if (node.type === OWNED_PRODUCTIVITY_METHOD_NODE_TYPE ||
-      OWNED_PRODUCTIVITY_METHOD_NODE_TYPES.has(node.type)) {
+    OWNED_PRODUCTIVITY_METHOD_NODE_TYPES.has(node.type)) {
     selectedWellName.value = node.wellName || selectedWellName.value
     activeModule.value = '产能试井'
     activeMethod.value = node.pageMethod || (node.testMethod === 'one-point' ? '一点法' : '回压试井')
@@ -1091,15 +1094,15 @@ const resultChartPoints = snapshot => {
   const exponential = snapshot.result.calculationResultType === 'exponential'
   const definitions = exponential
     ? [
-        ['analysis', snapshot.result.analysisPoints],
-        ['regression', snapshot.result.regressionLine],
-        ['transient', snapshot.result.transientLine]
-      ]
+      ['analysis', snapshot.result.analysisPoints],
+      ['regression', snapshot.result.regressionLine],
+      ['transient', snapshot.result.transientLine]
+    ]
     : [
-        ['regularized', snapshot.result.analysisPoints],
-        ['regression', snapshot.result.regressionLine],
-        ['shifted-regression', snapshot.result.transientLine]
-      ]
+      ['regularized', snapshot.result.analysisPoints],
+      ['regression', snapshot.result.regressionLine],
+      ['shifted-regression', snapshot.result.transientLine]
+    ]
   return definitions.flatMap(([curveType, points]) => (points || []).map((point, index) => ({
     curveType,
     pointNumber: index + 1,
@@ -1390,17 +1393,16 @@ onBeforeUnmount(() => window.removeEventListener('click', closeStableContextMenu
 <template>
   <!-- 顶部菜单栏对应板块：单井产能。 -->
   <div class="productivity-interface" :class="{ embedded: props.embedded }">
-    <RibbonMenu v-if="!props.embedded" :scope="workspaceRibbonScope"
-      @scope-change="setWorkspaceRibbonScope" @command="handleCommand" />
+    <RibbonMenu v-if="!props.embedded" :scope="workspaceRibbonScope" @scope-change="setWorkspaceRibbonScope"
+      @command="handleCommand" />
 
     <div class="productivity-main">
       <!-- 公共左侧目录：与 IprInterface.vue 使用同一个组件。 -->
-      <WorkspaceSidebar v-if="!props.embedded" v-model:keyword="keyword" v-model:collapsed="sideTreeCollapsed" :nodes="sidebarTreeData"
-        :active-id="workspaceActiveNodeId" :loading="loadingWells" @select="handleSidebarSelect"
-        @expand="handleSidebarExpand"
-        @node-contextmenu="handleStableContextMenu" />
+      <WorkspaceSidebar v-if="!props.embedded" v-model:keyword="keyword" v-model:collapsed="sideTreeCollapsed"
+        :nodes="sidebarTreeData" :active-id="workspaceActiveNodeId" :loading="loadingWells"
+        @select="handleSidebarSelect" @expand="handleSidebarExpand" @node-contextmenu="handleStableContextMenu" />
 
-            <main class="productivity-content">
+      <main class="productivity-content">
         <div v-if="activeModule && activeMethod" class="test-tabs">
           <div class="test-tab">
             <span>{{ tabTitle }}</span>
@@ -1433,12 +1435,9 @@ onBeforeUnmount(() => window.removeEventListener('click', closeStableContextMenu
                 <div class="parameter-form">
                   <label class="field-group">
                     <span>当前PVT表</span>
-                    <input
-                      :value="pvtOptionsLoading
-                        ? '正在加载PVT…'
-                        : selectedPvtOption ? 'PVT性质1' : '当前井暂无已保存PVT性质'"
-                      readonly
-                    />
+                    <input :value="pvtOptionsLoading
+                      ? '正在加载PVT…'
+                      : selectedPvtOption ? 'PVT性质1' : '当前井暂无已保存PVT性质'" readonly />
                   </label>
 
                   <label class="field-group">
@@ -1478,11 +1477,11 @@ onBeforeUnmount(() => window.removeEventListener('click', closeStableContextMenu
                     <label><input v-model="calculationMethod" type="radio" value="压力法" />压力法</label>
                   </fieldset>
 
-                <fieldset class="radio-group">
-                  <legend>注采类型</legend>
-                  <label><input v-model="operationType" type="radio" value="production" />采气</label>
-                  <label><input v-model="operationType" type="radio" value="injection" />注气</label>
-                </fieldset>
+                  <fieldset class="radio-group">
+                    <legend>注采类型</legend>
+                    <label><input v-model="operationType" type="radio" value="production" />采气</label>
+                    <label><input v-model="operationType" type="radio" value="injection" />注气</label>
+                  </fieldset>
 
                   <fieldset class="radio-group result-methods">
                     <legend>计算结果</legend>
@@ -1492,20 +1491,12 @@ onBeforeUnmount(() => window.removeEventListener('click', closeStableContextMenu
 
                   <div class="parameter-actions">
                     <button type="button" class="calculate-button" @click="handleCalculate">计算</button>
-                    <button
-                      v-if="isOwnedPressureMethod"
-                      type="button"
-                      class="save-button"
-                      :disabled="savingResult || !calculationOutput || !resultDirty"
-                      @click="saveCalculation"
-                    >{{ savingResult ? '保存中…' : '保存' }}</button>
-                    <button
-                      v-if="activeMethod === '等时试井'"
-                      type="button"
-                      class="save-button"
-                      :disabled="savingProductivityTest || !calculationOutput"
-                      @click="handleSaveIsochronal"
-                    >{{ savingProductivityTest ? '保存中…' : '保存' }}</button>
+                    <button v-if="isOwnedPressureMethod" type="button" class="save-button"
+                      :disabled="savingResult || !calculationOutput || !resultDirty" @click="saveCalculation">{{
+                        savingResult ? '保存中…' : '保存' }}</button>
+                    <button v-if="activeMethod === '等时试井'" type="button" class="save-button"
+                      :disabled="savingProductivityTest || !calculationOutput" @click="handleSaveIsochronal">{{
+                        savingProductivityTest ? '保存中…' : '保存' }}</button>
                   </div>
                   <div v-if="calculationOutput" class="calculation-output">
                     <template v-if="calculationOutput.calculationResultType === 'exponential'">
@@ -1530,7 +1521,9 @@ onBeforeUnmount(() => window.removeEventListener('click', closeStableContextMenu
                     </template>
                     <label class="field-group">
                       <span>{{ operationType === 'injection' ? '最大注气量(10⁴m³/d)' : '无阻流量(10⁴m³/d)' }}</span>
-                      <input :value="Number.isFinite(Number(calculationOutput.aofRate)) ? Number(calculationOutput.aofRate).toFixed(4) : ''" readonly />
+                      <input
+                        :value="Number.isFinite(Number(calculationOutput.aofRate)) ? Number(calculationOutput.aofRate).toFixed(4) : ''"
+                        readonly />
                     </label>
                   </div>
                 </div>
@@ -1545,11 +1538,9 @@ onBeforeUnmount(() => window.removeEventListener('click', closeStableContextMenu
                 :external-temperature="Number(formationTemperature)" :external-one-point-alpha="Number(onePointAlpha)"
                 :external-calculation-method="pressureCalculationMethod"
                 :external-calculation-result="calculationResult === '指数式' ? 'exponential' : 'binomial'"
-                :external-operation-type="operationType"
-                :pvt-result-rows="selectedPvtRecord?.gasResultRows || []" :pvt-record="selectedPvtRecord"
-                :stored-test="storedProductivityTest"
-                :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID"
-                @result-change="handleResultChange"
+                :external-operation-type="operationType" :pvt-result-rows="selectedPvtRecord?.gasResultRows || []"
+                :pvt-record="selectedPvtRecord" :stored-test="storedProductivityTest" :project-id="PROJECT_ID"
+                :gas-reservoir-id="GAS_RESERVOIR_ID" @result-change="handleResultChange"
                 @source-input-sync="handleSourceInputSync" />
 
               <template v-else>
@@ -1579,112 +1570,61 @@ onBeforeUnmount(() => window.removeEventListener('click', closeStableContextMenu
           </section>
         </template>
         <template v-else-if="activeModule === '产能系数'">
-          <ExponentialContent
-            :pvt-table-options="pvtTableOptions"
-            :selected-pvt-table="selectedPvtTable"
-            :pvt-loading="pvtOptionsLoading"
-            @select-pvt="selectedPvtTable = $event; changeSelectedPvt()"
-            :operation-type="operationType"
-            :well-name="selectedWellName"
+          <ExponentialContent :pvt-table-options="pvtTableOptions" :selected-pvt-table="selectedPvtTable"
+            :pvt-loading="pvtOptionsLoading" @select-pvt="selectedPvtTable = $event; changeSelectedPvt()"
+            :operation-type="operationType" :well-name="selectedWellName"
             :maximum-formation-pressure="maximumFormationPressure"
-            :formation-temperature="formationTemperature"
-            :productivity-coefficient-c="productivityCoefficientC"
-            :productivity-exponent-n="productivityExponentN"
-            :corrected-coefficient-c="correctedCoefficientC"
-            :corrected-exponent-n="correctedExponentN"
-            :fitted-formation-pressure="fittedFormationPressure"
-            :fitted-flow-rate="fittedFlowRate"
-            :open-flow-rate="openFlowRate"
-            :pvt-record="selectedPvtRecord"
-            :project-id="PROJECT_ID"
-            :gas-reservoir-id="GAS_RESERVOIR_ID"
-            :method-type="activeMethod"
+            @update:maximum-formation-pressure="maximumFormationPressure = $event"
+            :formation-temperature="formationTemperature" :productivity-coefficient-c="productivityCoefficientC"
+            :productivity-exponent-n="productivityExponentN" :corrected-coefficient-c="correctedCoefficientC"
+            :corrected-exponent-n="correctedExponentN" :fitted-formation-pressure="fittedFormationPressure"
+            :fitted-flow-rate="fittedFlowRate" :open-flow-rate="openFlowRate" :pvt-record="selectedPvtRecord"
+            :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" :method-type="activeMethod"
             @update:coefficient-c="productivityCoefficientC = $event"
-            @update:exponent-n="productivityExponentN = $event"
-            @update:corrected-c="correctedCoefficientC = $event"
-            @update:corrected-n="correctedExponentN = $event"
-            @update:fitted-pressure="fittedFormationPressure = $event"
-            @update:fitted-flow-rate="fittedFlowRate = $event"
-            @update:open-flow-rate="openFlowRate = $event"
-            @update:operation-type="operationType = $event"
-          />
+            @update:exponent-n="productivityExponentN = $event" @update:corrected-c="correctedCoefficientC = $event"
+            @update:corrected-n="correctedExponentN = $event" @update:fitted-pressure="fittedFormationPressure = $event"
+            @update:fitted-flow-rate="fittedFlowRate = $event" @update:open-flow-rate="openFlowRate = $event"
+            @update:operation-type="operationType = $event" />
         </template>
 
         <template v-else-if="activeModule === '理论计算' && activeMethod === '稳定流'">
-          <TheoreticalProductivityContent
-            :well-name="selectedWellName"
-            :project-id="PROJECT_ID"
-            :gas-reservoir-id="GAS_RESERVOIR_ID"
-            :pvt-table-options="pvtTableOptions"
-            :pvt-records="databasePvtRecords"
-            :stable-id="activeStableId"
-            :auto-calculate="autoCalculateStable"
-            @saved="handleStableSaved"
-            @record-missing="handleStableRecordMissing"
-            @initial-calculated="handleInitialStableCalculated"
-          />
+          <TheoreticalProductivityContent :well-name="selectedWellName" :project-id="PROJECT_ID"
+            :gas-reservoir-id="GAS_RESERVOIR_ID" :pvt-table-options="pvtTableOptions" :pvt-records="databasePvtRecords"
+            :stable-id="activeStableId" :auto-calculate="autoCalculateStable" @saved="handleStableSaved"
+            @record-missing="handleStableRecordMissing" @initial-calculated="handleInitialStableCalculated" />
         </template>
 
         <template v-else-if="activeModule === '动态产能' && activeMethod === '稳定流'">
-          <DynamicProductivityContent
-            :well-name="selectedWellName"
-            :project-id="PROJECT_ID"
-            :gas-reservoir-id="GAS_RESERVOIR_ID"
-            :pvt-table-options="pvtTableOptions"
-            :pvt-records="databasePvtRecords"
-            :stable-id="activeStableId"
-            :auto-calculate="autoCalculateStable"
-            @saved="handleStableSaved"
-            @record-missing="handleStableRecordMissing"
-            @initial-calculated="handleInitialStableCalculated"
-          />
+          <DynamicProductivityContent :well-name="selectedWellName" :project-id="PROJECT_ID"
+            :gas-reservoir-id="GAS_RESERVOIR_ID" :pvt-table-options="pvtTableOptions" :pvt-records="databasePvtRecords"
+            :stable-id="activeStableId" :auto-calculate="autoCalculateStable" @saved="handleStableSaved"
+            @record-missing="handleStableRecordMissing" @initial-calculated="handleInitialStableCalculated" />
         </template>
 
         <template v-else-if="activeModule === '理论计算' && activeMethod === '不稳定流'">
-          <TheoreticalUnstableProductivityContent
-            :well-name="selectedWellName"
-            :project-id="PROJECT_ID"
-            :gas-reservoir-id="GAS_RESERVOIR_ID"
-            :pvt-table-options="pvtTableOptions"
-            :pvt-records="databasePvtRecords"
-            :unstable-id="activeStableId"
-            :auto-calculate="autoCalculateStable"
-            @saved="handleStableSaved"
-            @record-missing="handleStableRecordMissing"
-            @initial-calculated="handleInitialStableCalculated"
-          />
+          <TheoreticalUnstableProductivityContent :well-name="selectedWellName" :project-id="PROJECT_ID"
+            :gas-reservoir-id="GAS_RESERVOIR_ID" :pvt-table-options="pvtTableOptions" :pvt-records="databasePvtRecords"
+            :unstable-id="activeStableId" :auto-calculate="autoCalculateStable" @saved="handleStableSaved"
+            @record-missing="handleStableRecordMissing" @initial-calculated="handleInitialStableCalculated" />
         </template>
 
         <template v-else-if="activeModule === '动态产能' && activeMethod === '不稳定流'">
-          <DynamicUnstableProductivityContent
-            :well-name="selectedWellName"
-            :project-id="PROJECT_ID"
-            :gas-reservoir-id="GAS_RESERVOIR_ID"
-            :pvt-table-options="pvtTableOptions"
-            :pvt-records="databasePvtRecords"
-            :unstable-id="activeStableId"
-            :auto-calculate="autoCalculateStable"
-            @saved="handleStableSaved"
-            @record-missing="handleStableRecordMissing"
-            @initial-calculated="handleInitialStableCalculated"
-          />
+          <DynamicUnstableProductivityContent :well-name="selectedWellName" :project-id="PROJECT_ID"
+            :gas-reservoir-id="GAS_RESERVOIR_ID" :pvt-table-options="pvtTableOptions" :pvt-records="databasePvtRecords"
+            :unstable-id="activeStableId" :auto-calculate="autoCalculateStable" @saved="handleStableSaved"
+            @record-missing="handleStableRecordMissing" @initial-calculated="handleInitialStableCalculated" />
         </template>
 
         <template v-else-if="activeModule === '产能对比'">
-          <ProductivityComparison
-            :well-name="selectedWellName"
-            :project-id="PROJECT_ID"
-            :gas-reservoir-id="GAS_RESERVOIR_ID"
-            :method-type="activeMethod"
-          />
+          <ProductivityComparison :well-name="selectedWellName" :project-id="PROJECT_ID"
+            :gas-reservoir-id="GAS_RESERVOIR_ID" :method-type="activeMethod" />
         </template>
       </main>
     </div>
   </div>
   <Teleport to="body">
     <div v-if="stableContextMenu.visible" class="stable-context-menu"
-      :style="{ left: `${stableContextMenu.x}px`, top: `${stableContextMenu.y}px` }"
-      @click.stop @contextmenu.prevent>
+      :style="{ left: `${stableContextMenu.x}px`, top: `${stableContextMenu.y}px` }" @click.stop @contextmenu.prevent>
       <button v-if="isStableRecordNode(stableContextMenu.node)" type="button" @click="renameStableNode">重命名</button>
       <button type="button" class="danger" @click="deleteStableNode">删除</button>
     </div>
@@ -1705,12 +1645,26 @@ $accent-soft: #fff8d8;
   border-radius: 6px;
   box-shadow: 0 8px 22px rgba(0, 0, 0, .18);
 }
+
 :global(.stable-context-menu button) {
-  width: 100%; height: 32px; padding: 0 10px; border: 0; border-radius: 4px;
-  background: transparent; text-align: left; cursor: pointer; color: #333;
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  color: #333;
 }
-:global(.stable-context-menu button:hover) { background: #f5f7fa; }
-:global(.stable-context-menu button.danger) { color: #d93025; }
+
+:global(.stable-context-menu button:hover) {
+  background: #f5f7fa;
+}
+
+:global(.stable-context-menu button.danger) {
+  color: #d93025;
+}
 
 .productivity-interface {
   height: 100vh;
@@ -2036,7 +1990,10 @@ $accent-soft: #fff8d8;
   font-weight: 700;
   cursor: pointer;
 
-  &:hover:not(:disabled) { background: #f5f5f5; }
+  &:hover:not(:disabled) {
+    background: #f5f5f5;
+  }
+
   &:disabled {
     border-color: #d7d7d7;
     color: #aaa;
