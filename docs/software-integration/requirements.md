@@ -258,6 +258,16 @@ GRDP-Studio Vue :5173
 - 支持取消运行任务。
 - 运行取消失败时终止并重启 Python Worker。
 
+### 8.4 ECLIPSE 100 MVP
+
+- 目标版本为 ECLIPSE 100 2024.1，Worker 通过官方 `eclrun.exe` 调用，不直接以 `eclipse.exe` 作为生产入口。
+- 首版只接受一个 `.DATA` 文件；拒绝 ZIP、目录包和任何包含 `INCLUDE` 指令的 deck。依赖文件包与安全解压属于后续范围。
+- 首版不提供 Study 选择、参数覆盖、模板生成或对输入 deck 的文本替换；一次运行只执行上传版本的隔离副本，浏览器不得构造本机路径或命令。
+- 验证成功的版本使用 `modelKind=eclipse_100` 和 `simulatorType=ECLIPSE_100`；运行类型固定为 `eclipse`，不伪造 PIPESIM Study。
+- 运行成功必须同时满足：`eclrun` 退出码为零、本次生成新鲜 `.ECLEND`、`.ECLEND` 中 Errors/Problems/Bugs 均为零，且受控诊断不含 License 或 Fatal 分类。
+- 首版页面展示 ECLEND 计数、运行状态、受控诊断、输出 Artifact 清单和本次新鲜 `.RSM` 解析出的 Summary 序列；未生成或无法解析 RSM 不得伪造曲线。
+- 取消时 Worker 必须确认进程树退出，并执行官方 `eclrun kill <case>` 和 `eclrun check <case>` 清理；清理状态随运行记录持久化。
+
 ## 9. 模型上传和版本
 
 ### 9.1 上传类型
@@ -574,16 +584,23 @@ C:\Program Files\Schlumberger\PIPESIM2022.1\Case Studies\Network Models\CSN_302_
 - B/S 拓扑图、支路曲线、变量表和诊断展示。
 - 官方 CSN_302 真实闭环验收。
 
-### 阶段 5：后续能力
+### 阶段 5：ECLIPSE 100 MVP
+
+- 单 `.DATA`、无 `INCLUDE` 的验证和隔离执行。
+- `ECLRUN` 2024.1 能力探测、ECLEND/诊断成功判定、取消清理和 Artifact 发布。
+- RSM Summary 解析及 B/S 结果展示。
+- 独立 ECLIPSE 契约测试与一份真实成功 deck 的端到端验收。
+
+### 阶段 6：后续能力
 
 - 敏感性分析。
 - 模板模型创建。
-- ECLIPSE。
+- ECLIPSE ZIP 模型包、`INCLUDE` 依赖、参数覆盖和网格/二进制结果解析。
 - 多用户权限。
 - 远程或多计算节点。
 - 显式发布结果到解析融合。
 
-阶段 5 内容不属于当前首版，不得提前混入首版实现。
+阶段 6 内容不属于当前 MVP，不得提前混入实现。
 
 ## 17. 当前非阻塞环境核对项
 

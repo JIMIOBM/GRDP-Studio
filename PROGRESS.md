@@ -1,6 +1,6 @@
 # GRDP-Studio Software Integration Progress
 
-Last verified: 2026-09-09
+Last verified: 2026-09-10
 
 ## Repository State
 
@@ -110,12 +110,14 @@ published five Artifacts, confirmed process-tree exit, and returned the Worker t
 
 ### ECLIPSE Migration Checkpoint
 
-- ECLIPSE migration has been selected as the next software-integration capability but is intentionally paused before architecture freeze or implementation while the user works on another feature.
+- ECLIPSE migration is selected as the next software-integration capability. Architecture preparation is complete; implementation has not started.
 - A separate C# probe project built successfully and launched the trusted local ECLIPSE 2024.1 installation. The process created current-run PRT, EGRID and INIT outputs and exited without leaving an ECLIPSE process behind.
 - The probe's sample deck did not complete a valid simulation: its PRT contained four errors, 101 reported problems, repeated `CONVERGENCE ERROR = NaN`, and a terminal `RUN STOPPED` condition. Process exit code zero and output-file existence therefore must not be treated as simulation success.
-- No ECLIPSE Worker, Spring Boot, database, API or Vue implementation has been added to GRDP-Studio. No ECLIPSE contract or work package is frozen yet.
+- The official launcher is discoverable from the controlled local environment; `eclrun.exe --report-versions eclipse` returned `2024.1`. The Worker must use this launcher, not the probe's direct `eclipse.exe` invocation.
+- The user selected the first MVP input boundary: one `.DATA` file only, with ZIP, directory packages and `INCLUDE` decks rejected. No Study, parameter override or input-deck modification is permitted.
+- No ECLIPSE Worker, Spring Boot, database, API or Vue implementation has been added to GRDP-Studio. The prepared contract and Executor work packages are in `docs/software-integration/eclipse-mvp-architecture.md`.
 - The external probe is evidence for executable invocation only. Its permissive success check, formula-generated fallback values, hard-coded license-path handling and license-environment logging must not be migrated.
-- When work resumes, Architect must first freeze the Avalonia-compatible RSM/ECLEND parsing, output freshness, License/Fatal classification, immutable isolated-run behavior, status transitions, result schema and Executor file ownership.
+- The contract preserves Avalonia-compatible RSM/ECLEND parsing, output freshness, License/Fatal classification, immutable isolated-run behavior, cancellation cleanup and result semantics.
 
 ### Backend Model Management
 
@@ -252,13 +254,11 @@ Nodal and combined runs require non-empty IPR/VLP. Profile-only runs require a n
 
 ## Next Bounded Goal
 
-Keep the reviewed PIPESIM implementation and frozen Golden unchanged while the user works on another feature. Resume ECLIPSE only after an explicit execution decision:
+Keep the reviewed PIPESIM implementation and frozen Golden unchanged while implementing the approved ECLIPSE MVP:
 
 ```text
-Architect reads the authoritative requirements and read-only Avalonia ECLIPSE baseline
--> freeze invocation, isolation, completion/error classification, result and API contracts
--> divide non-overlapping Worker, Spring Boot and Vue work packages with a test matrix
--> Executors implement only after the shared contract is frozen
+Architect reviews the prepared ECLIPSE MVP contract and freezes any implementation-level ambiguity
+-> Executors complete migration/schema and Worker contract work before parallel Worker and Vue work packages
 -> Reviewer verifies the complete diff before any real ECLIPSE B/S acceptance run
 ```
 
