@@ -39,14 +39,18 @@ function visibleBarLabels() {
   }
 }
 
-export function buildDirectionComparisonChart(response, pressureMethod, emptyText = '请选择采气和注气记录并计算') {
+export function buildDirectionComparisonChart(response, pressureMethod, emptyText = '请选择采气或注气记录并计算') {
   const option = buildComparisonChart(response, pressureMethod, emptyText)
   const groups = response?.directionGroups || []
   const results = response?.results || []
   const form = pressureForms.find(item => item.value === pressureMethod)?.label || ''
   option.title.text = `注采无阻流量对比图（${form}）`
-  // Two condition lines need room above the legend/grid.
-  option.legend = { ...option.legend, top: 94, data: results.length ? ['采气', '注气'] : [] }
+  const directions = [
+    { type: 'production', name: '采气', color: '#5879c4' },
+    { type: 'injection', name: '注气', color: '#dc9740' }
+  ].filter(direction => results.some(row => operationOf(row.record) === direction.type))
+  // Only show directions actually selected; an absent side is not a zero-flow series.
+  option.legend = { ...option.legend, top: 94, data: directions.map(direction => direction.name) }
   option.grid.top = 132
   const many = groups.length > 4
   option.grid.bottom = many ? 125 : 90
@@ -61,10 +65,7 @@ export function buildDirectionComparisonChart(response, pressureMethod, emptyTex
   option.tooltip.formatter = point => point.data?.row
     ? `${operationOf(point.data.row.record) === 'injection' ? '注气' : '采气'}<br/>`
       + tooltip({ dataIndex: indexes.get(point.data.row.record.key) }) : ''
-  option.series = (results.length ? [
-    { type: 'production', name: '采气', color: '#5879c4' },
-    { type: 'injection', name: '注气', color: '#dc9740' }
-  ] : []).flatMap(direction => {
+  option.series = directions.flatMap(direction => {
     const rows = groups.map(group => group.results.filter(row => operationOf(row.record) === direction.type))
     const slots = Math.max(1, ...rows.map(items => items.length))
     return Array.from({ length: slots }, (_, slot) => ({

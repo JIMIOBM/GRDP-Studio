@@ -39,6 +39,7 @@ public class ComparisonRepository {
         if (!METHODS.containsKey(method)) throw new BusinessException(400, "不支持的产能对比方法");
         if (!List.of("production", "injection").contains(operationType)) throw new BusinessException(400, "不支持的注采类型");
         boolean theory = method.equals("stable") || method.equals("unstable");
+        boolean readLinkedPvt = !theory && pressureMethod.equals("pseudo-pressure");
         String common = "o.darcy_seepage_coefficient AS coefficient_a,o.non_darcy_seepage_coefficient AS coefficient_b,"
                 + "i.gas_type,i.specific_gravity,i.hydrogen_sulfide,i.carbon_dioxide,i.nitrogen,"
                 + "i.modification_method,i.deviation_factor_method,i.viscosity_method,i.formation_temperature,";
@@ -48,7 +49,7 @@ public class ComparisonRepository {
             // Table identifiers come exclusively from the two allowlisted constants above.
             String prefix = "project_well_theoretical_" + method;
             sql = "SELECT t.id AS record_id,t." + method + "_name AS record_name,"
-                    + "CAST(o.calculated_at AS DATE) AS record_date," + common
+                    + "CAST(o.calculated_at AS DATE) AS record_date,NULL AS linked_pvt_settings," + common
                     + "i.original_formation_pressure AS original_pressure FROM " + prefix + "_calculation t "
                     + "JOIN project_well_theoretical_productivity d ON d.id=t.theoretical_productivity_id "
                     + "JOIN project_well_heads w ON w.id=d.well_id "
@@ -60,9 +61,15 @@ public class ComparisonRepository {
             args = new Object[]{projectId, reservoirId, wellName.trim(), operationType, pressureMethod.replace('-', '_')};
         } else {
             sql = "SELECT t.id AS record_id,t.test_name AS record_name,CAST(o.calculated_at AS DATE) AS record_date," + common
+                    + (readLinkedPvt ? "ps.settings_json" : "NULL") + " AS linked_pvt_settings,"
                     + "i.maximum_formation_pressure AS original_pressure FROM project_well_productivity_test t "
                     + "JOIN project_well_productivity_binomial_output o ON o.test_id=t.id "
                     + "LEFT JOIN project_well_productivity_test_input i ON i.test_id=t.id "
+                    // Use only the explicitly linked PVT, and verify ownership in the same project/reservoir/well.
+                    + (readLinkedPvt ? "LEFT JOIN project_well_pvt p ON p.id=t.pvt_id AND p.well_id=t.well_id "
+                    + "LEFT JOIN project_well_heads pw ON pw.id=p.well_id AND pw.project_id=t.project_id "
+                    + "AND pw.project_gas_reservoir_id=t.project_gas_reservoir_id AND pw.well_name=t.well_name "
+                    + "LEFT JOIN project_well_pvt_settings ps ON ps.pvt_id=p.id AND pw.id IS NOT NULL AND ps.property_kind='gas' " : "")
                     + "WHERE t.project_id=? AND t.project_gas_reservoir_id=? AND t.well_name=? "
                     + "AND t.operation_type=? AND t.test_method=? AND o.pressure_method=? ORDER BY record_date,t.id";
             args = new Object[]{projectId, reservoirId, wellName.trim(), operationType, method, pressureMethod};
@@ -70,10 +77,11 @@ public class ComparisonRepository {
         return jdbc.query(sql, (rs, row) -> new Saved(method, rs.getLong("record_id"), rs.getString("record_name"),
                 rs.getDate("record_date") == null ? null : rs.getDate("record_date").toLocalDate(),
                 decimal(rs, "coefficient_a"), decimal(rs, "coefficient_b"),
-                new PvtSnapshot(rs.getString("gas_type"), decimal(rs, "specific_gravity"), decimal(rs, "hydrogen_sulfide"),
+                ComparisonPvtMethods.complete(new PvtSnapshot(rs.getString("gas_type"), decimal(rs, "specific_gravity"), decimal(rs, "hydrogen_sulfide"),
                         decimal(rs, "carbon_dioxide"), decimal(rs, "nitrogen"), rs.getString("modification_method"),
                         rs.getString("deviation_factor_method"), rs.getString("viscosity_method"),
-                        decimal(rs, "formation_temperature"), decimal(rs, "original_pressure")), operationType), args);
+                        decimal(rs, "formation_temperature"), decimal(rs, "original_pressure")),
+                        rs.getString("linked_pvt_settings")), operationType), args);
     }
     private static Double decimal(ResultSet rs, String column) throws SQLException {
         double value = rs.getDouble(column);

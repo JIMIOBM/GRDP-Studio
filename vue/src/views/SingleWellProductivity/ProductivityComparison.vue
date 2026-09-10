@@ -216,8 +216,6 @@ const handleCalculate = async () => {
   if (!selectedOperationTypes.value.length || !selected.length) return ElMessage.warning('请选择参与对比的采气或注气记录')
   const hasProduction = selected.some(item => item.operationType !== 'injection')
   const hasInjection = selected.some(item => item.operationType === 'injection')
-  if (isDirectionComparison.value && (!hasProduction || !hasInjection))
-    return ElMessage.warning('请同时选择采气和注气记录进行对比')
   const pr = Number(formationPressure.value), pwf = Number(injectionPressure.value)
   if (hasProduction && (!Number.isFinite(pr) || pr <= .1)) return ElMessage.warning('计算地层压力必须大于0.1 MPa')
   if (hasInjection && (!Number.isFinite(pwf) || pwf <= .1)) return ElMessage.warning('计算注气压力必须大于0.1 MPa')
