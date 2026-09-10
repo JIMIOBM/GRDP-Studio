@@ -47,9 +47,13 @@ public class ComparisonPseudoPressure {
         range(pvt.nitrogen(), 0, 100, "N₂摩尔百分含量");
         if (pvt.hydrogenSulfide() + pvt.carbonDioxide() + pvt.nitrogen() > 100)
             throw new BusinessException(400, "记录中非烃气体摩尔百分含量之和超过100%");
-        index(pvt.modificationMethod(), "Wichert", "Carr");
-        index(pvt.deviationFactorMethod(), "Kassem", "Purvis", "Hall");
-        index(pvt.viscosityMethod(), "Lee", "Carr", "Sutton");
+        index(requiredMethod(pvt.modificationMethod(), "非烃气体修正方法"), "Wichert", "Carr");
+        index(requiredMethod(pvt.deviationFactorMethod(), "偏差系数计算方法"), "Kassem", "Purvis", "Hall");
+        index(requiredMethod(pvt.viscosityMethod(), "天然气黏度计算方法"), "Lee", "Carr", "Sutton");
+    }
+    private static String requiredMethod(String value, String name) {
+        if (value == null || value.isBlank()) throw new BusinessException(400, "记录缺少PVT计算方法：" + name);
+        return value;
     }
     private static void range(Double value, double min, double max, String name) {
         if (value == null || !Double.isFinite(value) || value < min || value > max)

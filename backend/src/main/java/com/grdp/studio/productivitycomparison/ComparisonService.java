@@ -88,8 +88,8 @@ public class ComparisonService {
         if (selected.size() != request.records().size()) throw new BusinessException(400, "参与对比的记录不能重复");
         var methods = selected.stream().map(Selection::method).distinct().toList();
         var directions = selected.stream().map(Selection::operationType).distinct().toList();
-        if (compareDirections && (methods.size() != 1 || !new HashSet<>(directions).equals(Set.of("production", "injection"))))
-            throw new BusinessException(400, "注采对比请选择同一方法下的采气和注气记录");
+        if (compareDirections && methods.size() != 1)
+            throw new BusinessException(400, "注采对比请选择同一方法下的记录");
         if (request.period() != null && (methods.size() != 1 || directions.size() != 1))
             throw new BusinessException(400, "多周期对比请选择同一方法和同一注采类型的记录");
         if (directions.contains("production")) validateCalculationPressure(request.formationPressure(), "地层压力", request.pressureMethod());
