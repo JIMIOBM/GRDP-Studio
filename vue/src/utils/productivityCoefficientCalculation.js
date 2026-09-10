@@ -75,6 +75,47 @@ export const coefficientPressurePotential = (pressure, method, pvtCurve = []) =>
   throw new Error('不支持的计算方法')
 }
 
+export const normalizeCoefficientFitPoint = ({
+  operationType = 'production',
+  flowRate,
+  flowingPressure,
+  curve
+}) => {
+  const direction = operationType === 'injection' ? 'injection' : 'production'
+  const operationLabel = direction === 'injection' ? '注气' : '采气'
+  const pressureLabel = direction === 'injection' ? '井底压力' : '井底流压'
+  const flowText = String(flowRate ?? '').trim()
+  const pressureText = String(flowingPressure ?? '').trim()
+
+  if (!flowText && !pressureText) return null
+  if (!flowText || !pressureText) {
+    throw new Error(`请同时填写${operationLabel}拟合点的${operationLabel}量和${pressureLabel}`)
+  }
+
+  const normalizedFlowRate = Number(flowText)
+  const normalizedPressure = Number(pressureText)
+  if (!Number.isFinite(normalizedFlowRate) || normalizedFlowRate < 0) {
+    throw new Error(`${operationLabel}拟合点${operationLabel}量必须是大于或等于 0 的有效数值`)
+  }
+  if (!Number.isFinite(normalizedPressure)) {
+    throw new Error(`${operationLabel}拟合点${pressureLabel}必须是有效数值`)
+  }
+
+  const pressureValues = curve?.points?.map(point => Number(point.flowingPressure))
+    .filter(Number.isFinite) || []
+  if (pressureValues.length) {
+    const minimumPressure = Math.min(...pressureValues)
+    const maximumPressure = Math.max(...pressureValues)
+    if (normalizedPressure < minimumPressure || normalizedPressure > maximumPressure) {
+      throw new Error(
+        `${operationLabel}拟合点${pressureLabel}应在 ${minimumPressure.toFixed(4)}～${maximumPressure.toFixed(4)} MPa 之间`
+      )
+    }
+  }
+
+  return { flowRate: normalizedFlowRate, flowingPressure: normalizedPressure }
+}
+
 const injectionLimit = (reservoirPressure, maximumFlowingPressure, method, pvtCurve) => {
   const maximum = numberFrom(maximumFlowingPressure)
   if (!Number.isFinite(maximum) || maximum <= reservoirPressure) {

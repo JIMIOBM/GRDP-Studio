@@ -181,6 +181,7 @@ const productivityExponentN = ref('')
 const correctedCoefficientC = ref('')
 const correctedExponentN = ref('')
 const fittedFormationPressure = ref('')
+const fittedFlowRate = ref('')
 const exponentialCalculationMethod = ref('拟压力')
 const openFlowRate = ref('')
 
@@ -1592,6 +1593,7 @@ onBeforeUnmount(() => window.removeEventListener('click', closeStableContextMenu
             :corrected-coefficient-c="correctedCoefficientC"
             :corrected-exponent-n="correctedExponentN"
             :fitted-formation-pressure="fittedFormationPressure"
+            :fitted-flow-rate="fittedFlowRate"
             :open-flow-rate="openFlowRate"
             :pvt-record="selectedPvtRecord"
             :project-id="PROJECT_ID"
@@ -1602,6 +1604,7 @@ onBeforeUnmount(() => window.removeEventListener('click', closeStableContextMenu
             @update:corrected-c="correctedCoefficientC = $event"
             @update:corrected-n="correctedExponentN = $event"
             @update:fitted-pressure="fittedFormationPressure = $event"
+            @update:fitted-flow-rate="fittedFlowRate = $event"
             @update:open-flow-rate="openFlowRate = $event"
             @update:operation-type="operationType = $event"
           />
