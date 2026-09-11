@@ -43,11 +43,21 @@ The existing validation request continues to contain only `modelStorageKey` and 
 
 1. Require a `.DATA` original filename and verify the storage key and SHA-256.
 2. Create and hash-check an isolated validation copy.
-3. Reject any deck containing an `INCLUDE` instruction after lexical comment handling, with a stable non-retryable `MODEL / ECLIPSE_INCLUDE_UNSUPPORTED` error.
+3. Reject any deck containing an `INCLUDE` instruction using the frozen lexical rule below, with a stable non-retryable `MODEL / ECLIPSE_INCLUDE_UNSUPPORTED` error.
 4. Verify the configured launcher through `eclrun --report-versions eclipse` and require version `2024.1`.
 5. Return `READY`, `modelKind=eclipse_100`, an empty Study list and a controlled validation message. Do not run the deck to validate it.
 
 Unavailable launcher or a failed version query is retryable `ENVIRONMENT / ECLIPSE_UNAVAILABLE`. License probing must not print or persist environment variables.
+
+#### Frozen INCLUDE lexical rule
+
+The Worker scans the `.DATA` text as a character stream before ECLIPSE starts. It must:
+
+1. Treat `--` outside a quoted literal as a comment through the next `\r` or `\n`; comment text is ignored.
+2. Treat text between single quotes as a literal; a doubled single quote inside a literal is an escaped quote. Literal text is ignored.
+3. In remaining text, recognize `INCLUDE` case-insensitively only when both neighbors are absent or are not ASCII letters, digits or `_`.
+4. Reject on the first recognized token. `INCLUDE`, `include`, `"INCLUDE"` and whitespace-delimited variants are rejected; `'INCLUDE'`, `-- INCLUDE`, `FOOINCLUDE` and `INCLUDE_FILE` are not tokens under this MVP rule. Double quotes have no special meaning in this scanner.
+5. Never resolve, read or disclose a referenced path. A rejected deck has no ECLIPSE process, no work Artifact and no generated result.
 
 ### Execution
 

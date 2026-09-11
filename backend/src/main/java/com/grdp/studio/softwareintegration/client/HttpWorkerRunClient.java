@@ -42,6 +42,31 @@ public class HttpWorkerRunClient implements WorkerRunClient {
     }
 
     @Override
+    public WorkerEclipseCapability eclipseCapability() {
+        JsonNode body = send(HttpRequest.newBuilder(uri("/api/capabilities"))
+                .timeout(properties.getWorkerReadTimeout()).GET().build(), 200);
+        JsonNode eclipse = body.get("eclipse100");
+        if (eclipse == null || !eclipse.isObject()) {
+            throw new WorkerClientException("Worker ECLIPSE capability is missing");
+        }
+        List<String> runTasks = new ArrayList<>();
+        JsonNode tasks = eclipse.get("runTasks");
+        if (tasks == null || !tasks.isArray()) {
+            throw new WorkerClientException("Worker ECLIPSE runTasks are invalid");
+        }
+        for (JsonNode task : tasks) {
+            if (!task.isTextual()) throw new WorkerClientException("Worker ECLIPSE runTask is invalid");
+            runTasks.add(task.asText());
+        }
+        JsonNode timeout = eclipse.get("maxTimeoutSeconds");
+        if (timeout == null || !timeout.isIntegralNumber() || !timeout.canConvertToInt()) {
+            throw new WorkerClientException("Worker ECLIPSE timeout capability is invalid");
+        }
+        return new WorkerEclipseCapability(text(eclipse, "version"), text(eclipse, "status"),
+                text(eclipse, "reasonCode"), List.copyOf(runTasks), timeout.intValue());
+    }
+
+    @Override
     public WorkerRunAccepted execute(WorkerRunExecuteRequest request) {
         try {
             var payload = objectMapper.createObjectNode();

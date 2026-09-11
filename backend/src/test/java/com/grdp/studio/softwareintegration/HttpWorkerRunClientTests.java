@@ -34,6 +34,9 @@ class HttpWorkerRunClientTests {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/api/health", exchange -> respond(exchange, 200,
                 "{\"status\":\"UP\",\"generationId\":\"generation-1\",\"activeRunId\":null,\"idle\":true}"));
+        server.createContext("/api/capabilities", exchange -> respond(exchange, 200,
+                "{\"eclipse100\":{\"version\":\"2024.1\",\"launcherFound\":true,\"status\":\"AVAILABLE\","
+                        + "\"reasonCode\":null,\"runTasks\":[\"eclipse\"],\"maxTimeoutSeconds\":1800}}"));
         server.createContext("/api/runs/execute", exchange -> {
             executeBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             if (executeStatus.get() == 409) {
@@ -102,6 +105,26 @@ class HttpWorkerRunClientTests {
                     assertThat(workerError.errorCode()).isEqualTo("WORKER_BUSY");
                     assertThat(workerError.error().path("retryable").asBoolean()).isTrue();
                 });
+    }
+
+    @Test
+    void readsExactEclipseCapabilityAndSendsTheFrozenNullStudyEnvelope() {
+        var capability = client.eclipseCapability();
+        assertThat(capability.version()).isEqualTo("2024.1");
+        assertThat(capability.status()).isEqualTo("AVAILABLE");
+        assertThat(capability.runTasks()).containsExactly("eclipse");
+        assertThat(capability.maxTimeoutSeconds()).isEqualTo(1800);
+
+        client.execute(new WorkerRunExecuteRequest(41, "models/9/1/CASE.DATA", "b".repeat(64),
+                null, "eclipse", null, 1800));
+        JsonNode request = objectMapper.readTree(executeBody.get());
+        assertThat(request.properties()).extracting(java.util.Map.Entry::getKey)
+                .containsExactlyInAnyOrder("runId", "modelStorageKey", "expectedModelSha256", "study",
+                        "runTask", "parameters", "timeoutSeconds");
+        assertThat(request.path("study").isNull()).isTrue();
+        assertThat(request.path("parameters").isNull()).isTrue();
+        assertThat(request.path("runTask").asText()).isEqualTo("eclipse");
+        assertThat(request.path("timeoutSeconds").asInt()).isEqualTo(1800);
     }
 
     private static void respond(HttpExchange exchange, int status, String body) throws IOException {

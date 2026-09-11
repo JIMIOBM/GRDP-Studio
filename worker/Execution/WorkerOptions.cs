@@ -13,6 +13,9 @@ public sealed class WorkerOptions
     public int ValidationTimeoutSeconds { get; init; } = 120;
     public int GracefulStopSeconds { get; init; } = 2;
     public int ProcessExitConfirmationSeconds { get; init; } = 30;
+    public string? EclrunPath { get; init; }
+    public int EclipseMaxRunTimeoutSeconds { get; init; } = 1800;
+    public int EclipseCleanupTimeoutSeconds { get; init; } = 30;
 
     public string EffectivePipesimPtkPath => PipesimPtkPath ?? Path.Combine(PipesimHome, "Developer Tools", "Python Toolkit", "Modules", "PythonToolkitModules.zip");
 

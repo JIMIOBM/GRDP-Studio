@@ -16,6 +16,7 @@ public final class SoftwareIntegrationRunStateMachine {
                 SoftwareIntegrationRunStatus.CANCEL_REQUESTED, SoftwareIntegrationRunStatus.FAILED, SoftwareIntegrationRunStatus.WORKER_LOST);
         allow(SoftwareIntegrationRunStatus.PREPARING, SoftwareIntegrationRunStatus.RUNNING_NODAL,
                 SoftwareIntegrationRunStatus.RUNNING_PROFILE, SoftwareIntegrationRunStatus.RUNNING_NETWORK,
+                SoftwareIntegrationRunStatus.RUNNING_ECLIPSE,
                 SoftwareIntegrationRunStatus.COLLECTING,
                 SoftwareIntegrationRunStatus.CANCEL_REQUESTED, SoftwareIntegrationRunStatus.FAILED, SoftwareIntegrationRunStatus.WORKER_LOST);
         allow(SoftwareIntegrationRunStatus.RUNNING_NODAL, SoftwareIntegrationRunStatus.RUNNING_PROFILE,
@@ -24,6 +25,8 @@ public final class SoftwareIntegrationRunStateMachine {
         allow(SoftwareIntegrationRunStatus.RUNNING_PROFILE, SoftwareIntegrationRunStatus.COLLECTING,
                 SoftwareIntegrationRunStatus.CANCEL_REQUESTED, SoftwareIntegrationRunStatus.FAILED, SoftwareIntegrationRunStatus.WORKER_LOST);
         allow(SoftwareIntegrationRunStatus.RUNNING_NETWORK, SoftwareIntegrationRunStatus.COLLECTING,
+                SoftwareIntegrationRunStatus.CANCEL_REQUESTED, SoftwareIntegrationRunStatus.FAILED, SoftwareIntegrationRunStatus.WORKER_LOST);
+        allow(SoftwareIntegrationRunStatus.RUNNING_ECLIPSE, SoftwareIntegrationRunStatus.COLLECTING,
                 SoftwareIntegrationRunStatus.CANCEL_REQUESTED, SoftwareIntegrationRunStatus.FAILED, SoftwareIntegrationRunStatus.WORKER_LOST);
         allow(SoftwareIntegrationRunStatus.COLLECTING, SoftwareIntegrationRunStatus.SUCCEEDED,
                 SoftwareIntegrationRunStatus.PARTIAL_SUCCEEDED, SoftwareIntegrationRunStatus.FAILED,

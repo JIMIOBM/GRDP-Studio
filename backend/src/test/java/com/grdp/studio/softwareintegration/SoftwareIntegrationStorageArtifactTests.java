@@ -72,6 +72,20 @@ class SoftwareIntegrationStorageArtifactTests {
     }
 
     @Test
+    void rejectsRawEclipseSimulatorOutputs() throws Exception {
+        SoftwareIntegrationProperties properties = properties();
+        SoftwareIntegrationArtifactPublisher publisher = new SoftwareIntegrationArtifactPublisher(
+                new SoftwareIntegrationStorageKeyNormalizer(properties), properties, new ObjectMapper());
+        Path rawOutput = root.resolve("jobs/9/output/CASE.ECLEND");
+        Files.createDirectories(rawOutput.getParent());
+        Files.writeString(rawOutput, "sensitive simulator output");
+
+        assertThatThrownBy(() -> publisher.publish(9, List.of(new WorkerRunArtifact(
+                "jobs/9/output/CASE.ECLEND", Files.size(rawOutput), sha256(rawOutput), "text/plain")), true))
+                .isInstanceOf(SoftwareIntegrationArtifactPublisher.ArtifactPublicationException.class);
+    }
+
+    @Test
     void rejectsArbitraryIncompleteExtraWrongHashAndWrongRunManifest() throws Exception {
         assertManifestRejected(20, "{}");
         assertManifestRejected(21, manifest(999, "jobs/21/output/raw.json", 6, "placeholder"));

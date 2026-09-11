@@ -7,6 +7,7 @@ import PipesimNetworkResult from './PipesimNetworkResult.vue'
 import PipesimNodalResult from './PipesimNodalResult.vue'
 import PipesimProfileResult from './PipesimProfileResult.vue'
 import PipesimRunHistory from './PipesimRunHistory.vue'
+import EclipseRunResult from './EclipseRunResult.vue'
 
 const store = useSoftwareIntegrationStore()
 const {
@@ -16,6 +17,7 @@ const {
   versions,
   isNetworkModel,
   isWellModel,
+  isEclipseModel,
   persistedStudies,
   selectedStudy,
   runType,
@@ -38,6 +40,7 @@ const statusMeta = {
   RUNNING_NODAL: ['节点分析', 'primary'],
   RUNNING_PROFILE: ['PT 剖面', 'primary'],
   RUNNING_NETWORK: ['管网模拟中', 'primary'],
+  RUNNING_ECLIPSE: ['ECLIPSE 计算中', 'primary'],
   COLLECTING: ['收集结果', 'primary'],
   CANCEL_REQUESTED: ['正在取消', 'warning'],
   SUCCEEDED: ['运行成功', 'success'],
@@ -54,6 +57,7 @@ const wellRunTypeOptions = [
 ]
 const runTypeOptions = computed(() => {
   if (isNetworkModel.value) return [{ value: 'network', label: '管网模拟' }]
+  if (isEclipseModel.value) return [{ value: 'eclipse', label: 'ECLIPSE 计算' }]
   return isWellModel.value ? wellRunTypeOptions : []
 })
 const displayRun = computed(() => activeRun.value || selectedRun.value)
@@ -116,16 +120,19 @@ const validNetworkResult = computed(() => {
 const isPartial = computed(() => selectedRun.value?.status === 'PARTIAL_SUCCEEDED' &&
   validWellResult.value?.resultContract === 'VALID_PARTIAL')
 const canRun = computed(() => activeVersion.value?.status === 'READY' &&
-  (isNetworkModel.value || isWellModel.value) && persistedStudies.value.includes(selectedStudy.value) &&
+  (isNetworkModel.value || isWellModel.value || isEclipseModel.value) &&
+  (isEclipseModel.value || persistedStudies.value.includes(selectedStudy.value)) &&
   !hasActiveRun.value && !submittingRun.value)
 const modelTypeLabel = computed(() => {
   if (isNetworkModel.value) return 'PIPESIM 管网模型'
+  if (isEclipseModel.value) return 'ECLIPSE 100 模型'
   return isWellModel.value ? 'PIPESIM 井筒模型' : '待识别 PIPESIM 模型'
 })
 const stages = computed(() => {
   const type = displayRun.value?.runType || runType.value
   const values = ['PREPARING']
   if (type === 'network') values.push('RUNNING_NETWORK')
+  else if (type === 'eclipse') values.push('RUNNING_ECLIPSE')
   else {
     if (type === 'nodal' || type === 'combined') values.push('RUNNING_NODAL')
     if (type === 'profile' || type === 'combined') values.push('RUNNING_PROFILE')
@@ -152,7 +159,7 @@ const submitRun = async () => {
   try {
     const detail = await store.createRun()
     if (!detail) return
-    activeTab.value = isNetworkModel.value ? 'network' : (runType.value === 'profile' ? 'profile' : 'nodal')
+    activeTab.value = isEclipseModel.value ? 'eclipse' : (isNetworkModel.value ? 'network' : (runType.value === 'profile' ? 'profile' : 'nodal'))
     ElMessage.success('运行任务已创建')
   } catch (error) {
     ElMessage.error(errorMessage(error))
@@ -171,6 +178,7 @@ const selectHistoryRun = async runId => {
     const detail = await store.selectRun(runId)
     if (!detail) return
     if (detail.runType === 'network') activeTab.value = 'network'
+    else if (detail.runType === 'eclipse') activeTab.value = 'eclipse'
     else if (detail.runType === 'profile') activeTab.value = 'profile'
   } catch (error) {
     ElMessage.error(errorMessage(error))
@@ -179,13 +187,19 @@ const selectHistoryRun = async runId => {
 
 watch(() => selectedRun.value?.id, () => {
   if (selectedRun.value?.runType === 'network') activeTab.value = 'network'
+  else if (selectedRun.value?.runType === 'eclipse') activeTab.value = 'eclipse'
   else if (selectedRun.value?.runType === 'profile') activeTab.value = 'profile'
   else if (activeTab.value === 'profile' && selectedRun.value?.runType === 'nodal') activeTab.value = 'nodal'
 })
-watch([isNetworkModel, isWellModel], ([networkModel, wellModel]) => {
+watch([isNetworkModel, isWellModel, isEclipseModel], ([networkModel, wellModel, eclipseModel]) => {
   if (networkModel) {
     runType.value = 'network'
     activeTab.value = 'network'
+    return
+  }
+  if (eclipseModel) {
+    runType.value = 'eclipse'
+    activeTab.value = 'eclipse'
     return
   }
   if (wellModel && runType.value === 'network') runType.value = 'nodal'
@@ -217,7 +231,7 @@ watch([isNetworkModel, isWellModel], ([networkModel, wellModel]) => {
           <el-option v-for="version in versions" :key="version.id" :value="version.id" :label="`v${version.versionNo} · ${version.status}`" />
         </el-select>
       </label>
-      <label>
+      <label v-if="!isEclipseModel">
         <span>Study</span>
         <el-select v-model="selectedStudy" :disabled="hasActiveRun || activeVersion?.status !== 'READY'" placeholder="请选择已有 Study">
           <el-option v-for="study in persistedStudies" :key="study" :value="study" :label="study" />
@@ -252,7 +266,7 @@ watch([isNetworkModel, isWellModel], ([networkModel, wellModel]) => {
       show-icon
     />
 
-    <div v-if="selectedError" class="structured-error">
+    <div v-if="selectedError && !isEclipseModel" class="structured-error">
       <dl>
         <div><dt>类别</dt><dd>{{ selectedError.category }}</dd></div>
         <div><dt>代码</dt><dd>{{ selectedError.code }}</dd></div>
@@ -270,6 +284,9 @@ watch([isNetworkModel, isWellModel], ([networkModel, wellModel]) => {
       </el-tab-pane>
       <el-tab-pane v-if="isNetworkModel" label="管网结果" name="network">
         <PipesimNetworkResult :result="validNetworkResult" />
+      </el-tab-pane>
+      <el-tab-pane v-if="isEclipseModel" label="ECLIPSE 结果" name="eclipse">
+        <EclipseRunResult :run="selectedRun" />
       </el-tab-pane>
       <el-tab-pane label="运行记录" name="history">
         <PipesimRunHistory

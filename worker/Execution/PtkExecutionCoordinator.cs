@@ -13,6 +13,9 @@ public sealed class PtkExecutionCoordinator : IDisposable
     private readonly object gate = new();
     private bool reserved;
     private bool disposed;
+    private readonly string mutexName;
+
+    public PtkExecutionCoordinator(string? mutexName = null) => this.mutexName = mutexName ?? MutexName;
 
     public bool IsBusy
     {
@@ -36,7 +39,7 @@ public sealed class PtkExecutionCoordinator : IDisposable
             reserved = true;
         }
 
-        var machineLease = MachineMutexLease.TryAcquire(MutexName);
+        var machineLease = MachineMutexLease.TryAcquire(mutexName);
         if (machineLease.Lease is null)
         {
             ReleaseReservation();

@@ -2,6 +2,7 @@ package com.grdp.studio.softwareintegration.artifact;
 
 import com.grdp.studio.softwareintegration.client.WorkerRunArtifact;
 import com.grdp.studio.softwareintegration.support.SoftwareIntegrationProperties;
+import com.grdp.studio.softwareintegration.support.SoftwareIntegrationEclipseSanitizer;
 import com.grdp.studio.softwareintegration.support.SoftwareIntegrationStorageKeyNormalizer;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
@@ -26,6 +27,10 @@ import java.util.UUID;
 
 @Component
 public class SoftwareIntegrationArtifactPublisher {
+    private static final Map<String, String> ECLIPSE_ARTIFACTS = Map.of(
+            "normalized-result.json", "application/json",
+            "run.log", "text/plain",
+            "manifest.json", "application/json");
     private final SoftwareIntegrationStorageKeyNormalizer normalizer;
     private final SoftwareIntegrationProperties properties;
     private final ObjectMapper objectMapper;
@@ -39,6 +44,10 @@ public class SoftwareIntegrationArtifactPublisher {
     }
 
     public PublishedArtifacts publish(long runId, List<WorkerRunArtifact> artifacts) {
+        return publish(runId, artifacts, false);
+    }
+
+    public PublishedArtifacts publish(long runId, List<WorkerRunArtifact> artifacts, boolean eclipseMetadata) {
         if (artifacts == null || artifacts.isEmpty()) return new PublishedArtifacts(List.of(), null, null);
         String requiredPrefix = "jobs/" + runId + "/output/";
         Path artifactRoot = normalizer.resolve("artifacts/directory-placeholder").getParent();
@@ -62,6 +71,11 @@ public class SoftwareIntegrationArtifactPublisher {
                 String workerName = sourceKey.substring(requiredPrefix.length());
                 String name = normalizer.normalizeRelative("artifact-name-root/" + required(workerName, "artifact name"))
                         .substring("artifact-name-root/".length());
+                if (eclipseMetadata && (!SoftwareIntegrationEclipseSanitizer.isSafeIdentifier(name)
+                        || !ECLIPSE_ARTIFACTS.containsKey(name)
+                        || !ECLIPSE_ARTIFACTS.get(name).equals(artifact.contentType()))) {
+                    throw new ArtifactPublicationException("ECLIPSE Artifact metadata contains sensitive content");
+                }
                 if (!names.add(name)) throw new ArtifactPublicationException("Duplicate artifact name");
                 Path source = normalizer.resolve(sourceKey);
                 Path realRoot = normalizer.root().toRealPath();

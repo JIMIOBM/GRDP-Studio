@@ -2,9 +2,11 @@ package com.grdp.studio.softwareintegration.controller;
 
 import com.grdp.studio.common.ApiResponse;
 import com.grdp.studio.softwareintegration.dto.SoftwareIntegrationProjectDetailResponse;
+import com.grdp.studio.softwareintegration.dto.SoftwareIntegrationCapabilitiesResponse;
 import com.grdp.studio.softwareintegration.dto.SoftwareIntegrationProjectRequest;
 import com.grdp.studio.softwareintegration.dto.SoftwareIntegrationProjectResponse;
 import com.grdp.studio.softwareintegration.service.SoftwareIntegrationService;
+import com.grdp.studio.softwareintegration.service.SoftwareIntegrationCapabilityService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import org.springframework.validation.annotation.Validated;
@@ -26,7 +28,17 @@ import java.util.List;
 @RequestMapping("/software-integration")
 public class SoftwareIntegrationController {
     private final SoftwareIntegrationService service;
-    public SoftwareIntegrationController(SoftwareIntegrationService service) { this.service = service; }
+    private final SoftwareIntegrationCapabilityService capabilityService;
+    public SoftwareIntegrationController(SoftwareIntegrationService service,
+                                         SoftwareIntegrationCapabilityService capabilityService) {
+        this.service = service;
+        this.capabilityService = capabilityService;
+    }
+
+    @GetMapping("/capabilities")
+    public ApiResponse<SoftwareIntegrationCapabilitiesResponse> capabilities() {
+        return ApiResponse.success(capabilityService.get());
+    }
 
     @GetMapping("/projects")
     public ApiResponse<List<SoftwareIntegrationProjectResponse>> listProjects() { return ApiResponse.success(service.listProjects()); }

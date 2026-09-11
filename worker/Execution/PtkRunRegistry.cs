@@ -108,11 +108,13 @@ public sealed class PtkRunRegistry
         {
             "profile" => next == "RUNNING_PROFILE",
             "network" => next == "RUNNING_NETWORK",
+            "eclipse" => next == "RUNNING_ECLIPSE",
             _ => next == "RUNNING_NODAL"
         },
         "RUNNING_NODAL" => entry.Request.RunTask == "combined" ? next == "RUNNING_PROFILE" : next == "COLLECTING",
         "RUNNING_PROFILE" => next == "COLLECTING",
         "RUNNING_NETWORK" => next == "COLLECTING",
+        "RUNNING_ECLIPSE" => next == "COLLECTING",
         _ => false
     };
 

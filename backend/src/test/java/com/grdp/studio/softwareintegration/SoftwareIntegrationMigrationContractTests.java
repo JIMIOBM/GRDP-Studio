@@ -71,6 +71,18 @@ class SoftwareIntegrationMigrationContractTests {
     }
 
     @Test
+    void eclipseMigrationMakesOnlyTheStudyOptionalAndExtendsTheActiveSlot() throws Exception {
+        Path backend = Path.of("").toAbsolutePath().normalize();
+        if (!backend.getFileName().toString().equalsIgnoreCase("backend")) backend = backend.resolve("backend");
+        String sql = Files.readString(backend.resolve(
+                "deploy/mysql/migrations/009_software_integration_eclipse_contract.sql"));
+        assertThat(sql).contains("column_name = 'study_name'", "MAX(IS_NULLABLE) = 'YES'",
+                "MODIFY COLUMN study_name VARCHAR(255) NULL", "RUNNING_ECLIPSE",
+                "PREPARE grdp_eclipse_study_column", "PREPARE grdp_eclipse_active_slot_column");
+        assertThat(sql.toUpperCase()).doesNotContain("DROP ", "CREATE TABLE", "RESULT_JSON", " BLOB", "DELETE ", "UPDATE ");
+    }
+
+    @Test
     void schemaInitializerRepeatablyUpgradesAnExistingRunTable() {
         DriverManagerDataSource dataSource = new DriverManagerDataSource(
                 "jdbc:h2:mem:acceptance-upgrade;MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1", "sa", "");
@@ -115,7 +127,7 @@ class SoftwareIntegrationMigrationContractTests {
     }
 
     @Test
-    void schemaInitializerCreatesNetworkActiveSlotForFreshH2Schema() {
+    void schemaInitializerCreatesEclipseActiveSlotAndNullableStudyForFreshH2Schema() {
         DriverManagerDataSource dataSource = new DriverManagerDataSource(
                 "jdbc:h2:mem:network-active-slot-upgrade;MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1", "sa", "");
         JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
@@ -128,6 +140,63 @@ class SoftwareIntegrationMigrationContractTests {
                 SELECT generation_expression FROM information_schema.columns
                 WHERE LOWER(table_name) = 'software_integration_run' AND LOWER(column_name) = 'active_slot'
                 """, String.class);
-        assertThat(expression).contains("RUNNING_NETWORK");
+        assertThat(expression).contains("RUNNING_NETWORK", "RUNNING_ECLIPSE");
+        String nullable = jdbcTemplate.queryForObject("""
+                SELECT is_nullable FROM information_schema.columns
+                WHERE LOWER(table_name) = 'software_integration_run' AND LOWER(column_name) = 'study_name'
+                """, String.class);
+        assertThat(nullable).isEqualToIgnoringCase("YES");
+    }
+
+    @Test
+    void schemaInitializerRepeatablyUpgradesOldH2EclipseRunContractWithoutLosingRowsOrIndex() {
+        DriverManagerDataSource dataSource = new DriverManagerDataSource(
+                "jdbc:h2:mem:eclipse-old-schema-upgrade;MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1", "sa", "");
+        JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
+        jdbcTemplate.execute("CREATE TABLE software_integration_model (id BIGINT PRIMARY KEY, simulator_type VARCHAR(50))");
+        jdbcTemplate.execute("CREATE TABLE software_integration_model_version (id BIGINT PRIMARY KEY, model_id BIGINT, status VARCHAR(50))");
+        jdbcTemplate.execute("""
+                CREATE TABLE software_integration_run (
+                  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                  study_name VARCHAR(255) NOT NULL,
+                  status VARCHAR(40) NOT NULL,
+                  result_json JSON,
+                  active_slot TINYINT GENERATED ALWAYS AS (
+                    CASE WHEN REGEXP_LIKE(status, '^(CLAIMED|PREPARING|RUNNING_NODAL|RUNNING_PROFILE|RUNNING_NETWORK|COLLECTING|CANCEL_REQUESTED)$')
+                    THEN 1 ELSE NULL END),
+                  CONSTRAINT uk_software_integration_run_active_slot UNIQUE (active_slot)
+                )
+                """);
+        jdbcTemplate.update("INSERT INTO software_integration_run (study_name, status, result_json) VALUES ('Study 1', 'SUCCEEDED', '{\"kept\":true}')");
+        SoftwareIntegrationSchemaInitializer initializer = new SoftwareIntegrationSchemaInitializer(jdbcTemplate);
+
+        initializer.run(null);
+        initializer.run(null);
+
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM software_integration_run", Integer.class)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("SELECT result_json FROM software_integration_run WHERE id = 1", String.class))
+                .contains("kept", "true");
+        String nullable = jdbcTemplate.queryForObject("""
+                SELECT is_nullable FROM information_schema.columns
+                WHERE LOWER(table_name) = 'software_integration_run' AND LOWER(column_name) = 'study_name'
+                """, String.class);
+        assertThat(nullable).isEqualToIgnoringCase("YES");
+        String expression = jdbcTemplate.queryForObject("""
+                SELECT generation_expression FROM information_schema.columns
+                WHERE LOWER(table_name) = 'software_integration_run' AND LOWER(column_name) = 'active_slot'
+                """, String.class);
+        assertThat(expression).contains("RUNNING_NETWORK", "RUNNING_ECLIPSE");
+        Integer indexCount = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM information_schema.indexes
+                WHERE LOWER(table_name) = 'software_integration_run'
+                  AND LOWER(index_name) = 'uk_software_integration_run_active_slot'
+                """, Integer.class);
+        assertThat(indexCount).isEqualTo(1);
+        jdbcTemplate.update("INSERT INTO software_integration_run (study_name, status) VALUES (NULL, 'RUNNING_ECLIPSE')");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT active_slot FROM software_integration_run WHERE status = 'RUNNING_ECLIPSE'", Integer.class)).isEqualTo(1);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> jdbcTemplate.update(
+                        "INSERT INTO software_integration_run (study_name, status) VALUES (NULL, 'RUNNING_ECLIPSE')"))
+                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
     }
 }

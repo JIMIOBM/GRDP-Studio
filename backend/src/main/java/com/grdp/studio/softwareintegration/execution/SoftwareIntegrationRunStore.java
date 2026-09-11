@@ -11,6 +11,7 @@ import com.grdp.studio.softwareintegration.mapper.SoftwareIntegrationArtifactMap
 import com.grdp.studio.softwareintegration.mapper.SoftwareIntegrationRunEventMapper;
 import com.grdp.studio.softwareintegration.mapper.SoftwareIntegrationRunMapper;
 import com.grdp.studio.softwareintegration.support.SoftwareIntegrationDiagnosticSanitizer;
+import com.grdp.studio.softwareintegration.support.SoftwareIntegrationEclipseSanitizer;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
@@ -29,7 +30,7 @@ import java.util.function.Consumer;
 @Component
 public class SoftwareIntegrationRunStore {
     private static final List<String> ACTIVE_STATUSES = List.of(
-            "CLAIMED", "PREPARING", "RUNNING_NODAL", "RUNNING_PROFILE", "RUNNING_NETWORK", "COLLECTING", "CANCEL_REQUESTED");
+            "CLAIMED", "PREPARING", "RUNNING_NODAL", "RUNNING_PROFILE", "RUNNING_NETWORK", "RUNNING_ECLIPSE", "COLLECTING", "CANCEL_REQUESTED");
     private final SoftwareIntegrationRunMapper runMapper;
     private final SoftwareIntegrationRunEventMapper eventMapper;
     private final SoftwareIntegrationArtifactMapper artifactMapper;
@@ -284,8 +285,10 @@ public class SoftwareIntegrationRunStore {
                         .eq(SoftwareIntegrationRunEventEntity::getRunId, runId)
                         .eq(SoftwareIntegrationRunEventEntity::getWorkerSequence, event.sequence()));
                 if (duplicate == 0) {
+                    String message = "eclipse".equals(run.getRunType())
+                            ? SoftwareIntegrationEclipseSanitizer.sanitizeText(event.message()) : event.message();
                     appendEvent(runId, event.sequence(), "STATE", event.state(),
-                            event.message(), null, LocalDateTime.ofInstant(event.occurredAtUtc(), ZoneOffset.UTC));
+                            message, null, LocalDateTime.ofInstant(event.occurredAtUtc(), ZoneOffset.UTC));
                 }
                 last = Math.max(last, event.sequence());
             }
@@ -304,6 +307,10 @@ public class SoftwareIntegrationRunStore {
             if (current == null) return false;
             SoftwareIntegrationRunStatus from = SoftwareIntegrationRunStatus.valueOf(current.getStatus());
             if (from.isTerminal()) return false;
+            if ("eclipse".equals(current.getRunType())
+                    && terminal == SoftwareIntegrationRunStatus.PARTIAL_SUCCEEDED) {
+                throw new IllegalStateException("ECLIPSE runs cannot be partially successful");
+            }
             SoftwareIntegrationRunStateMachine.requireAllowed(from, terminal);
             LocalDateTime now = LocalDateTime.now();
             SoftwareIntegrationRunEntity patch = statePatch(current, terminal, now);

@@ -1,5 +1,6 @@
 package com.grdp.studio.softwareintegration;
 
+import com.grdp.studio.common.BusinessException;
 import com.grdp.studio.softwareintegration.artifact.SoftwareIntegrationArtifactPublisher;
 import com.grdp.studio.softwareintegration.client.HttpWorkerRunClient.WorkerClientException;
 import com.grdp.studio.softwareintegration.client.WorkerAvailability;
@@ -9,6 +10,7 @@ import com.grdp.studio.softwareintegration.client.WorkerRunClient;
 import com.grdp.studio.softwareintegration.client.WorkerRunEvent;
 import com.grdp.studio.softwareintegration.client.WorkerRunExecuteRequest;
 import com.grdp.studio.softwareintegration.client.WorkerRunSnapshot;
+import com.grdp.studio.softwareintegration.client.WorkerEclipseCapability;
 import com.grdp.studio.softwareintegration.controller.SoftwareIntegrationController;
 import com.grdp.studio.softwareintegration.controller.SoftwareIntegrationRunController;
 import com.grdp.studio.softwareintegration.dto.run.SoftwareIntegrationCreateRunRequest;
@@ -17,6 +19,7 @@ import com.grdp.studio.softwareintegration.entity.SoftwareIntegrationModelVersio
 import com.grdp.studio.softwareintegration.entity.SoftwareIntegrationProjectEntity;
 import com.grdp.studio.softwareintegration.execution.PipesimWellResultValidator;
 import com.grdp.studio.softwareintegration.execution.PipesimResultValidator;
+import com.grdp.studio.softwareintegration.execution.EclipseSummaryResultValidator;
 import com.grdp.studio.softwareintegration.execution.SoftwareIntegrationRunDispatcher;
 import com.grdp.studio.softwareintegration.execution.SoftwareIntegrationRunStatus;
 import com.grdp.studio.softwareintegration.execution.SoftwareIntegrationRunStore;
@@ -26,10 +29,13 @@ import com.grdp.studio.softwareintegration.mapper.SoftwareIntegrationProjectMapp
 import com.grdp.studio.softwareintegration.mapper.SoftwareIntegrationRunMapper;
 import com.grdp.studio.softwareintegration.service.SoftwareIntegrationRunService;
 import com.grdp.studio.softwareintegration.service.SoftwareIntegrationService;
+import com.grdp.studio.softwareintegration.service.SoftwareIntegrationCapabilityService;
+import com.grdp.studio.softwareintegration.service.impl.SoftwareIntegrationServiceImpl;
 import com.grdp.studio.softwareintegration.support.SoftwareIntegrationProperties;
 import com.grdp.studio.softwareintegration.support.SoftwareIntegrationRunExceptionHandler;
 import com.grdp.studio.softwareintegration.support.SoftwareIntegrationRunExceptionHandler.RunException;
 import com.grdp.studio.softwareintegration.support.SoftwareIntegrationStorageKeyNormalizer;
+import com.grdp.studio.softwareintegration.support.SoftwareIntegrationValidationDispatcher;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -47,6 +53,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import tools.jackson.databind.JsonNode;
@@ -100,7 +107,9 @@ class SoftwareIntegrationRunFlowTests {
     @Autowired SoftwareIntegrationProperties integrationProperties;
     @Autowired SoftwareIntegrationStorageKeyNormalizer normalizer;
     @Autowired PipesimResultValidator resultValidator;
+    @Autowired EclipseSummaryResultValidator eclipseResultValidator;
     @Autowired SoftwareIntegrationArtifactPublisher artifactPublisher;
+    @Autowired SoftwareIntegrationCapabilityService capabilityService;
     @Autowired ObjectMapper objectMapper;
     @Autowired FakeWorkerRunClient fakeWorker;
 
@@ -138,6 +147,14 @@ class SoftwareIntegrationRunFlowTests {
                         .contentType("application/json")
                         .content("{\"study\":\"Study 1\",\"runType\":\"nodal\"}"))
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value(400));
+        for (String invalidStudy : List.of(
+                "{\"runType\":\"nodal\",\"parameters\":null}",
+                "{\"study\":null,\"runType\":\"nodal\",\"parameters\":null}",
+                "{\"study\":\"\",\"runType\":\"nodal\",\"parameters\":null}")) {
+            mockMvc.perform(post("/software-integration/model-versions/{id}/runs", seed.version().getId())
+                            .contentType("application/json").content(invalidStudy))
+                    .andExpect(status().isBadRequest());
+        }
 
         SoftwareIntegrationCreateRunRequest wrongStudy = request("Study 1 ", "nodal");
         assertThatThrownBy(() -> runService.create(seed.version().getId(), wrongStudy)).isInstanceOf(RunException.class);
@@ -146,6 +163,117 @@ class SoftwareIntegrationRunFlowTests {
         assertThatThrownBy(() -> runService.create(seed.version().getId(), request("Study 1", "combined")))
                 .isInstanceOf(RunException.class).satisfies(error ->
                         assertThat(((RunException) error).status()).isEqualTo(HttpStatus.CONFLICT));
+    }
+
+    @Test
+    void eclipseBrowserRequestRequiresEveryFrozenNullFieldAndAvailableCapability() throws Exception {
+        Seed eclipse = seed("READY", "models/eclipse/1/CASE.DATA", "ECLIPSE_100");
+
+        mockMvc.perform(post("/software-integration/model-versions/{id}/runs", eclipse.version().getId())
+                        .contentType("application/json")
+                        .content("{\"study\":null,\"runType\":\"eclipse\",\"parameters\":null}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.study").isEmpty())
+                .andExpect(jsonPath("$.data.runType").value("eclipse"));
+        var persisted = runStore.listByVersion(eclipse.version().getId(), 10).get(0);
+        assertThat(persisted.getStudyName()).isNull();
+        assertThat(persisted.getParametersJson()).isEqualTo("null");
+        assertThat(persisted.getTimeoutSeconds()).isEqualTo(1800);
+
+        for (String invalidBody : List.of(
+                "{\"runType\":\"eclipse\",\"parameters\":null}",
+                "{\"study\":\"\",\"runType\":\"eclipse\",\"parameters\":null}",
+                "{\"study\":\"Study 1\",\"runType\":\"eclipse\",\"parameters\":null}",
+                "{\"study\":null,\"runType\":\"ECLIPSE\",\"parameters\":null}",
+                "{\"study\":null,\"runType\":\"eclipse\"}",
+                "{\"study\":null,\"runType\":\"eclipse\",\"parameters\":{}}",
+                "{\"study\":null,\"runType\":\"eclipse\",\"parameters\":null,\"executable\":\"eclrun\"}")) {
+            mockMvc.perform(post("/software-integration/model-versions/{id}/runs", eclipse.version().getId())
+                            .contentType("application/json").content(invalidBody))
+                    .andExpect(status().isBadRequest());
+        }
+
+        int before = runStore.listByVersion(eclipse.version().getId(), 100).size();
+        fakeWorker.eclipseCapability = new WorkerEclipseCapability(
+                null, "UNAVAILABLE", "ECLIPSE_UNAVAILABLE", List.of(), 1800);
+        mockMvc.perform(post("/software-integration/model-versions/{id}/runs", eclipse.version().getId())
+                        .contentType("application/json")
+                        .content("{\"study\":null,\"runType\":\"eclipse\",\"parameters\":null}"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value(503));
+        assertThat(runStore.listByVersion(eclipse.version().getId(), 100)).hasSize(before);
+        assertThatThrownBy(() -> runService.create(eclipse.version().getId(), request(null, "eclipse")))
+                .isInstanceOf(RunException.class)
+                .satisfies(error -> assertThat(((RunException) error).status()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE));
+        assertThat(runStore.listByVersion(eclipse.version().getId(), 100)).hasSize(before);
+
+        fakeWorker.eclipseCapability = new WorkerEclipseCapability(
+                "2024.1", "AVAILABLE", null, List.of("eclipse"), 1800);
+        eclipse.version().setStudiesJson("Study 1");
+        versionMapper.updateById(eclipse.version());
+        assertThatThrownBy(() -> runService.create(eclipse.version().getId(), request(null, "eclipse")))
+                .isInstanceOf(RunException.class)
+                .satisfies(error -> assertThat(((RunException) error).status()).isEqualTo(HttpStatus.CONFLICT));
+    }
+
+    @Test
+    void capabilitiesEndpointReturnsOnlyControlledEclipseFieldsAndReasonCodes() throws Exception {
+        MockMvc projectMvc = MockMvcBuilders.standaloneSetup(
+                        new SoftwareIntegrationController(softwareIntegrationService, capabilityService))
+                .setControllerAdvice(new SoftwareIntegrationRunExceptionHandler()).build();
+
+        projectMvc.perform(get("/software-integration/capabilities"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.eclipse100.version").value("2024.1"))
+                .andExpect(jsonPath("$.data.eclipse100.status").value("AVAILABLE"))
+                .andExpect(jsonPath("$.data.eclipse100.runTasks[0]").value("eclipse"))
+                .andExpect(jsonPath("$.data.eclipse100.maxTimeoutSeconds").value(1800))
+                .andExpect(jsonPath("$.data.eclipse100.launcherFound").doesNotExist())
+                .andExpect(jsonPath("$.data.eclipse100.path").doesNotExist());
+
+        fakeWorker.eclipseCapability = new WorkerEclipseCapability(
+                "2023.1", "AVAILABLE", null, List.of("eclipse"), 1800);
+        projectMvc.perform(get("/software-integration/capabilities"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.eclipse100.status").value("UNAVAILABLE"))
+                .andExpect(jsonPath("$.data.eclipse100.reasonCode").value("ECLIPSE_VERSION_MISMATCH"));
+
+        fakeWorker.capabilityError = new WorkerClientException("unreachable");
+        projectMvc.perform(get("/software-integration/capabilities"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.eclipse100.reasonCode").value("WORKER_UNREACHABLE"));
+    }
+
+    @Test
+    void dataAndPipsUploadsRemainTypeIsolated() throws Exception {
+        SoftwareIntegrationValidationDispatcher validationDispatcher =
+                org.mockito.Mockito.mock(SoftwareIntegrationValidationDispatcher.class);
+        SoftwareIntegrationService uploadService = new SoftwareIntegrationServiceImpl(
+                projectMapper, modelMapper, versionMapper, integrationProperties, validationDispatcher,
+                normalizer, jdbcTemplate);
+        SoftwareIntegrationProjectEntity project = new SoftwareIntegrationProjectEntity();
+        project.setName("upload-" + UUID.randomUUID());
+        project.setCreatedBy("administrator");
+        project.setCreatedAt(LocalDateTime.now());
+        project.setUpdatedAt(LocalDateTime.now());
+        projectMapper.insert(project);
+
+        uploadService.uploadModel(project.getId(), new MockMultipartFile(
+                "file", "CASE.DATA", "text/plain", "RUNSPEC".getBytes(StandardCharsets.UTF_8)));
+        uploadService.uploadModel(project.getId(), new MockMultipartFile(
+                "file", "WELL.pips", "application/octet-stream", new byte[]{1, 2, 3}));
+
+        var detail = uploadService.getProject(project.getId());
+        assertThat(detail.models()).extracting(model -> model.name() + ":" + model.simulatorType())
+                .containsExactlyInAnyOrder("CASE:ECLIPSE_100", "WELL:PIPESIM_WELL");
+        assertThat(detail.models()).flatExtracting(model -> model.versions())
+                .extracting(version -> version.originalName() + ":" + version.status())
+                .containsExactlyInAnyOrder("CASE.DATA:UPLOADED", "WELL.pips:UPLOADED");
+
+        assertThatThrownBy(() -> uploadService.uploadModel(project.getId(), new MockMultipartFile(
+                "file", "CASE.pips", "application/octet-stream", new byte[]{4})))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(error -> assertThat(((BusinessException) error).getCode()).isEqualTo(409));
     }
 
     @Test
@@ -165,6 +293,12 @@ class SoftwareIntegrationRunFlowTests {
         var created = runService.create(network.version().getId(), request("Study 1", "network"));
         assertThat(created.runType()).isEqualTo("network");
         assertThat(runStore.find(created.id()).getParametersJson()).isEqualTo("null");
+
+        well.version().setOriginalName("wrong.DATA");
+        versionMapper.updateById(well.version());
+        assertThatThrownBy(() -> runService.create(well.version().getId(), request("Study 1", "nodal")))
+                .isInstanceOf(RunException.class)
+                .satisfies(error -> assertThat(((RunException) error).status()).isEqualTo(HttpStatus.CONFLICT));
     }
 
     @Test
@@ -320,6 +454,137 @@ class SoftwareIntegrationRunFlowTests {
             assertThat(event.getStatus()).isEqualTo("RUNNING_NETWORK");
             assertThat(event.getMessage()).isEqualTo("Worker 正在执行管网模拟");
         });
+    }
+
+    @Test
+    void eclipseWorkerEnvelopePhaseValidatedResultArtifactsAndDiagnosticsArePersisted() throws Exception {
+        Seed seed = seed("READY", "models/eclipse/1/CASE.DATA", "ECLIPSE_100");
+        long runId = runService.create(seed.version().getId(), request(null, "eclipse")).id();
+        SoftwareIntegrationRunDispatcher dispatcher = dispatcher();
+        dispatcher.dispatch();
+
+        assertThat(fakeWorker.lastExecuteRequest).satisfies(request -> {
+            assertThat(request.runId()).isEqualTo(runId);
+            assertThat(request.modelStorageKey()).isEqualTo("models/eclipse/1/CASE.DATA");
+            assertThat(request.expectedModelSha256()).isEqualTo("a".repeat(64));
+            assertThat(request.study()).isNull();
+            assertThat(request.runTask()).isEqualTo("eclipse");
+            assertThat(request.parameters()).isNull();
+            assertThat(request.timeoutSeconds()).isEqualTo(1800);
+        });
+
+        Path eclEnd = STORAGE_ROOT.resolve("jobs/" + runId + "/output/CASE.ECLEND");
+        Files.createDirectories(eclEnd.getParent());
+        Files.writeString(eclEnd, "ECLEND=0");
+        String eclEndSha = sha256(eclEnd);
+        Path normalizedResult = eclEnd.getParent().resolve("normalized-result.json");
+        Files.writeString(normalizedResult, "{\"result\":\"sanitized\"}");
+        Path runLog = eclEnd.getParent().resolve("run.log");
+        Files.writeString(runLog, "SUCCEEDED\n");
+        Path manifest = eclEnd.getParent().resolve("manifest.json");
+        Files.writeString(manifest, """
+                {"schemaVersion":"grdp-worker-artifact-manifest/1","runId":%d,"generatedAtUtc":"2026-09-10T00:00:00Z","files":[
+                  {"storageKey":"jobs/%d/output/normalized-result.json","size":%d,"sha256":"%s","contentType":"application/json"},
+                  {"storageKey":"jobs/%d/output/run.log","size":%d,"sha256":"%s","contentType":"text/plain"}]}
+                """.formatted(runId, runId, Files.size(normalizedResult), sha256(normalizedResult),
+                runId, Files.size(runLog), sha256(runLog)));
+        JsonNode cleanup = objectMapper.readTree("""
+                {"processTreeExitConfirmed":true,"licenseServer":"27000@private",
+                 "details":{"workingDirectory":"C:\\\\Users\\\\operator\\\\private","note":"/home/operator/private/case"}}
+                """);
+        fakeWorker.snapshot = new WorkerRunSnapshot(runId, "SUCCEEDED", 4, "worker-1", "generation-1",
+                List.of(
+                        new WorkerRunEvent(1, "PREPARING", Instant.now(), "deck C:\\Users\\operator\\CASE.DATA"),
+                        new WorkerRunEvent(2, "RUNNING_ECLIPSE", Instant.now(), "licenseServer=27000@private"),
+                        new WorkerRunEvent(3, "COLLECTING", Instant.now(), "collecting"),
+                        new WorkerRunEvent(4, "SUCCEEDED", Instant.now(), "done")),
+                eclipseResult(Files.size(eclEnd), eclEndSha), null,
+                List.of(
+                        new WorkerRunArtifact("jobs/" + runId + "/output/normalized-result.json",
+                                Files.size(normalizedResult), sha256(normalizedResult), "application/json"),
+                        new WorkerRunArtifact("jobs/" + runId + "/output/run.log",
+                                Files.size(runLog), sha256(runLog), "text/plain"),
+                        new WorkerRunArtifact("jobs/" + runId + "/output/manifest.json",
+                                Files.size(manifest), sha256(manifest), "application/json")), cleanup);
+
+        dispatcher.poll();
+
+        assertThat(runStore.find(runId).getStatus()).isEqualTo("SUCCEEDED");
+        assertThat(runStore.find(runId).getResultContract()).isEqualTo("VALID_FULL");
+        assertThat(runStore.artifacts(runId)).extracting(artifact -> artifact.getArtifactName())
+                .containsExactlyInAnyOrder("normalized-result.json", "run.log", "manifest.json")
+                .doesNotContain("CASE.ECLEND");
+        var detail = runService.get(runId);
+        assertThat(detail.result().path("summary").path("series").get(0).path("keyword").asText()).isEqualTo("FOPR");
+        assertThat(detail.result().path("summary").path("series").get(0).path("points").toString())
+                .isEqualTo("[{\"timeDays\":0.0,\"value\":2.0},{\"timeDays\":1.0,\"value\":1.0}]");
+        assertThat(detail.result().toString()).doesNotContain("operator", "private-token");
+        assertThat(detail.cleanup().toString()).contains("[redacted]", "[local path]")
+                .doesNotContain("27000@private", "operator");
+        assertThat(detail.events()).allSatisfy(event -> {
+            if (event.message() != null) assertThat(event.message()).doesNotContain("operator", "27000@private");
+        });
+        assertThat(runStore.events(runId)).anySatisfy(event ->
+                assertThat(event.getStatus()).isEqualTo("RUNNING_ECLIPSE"));
+        assertThat(fakeWorker.transactionActiveDuringHttp).isFalse();
+    }
+
+    @Test
+    void eclipseRejectsPartialAndSanitizesFailedErrorDetailsWithoutPersistingSuccessResult() throws Exception {
+        Seed seed = seed("READY", "models/eclipse/failure/CASE.DATA", "ECLIPSE_100");
+        long partialRun = runService.create(seed.version().getId(), request(null, "eclipse")).id();
+        SoftwareIntegrationRunDispatcher partialDispatcher = dispatcher();
+        partialDispatcher.dispatch();
+        fakeWorker.snapshot = new WorkerRunSnapshot(partialRun, "PARTIAL_SUCCEEDED", 1,
+                "worker-1", "generation-1", List.of(), eclipseResult(8, "a".repeat(64)), null,
+                List.of(), objectMapper.readTree("{\"processTreeExitConfirmed\":true}"));
+        partialDispatcher.poll();
+        assertThat(runStore.find(partialRun).getStatus()).isEqualTo("FAILED");
+        assertThat(runStore.find(partialRun).getResultJson()).isNull();
+        assertThat(runStore.find(partialRun).getResultContract()).isNull();
+        assertThat(runStore.artifacts(partialRun)).isEmpty();
+
+        long failedRun = runService.create(seed.version().getId(), request(null, "eclipse")).id();
+        SoftwareIntegrationRunDispatcher failedDispatcher = dispatcher();
+        failedDispatcher.dispatch();
+        JsonNode error = objectMapper.readTree("""
+                {"category":"SOLVER","code":"ECLIPSE_SOLVER_FAILED","message":"failed at C:\\\\Users\\\\operator\\\\CASE.DATA",
+                 "retryable":false,"details":{"errors":2,"licenseServer":"27000@private","nested":[{"command":"eclrun secret"}]}}
+                """);
+        fakeWorker.snapshot = new WorkerRunSnapshot(failedRun, "FAILED", 1,
+                "worker-1", "generation-1", List.of(), eclipseResult(8, "a".repeat(64)), error,
+                List.of(), objectMapper.readTree("{\"processTreeExitConfirmed\":true}"));
+        failedDispatcher.poll();
+        assertThat(runStore.find(failedRun).getStatus()).isEqualTo("FAILED");
+        assertThat(runStore.find(failedRun).getResultJson()).isNull();
+        assertThat(runService.get(failedRun).error().path("details").path("errors").asInt()).isEqualTo(2);
+        assertThat(runService.get(failedRun).error().toString()).contains("[redacted]", "[local path]")
+                .doesNotContain("operator", "27000@private", "eclrun secret");
+
+        long invalidPhaseRun = runService.create(seed.version().getId(), request(null, "eclipse")).id();
+        SoftwareIntegrationRunDispatcher invalidPhaseDispatcher = dispatcher();
+        invalidPhaseDispatcher.dispatch();
+        fakeWorker.snapshot = new WorkerRunSnapshot(invalidPhaseRun, "PREPARING", 1,
+                "worker-1", "generation-1",
+                List.of(new WorkerRunEvent(1, "RUNNING_NETWORK", Instant.now(), "wrong phase")),
+                null, null, List.of(), null);
+        invalidPhaseDispatcher.poll();
+        assertThat(runStore.find(invalidPhaseRun).getStatus()).isEqualTo("WORKER_LOST");
+        assertThat(runStore.events(invalidPhaseRun)).noneSatisfy(event ->
+                assertThat(event.getWorkerSequence()).isEqualTo(1));
+
+        long busyRun = runService.create(seed.version().getId(), request(null, "eclipse")).id();
+        JsonNode busyError = objectMapper.readTree("""
+                {"category":"COORDINATION","code":"WORKER_BUSY","message":"busy at C:\\\\Users\\\\operator\\\\CASE.DATA",
+                 "retryable":true,"details":{"licenseServer":"27000@private"}}
+                """);
+        fakeWorker.executeError = new WorkerClientException("busy", 409, busyError);
+        dispatcher().dispatch();
+        assertThat(runStore.find(busyRun).getStatus()).isEqualTo("QUEUED");
+        assertThat(runStore.events(busyRun)).filteredOn(event -> "REQUEUED".equals(event.getEventType()))
+                .singleElement().satisfies(event -> assertThat(event.getErrorJson())
+                        .contains("[redacted]", "[local path]")
+                        .doesNotContain("operator", "27000@private"));
     }
 
     @Test
@@ -585,7 +850,7 @@ class SoftwareIntegrationRunFlowTests {
         Seed seed = seed("READY", "models/1/1/model.pips");
         long runId = runService.create(seed.version().getId(), request("Study 1", "nodal")).id();
         assertThat(runStore.claimOldest("delete-race-dispatcher").getId()).isEqualTo(runId);
-        MockMvc projectMvc = MockMvcBuilders.standaloneSetup(new SoftwareIntegrationController(softwareIntegrationService))
+        MockMvc projectMvc = MockMvcBuilders.standaloneSetup(new SoftwareIntegrationController(softwareIntegrationService, capabilityService))
                 .setControllerAdvice(new SoftwareIntegrationRunExceptionHandler()).build();
 
         projectMvc.perform(delete("/software-integration/projects/{id}", seed.project().getId()))
@@ -607,7 +872,7 @@ class SoftwareIntegrationRunFlowTests {
         Seed well = seed("READY", "models/well/queued.pips");
         long queuedRunId = runService.create(well.version().getId(), request("Study 1", "nodal")).id();
         assertThat(runStore.claimOldest("blocked-by-network")).isNull();
-        MockMvc projectMvc = MockMvcBuilders.standaloneSetup(new SoftwareIntegrationController(softwareIntegrationService))
+        MockMvc projectMvc = MockMvcBuilders.standaloneSetup(new SoftwareIntegrationController(softwareIntegrationService, capabilityService))
                 .setControllerAdvice(new SoftwareIntegrationRunExceptionHandler()).build();
         projectMvc.perform(delete("/software-integration/projects/{id}", network.project().getId()))
                 .andExpect(status().isConflict());
@@ -616,6 +881,36 @@ class SoftwareIntegrationRunFlowTests {
 
         assertThat(runStore.find(networkRunId).getStatus()).isEqualTo("WORKER_LOST");
         assertThat(runStore.claimOldest("after-network-recovery").getId()).isEqualTo(queuedRunId);
+    }
+
+    @Test
+    void runningEclipseRetainsGlobalSlotBlocksDeletionAndRecoversAsWorkerLost() throws Exception {
+        Seed eclipse = seed("READY", "models/eclipse/recovery/CASE.DATA", "ECLIPSE_100");
+        long eclipseRunId = runService.create(eclipse.version().getId(), request(null, "eclipse")).id();
+        assertThat(runStore.claimOldest("eclipse-recovery-dispatcher").getId()).isEqualTo(eclipseRunId);
+        runStore.acceptWorker(eclipseRunId, "worker-1", "generation-1");
+        runStore.transition(eclipseRunId, SoftwareIntegrationRunStatus.PREPARING, null, "preparing", null);
+        runStore.transition(eclipseRunId, SoftwareIntegrationRunStatus.RUNNING_ECLIPSE, null, "eclipse", null);
+        assertThat(runStore.find(eclipseRunId).getStatus()).isEqualTo("RUNNING_ECLIPSE");
+
+        Seed well = seed("READY", "models/well/queued-after-eclipse.pips");
+        long queuedRunId = runService.create(well.version().getId(), request("Study 1", "nodal")).id();
+        assertThat(runStore.claimOldest("blocked-by-eclipse")).isNull();
+        MockMvc projectMvc = MockMvcBuilders.standaloneSetup(
+                        new SoftwareIntegrationController(softwareIntegrationService, capabilityService))
+                .setControllerAdvice(new SoftwareIntegrationRunExceptionHandler()).build();
+        projectMvc.perform(delete("/software-integration/projects/{id}", eclipse.project().getId()))
+                .andExpect(status().isConflict());
+        runStore.transition(eclipseRunId, SoftwareIntegrationRunStatus.COLLECTING, null, "collecting", null);
+        assertThatThrownBy(() -> runStore.complete(eclipseRunId, SoftwareIntegrationRunStatus.PARTIAL_SUCCEEDED,
+                "VALID_PARTIAL", eclipseResult(8, "a".repeat(64)), null, null, null))
+                .isInstanceOf(IllegalStateException.class);
+
+        runStore.recoverOnStartup();
+
+        assertThat(runStore.find(eclipseRunId).getStatus()).isEqualTo("WORKER_LOST");
+        assertThat(runStore.find(eclipseRunId).getResultJson()).isNull();
+        assertThat(runStore.claimOldest("after-eclipse-recovery").getId()).isEqualTo(queuedRunId);
     }
 
     @Test
@@ -789,7 +1084,8 @@ class SoftwareIntegrationRunFlowTests {
 
     private SoftwareIntegrationRunDispatcher dispatcher() {
         SoftwareIntegrationRunDispatcher dispatcher = new SoftwareIntegrationRunDispatcher(
-                runStore, versionMapper, normalizer, fakeWorker, resultValidator, artifactPublisher, integrationProperties);
+                runStore, versionMapper, normalizer, fakeWorker, resultValidator, eclipseResultValidator,
+                artifactPublisher, integrationProperties, objectMapper);
         dispatcher.recover();
         return dispatcher;
     }
@@ -816,13 +1112,15 @@ class SoftwareIntegrationRunFlowTests {
         SoftwareIntegrationModelVersionEntity version = new SoftwareIntegrationModelVersionEntity();
         version.setModelId(model.getId());
         version.setVersionNo(1);
-        version.setOriginalName("model.pips");
+        boolean eclipse = "ECLIPSE_100".equals(simulatorType);
+        version.setOriginalName(eclipse ? "CASE.DATA" : "model.pips");
         version.setStorageKey(storageKey);
         version.setSha256("a".repeat(64));
         version.setSizeBytes(5L);
         version.setStatus(status);
-        version.setModelKind("PIPESIM_NETWORK".equals(simulatorType) ? "network" : "black_oil_liquid");
-        version.setStudiesJson("Study 1\nStudy 2\nNetwork Study");
+        version.setModelKind(eclipse ? "eclipse_100"
+                : ("PIPESIM_NETWORK".equals(simulatorType) ? "network" : "black_oil_liquid"));
+        version.setStudiesJson(eclipse ? null : "Study 1\nStudy 2\nNetwork Study");
         version.setCreatedAt(now);
         version.setUpdatedAt(now);
         versionMapper.insert(version);
@@ -872,6 +1170,18 @@ class SoftwareIntegrationRunFlowTests {
                 """);
     }
 
+    private JsonNode eclipseResult(long eclEndSize, String eclEndSha) {
+        return objectMapper.readTree("""
+                {"schemaVersion":"eclipse-summary-result/1","modelKind":"eclipse_100","runTask":"eclipse",
+                 "resultContract":"VALID_FULL","caseName":"CASE.DATA",
+                 "eclEnd":{"comments":null,"warnings":0,"problems":0,"errors":0,"bugs":0},
+                 "summary":{"series":[{"keyword":"FOPR","objectName":null,"unit":"STB/DAY","points":[
+                   {"timeDays":0.0,"value":2.0},{"timeDays":1.0,"value":1.0}]}]},
+                 "messages":[{"category":"SOLVER","code":"NOTICE","message":"token=private-token","retryable":false}],
+                 "outputFiles":[{"name":"CASE.ECLEND","sizeBytes":%d,"sha256":"%s"}]}
+                """.formatted(eclEndSize, eclEndSha));
+    }
+
     private static String sha256(Path file) throws Exception {
         return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(file)));
     }
@@ -909,6 +1219,8 @@ class SoftwareIntegrationRunFlowTests {
         boolean transactionActiveDuringHttp;
         WorkerRunSnapshot snapshot;
         WorkerRunExecuteRequest lastExecuteRequest;
+        WorkerEclipseCapability eclipseCapability;
+        WorkerClientException capabilityError;
 
         void reset() {
             executeError = null;
@@ -919,6 +1231,9 @@ class SoftwareIntegrationRunFlowTests {
             cancelCalls = 0;
             transactionActiveDuringHttp = false;
             lastExecuteRequest = null;
+            eclipseCapability = new WorkerEclipseCapability(
+                    "2024.1", "AVAILABLE", null, List.of("eclipse"), 1800);
+            capabilityError = null;
             snapshot = new WorkerRunSnapshot(-1, "PREPARING", 0, "worker-1", "generation-1",
                     List.of(), null, null, List.of(), null);
         }
@@ -930,6 +1245,13 @@ class SoftwareIntegrationRunFlowTests {
         }
 
         @Override
+        public WorkerEclipseCapability eclipseCapability() {
+            observeTransaction();
+            if (capabilityError != null) throw capabilityError;
+            return eclipseCapability;
+        }
+
+        @Override
         public WorkerRunAccepted execute(WorkerRunExecuteRequest request) {
             observeTransaction();
             lastExecuteRequest = request;
@@ -937,7 +1259,7 @@ class SoftwareIntegrationRunFlowTests {
             if (executeError != null) throw executeError;
             assertThat(request.modelStorageKey()).doesNotMatch("^[A-Za-z]:.*");
             assertThat(request.parameters()).isNull();
-            assertThat(request.timeoutSeconds()).isEqualTo(600);
+            assertThat(request.timeoutSeconds()).isIn(600, 1800);
             return new WorkerRunAccepted(request.runId(), "CLAIMED", "worker-1", "generation-1");
         }
 

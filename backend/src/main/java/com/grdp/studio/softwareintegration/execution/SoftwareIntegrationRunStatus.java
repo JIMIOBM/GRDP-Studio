@@ -11,6 +11,7 @@ public enum SoftwareIntegrationRunStatus {
     RUNNING_NODAL,
     RUNNING_PROFILE,
     RUNNING_NETWORK,
+    RUNNING_ECLIPSE,
     COLLECTING,
     SUCCEEDED,
     PARTIAL_SUCCEEDED,
@@ -21,7 +22,7 @@ public enum SoftwareIntegrationRunStatus {
     WORKER_LOST;
 
     private static final Set<SoftwareIntegrationRunStatus> ACTIVE = EnumSet.of(
-            CLAIMED, PREPARING, RUNNING_NODAL, RUNNING_PROFILE, RUNNING_NETWORK, COLLECTING, CANCEL_REQUESTED);
+            CLAIMED, PREPARING, RUNNING_NODAL, RUNNING_PROFILE, RUNNING_NETWORK, RUNNING_ECLIPSE, COLLECTING, CANCEL_REQUESTED);
     private static final Set<SoftwareIntegrationRunStatus> TERMINAL = EnumSet.of(
             SUCCEEDED, PARTIAL_SUCCEEDED, FAILED, CANCELLED, TIMED_OUT, WORKER_LOST);
 

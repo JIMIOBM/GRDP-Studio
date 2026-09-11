@@ -18,6 +18,7 @@ import com.grdp.studio.softwareintegration.mapper.SoftwareIntegrationModelMapper
 import com.grdp.studio.softwareintegration.mapper.SoftwareIntegrationModelVersionMapper;
 import com.grdp.studio.softwareintegration.mapper.SoftwareIntegrationProjectMapper;
 import com.grdp.studio.softwareintegration.service.SoftwareIntegrationRunService;
+import com.grdp.studio.softwareintegration.service.SoftwareIntegrationCapabilityService;
 import com.grdp.studio.softwareintegration.support.SoftwareIntegrationDiagnosticSanitizer;
 import com.grdp.studio.softwareintegration.support.SoftwareIntegrationProperties;
 import com.grdp.studio.softwareintegration.support.SoftwareIntegrationRunExceptionHandler.RunException;
@@ -37,8 +38,9 @@ import java.util.Set;
 
 @Service
 public class SoftwareIntegrationRunServiceImpl implements SoftwareIntegrationRunService {
+    private static final int ECLIPSE_TIMEOUT_SECONDS = 1800;
     private static final Set<String> WELL_RUN_TYPES = Set.of("nodal", "profile", "combined");
-    private static final Set<String> RUN_TYPES = Set.of("nodal", "profile", "combined", "network");
+    private static final Set<String> RUN_TYPES = Set.of("nodal", "profile", "combined", "network", "eclipse");
     private final SoftwareIntegrationRunStore runStore;
     private final SoftwareIntegrationModelVersionMapper versionMapper;
     private final SoftwareIntegrationModelMapper modelMapper;
@@ -46,6 +48,7 @@ public class SoftwareIntegrationRunServiceImpl implements SoftwareIntegrationRun
     private final SoftwareIntegrationStorageKeyNormalizer normalizer;
     private final SoftwareIntegrationProperties properties;
     private final WorkerRunClient workerClient;
+    private final SoftwareIntegrationCapabilityService capabilityService;
     private final ObjectMapper objectMapper;
 
     public SoftwareIntegrationRunServiceImpl(SoftwareIntegrationRunStore runStore,
@@ -55,6 +58,7 @@ public class SoftwareIntegrationRunServiceImpl implements SoftwareIntegrationRun
                                              SoftwareIntegrationStorageKeyNormalizer normalizer,
                                              SoftwareIntegrationProperties properties,
                                              WorkerRunClient workerClient,
+                                             SoftwareIntegrationCapabilityService capabilityService,
                                              ObjectMapper objectMapper) {
         this.runStore = runStore;
         this.versionMapper = versionMapper;
@@ -63,6 +67,7 @@ public class SoftwareIntegrationRunServiceImpl implements SoftwareIntegrationRun
         this.normalizer = normalizer;
         this.properties = properties;
         this.workerClient = workerClient;
+        this.capabilityService = capabilityService;
         this.objectMapper = objectMapper;
     }
 
@@ -73,32 +78,55 @@ public class SoftwareIntegrationRunServiceImpl implements SoftwareIntegrationRun
         }
         String runType = request.getRunType();
         if (!RUN_TYPES.contains(runType)) {
-            throw new RunException(HttpStatus.BAD_REQUEST, "runType 必须为 nodal、profile、combined 或 network");
+            throw new RunException(HttpStatus.BAD_REQUEST, "runType 必须为 nodal、profile、combined、network 或 eclipse");
         }
         SoftwareIntegrationModelVersionEntity version = requireVersion(versionId);
         if (!"READY".equals(version.getStatus())) throw new RunException(HttpStatus.CONFLICT, "只有 READY 模型版本可以创建运行");
-        List<String> matchingStudies = version.getStudiesJson() == null ? List.of()
-                : Arrays.stream(version.getStudiesJson().split("\\n", -1))
-                .filter(study -> SoftwareIntegrationDiagnosticSanitizer.sanitize(study).equals(request.getStudy()))
-                .toList();
-        if (matchingStudies.size() != 1) {
-            throw new RunException(HttpStatus.BAD_REQUEST, "Study 不存在、名称不精确匹配或脱敏后不唯一");
-        }
-        String study = matchingStudies.get(0);
         SoftwareIntegrationModelEntity model = modelMapper.selectById(version.getModelId());
         if (model == null || model.getDeletedAt() != null) throw new RunException(HttpStatus.NOT_FOUND, "模型不存在");
         String versionSimulatorType = simulatorType(version.getModelKind());
         if (versionSimulatorType == null) {
             throw new RunException(HttpStatus.CONFLICT, "模型版本缺少已验证类型，请重新验证");
         }
-        boolean compatible = "PIPESIM_NETWORK".equals(versionSimulatorType) && "network".equals(runType)
+        boolean eclipse = "ECLIPSE_100".equals(versionSimulatorType);
+        String lowerOriginalName = version.getOriginalName() == null
+                ? "" : version.getOriginalName().toLowerCase(java.util.Locale.ROOT);
+        if (eclipse ? !lowerOriginalName.endsWith(".data") : !lowerOriginalName.endsWith(".pips")) {
+            throw new RunException(HttpStatus.CONFLICT, "模型文件扩展名与已验证 modelKind 不匹配");
+        }
+        String study = null;
+        if (eclipse) {
+            if (version.getStudiesJson() != null && !version.getStudiesJson().isBlank()) {
+                throw new RunException(HttpStatus.CONFLICT, "ECLIPSE 模型版本不得包含 Study");
+            }
+            if (!"eclipse".equals(runType) || !request.isStudyProvided() || request.getStudy() != null) {
+                throw new RunException(HttpStatus.BAD_REQUEST, "ECLIPSE 运行必须使用 runType=eclipse 且 study=null");
+            }
+        } else {
+            if (!request.isStudyProvided() || request.getStudy() == null || request.getStudy().isBlank()) {
+                throw new RunException(HttpStatus.BAD_REQUEST, "PIPESIM 运行必须显式提供非空 Study");
+            }
+            List<String> matchingStudies = version.getStudiesJson() == null ? List.of()
+                    : Arrays.stream(version.getStudiesJson().split("\\n", -1))
+                    .filter(candidate -> SoftwareIntegrationDiagnosticSanitizer.sanitize(candidate).equals(request.getStudy()))
+                    .toList();
+            if (matchingStudies.size() != 1) {
+                throw new RunException(HttpStatus.BAD_REQUEST, "Study 不存在、名称不精确匹配或脱敏后不唯一");
+            }
+            study = matchingStudies.get(0);
+        }
+        boolean compatible = eclipse && "eclipse".equals(runType)
+                || "PIPESIM_NETWORK".equals(versionSimulatorType) && "network".equals(runType)
                 || "PIPESIM_WELL".equals(versionSimulatorType) && WELL_RUN_TYPES.contains(runType);
         if (!compatible) throw new RunException(HttpStatus.BAD_REQUEST, "runType 与模型 simulatorType 不兼容");
         SoftwareIntegrationProjectEntity project = projectMapper.selectById(model.getProjectId());
         if (project == null || project.getDeletedAt() != null) throw new RunException(HttpStatus.NOT_FOUND, "软件集成项目不存在");
         normalizeStoredKey(version);
+        if (eclipse && !capabilityService.eclipseAvailable()) {
+            throw new RunException(HttpStatus.SERVICE_UNAVAILABLE, "ECLIPSE 100 2024.1 Worker 能力不可用");
+        }
         SoftwareIntegrationRunEntity run = runStore.createQueued(project.getId(), model.getId(), version.getId(),
-                study, runType, properties.getDefaultRunTimeoutSeconds());
+                study, runType, eclipse ? ECLIPSE_TIMEOUT_SECONDS : properties.getDefaultRunTimeoutSeconds());
         return summary(run, model, version);
     }
 
@@ -248,6 +276,7 @@ public class SoftwareIntegrationRunServiceImpl implements SoftwareIntegrationRun
 
     private static String simulatorType(String modelKind) {
         if ("network".equals(modelKind)) return "PIPESIM_NETWORK";
+        if ("eclipse_100".equals(modelKind)) return "ECLIPSE_100";
         if ("black_oil_liquid".equals(modelKind) || "basic_gas".equals(modelKind)
                 || "legacy_well".equals(modelKind)) return "PIPESIM_WELL";
         return null;

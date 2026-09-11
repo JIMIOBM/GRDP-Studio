@@ -32,6 +32,7 @@ import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Locale;
 
 @Service
 public class SoftwareIntegrationServiceImpl implements SoftwareIntegrationService {
@@ -104,7 +105,7 @@ public class SoftwareIntegrationServiceImpl implements SoftwareIntegrationServic
         if (!exists) throw new BusinessException(404, "软件集成项目不存在");
         Integer active = jdbcTemplate.queryForObject("""
                 SELECT COUNT(*) FROM software_integration_run
-                WHERE project_id = ? AND status IN ('CLAIMED','PREPARING','RUNNING_NODAL','RUNNING_PROFILE','RUNNING_NETWORK','COLLECTING','CANCEL_REQUESTED')
+                WHERE project_id = ? AND status IN ('CLAIMED','PREPARING','RUNNING_NODAL','RUNNING_PROFILE','RUNNING_NETWORK','RUNNING_ECLIPSE','COLLECTING','CANCEL_REQUESTED')
                 """, Integer.class, projectId);
         if (active != null && active > 0) throw new BusinessException(409, "项目存在活动运行，不能删除");
         SoftwareIntegrationProjectEntity entity = requireProject(projectId);
@@ -117,10 +118,11 @@ public class SoftwareIntegrationServiceImpl implements SoftwareIntegrationServic
         if (file == null || file.isEmpty()) throw new BusinessException(400, "请选择模型文件");
         if (file.getSize() > properties.getMaxUploadBytes()) throw new BusinessException(400, "模型文件超过500MB限制");
         String originalName = file.getOriginalFilename() == null ? "model" : Path.of(file.getOriginalFilename()).getFileName().toString();
-        String lowerName = originalName.toLowerCase();
-        if (!lowerName.endsWith(".pips") && !lowerName.endsWith(".zip")) throw new BusinessException(400, "仅支持 .pips 或 ZIP 模型包");
+        String lowerName = originalName.toLowerCase(Locale.ROOT);
+        if (!lowerName.endsWith(".pips") && !lowerName.endsWith(".zip") && !lowerName.endsWith(".data")) throw new BusinessException(400, "仅支持 .pips、.DATA 或 ZIP 模型包");
 
-        SoftwareIntegrationModelEntity model = findOrCreateModel(projectId, modelName(originalName));
+        SoftwareIntegrationModelEntity model = findOrCreateModel(projectId, modelName(originalName),
+                lowerName.endsWith(".data") ? "ECLIPSE_100" : "PIPESIM_WELL");
         int nextVersion = versionMapper.selectCount(new LambdaQueryWrapper<SoftwareIntegrationModelVersionEntity>().eq(SoftwareIntegrationModelVersionEntity::getModelId, model.getId())).intValue() + 1;
         String storageKey = storageKeyNormalizer.normalizeRelative("models/" + model.getId() + "/" + nextVersion + "/" + originalName);
         Path target = storageKeyNormalizer.resolve(storageKey);
@@ -153,13 +155,20 @@ public class SoftwareIntegrationServiceImpl implements SoftwareIntegrationServic
         return getProject(projectId);
     }
 
-    private SoftwareIntegrationModelEntity findOrCreateModel(long projectId, String name) {
+    private SoftwareIntegrationModelEntity findOrCreateModel(long projectId, String name, String initialSimulatorType) {
         SoftwareIntegrationModelEntity existing = modelMapper.selectOne(new LambdaQueryWrapper<SoftwareIntegrationModelEntity>()
                 .eq(SoftwareIntegrationModelEntity::getProjectId, projectId).eq(SoftwareIntegrationModelEntity::getName, name)
                 .isNull(SoftwareIntegrationModelEntity::getDeletedAt));
-        if (existing != null) return existing;
+        if (existing != null) {
+            boolean existingEclipse = "ECLIPSE_100".equals(existing.getSimulatorType());
+            boolean requestedEclipse = "ECLIPSE_100".equals(initialSimulatorType);
+            if (existingEclipse != requestedEclipse) {
+                throw new BusinessException(409, "同名模型不能混用 PIPESIM 与 ECLIPSE 文件类型");
+            }
+            return existing;
+        }
         LocalDateTime now = LocalDateTime.now(); SoftwareIntegrationModelEntity model = new SoftwareIntegrationModelEntity();
-        model.setProjectId(projectId); model.setName(name); model.setSimulatorType("PIPESIM_WELL"); model.setCreatedAt(now); model.setUpdatedAt(now); modelMapper.insert(model); return model;
+        model.setProjectId(projectId); model.setName(name); model.setSimulatorType(initialSimulatorType); model.setCreatedAt(now); model.setUpdatedAt(now); modelMapper.insert(model); return model;
     }
 
     private SoftwareIntegrationProjectEntity requireProject(long id) {
@@ -172,7 +181,7 @@ public class SoftwareIntegrationServiceImpl implements SoftwareIntegrationServic
         if (count > 0) throw new BusinessException(409, "项目名称已存在");
     }
     private String trim(String value) { return value == null ? null : value.trim(); }
-    private String modelName(String originalName) { return originalName.replaceFirst("(?i)\\.(pips|zip)$", ""); }
+    private String modelName(String originalName) { return originalName.replaceFirst("(?i)\\.(pips|data|zip)$", ""); }
     private String sha256(Path file) {
         try (InputStream input = Files.newInputStream(file)) {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");

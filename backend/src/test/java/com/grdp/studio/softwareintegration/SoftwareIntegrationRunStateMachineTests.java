@@ -22,6 +22,11 @@ class SoftwareIntegrationRunStateMachineTests {
                 SoftwareIntegrationRunStatus.RUNNING_NETWORK, SoftwareIntegrationRunStatus.COLLECTING)).isTrue();
         assertThat(SoftwareIntegrationRunStatus.RUNNING_NETWORK.isActive()).isTrue();
         assertThat(SoftwareIntegrationRunStateMachine.allows(
+                SoftwareIntegrationRunStatus.PREPARING, SoftwareIntegrationRunStatus.RUNNING_ECLIPSE)).isTrue();
+        assertThat(SoftwareIntegrationRunStateMachine.allows(
+                SoftwareIntegrationRunStatus.RUNNING_ECLIPSE, SoftwareIntegrationRunStatus.COLLECTING)).isTrue();
+        assertThat(SoftwareIntegrationRunStatus.RUNNING_ECLIPSE.isActive()).isTrue();
+        assertThat(SoftwareIntegrationRunStateMachine.allows(
                 SoftwareIntegrationRunStatus.CANCEL_REQUESTED, SoftwareIntegrationRunStatus.SUCCEEDED)).isFalse();
         assertThat(SoftwareIntegrationRunStateMachine.allows(
                 SoftwareIntegrationRunStatus.CANCEL_REQUESTED, SoftwareIntegrationRunStatus.PARTIAL_SUCCEEDED)).isFalse();

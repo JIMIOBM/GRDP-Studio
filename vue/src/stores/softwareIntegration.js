@@ -59,6 +59,7 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
   const activeModelKind = computed(() => activeVersion.value?.modelKind || '')
   const isNetworkModel = computed(() => activeModelKind.value === 'network')
   const isWellModel = computed(() => wellModelKinds.has(activeModelKind.value))
+  const isEclipseModel = computed(() => activeModelKind.value === 'eclipse_100')
   const persistedStudies = computed(() => activeVersion.value?.status === 'READY' && Array.isArray(activeVersion.value.studies)
     ? activeVersion.value.studies
     : [])
@@ -122,6 +123,7 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
   const syncRunTypeForModel = () => {
     if (!activeModel.value) return
     if (isNetworkModel.value) runType.value = 'network'
+    else if (isEclipseModel.value) runType.value = 'eclipse'
     else if (isWellModel.value && !wellRunTypes.has(runType.value)) runType.value = 'nodal'
     else if (!isWellModel.value) runType.value = ''
   }
@@ -352,8 +354,9 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
     selectedRun.value = null
     runHistory.value = []
     activeVersionId.value = versionId
+    syncRunTypeForModel()
     const studies = persistedStudies.value
-    selectedStudy.value = studies.includes(selectedStudy.value) ? selectedStudy.value : (studies[0] || '')
+    selectedStudy.value = isEclipseModel.value ? '' : (studies.includes(selectedStudy.value) ? selectedStudy.value : (studies[0] || ''))
     await loadRunHistory(versionId, true, generation)
     if (!matchesRunContext(generation, versionId)) return null
     return activeVersion.value
@@ -375,12 +378,12 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
 
   const createRun = async () => {
     const version = activeVersion.value
-    if (!version || version.status !== 'READY' || !persistedStudies.value.includes(selectedStudy.value)) {
+    if (!version || version.status !== 'READY' || (!isEclipseModel.value && !persistedStudies.value.includes(selectedStudy.value))) {
       throw new Error('请选择 READY 模型版本及其已有 Study')
     }
-    if (!isNetworkModel.value && !isWellModel.value) throw new Error('模型版本缺少已验证类型，请重新验证')
+    if (!isNetworkModel.value && !isWellModel.value && !isEclipseModel.value) throw new Error('模型版本缺少已验证类型，请重新验证')
     syncRunTypeForModel()
-    const requestedRunType = isNetworkModel.value ? 'network' : runType.value
+    const requestedRunType = isNetworkModel.value ? 'network' : (isEclipseModel.value ? 'eclipse' : runType.value)
     const expectedNavigation = navigationGeneration
     const expectedProjectId = activeProjectId.value
     const expectedModelId = activeModelId.value
@@ -390,7 +393,7 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
     loadingHistory.value = false
     submittingRun.value = true
     try {
-      const summary = unwrap(await softwareIntegrationApi.createRun(version.id, selectedStudy.value, requestedRunType))
+      const summary = unwrap(await softwareIntegrationApi.createRun(version.id, isEclipseModel.value ? null : selectedStudy.value, requestedRunType))
       if (detailRequestGeneration !== runDetailGeneration || expectedNavigation !== navigationGeneration ||
         activeProjectId.value !== expectedProjectId || activeModelId.value !== expectedModelId ||
         activeVersionId.value !== expectedVersionId || summary?.modelVersionId !== expectedVersionId) return null
@@ -477,6 +480,7 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
     activeModelKind,
     isNetworkModel,
     isWellModel,
+    isEclipseModel,
     versions,
     readyVersions,
     activeVersion,

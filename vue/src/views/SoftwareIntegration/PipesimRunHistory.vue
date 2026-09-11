@@ -24,9 +24,10 @@ const statusMeta = {
   RUNNING_NODAL: ['节点分析中', 'primary'],
   RUNNING_PROFILE: ['PT 剖面中', 'primary'],
   RUNNING_NETWORK: ['管网模拟中', 'primary'],
+  RUNNING_ECLIPSE: ['ECLIPSE 计算中', 'primary'],
   COLLECTING: ['收集结果', 'primary']
 }
-const runTypeLabel = { nodal: '节点分析', profile: 'PT 剖面', combined: '组合运行', network: '管网模拟' }
+const runTypeLabel = { nodal: '节点分析', profile: 'PT 剖面', combined: '组合运行', network: '管网模拟', eclipse: 'ECLIPSE 计算' }
 const rows = computed(() => props.runs || [])
 const formatTime = value => value ? String(value).replace('T', ' ') : '-'
 const formatElapsed = value => {
@@ -47,7 +48,7 @@ const formatElapsed = value => {
   >
     <el-table-column prop="id" label="运行 ID" width="100" />
     <el-table-column label="版本" width="82"><template #default="{ row }">v{{ row.versionNo }}</template></el-table-column>
-    <el-table-column prop="study" label="Study" min-width="150" show-overflow-tooltip />
+    <el-table-column prop="study" label="Study" min-width="150" show-overflow-tooltip><template #default="{ row }">{{ row.study || '-' }}</template></el-table-column>
     <el-table-column label="类型" width="100"><template #default="{ row }">{{ runTypeLabel[row.runType] || row.runType }}</template></el-table-column>
     <el-table-column label="状态" width="120">
       <template #default="{ row }"><el-tag :type="statusMeta[row.status]?.[1] || 'info'">{{ statusMeta[row.status]?.[0] || row.status }}</el-tag></template>

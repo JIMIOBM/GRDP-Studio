@@ -14,29 +14,38 @@ import com.grdp.studio.softwareintegration.entity.SoftwareIntegrationRunEntity;
 import com.grdp.studio.softwareintegration.mapper.SoftwareIntegrationModelVersionMapper;
 import com.grdp.studio.softwareintegration.support.SoftwareIntegrationStorageKeyNormalizer;
 import com.grdp.studio.softwareintegration.support.SoftwareIntegrationProperties;
+import com.grdp.studio.softwareintegration.support.SoftwareIntegrationEclipseSanitizer;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 import java.time.LocalDateTime;
 import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 @Component
 @ConditionalOnProperty(prefix = "grdp.software-integration", name = "dispatcher-enabled", havingValue = "true", matchIfMissing = true)
 public class SoftwareIntegrationRunDispatcher {
+    private static final Set<String> WORKER_STATES = Set.of(
+            "CLAIMED", "PREPARING", "RUNNING_NODAL", "RUNNING_PROFILE", "RUNNING_NETWORK", "RUNNING_ECLIPSE",
+            "COLLECTING", "SUCCEEDED", "PARTIAL_SUCCEEDED", "FAILED", "CANCEL_REQUESTED", "CANCELLED",
+            "TIMED_OUT", "WORKER_LOST");
     private final String dispatcherId = UUID.randomUUID().toString();
     private final SoftwareIntegrationRunStore runStore;
     private final SoftwareIntegrationModelVersionMapper versionMapper;
     private final SoftwareIntegrationStorageKeyNormalizer normalizer;
     private final WorkerRunClient workerClient;
     private final PipesimResultValidator resultValidator;
+    private final EclipseSummaryResultValidator eclipseResultValidator;
     private final SoftwareIntegrationArtifactPublisher artifactPublisher;
     private final SoftwareIntegrationProperties properties;
+    private final ObjectMapper objectMapper;
     private final AtomicBoolean dispatching = new AtomicBoolean();
     private final AtomicBoolean polling = new AtomicBoolean();
     private volatile boolean recovered;
@@ -45,17 +54,21 @@ public class SoftwareIntegrationRunDispatcher {
     public SoftwareIntegrationRunDispatcher(SoftwareIntegrationRunStore runStore,
                                             SoftwareIntegrationModelVersionMapper versionMapper,
                                             SoftwareIntegrationStorageKeyNormalizer normalizer,
-                                            WorkerRunClient workerClient,
-                                            PipesimResultValidator resultValidator,
-                                            SoftwareIntegrationArtifactPublisher artifactPublisher,
-                                            SoftwareIntegrationProperties properties) {
+                                             WorkerRunClient workerClient,
+                                             PipesimResultValidator resultValidator,
+                                             EclipseSummaryResultValidator eclipseResultValidator,
+                                             SoftwareIntegrationArtifactPublisher artifactPublisher,
+                                             SoftwareIntegrationProperties properties,
+                                             ObjectMapper objectMapper) {
         this.runStore = runStore;
         this.versionMapper = versionMapper;
         this.normalizer = normalizer;
         this.workerClient = workerClient;
         this.resultValidator = resultValidator;
+        this.eclipseResultValidator = eclipseResultValidator;
         this.artifactPublisher = artifactPublisher;
         this.properties = properties;
+        this.objectMapper = objectMapper;
     }
 
     @EventListener(ApplicationReadyEvent.class)
@@ -134,7 +147,8 @@ public class SoftwareIntegrationRunDispatcher {
                 return;
             }
             if (isWorkerBusy(exception)) {
-                runStore.requeueClaimed(current.getId(), "Worker 短暂忙，运行安全退回队列", exception.error());
+                runStore.requeueClaimed(current.getId(), "Worker 短暂忙，运行安全退回队列",
+                        sanitizeForRun(current, exception.error()));
                 nextDispatchAt = LocalDateTime.now().plus(properties.getWorkerBusyBackoff());
             } else if (exception.statusCode() == null) {
                 runStore.markAcceptanceUncertain(current.getId(), availability.generationId(),
@@ -297,7 +311,8 @@ public class SoftwareIntegrationRunDispatcher {
             workerLost(run.getId(), "Worker generation 已变化，原 execute 是否执行无法安全确认");
             return;
         }
-        runStore.requeueClaimed(run.getId(), "同 generation 明确返回 404，运行安全退回队列", workerError);
+        runStore.requeueClaimed(run.getId(), "同 generation 明确返回 404，运行安全退回队列",
+                sanitizeForRun(run, workerError));
         nextDispatchAt = LocalDateTime.now().plus(properties.getWorkerBusyBackoff());
     }
 
@@ -333,6 +348,10 @@ public class SoftwareIntegrationRunDispatcher {
                 if (run != null) workerLost(run.getId(), "Worker 返回的运行或 generation 标识不匹配");
                 return;
             }
+            validateWorkerStateForRun(run, snapshot.state());
+            if (snapshot.events() != null) {
+                for (var event : snapshot.events()) validateWorkerStateForRun(run, event.state());
+            }
             runStore.persistWorkerEvents(run.getId(), snapshot.events());
             for (var event : snapshot.events()) applyWorkerPhase(run.getId(), event.state());
             applySnapshot(runStore.find(run.getId()), snapshot);
@@ -358,8 +377,21 @@ public class SoftwareIntegrationRunDispatcher {
             case "RUNNING_NODAL" -> phase(run, SoftwareIntegrationRunStatus.RUNNING_NODAL, "Worker 正在执行节点分析");
             case "RUNNING_PROFILE" -> phase(run, SoftwareIntegrationRunStatus.RUNNING_PROFILE, "Worker 正在执行 PT 剖面");
             case "RUNNING_NETWORK" -> phase(run, SoftwareIntegrationRunStatus.RUNNING_NETWORK, "Worker 正在执行管网模拟");
+            case "RUNNING_ECLIPSE" -> phase(run, SoftwareIntegrationRunStatus.RUNNING_ECLIPSE, "Worker 正在执行 ECLIPSE 计算");
             case "COLLECTING" -> phase(run, SoftwareIntegrationRunStatus.COLLECTING, "Worker 正在收集结果");
             default -> { }
+        }
+    }
+
+    private static void validateWorkerStateForRun(SoftwareIntegrationRunEntity run, String workerState) {
+        String state = workerState == null ? "" : workerState.toUpperCase(Locale.ROOT);
+        if (!WORKER_STATES.contains(state)) throw new IllegalArgumentException("Unknown Worker state");
+        if ("eclipse".equals(run.getRunType())
+                && ("RUNNING_NODAL".equals(state) || "RUNNING_PROFILE".equals(state) || "RUNNING_NETWORK".equals(state))) {
+            throw new IllegalArgumentException("PIPESIM phase is invalid for ECLIPSE");
+        }
+        if (!"eclipse".equals(run.getRunType()) && "RUNNING_ECLIPSE".equals(state)) {
+            throw new IllegalArgumentException("ECLIPSE phase is invalid for PIPESIM");
         }
     }
 
@@ -398,8 +430,16 @@ public class SoftwareIntegrationRunDispatcher {
             case "RUNNING_NODAL" -> phase(run, SoftwareIntegrationRunStatus.RUNNING_NODAL, "Worker 正在执行节点分析");
             case "RUNNING_PROFILE" -> phase(run, SoftwareIntegrationRunStatus.RUNNING_PROFILE, "Worker 正在执行 PT 剖面");
             case "RUNNING_NETWORK" -> phase(run, SoftwareIntegrationRunStatus.RUNNING_NETWORK, "Worker 正在执行管网模拟");
+            case "RUNNING_ECLIPSE" -> phase(run, SoftwareIntegrationRunStatus.RUNNING_ECLIPSE, "Worker 正在执行 ECLIPSE 计算");
             case "COLLECTING" -> phase(run, SoftwareIntegrationRunStatus.COLLECTING, "Worker 正在收集结果");
-            case "SUCCEEDED", "PARTIAL_SUCCEEDED" -> publishResult(runStore.find(run.getId()), snapshot);
+            case "SUCCEEDED" -> publishResult(runStore.find(run.getId()), snapshot);
+            case "PARTIAL_SUCCEEDED" -> {
+                if ("eclipse".equals(run.getRunType())) {
+                    fail(run.getId(), "RESULT_CONTRACT_INVALID", "ECLIPSE 不允许部分成功结果");
+                } else {
+                    publishResult(runStore.find(run.getId()), snapshot);
+                }
+            }
             case "FAILED" -> finishFailure(runStore.find(run.getId()), snapshot);
             case "CANCELLED" -> finishCancellation(runStore.find(run.getId()), snapshot);
             case "TIMED_OUT" -> finishTimeout(runStore.find(run.getId()), snapshot);
@@ -416,7 +456,8 @@ public class SoftwareIntegrationRunDispatcher {
             JsonNode error = timedOut
                     ? runStore.error("TIMEOUT", "取消 CAS 先于 Worker 终态，超时结果已丢弃且清理已确认")
                     : runStore.error("RUN_CANCELLED", "取消 CAS 先于 Worker 终态，结果已丢弃且清理已确认");
-            runStore.complete(run.getId(), terminal, null, null, error, snapshot.cleanup(), null);
+            runStore.complete(run.getId(), terminal, null, null, sanitizeForRun(run, error),
+                    sanitizeForRun(run, snapshot.cleanup()), null);
             return;
         }
         try {
@@ -453,32 +494,52 @@ public class SoftwareIntegrationRunDispatcher {
     private void publishResult(SoftwareIntegrationRunEntity run, WorkerRunSnapshot snapshot) {
         PublishedArtifacts published = null;
         try {
-            PipesimResultValidator.ValidatedResult validated =
-                    resultValidator.validate(run.getRunType(), run.getStudyName(), snapshot.result());
+            boolean eclipse = "eclipse".equals(run.getRunType());
+            SoftwareIntegrationRunStatus terminalStatus;
+            String contract;
+            JsonNode result;
+            if (eclipse) {
+                SoftwareIntegrationModelVersionEntity version = versionMapper.selectById(run.getModelVersionId());
+                if (version == null) {
+                    throw new EclipseSummaryResultValidator.ResultValidationException("Model version is missing");
+                }
+                EclipseSummaryResultValidator.ValidatedResult validated = eclipseResultValidator.validate(
+                        version.getOriginalName(), snapshot.result());
+                terminalStatus = validated.terminalStatus();
+                contract = validated.contract();
+                result = validated.result();
+            } else {
+                PipesimResultValidator.ValidatedResult validated =
+                        resultValidator.validate(run.getRunType(), run.getStudyName(), snapshot.result());
+                terminalStatus = validated.terminalStatus();
+                contract = validated.contract();
+                result = validated.result();
+            }
             SoftwareIntegrationRunStatus current = SoftwareIntegrationRunStatus.valueOf(run.getStatus());
             if (current != SoftwareIntegrationRunStatus.CANCEL_REQUESTED && current != SoftwareIntegrationRunStatus.COLLECTING) {
                 run = runStore.transition(run.getId(), SoftwareIntegrationRunStatus.COLLECTING, null,
                         "Worker 已完成计算，正在发布结果", null);
             }
-            published = artifactPublisher.publish(run.getId(), snapshot.artifacts());
+            published = artifactPublisher.publish(run.getId(), snapshot.artifacts(), eclipse);
             if (published.manifestKey() == null) {
                 artifactPublisher.discard(published);
                 published = null;
                 throw new SoftwareIntegrationArtifactPublisher.ArtifactPublicationException(
                         "Successful run is missing manifest.json");
             }
-            JsonNode error = snapshot.error();
-            if (validated.terminalStatus() == SoftwareIntegrationRunStatus.PARTIAL_SUCCEEDED && error == null) {
+            JsonNode error = sanitizeForRun(run, snapshot.error());
+            if (terminalStatus == SoftwareIntegrationRunStatus.PARTIAL_SUCCEEDED && error == null) {
                 error = runStore.error("PROFILE_PARTIAL", "节点分析有效，但 PT 剖面未产生有效结果");
             }
-            boolean completed = runStore.complete(run.getId(), validated.terminalStatus(), validated.contract(),
-                    validated.result(), error, snapshot.cleanup(), published);
+            boolean completed = runStore.complete(run.getId(), terminalStatus, contract,
+                    result, error, sanitizeForRun(run, snapshot.cleanup()), published);
             if (!completed) artifactPublisher.discard(published);
-        } catch (PipesimResultValidator.ResultValidationException exception) {
+        } catch (PipesimResultValidator.ResultValidationException
+                 | EclipseSummaryResultValidator.ResultValidationException exception) {
             if (published != null) artifactPublisher.discard(published);
             if (finishCancellationThatWonDuringPublication(run.getId(), snapshot)) return;
-            String schema = "network".equals(run.getRunType())
-                    ? "pipesim-network-result/1" : "pipesim-well-result/1";
+            String schema = "eclipse".equals(run.getRunType()) ? "eclipse-summary-result/1"
+                    : ("network".equals(run.getRunType()) ? "pipesim-network-result/1" : "pipesim-well-result/1");
             fail(run.getId(), "RESULT_CONTRACT_INVALID", "Worker 结果不符合 " + schema);
         } catch (SoftwareIntegrationArtifactPublisher.ArtifactPublicationException exception) {
             if (published != null) artifactPublisher.discard(published);
@@ -509,7 +570,7 @@ public class SoftwareIntegrationRunDispatcher {
             JsonNode error = snapshot.error() == null
                     ? runStore.error("RUN_CANCELLED", "运行已取消且进程清理已确认") : snapshot.error();
             runStore.complete(run.getId(), SoftwareIntegrationRunStatus.CANCELLED, null,
-                    null, error, snapshot.cleanup(), null);
+                    null, sanitizeForRun(run, error), sanitizeForRun(run, snapshot.cleanup()), null);
         }
     }
 
@@ -529,13 +590,13 @@ public class SoftwareIntegrationRunDispatcher {
         }
         JsonNode error = snapshot.error() == null ? runStore.error("TIMEOUT", "运行超时并已完成进程清理") : snapshot.error();
         runStore.complete(run.getId(), SoftwareIntegrationRunStatus.TIMED_OUT, null,
-                null, error, snapshot.cleanup(), null);
+                null, sanitizeForRun(run, error), sanitizeForRun(run, snapshot.cleanup()), null);
     }
 
     private void finishFailure(SoftwareIntegrationRunEntity run, WorkerRunSnapshot snapshot) {
         if (run == null) return;
         JsonNode error = snapshot.error() == null
-                ? runStore.error("WORKER_FAILED", "Worker 运行失败") : snapshot.error();
+                ? runStore.error("WORKER_FAILED", "Worker 运行失败") : sanitizeForRun(run, snapshot.error());
         publishTerminal(run, SoftwareIntegrationRunStatus.FAILED, snapshot, error,
                 "失败运行的 Artifact 发布失败");
     }
@@ -544,9 +605,9 @@ public class SoftwareIntegrationRunDispatcher {
                                  WorkerRunSnapshot snapshot, JsonNode error, String artifactFailureMessage) {
         PublishedArtifacts published = null;
         try {
-            published = artifactPublisher.publish(run.getId(), snapshot.artifacts());
+            published = artifactPublisher.publish(run.getId(), snapshot.artifacts(), "eclipse".equals(run.getRunType()));
             boolean completed = runStore.complete(run.getId(), terminal, null,
-                    null, error, snapshot.cleanup(), published);
+                    null, sanitizeForRun(run, error), sanitizeForRun(run, snapshot.cleanup()), published);
             if (!completed) artifactPublisher.discard(published);
         } catch (SoftwareIntegrationArtifactPublisher.ArtifactPublicationException exception) {
             if (published != null) artifactPublisher.discard(published);
@@ -562,10 +623,11 @@ public class SoftwareIntegrationRunDispatcher {
         JsonNode error = runStore.error(code, message);
         SoftwareIntegrationRunEntity current = runStore.find(runId);
         if (current != null && !SoftwareIntegrationRunStatus.valueOf(current.getStatus()).isTerminal()) {
+            JsonNode sanitizedCleanup = sanitizeForRun(current, cleanup);
             runStore.transition(runId, SoftwareIntegrationRunStatus.FAILED, patch -> {
                 patch.setErrorCode(code);
                 patch.setErrorJson(error.toString());
-                patch.setCleanupJson(cleanup == null ? null : cleanup.toString());
+                patch.setCleanupJson(sanitizedCleanup == null ? null : sanitizedCleanup.toString());
             }, message, error);
         }
     }
@@ -577,7 +639,8 @@ public class SoftwareIntegrationRunDispatcher {
     private void failWithWorkerError(long runId, JsonNode workerError, String fallbackCode, String fallbackMessage) {
         SoftwareIntegrationRunEntity current = runStore.find(runId);
         if (current == null || SoftwareIntegrationRunStatus.valueOf(current.getStatus()).isTerminal()) return;
-        JsonNode error = workerError == null ? runStore.error(fallbackCode, fallbackMessage) : workerError;
+        JsonNode error = workerError == null ? runStore.error(fallbackCode, fallbackMessage)
+                : sanitizeForRun(current, workerError);
         runStore.transition(runId, SoftwareIntegrationRunStatus.FAILED, null, fallbackMessage, error);
     }
 
@@ -601,5 +664,10 @@ public class SoftwareIntegrationRunDispatcher {
             if (updated != 1) throw new IllegalStateException("Model storage key CAS failed");
         }
         return normalized;
+    }
+
+    private JsonNode sanitizeForRun(SoftwareIntegrationRunEntity run, JsonNode value) {
+        return run != null && "eclipse".equals(run.getRunType())
+                ? SoftwareIntegrationEclipseSanitizer.sanitize(value, objectMapper) : value;
     }
 }

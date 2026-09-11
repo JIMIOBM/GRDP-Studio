@@ -48,12 +48,12 @@ public class SoftwareIntegrationSchemaInitializer implements ApplicationRunner {
         String jsonType = h2 ? "CLOB" : "JSON";
         String resultType = h2 ? "CLOB" : "LONGTEXT";
         String generated = h2
-                ? "GENERATED ALWAYS AS (CASE WHEN status IN ('CLAIMED','PREPARING','RUNNING_NODAL','RUNNING_PROFILE','RUNNING_NETWORK','COLLECTING','CANCEL_REQUESTED') THEN 1 ELSE NULL END)"
-                : "GENERATED ALWAYS AS (CASE WHEN status IN ('CLAIMED','PREPARING','RUNNING_NODAL','RUNNING_PROFILE','RUNNING_NETWORK','COLLECTING','CANCEL_REQUESTED') THEN 1 ELSE NULL END) STORED";
+                ? "GENERATED ALWAYS AS (CASE WHEN " + h2ActivePredicate() + " THEN 1 ELSE NULL END)"
+                : "GENERATED ALWAYS AS (CASE WHEN status IN ('CLAIMED','PREPARING','RUNNING_NODAL','RUNNING_PROFILE','RUNNING_NETWORK','RUNNING_ECLIPSE','COLLECTING','CANCEL_REQUESTED') THEN 1 ELSE NULL END) STORED";
         jdbcTemplate.execute("""
                 CREATE TABLE IF NOT EXISTS software_integration_run (
                   id BIGINT AUTO_INCREMENT PRIMARY KEY, project_id BIGINT NOT NULL, model_id BIGINT NOT NULL, model_version_id BIGINT NOT NULL,
-                  study_name VARCHAR(255) NOT NULL, run_type VARCHAR(20) NOT NULL, parameters_json %s NOT NULL, status VARCHAR(40) NOT NULL,
+                  study_name VARCHAR(255), run_type VARCHAR(20) NOT NULL, parameters_json %s NOT NULL, status VARCHAR(40) NOT NULL,
                   status_version INT NOT NULL DEFAULT 0, timeout_seconds INT NOT NULL, dispatcher_id VARCHAR(64), worker_id VARCHAR(128),
                   generation_id VARCHAR(128), acceptance_uncertain_at DATETIME(3), acceptance_recovery_deadline_at DATETIME(3),
                   last_worker_sequence BIGINT NOT NULL DEFAULT 0, cancellation_reason VARCHAR(20),
@@ -70,7 +70,7 @@ public class SoftwareIntegrationSchemaInitializer implements ApplicationRunner {
         ensureRunColumn("acceptance_recovery_deadline_at",
                 "ALTER TABLE software_integration_run ADD COLUMN acceptance_recovery_deadline_at DATETIME(3) NULL");
         ensureResultJsonTextType(h2);
-        ensureNetworkActiveSlot(h2);
+        ensureEclipseRunContract(h2);
         jdbcTemplate.execute("""
                 CREATE TABLE IF NOT EXISTS software_integration_run_event (
                   id BIGINT AUTO_INCREMENT PRIMARY KEY, run_id BIGINT NOT NULL, event_sequence BIGINT NOT NULL, worker_sequence BIGINT,
@@ -150,22 +150,79 @@ public class SoftwareIntegrationSchemaInitializer implements ApplicationRunner {
         }
     }
 
-    private void ensureNetworkActiveSlot(boolean h2) {
-        // Test H2 databases are ephemeral; altering an indexed generated column leaves H2 2.4
-        // with an expression bound to the closed DDL session. Fresh H2 schemas already use the new expression.
-        if (h2) return;
+    private void ensureEclipseRunContract(boolean h2) {
+        ensureEclipseStudyNullable(h2);
         if (!runColumnExists("active_slot")) return;
         String expression = runColumnGenerationExpression();
-        if (expression != null && expression.toUpperCase().contains("RUNNING_NETWORK")) return;
-        String statuses = "('CLAIMED','PREPARING','RUNNING_NODAL','RUNNING_PROFILE','RUNNING_NETWORK','COLLECTING','CANCEL_REQUESTED')";
-        String ddl = "ALTER TABLE software_integration_run MODIFY COLUMN active_slot TINYINT GENERATED ALWAYS AS (CASE WHEN status IN "
-                + statuses + " THEN 1 ELSE NULL END) STORED";
-        try {
-            jdbcTemplate.execute(ddl);
-        } catch (DataAccessException exception) {
-            String current = runColumnGenerationExpression();
-            if (current == null || !current.toUpperCase().contains("RUNNING_NETWORK")) throw exception;
+        if (expression == null || !expression.toUpperCase().contains("RUNNING_ECLIPSE")) {
+            String statuses = "('CLAIMED','PREPARING','RUNNING_NODAL','RUNNING_PROFILE','RUNNING_NETWORK','RUNNING_ECLIPSE','COLLECTING','CANCEL_REQUESTED')";
+            String ddl = h2
+                    ? "ALTER TABLE software_integration_run ALTER COLUMN active_slot TINYINT GENERATED ALWAYS AS (CASE WHEN "
+                        + h2ActivePredicate() + " THEN 1 ELSE NULL END)"
+                    : "ALTER TABLE software_integration_run MODIFY COLUMN active_slot TINYINT GENERATED ALWAYS AS (CASE WHEN status IN "
+                        + statuses + " THEN 1 ELSE NULL END) STORED";
+            try {
+                jdbcTemplate.execute(ddl);
+            } catch (DataAccessException exception) {
+                String current = runColumnGenerationExpression();
+                if (current == null || !current.toUpperCase().contains("RUNNING_ECLIPSE")) throw exception;
+            }
         }
+        ensureActiveSlotUniqueIndex();
+    }
+
+    private void ensureEclipseStudyNullable(boolean h2) {
+        String type = runColumnType("study_name");
+        if (type == null || studyNameNullable(h2)) return;
+        try {
+            jdbcTemplate.execute(h2
+                    ? "ALTER TABLE software_integration_run ALTER COLUMN study_name DROP NOT NULL"
+                    : "ALTER TABLE software_integration_run MODIFY COLUMN study_name VARCHAR(255) NULL");
+        } catch (DataAccessException exception) {
+            if (!studyNameNullable(h2)) throw exception;
+        }
+    }
+
+    private void ensureActiveSlotUniqueIndex() {
+        if (activeSlotUniqueIndexExists()) return;
+        try {
+            jdbcTemplate.execute("CREATE UNIQUE INDEX uk_software_integration_run_active_slot "
+                    + "ON software_integration_run (active_slot)");
+        } catch (DataAccessException exception) {
+            if (!activeSlotUniqueIndexExists()) throw exception;
+        }
+    }
+
+    private boolean activeSlotUniqueIndexExists() {
+        return Boolean.TRUE.equals(jdbcTemplate.execute((ConnectionCallback<Boolean>) connection -> {
+            String catalog = connection.getCatalog();
+            for (String tablePattern : new String[]{"software_integration_run", "SOFTWARE_INTEGRATION_RUN"}) {
+                try (ResultSet indexes = connection.getMetaData().getIndexInfo(catalog, null, tablePattern, true, false)) {
+                    while (indexes.next()) {
+                        if ("uk_software_integration_run_active_slot".equalsIgnoreCase(indexes.getString("INDEX_NAME"))) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
+        }));
+    }
+
+    private boolean studyNameNullable(boolean h2) {
+        return jdbcTemplate.execute((ConnectionCallback<Boolean>) connection -> {
+            String schema = h2 ? connection.getSchema() : connection.getCatalog();
+            try (PreparedStatement statement = connection.prepareStatement("""
+                    SELECT is_nullable FROM information_schema.columns
+                    WHERE LOWER(table_schema) = LOWER(?) AND LOWER(table_name) = 'software_integration_run'
+                      AND LOWER(column_name) = 'study_name'
+                    """)) {
+                statement.setString(1, schema);
+                try (ResultSet result = statement.executeQuery()) {
+                    return result.next() && "YES".equalsIgnoreCase(result.getString(1));
+                }
+            }
+        });
     }
 
     private String runColumnType(String columnName) {
@@ -194,6 +251,10 @@ public class SoftwareIntegrationSchemaInitializer implements ApplicationRunner {
         String normalized = type.toUpperCase();
         return h2 ? normalized.contains("CLOB") || normalized.contains("CHARACTER LARGE OBJECT")
                 : normalized.equals("LONGTEXT");
+    }
+
+    private static String h2ActivePredicate() {
+        return "REGEXP_LIKE(status, '^(CLAIMED|PREPARING|RUNNING_NODAL|RUNNING_PROFILE|RUNNING_NETWORK|RUNNING_ECLIPSE|COLLECTING|CANCEL_REQUESTED)$')";
     }
 
     private static String columnType(Connection connection, String tableName, String columnName) throws SQLException {

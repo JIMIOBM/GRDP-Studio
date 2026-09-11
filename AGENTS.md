@@ -12,6 +12,8 @@ For any software-integration task, read these files before proposing or making c
 
 The original requirements backup remains at `C:\Users\Violet\Desktop\Bei\PRO.MD`, but the repository copy is the development reference. If the two files differ, stop and ask which change is authoritative rather than silently merging them.
 
+User decision, 2026-09-10: for the ECLIPSE 100 MVP, `docs/software-integration/requirements.md` is authoritative and `C:\Users\Violet\Desktop\Bei\PRO.MD` is a historical backup only. Do not edit the backup or reopen this resolved question for ECLIPSE work.
+
 ## Protected Scope
 
 Software integration is isolated from the existing GRDP business modules.

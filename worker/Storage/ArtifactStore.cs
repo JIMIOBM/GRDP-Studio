@@ -54,6 +54,19 @@ public sealed class ArtifactStore
         return await WriteJsonAsync(outputDirectory, "manifest.json", manifest, cancellationToken);
     }
 
+    // ECLIPSE text and binary outputs can expose paths, host details, and license diagnostics.
+    // Publish only their fresh-file metadata; normalized results retain the supported summary data.
+    public async Task<IReadOnlyList<EclipseOutputMetadata>> DescribeEclipseOutputsAsync(IEnumerable<string> files, CancellationToken cancellationToken = default)
+    {
+        var outputFiles = new List<EclipseOutputMetadata>();
+        foreach (var file in files)
+        {
+            var info = new FileInfo(file);
+            outputFiles.Add(new(Path.GetFileName(file), info.Length, await ComputeFileSha256Async(file, cancellationToken)));
+        }
+        return outputFiles.OrderBy(file => file.Filename, StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
     private async Task<ArtifactDescriptor> WriteBytesAsync(
         string outputDirectory,
         string name,
@@ -74,6 +87,12 @@ public sealed class ArtifactStore
         }
         var sha = Convert.ToHexStringLower(SHA256.HashData(bytes));
         return new ArtifactDescriptor(storage.ToStorageKey(path), bytes.LongLength, sha, contentType);
+    }
+
+    private static async Task<string> ComputeFileSha256Async(string path, CancellationToken cancellationToken)
+    {
+        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        return Convert.ToHexStringLower(await SHA256.HashDataAsync(stream, cancellationToken));
     }
 
     private static string SanitizeLogMessage(string message)
@@ -133,3 +152,5 @@ public sealed class ArtifactStore
         return LocalPath.Replace(redacted, "[local path]");
     }
 }
+
+public sealed record EclipseOutputMetadata(string Filename, long SizeBytes, string Sha256);

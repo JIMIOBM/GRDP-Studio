@@ -110,12 +110,15 @@ published five Artifacts, confirmed process-tree exit, and returned the Worker t
 
 ### ECLIPSE Migration Checkpoint
 
-- ECLIPSE migration is selected as the next software-integration capability. Architecture preparation is complete; implementation has not started.
+- ECLIPSE 100 MVP implementation is complete in the uncommitted worktree: Spring Boot and migration support, Worker `eclrun` execution/cleanup/parsing, and Vue model/run/result UI are present. It is not yet committed or deployed.
 - A separate C# probe project built successfully and launched the trusted local ECLIPSE 2024.1 installation. The process created current-run PRT, EGRID and INIT outputs and exited without leaving an ECLIPSE process behind.
 - The probe's sample deck did not complete a valid simulation: its PRT contained four errors, 101 reported problems, repeated `CONVERGENCE ERROR = NaN`, and a terminal `RUN STOPPED` condition. Process exit code zero and output-file existence therefore must not be treated as simulation success.
 - The official launcher is discoverable from the controlled local environment; `eclrun.exe --report-versions eclipse` returned `2024.1`. The Worker must use this launcher, not the probe's direct `eclipse.exe` invocation.
 - The user selected the first MVP input boundary: one `.DATA` file only, with ZIP, directory packages and `INCLUDE` decks rejected. No Study, parameter override or input-deck modification is permitted.
-- No ECLIPSE Worker, Spring Boot, database, API or Vue implementation has been added to GRDP-Studio. The prepared contract and Executor work packages are in `docs/software-integration/eclipse-mvp-architecture.md`.
+- The user confirmed that `docs/software-integration/requirements.md` is authoritative for the ECLIPSE MVP; the external `PRO.MD` remains an unmodified historical backup.
+- The Worker accepts one isolated `.DATA`, rejects lexical `INCLUDE`, invokes `eclrun -v 2024.1 eclipse`, requires a fresh zero-error `.ECLEND`, treats RSM as optional, and publishes only controlled artifacts plus metadata-only ECLIPSE output inventory. The Backend persists `RUNNING_ECLIPSE` and nullable ECLIPSE Study state; Vue hides Study, preserves version selection, and shows ECLEND, optional Summary, cleanup and separate output/Artifact inventories.
+- Verified on 2026-09-11: Backend Maven test suite passed 74 tests; Worker Release build passed with 0 warnings/errors and Worker xUnit passed 61 tests; Vue `npm run build` passed. Vue emits existing Rollup pure-comment, Sass legacy API and bundle-size warnings.
+- No user-approved serialized real standalone `.DATA` success run has been performed. A real acceptance run must capture fresh zero-count `.ECLEND`, cleanup evidence, output metadata hashes and, when available, RSM dimensions before deployment.
 - The external probe is evidence for executable invocation only. Its permissive success check, formula-generated fallback values, hard-coded license-path handling and license-environment logging must not be migrated.
 - The contract preserves Avalonia-compatible RSM/ECLEND parsing, output freshness, License/Fatal classification, immutable isolated-run behavior, cancellation cleanup and result semantics.
 

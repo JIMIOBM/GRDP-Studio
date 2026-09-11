@@ -74,6 +74,31 @@ public sealed class StorageResolver
         return fullPath;
     }
 
+    public string ResolveExistingData(string? storageKey)
+    {
+        var path = ResolveExistingFile(storageKey);
+        if (!string.Equals(Path.GetExtension(path), ".DATA", StringComparison.OrdinalIgnoreCase))
+            throw new StorageException("UNSUPPORTED_MODEL_FILE", "The ECLIPSE adapter supports only .DATA model files.");
+        return path;
+    }
+
+    private string ResolveExistingFile(string? storageKey)
+    {
+        if (string.IsNullOrWhiteSpace(storageKey)) throw new StorageException("MODEL_STORAGE_KEY_REQUIRED", "modelStorageKey is required.");
+        var key = storageKey.Trim();
+        if (Path.IsPathFullyQualified(key) || Path.IsPathRooted(key) || key.Contains(':') || key.Split(['/', '\\']).Any(segment => segment == ".."))
+            throw new StorageException("INVALID_STORAGE_KEY", "modelStorageKey must be a relative key without parent traversal.");
+        string fullPath;
+        try { fullPath = Path.GetFullPath(Path.Combine(root, key)); }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        { throw new StorageException("INVALID_STORAGE_KEY", "modelStorageKey is invalid."); }
+        if (!fullPath.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase) || string.Equals(fullPath, root, StringComparison.OrdinalIgnoreCase))
+            throw new StorageException("STORAGE_ROOT_ESCAPE", "modelStorageKey resolves outside the configured storage root.");
+        RejectReparsePoints(fullPath);
+        if (!File.Exists(fullPath)) throw new StorageException("MODEL_NOT_FOUND", "The model file does not exist.", StatusCodes.Status404NotFound);
+        return fullPath;
+    }
+
     public async Task<string> ComputeSha256Async(string path, CancellationToken cancellationToken)
     {
         await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);

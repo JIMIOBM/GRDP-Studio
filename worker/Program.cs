@@ -29,8 +29,11 @@ builder.Services.AddOptions<WorkerOptions>()
         (options.PipesimPtkPath is null || Path.IsPathFullyQualified(options.PipesimPtkPath)) &&
         options.MaxRunTimeoutSeconds > 0 &&
         options.ValidationTimeoutSeconds > 0 &&
-        options.GracefulStopSeconds > 0 &&
-        options.ProcessExitConfirmationSeconds > 0,
+         options.GracefulStopSeconds > 0 &&
+         options.ProcessExitConfirmationSeconds > 0 &&
+         options.EclipseMaxRunTimeoutSeconds > 0 &&
+         options.EclipseCleanupTimeoutSeconds > 0 &&
+         (options.EclrunPath is null || Path.IsPathFullyQualified(options.EclrunPath)),
         "Worker identity, storage, PIPESIM, and timeout configuration must be valid.")
     .ValidateOnStart();
 builder.Services.Configure<JsonOptions>(options =>
@@ -47,6 +50,10 @@ builder.Services.AddSingleton<PtkRunRegistry>();
 builder.Services.AddSingleton<PtkProcessRunner>();
 builder.Services.AddSingleton<PtkRunService>();
 builder.Services.AddSingleton<PtkValidationService>();
+builder.Services.AddSingleton<EclipseLauncher>();
+builder.Services.AddSingleton<EclipseExecutionCoordinator>();
+builder.Services.AddSingleton<EclipseValidationService>();
+builder.Services.AddSingleton<EclipseRunService>();
 
 var app = builder.Build();
 
@@ -66,19 +73,20 @@ app.MapGet("/api/health", (WorkerIdentity identity, PtkRunRegistry registry, Ptk
     });
 });
 
-app.MapGet("/api/capabilities", (WorkerIdentity identity, PtkRunRegistry registry, PtkExecutionCoordinator coordinator, IOptions<WorkerOptions> configuredOptions) =>
+app.MapGet("/api/capabilities", async (WorkerIdentity identity, PtkRunRegistry registry, PtkExecutionCoordinator coordinator, EclipseExecutionCoordinator eclipseCoordinator, EclipseLauncher eclipse, IOptions<WorkerOptions> configuredOptions, CancellationToken cancellationToken) =>
 {
     var options = configuredOptions.Value;
     var installationFound = Directory.Exists(options.PipesimHome);
     var pythonToolkitFound = File.Exists(options.EffectivePipesimPtkPath);
     var pythonFound = File.Exists(options.EffectivePythonPath);
     var activeRunId = registry.ActiveRunId;
+    var eclipseCapability = await eclipse.GetCapabilityAsync(cancellationToken);
     return Results.Ok(new
     {
         workerId = identity.WorkerId,
         generationId = identity.GenerationId,
         activeRunId,
-        idle = activeRunId is null && !coordinator.IsBusy,
+        idle = activeRunId is null && !coordinator.IsBusy && !eclipseCoordinator.IsBusy,
         pipesimWell = new
         {
             version = "2022.1",
@@ -98,16 +106,20 @@ app.MapGet("/api/capabilities", (WorkerIdentity identity, PtkRunRegistry registr
             status = installationFound && pythonToolkitFound && pythonFound ? "AVAILABLE" : "UNAVAILABLE",
             runTasks = new[] { "network" },
             maxTimeoutSeconds = options.MaxRunTimeoutSeconds
-        }
+        },
+        eclipse100 = new { version = "2024.1", launcherFound = eclipseCapability.LauncherFound,
+            status = eclipseCapability.Available ? "AVAILABLE" : "UNAVAILABLE", runTasks = new[] { "eclipse" },
+            maxTimeoutSeconds = options.EclipseMaxRunTimeoutSeconds }
     });
 });
 
 app.MapPost("/api/models/validate", async (
     ModelValidationRequest request,
-    PtkValidationService service,
+    PtkValidationService service, EclipseValidationService eclipse,
     CancellationToken cancellationToken) =>
 {
-    var outcome = await service.ValidateAsync(request, cancellationToken);
+    var outcome = request.ModelStorageKey?.EndsWith(".DATA", StringComparison.OrdinalIgnoreCase) == true
+        ? await eclipse.ValidateAsync(request, cancellationToken) : await service.ValidateAsync(request, cancellationToken);
     return outcome.HttpStatus switch
     {
         StatusCodes.Status200OK => Results.Ok(outcome.Body),
@@ -121,10 +133,10 @@ app.MapPost("/api/models/validate", async (
 
 app.MapPost("/api/runs/execute", async (
     RunExecuteRequest request,
-    PtkRunService service,
+    PtkRunService service, EclipseRunService eclipse,
     CancellationToken cancellationToken) =>
 {
-    var outcome = await service.SubmitAsync(request, cancellationToken);
+    var outcome = request.RunTask == "eclipse" ? await eclipse.SubmitAsync(request, cancellationToken) : await service.SubmitAsync(request, cancellationToken);
     return outcome.HttpStatus switch
     {
         StatusCodes.Status202Accepted => Results.Json(outcome.Body, statusCode: StatusCodes.Status202Accepted),

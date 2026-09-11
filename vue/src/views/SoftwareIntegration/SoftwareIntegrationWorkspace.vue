@@ -33,12 +33,18 @@ const activeModels = computed(() => activeProjectDetail.value?.models || [])
 const wellModelKinds = new Set(['black_oil_liquid', 'basic_gas', 'legacy_well'])
 const latestKnownModelKind = model => model?.versions?.find(version => version.status === 'READY' && version.modelKind)?.modelKind ||
   model?.versions?.find(version => version.modelKind)?.modelKind || ''
-const modelFamily = model => latestKnownModelKind(model) === 'network'
-  ? 'network'
-  : (wellModelKinds.has(latestKnownModelKind(model)) ? 'well' : 'unknown')
-const simulatorTypeLabel = model => modelFamily(model) === 'network'
-  ? 'PIPESIM 管网模型'
-  : (modelFamily(model) === 'well' ? 'PIPESIM 井筒模型' : '待识别 PIPESIM 模型')
+const modelFamily = model => {
+  const kind = latestKnownModelKind(model)
+  if (kind === 'network') return 'network'
+  if (kind === 'eclipse_100') return 'eclipse'
+  return wellModelKinds.has(kind) ? 'well' : 'unknown'
+}
+const simulatorTypeLabel = model => {
+  const family = modelFamily(model)
+  if (family === 'network') return 'PIPESIM 管网模型'
+  if (family === 'eclipse') return 'ECLIPSE 100 模型'
+  return family === 'well' ? 'PIPESIM 井筒模型' : '待识别模拟模型'
+}
 const resourceTree = computed(() => projects.value
   .map(project => projectDetails.value[project.id] || { project, models: [] })
   .filter(detail => detail.project.name.toLowerCase().includes(treeKeyword.value.trim().toLowerCase()) ||
@@ -48,6 +54,7 @@ const resourceTree = computed(() => projects.value
     const categories = [
       { key: 'well-models', label: '井筒模型', models: models.filter(model => modelFamily(model) === 'well') },
       { key: 'network-models', label: '管网模型', models: models.filter(model => modelFamily(model) === 'network') },
+      { key: 'eclipse-models', label: 'ECLIPSE 模型', models: models.filter(model => modelFamily(model) === 'eclipse') },
       { key: 'pending-models', label: '待识别模型', models: models.filter(model => modelFamily(model) === 'unknown') }
     ].filter(category => category.models.length)
     return {
@@ -175,7 +182,7 @@ const uploadModel = async (event) => {
   const [file] = event.target.files
   event.target.value = ''
   if (!file || !activeProject.value) return
-  if (!/\.(pips|zip)$/i.test(file.name)) return ElMessage.error('仅支持 .pips 或 ZIP 模型包')
+  if (!/\.(pips|data|zip)$/i.test(file.name)) return ElMessage.error('仅支持 .pips、.DATA 或 ZIP 模型包')
   if (file.size > 500 * 1024 * 1024) return ElMessage.error('模型文件不能超过500MB')
   uploading.value = true
   const projectId = activeProject.value.id
@@ -249,8 +256,8 @@ defineExpose({ openCreateDialog, openImportModel })
 
     <template v-else>
       <div class="workspace-toolbar">
-        <div><strong>PIPESIM 模型</strong><span>双击模型或点击“进入计算”；井筒与管网 .pips 已可验证和运行，ZIP 包暂仅保存</span></div>
-        <input ref="fileInput" accept=".pips,.zip" class="hidden-input" type="file" @change="uploadModel" />
+        <div><strong>模拟模型</strong><span>支持 PIPESIM .pips 和 ECLIPSE 单 .DATA；ECLIPSE 暂不支持 INCLUDE 或 ZIP 依赖包</span></div>
+        <input ref="fileInput" accept=".pips,.data,.DATA,.zip" class="hidden-input" type="file" @change="uploadModel" />
         <el-button :loading="uploading" plain @click="chooseModel"><el-icon><UploadFilled /></el-icon>导入模型</el-button>
       </div>
       <div v-if="!activeModels.length" class="empty-models">
