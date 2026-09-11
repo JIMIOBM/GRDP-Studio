@@ -107,9 +107,12 @@ const validNetworkResult = computed(() => {
   const topology = result?.topology
   const counts = topology?.counts
   if (!result || result.schemaVersion !== 'pipesim-network-result/1' || result.model_kind !== 'network' ||
-    result.runTask !== 'network' || result.resultContract !== 'VALID_FULL' || result.simulationState !== 'Completed') return null
-  if (selectedRun.value?.runType !== 'network' || selectedRun.value?.resultContract !== 'VALID_FULL' ||
+    result.runTask !== 'network' || !['VALID_FULL', 'VALID_PARTIAL'].includes(result.resultContract) ||
+    result.simulationState !== 'Completed') return null
+  if (selectedRun.value?.runType !== 'network' || result.resultContract !== selectedRun.value?.resultContract ||
     result.study !== selectedRun.value?.study) return null
+  if (result.resultContract === 'VALID_PARTIAL' && selectedRun.value?.status === 'PARTIAL_SUCCEEDED') return result
+  if (result.resultContract !== 'VALID_FULL') return null
   if (!Array.isArray(topology?.nodes) || !topology.nodes.every(node =>
     typeof node?.id === 'string' && typeof node.componentType === 'string')) return null
   if (!Array.isArray(topology?.edges) || !topology.edges.every(edge =>
@@ -127,6 +130,8 @@ const validNetworkResult = computed(() => {
 })
 const isPartial = computed(() => selectedRun.value?.status === 'PARTIAL_SUCCEEDED' &&
   validWellResult.value?.resultContract === 'VALID_PARTIAL')
+const isNetworkPartial = computed(() => selectedRun.value?.status === 'PARTIAL_SUCCEEDED' &&
+  validNetworkResult.value?.resultContract === 'VALID_PARTIAL')
 const canRun = computed(() => activeVersion.value?.status === 'READY' &&
   (isNetworkModel.value || isWellModel.value || isEclipseModel.value) &&
   (isEclipseModel.value ? eclipsePresentationAvailable.value : persistedStudies.value.includes(selectedStudy.value)) &&
@@ -385,6 +390,15 @@ defineExpose({ eclipseRunRequest, reloadEclipseRunHistory })
       :closable="false"
       show-icon
     />
+    <el-alert
+      v-if="isNetworkPartial"
+      class="network-partial-alert"
+      title="部分真实计算结果"
+      description="计算已完成，但完整展示校验未通过。仅展示实际返回的数据；未返回的拓扑、表格、图表或剖面字段会标记为不可用。"
+      type="warning"
+      :closable="false"
+      show-icon
+    />
 
     <div v-if="safeRunError && !isEclipseModel" class="structured-error">
       <dl>
@@ -414,7 +428,7 @@ defineExpose({ eclipseRunRequest, reloadEclipseRunHistory })
         <PipesimProfileResult :result="validWellResult" :partial="isPartial" />
       </el-tab-pane>
       <el-tab-pane v-if="isNetworkModel" label="管网结果" name="network">
-        <PipesimNetworkResult :result="validNetworkResult" />
+        <PipesimNetworkResult :result="validNetworkResult" :partial="isNetworkPartial" />
       </el-tab-pane>
       <el-tab-pane v-if="isEclipseModel" label="ECLIPSE 结果" name="eclipse">
         <EclipseRunResult :run="selectedRun" />
@@ -453,7 +467,7 @@ h1 { margin: 0; font-size: 19px; font-weight: 600; }
 .stage.active { color: #2b6cb3; font-weight: 600; }.stage.active i { border-color: #2b6cb3; background: #2b6cb3; }
 .stage.done { color: #67c23a; }.stage.done i { border-color: #67c23a; background: #67c23a; }
 .queue-stage { margin-left: auto; color: #606266; }
-.partial-alert { margin-bottom: 14px; }
+.partial-alert, .network-partial-alert { margin-bottom: 14px; }.network-partial-alert { border: 2px solid #d97706; background: #fff7e6; }.network-partial-alert :deep(.el-alert__title) { color: #9a4d00; font-size: 16px; font-weight: 700; }.network-partial-alert :deep(.el-alert__description) { color: #7a430a; font-weight: 600; }
 .structured-error { margin-bottom: 14px; padding: 12px 14px; border-left: 3px solid #d94b4b; background: #fff3f3; color: #8b2525; }
 .structured-error dl { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 0; font-size: 12px; }
 .structured-error dl div { display: flex; gap: 5px; }.structured-error dt { color: #a85b5b; }.structured-error dd { margin: 0; }

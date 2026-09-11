@@ -4,7 +4,8 @@ import * as echarts from 'echarts'
 import PipesimNetworkVariableTable from './PipesimNetworkVariableTable.vue'
 
 const props = defineProps({
-  result: { type: Object, default: null }
+  result: { type: Object, default: null },
+  partial: { type: Boolean, default: false }
 })
 
 const PROFILE_VARIABLES = [
@@ -25,17 +26,21 @@ let topologyChart
 let profileChart
 let chartResizeObserver
 
-const topologyNodes = computed(() => props.result?.topology?.nodes || [])
-const topologyEdges = computed(() => props.result?.topology?.edges || [])
+const arrayValue = value => Array.isArray(value) ? value : []
+const topologyNodes = computed(() => arrayValue(props.result?.topology?.nodes).filter(node =>
+  typeof node?.id === 'string' && typeof node.componentType === 'string'))
+const topologyEdges = computed(() => arrayValue(props.result?.topology?.edges).filter(edge =>
+  typeof edge?.source === 'string' && typeof edge.destination === 'string'))
 const topologyCounts = computed(() => props.result?.topology?.counts || {})
 const countItems = computed(() => [
-  { key: 'nodes', label: '节点', value: topologyCounts.value.nodes },
-  { key: 'edges', label: '连接', value: topologyCounts.value.edges },
-  { key: 'sources', label: '源点', value: topologyCounts.value.sources },
-  { key: 'sinks', label: '汇点', value: topologyCounts.value.sinks },
-  { key: 'flowlines', label: '流线', value: topologyCounts.value.flowlines }
+  { key: 'nodes', label: '节点', value: topologyCounts.value.nodes ?? '不可用' },
+  { key: 'edges', label: '连接', value: topologyCounts.value.edges ?? '不可用' },
+  { key: 'sources', label: '源点', value: topologyCounts.value.sources ?? '不可用' },
+  { key: 'sinks', label: '汇点', value: topologyCounts.value.sinks ?? '不可用' },
+  { key: 'flowlines', label: '流线', value: topologyCounts.value.flowlines ?? '不可用' }
 ])
-const profiles = computed(() => props.result?.profiles || [])
+const profiles = computed(() => arrayValue(props.result?.profiles).filter(profile =>
+  typeof profile?.branch === 'string' && Array.isArray(profile.variables)))
 const selectedProfile = computed(() => profiles.value.find(profile => profile.branch === selectedBranch.value) || null)
 const distanceVariable = computed(() => selectedProfile.value?.variables?.find(item => item.variable === 'TotalDistance') || null)
 const availableProfileVariables = computed(() => {
@@ -44,6 +49,14 @@ const availableProfileVariables = computed(() => {
     const entry = variables.find(item => item.variable === meta.variable)
     return entry ? [{ ...meta, unit: entry.unit, values: entry.values }] : []
   })
+})
+const unavailableProfileFields = computed(() => {
+  if (!props.partial || !selectedProfile.value) return []
+  const variableNames = new Set(selectedProfile.value.variables.map(item => item?.variable))
+  return [
+    !variableNames.has('TotalDistance') ? '总距离' : null,
+    ...PROFILE_VARIABLES.filter(meta => !variableNames.has(meta.variable)).map(meta => meta.label)
+  ].filter(Boolean)
 })
 const selectedPrimaryVariable = computed(() =>
   availableProfileVariables.value.find(item => item.variable === selectedProfileVariable.value) || null)
@@ -58,11 +71,14 @@ const profileRows = computed(() => {
 })
 const hasProfileSeries = computed(() => Boolean(distanceVariable.value && selectedPrimaryVariable.value && profileRows.value.length))
 const diagnosticGroups = computed(() => [
-  { key: 'errors', label: '错误', type: 'danger', items: props.result?.summary?.errors || [] },
-  { key: 'warnings', label: '警告', type: 'warning', items: props.result?.summary?.warnings || [] },
-  { key: 'info', label: '信息', type: 'info', items: props.result?.summary?.info || [] },
-  { key: 'messages', label: '模拟器消息', type: 'info', items: props.result?.messages || [] }
+  { key: 'errors', label: '错误', type: 'danger', items: arrayValue(props.result?.summary?.errors) },
+  { key: 'warnings', label: '警告', type: 'warning', items: arrayValue(props.result?.summary?.warnings) },
+  { key: 'info', label: '信息', type: 'info', items: arrayValue(props.result?.summary?.info) },
+  { key: 'messages', label: '模拟器消息', type: 'info', items: arrayValue(props.result?.messages) }
 ])
+const systemResults = computed(() => arrayValue(props.result?.system))
+const nodeResults = computed(() => arrayValue(props.result?.node))
+const qualityItems = computed(() => arrayValue(props.result?.quality))
 
 const axisName = (name, unit) => unit ? `${name} (${unit})` : name
 const displayValue = value => value === null || value === undefined ? '-' : value
@@ -326,9 +342,9 @@ onBeforeUnmount(() => {
       <div>
         <span class="network-kicker">PIPESIM NETWORK</span>
         <h2>管网稳态模拟结果</h2>
-        <p>Study：{{ result.study }}</p>
+        <p>Study：{{ result.study || '不可用' }}</p>
       </div>
-      <el-tag type="success">{{ result.simulationState === 'Completed' ? '仿真完成' : result.simulationState }}</el-tag>
+      <el-tag :type="partial ? 'warning' : 'success'">{{ partial ? '部分真实计算结果' : (result.simulationState === 'Completed' ? '仿真完成' : result.simulationState) }}</el-tag>
     </header>
 
     <div class="count-strip" aria-label="管网拓扑统计">
@@ -344,7 +360,7 @@ onBeforeUnmount(() => {
         <span>{{ topologyNodes.length }} 个节点 / {{ topologyEdges.length }} 条连接</span>
       </div>
       <div v-if="topologyNodes.length" ref="topologyElement" class="topology-chart" />
-      <el-empty v-else description="当前结果没有拓扑节点" :image-size="72" />
+      <el-empty v-else :description="partial ? '当前部分结果未提供可展示的拓扑' : '当前结果没有拓扑节点'" :image-size="72" />
     </section>
 
     <section class="result-panel profile-panel">
@@ -371,8 +387,9 @@ onBeforeUnmount(() => {
           </el-select>
         </label>
       </div>
+      <p v-if="unavailableProfileFields.length" class="profile-unavailable">未返回的剖面字段（不可用）：{{ unavailableProfileFields.join('、') }}</p>
       <div v-if="hasProfileSeries" ref="profileElement" class="profile-chart" />
-      <el-empty v-else description="当前分支没有可绘制的主变量剖面" :image-size="72" />
+      <el-empty v-else :description="partial ? '当前部分结果未提供可绘制的距离和变量剖面' : '当前分支没有可绘制的主变量剖面'" :image-size="72" />
       <el-table v-if="hasProfileSeries" :data="profileRows" border size="small" max-height="280">
         <el-table-column type="index" label="#" width="54" align="center" />
         <el-table-column :label="axisName('总距离', distanceVariable.unit)" min-width="180">
@@ -386,11 +403,11 @@ onBeforeUnmount(() => {
 
     <section class="result-panel detail-panel">
       <el-tabs v-model="detailTab" class="network-detail-tabs">
-        <el-tab-pane :label="`系统结果 (${result.system.length})`" name="system">
-          <PipesimNetworkVariableTable title="系统结果" :entries="result.system" empty-text="当前运行没有系统结果" />
+        <el-tab-pane :label="`系统结果 (${systemResults.length})`" name="system">
+          <PipesimNetworkVariableTable title="系统结果" :entries="systemResults" :empty-text="partial ? '当前部分结果未提供系统结果' : '当前运行没有系统结果'" />
         </el-tab-pane>
-        <el-tab-pane :label="`节点结果 (${result.node.length})`" name="node">
-          <PipesimNetworkVariableTable title="节点结果" :entries="result.node" empty-text="当前运行没有节点结果" />
+        <el-tab-pane :label="`节点结果 (${nodeResults.length})`" name="node">
+          <PipesimNetworkVariableTable title="节点结果" :entries="nodeResults" :empty-text="partial ? '当前部分结果未提供节点结果' : '当前运行没有节点结果'" />
         </el-tab-pane>
         <el-tab-pane label="消息与质量" name="diagnostics">
           <div class="diagnostic-grid">
@@ -402,8 +419,8 @@ onBeforeUnmount(() => {
               <span v-else>无</span>
             </article>
           </div>
-          <div class="quality-heading"><strong>质量标记</strong><span>{{ result.quality.length }} 条</span></div>
-          <el-table v-if="result.quality.length" :data="result.quality" border size="small" max-height="320">
+          <div class="quality-heading"><strong>质量标记</strong><span>{{ qualityItems.length }} 条</span></div>
+          <el-table v-if="qualityItems.length" :data="qualityItems" border size="small" max-height="320">
             <el-table-column prop="path" label="数据路径" min-width="260" show-overflow-tooltip />
             <el-table-column prop="code" label="代码" min-width="180" show-overflow-tooltip />
           </el-table>
@@ -435,6 +452,7 @@ onBeforeUnmount(() => {
 .profile-controls { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr); gap: 14px; margin-bottom: 12px; }
 .profile-controls label > span { display: block; margin-bottom: 6px; color: #606266; font-size: 12px; }
 .profile-controls .el-select { width: 100%; }
+.profile-unavailable { margin: 0 0 12px; color: #9a4d00; font-size: 12px; font-weight: 600; }
 .profile-chart { width: 100%; height: 410px; min-height: 300px; margin-bottom: 14px; border: 1px solid #e5eaf1; background: #fff; }
 .detail-panel { padding-top: 4px; }
 .network-detail-tabs :deep(.el-tabs__header) { margin-bottom: 14px; }
