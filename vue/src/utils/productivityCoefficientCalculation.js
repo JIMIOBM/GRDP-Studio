@@ -1,6 +1,9 @@
 import { backPressurePotentialDifference } from './backPressureCalculation.js'
 
 export const ATMOSPHERIC_PRESSURE_MPA = 0.101325
+// 二项式采气无阻流量规定的井底流压
+export const BINOMIAL_OPEN_FLOW_PRESSURE_MPA = 0.1
+
 
 export const normalizeCoefficientPressureMethod = value => ({
   '拟压力': 'pseudo-pressure',
@@ -126,6 +129,371 @@ const injectionLimit = (reservoirPressure, maximumFlowingPressure, method, pvtCu
   return maximum
 }
 
+const solveBinomialFlowRate = (
+  potentialDifference,
+  a,
+  b
+) => {
+  const rawDifference =
+    Number(potentialDifference)
+
+  if (!Number.isFinite(rawDifference)) {
+    throw new Error(
+      '二项式压力差必须是有效数值'
+    )
+  }
+
+  /*
+   * 采气：
+   * F(Pr) - F(Pwf) >= 0
+   *
+   * 注气：
+   * F(Pwf) - F(Pr) >= 0
+   */
+  if (rawDifference < -1e-10) {
+    throw new Error(
+      '二项式压力差为负，请检查注采方向以及 Pr、Pwf 的大小关系'
+    )
+  }
+
+  const difference =
+    Math.max(0, rawDifference)
+
+  if (difference === 0) {
+    return 0
+  }
+
+  // B = 0 时退化成 Aq = Δ
+  if (Math.abs(b) <= 1e-14) {
+    return difference / a
+  }
+
+  const discriminant =
+    a ** 2 + 4 * b * difference
+
+  if (discriminant < 0) {
+    throw new Error(
+      '当前二项式参数无实数产量解'
+    )
+  }
+
+  return (
+    (2 * difference) /
+    (
+      a +
+      Math.sqrt(discriminant)
+    )
+  )
+}
+
+
+export const calculateBinomialCoefficientCurve = ({
+  reservoirPressure,
+  darcyCoefficient,
+  nonDarcyCoefficient,
+  calculationMethod,
+  operationType = 'production',
+
+
+  fittedFlowingPressure = null,
+
+  pvtResultRows = [],
+  steps = 240
+}) => {
+  const pressure =
+    Number(reservoirPressure)
+
+  const a =
+    Number(darcyCoefficient)
+
+  const b =
+    Number(nonDarcyCoefficient)
+
+  const direction =
+    operationType === 'injection'
+      ? 'injection'
+      : 'production'
+
+  if (
+    !Number.isFinite(pressure) ||
+    pressure <= 0
+  ) {
+    throw new Error(
+      '二项式地层压力 Pr 必须大于 0 MPa'
+    )
+  }
+
+  /*
+   * 只有采气需要保证
+   * Pr > 0.1，
+   * 因为无阻流量终点规定为
+   * Pwf = 0.1 MPa。
+   */
+  if (
+    direction === 'production' &&
+    pressure <=
+      BINOMIAL_OPEN_FLOW_PRESSURE_MPA
+  ) {
+    throw new Error(
+      `采气二项式地层压力 Pr 必须大于 ` +
+      `${BINOMIAL_OPEN_FLOW_PRESSURE_MPA} MPa`
+    )
+  }
+
+  if (
+    !Number.isFinite(a) ||
+    a < 0
+  ) {
+    throw new Error(
+      '二项式系数 A 必须大于等于 0'
+    )
+  }
+
+  if (
+    !Number.isFinite(b) ||
+    b < 0
+  ) {
+    throw new Error(
+      '二项式系数 B 必须大于等于 0'
+    )
+  }
+
+  if (
+    a === 0 &&
+    b === 0
+  ) {
+    throw new Error(
+      '二项式系数 A、B 不能同时为 0'
+    )
+  }
+
+  const method =
+    normalizeCoefficientPressureMethod(
+      calculationMethod
+    )
+
+  const pvtCurve =
+    normalizeCoefficientPvtCurve(
+      pvtResultRows
+    )
+
+  let endPressure
+
+  if (
+    direction === 'production'
+  ) {
+    endPressure =
+      BINOMIAL_OPEN_FLOW_PRESSURE_MPA
+  } else {
+    const parameterPressure =
+      numberFrom(
+        fittedFlowingPressure
+      )
+
+    if (
+      !Number.isFinite(
+        parameterPressure
+      )
+    ) {
+      throw new Error(
+        '注气时请输入参数点井底注入压力 Pwf'
+      )
+    }
+
+    if (
+      parameterPressure <= pressure
+    ) {
+      throw new Error(
+        `注气参数点 Pwf 必须大于地层压力 ` +
+        `Pr（${pressure} MPa）`
+      )
+    }
+
+    endPressure =
+      parameterPressure
+  }
+
+  if (
+    method === 'pseudo-pressure'
+  ) {
+    if (
+      pvtCurve.length < 2
+    ) {
+      throw new Error(
+        '二项式拟压力法需要所选PVT表包含气体拟压力数据；' +
+        '可改用压力平方法/压力法，或先补全PVT数据'
+      )
+    }
+
+    const pvtMinimumPressure =
+      pvtCurve[0].pressure
+
+    const pvtMaximumPressure =
+      pvtCurve.at(-1).pressure
+
+    const requiredMinimumPressure =
+      Math.min(
+        pressure,
+        endPressure
+      )
+
+    const requiredMaximumPressure =
+      Math.max(
+        pressure,
+        endPressure
+      )
+
+    if (
+      requiredMinimumPressure <
+        pvtMinimumPressure - 1e-9 ||
+      requiredMaximumPressure >
+        pvtMaximumPressure + 1e-9
+    ) {
+      throw new Error(
+        `二项式${
+          direction === 'injection'
+            ? '注气'
+            : '采气'
+        }拟压力法需要PVT拟压力数据覆盖 ` +
+        `${requiredMinimumPressure}～` +
+        `${requiredMaximumPressure} MPa，` +
+        `当前仅覆盖 ` +
+        `${pvtMinimumPressure}～` +
+        `${pvtMaximumPressure} MPa`
+      )
+    }
+  }
+
+  const pointCount =
+    Math.max(
+      2,
+      Math.floor(
+        Number(steps)
+      ) || 240
+    )
+
+  /*
+   * Pr 对应的压力函数：
+   *
+   * 压力法        -> Pr
+   * 压力平方法    -> Pr²
+   * 拟压力法      -> m(Pr)
+   */
+  const reservoirPotential =
+    coefficientPressurePotential(
+      pressure,
+      method,
+      pvtCurve
+    )
+
+  const points =
+    Array.from(
+      {
+        length:
+          pointCount + 1
+      },
+      (_, index) => {
+        const ratio =
+          index / pointCount
+
+        /*
+         * 采气：
+         * Pr -> 0.1
+         *
+         * 注气：
+         * Pr -> 参数点 Pwf
+         */
+        const flowingPressure =
+          pressure +
+          (
+            endPressure -
+            pressure
+          ) * ratio
+
+        const flowingPotential =
+          coefficientPressurePotential(
+            flowingPressure,
+            method,
+            pvtCurve
+          )
+
+        const difference =
+          direction === 'injection'
+            /*
+             * 注气：
+             * F(Pwf)-F(Pr)
+             */
+            ? flowingPotential -
+              reservoirPotential
+
+            /*
+             * 采气：
+             * F(Pr)-F(Pwf)
+             */
+            : reservoirPotential -
+              flowingPotential
+
+        const flowRate =
+          solveBinomialFlowRate(
+            difference,
+            a,
+            b
+          )
+
+        if (
+          !Number.isFinite(
+            flowRate
+          ) ||
+          flowRate < 0
+        ) {
+          throw new Error(
+            '当前二项式参数无法生成有效的IPR曲线'
+          )
+        }
+
+        return {
+          flowRate,
+          flowingPressure,
+
+          potentialDifference:
+            Math.max(
+              0,
+              difference
+            )
+        }
+      }
+    )
+
+  return {
+    operationType:
+      direction,
+
+    calculationMethod:
+      method,
+
+    reservoirPressure:
+      pressure,
+
+    limitPressure:
+      endPressure,
+
+    /*
+     * 采气：
+     * Pwf = 0.1 对应无阻流量。
+     *
+     * 注气：
+     * 当前参数点 Pwf 下，
+     * A/B 对应的理论注气量。
+     */
+    limitRate:
+      points.at(-1).flowRate,
+
+    points
+  }
+}
+
+
+
 export const calculateExponentialCoefficientCurve = ({
   reservoirPressure,
   coefficient,
@@ -146,7 +514,9 @@ export const calculateExponentialCoefficientCurve = ({
     throw new Error('计算IPR曲线的最大地层压力必须大于大气压')
   }
   if (!Number.isFinite(c) || c <= 0) throw new Error(`${coefficientLabel}必须大于 0`)
-  if (!Number.isFinite(n) || n <= 0) throw new Error(`${exponentLabel}必须大于 0`)
+  if (!Number.isFinite(n) || n < 0.5 || n > 1) {
+    throw new Error(`${exponentLabel}必须在 0.5～1 之间`)
+  }
 
   const method = normalizeCoefficientPressureMethod(calculationMethod)
   const pvtCurve = normalizeCoefficientPvtCurve(pvtResultRows)
@@ -180,4 +550,29 @@ export const calculateExponentialCoefficientCurve = ({
     limitRate: points.at(-1).flowRate,
     points
   }
+}
+
+export const calculateExponentialCoefficientIprFamily = ({
+  reservoirPressure,
+  levels = 10,
+  ...curveOptions
+}) => {
+  const maximumPressure = Number(reservoirPressure)
+  const levelCount = Math.max(1, Math.floor(Number(levels)) || 10)
+  if (!Number.isFinite(maximumPressure) || maximumPressure <= ATMOSPHERIC_PRESSURE_MPA) {
+    throw new Error('计算IPR曲线的最大地层压力必须大于大气压')
+  }
+
+  return Array.from({ length: levelCount }, (_, index) => ({
+    level: index + 1,
+    reservoirPressure: maximumPressure * (levelCount - index) / levelCount
+  }))
+    .filter(item => item.reservoirPressure > ATMOSPHERIC_PRESSURE_MPA)
+    .map(item => ({
+      ...item,
+      curve: calculateExponentialCoefficientCurve({
+        ...curveOptions,
+        reservoirPressure: item.reservoirPressure
+      })
+    }))
 }
