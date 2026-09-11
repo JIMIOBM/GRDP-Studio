@@ -19,9 +19,18 @@ public sealed record EclipseDataInspection(
     IReadOnlyList<string> Sections,
     string? UnitSystem,
     IReadOnlyList<string> Phases,
-    EclipseDimensions? Dimensions);
+    EclipseDimensions? Dimensions,
+    IReadOnlyList<string>? WellNames = null,
+    IReadOnlyList<EclipseScheduleEvent>? ScheduleTimeline = null);
 
 public sealed record EclipseDimensions(int Nx, int Ny, int Nz);
+
+public sealed record EclipseScheduleEvent(
+    string Kind,
+    IReadOnlyList<EclipseScheduleDate>? Records = null,
+    IReadOnlyList<string>? Steps = null);
+
+public sealed record EclipseScheduleDate(string Day, string Month, string Year, string? Time = null);
 
 public sealed record RunExecuteRequest(
     long RunId,

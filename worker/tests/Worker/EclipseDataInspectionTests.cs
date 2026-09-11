@@ -19,12 +19,110 @@ public sealed class EclipseDataInspectionTests : IDisposable
     {
         var inspection = Inspect("-- RUNSPEC\nRUNSPEC\nGRID\nRUNSPEC\nMETRIC\nFIELD\nOIL\nWATER\nOIL\nDIMENS\n 10 20 30 /\n'ignored GAS'\n\"GAS\"\nSCHEDULE\n");
 
-        Assert.Equal("eclipse-data-inspection/1", inspection.SchemaVersion);
+        Assert.Equal("eclipse-data-inspection/2", inspection.SchemaVersion);
         Assert.Equal("CASE.DATA", inspection.CaseName);
         Assert.Equal(["RUNSPEC", "GRID", "SCHEDULE"], inspection.Sections);
         Assert.Equal("METRIC", inspection.UnitSystem);
         Assert.Equal(["OIL", "WATER", "GAS"], inspection.Phases);
         Assert.Equal(new EclipseDimensions(10, 20, 30), inspection.Dimensions);
+    }
+
+    [Fact]
+    public void InspectorExtractsOnlyCompletedScheduleBlocksAfterSchedule()
+    {
+        var inspection = Inspect("WELSPECS\n'BEFORE' /\n/\nSCHEDULE -- only this starts schedule inspection\nWELSPECS\n'Well'' One' 1 /\nWELL_2 2 /\n'Well'' One' 3 /\n/\nDATES\n31 feb 2024 /\n1 JAN 2025 /\n/\nTSTEP\n1 0.5 1E2 2*3 -1 NaN Infinity /\n2 1e9999 -0.1 /\n/\nDATES\n1 JAN 2025\n");
+
+        Assert.Equal(["Well' One", "WELL_2"], inspection.WellNames);
+        Assert.Equal(2, inspection.ScheduleTimeline!.Count);
+        Assert.Equal([new EclipseScheduleDate("31", "FEB", "2024"), new EclipseScheduleDate("1", "JAN", "2025")], inspection.ScheduleTimeline[0].Records);
+        Assert.Equal(["1", "0.5", "1E2", "2"], inspection.ScheduleTimeline[1].Steps);
+    }
+
+    [Fact]
+    public void InspectorOmitsEntireUnterminatedMultiRecordScheduleBlock()
+    {
+        var inspection = Inspect("SCHEDULE\nWELSPECS\nWELL_A /\nWELL_B /\nDATES\n1 JAN 2025 /\n2 FEB 2025 /\n");
+
+        Assert.Empty(inspection.WellNames!);
+        Assert.Empty(inspection.ScheduleTimeline!);
+    }
+
+    [Fact]
+    public void InspectorTerminatesScheduleBlocksOnlyOnStandaloneSlashLines()
+    {
+        var unterminated = Inspect("SCHEDULE\nWELSPECS\nWELL_A /\n/ trailing-token\n");
+        var completed = Inspect("SCHEDULE\nWELSPECS\nWELL_A / WELL_B /\n/ -- terminator comment\n");
+
+        Assert.Empty(unterminated.WellNames!);
+        Assert.Equal(["WELL_A", "WELL_B"], completed.WellNames);
+    }
+
+    [Fact]
+    public void InspectorOmitsClosedQuotedEmptyWellNames()
+    {
+        var inspection = Inspect("SCHEDULE\nWELSPECS\n'' /\nSAFE_WELL /\n/\n");
+
+        Assert.Equal(["SAFE_WELL"], inspection.WellNames);
+    }
+
+    [Theory]
+    [InlineData("'C:\\private\\WELL'")]
+    [InlineData("'nested/WELL'")]
+    [InlineData("'WELL:2'")]
+    [InlineData("'WELL..2'")]
+    [InlineData("'net.pipe://localhost/pipe/private'")]
+    [InlineData("'WELL_SECRET'")]
+    [InlineData("'LICENSE_SERVER'")]
+    [InlineData("'ENVIRONMENT_NAME'")]
+    public void InspectorOmitsUnsafeQuotedWellNames(string unsafeName)
+    {
+        var inspection = Inspect($"SCHEDULE\nWELSPECS\n{unsafeName} /\nSAFE_WELL /\n/\n");
+
+        Assert.Equal(["SAFE_WELL"], inspection.WellNames);
+    }
+
+    [Theory]
+    [InlineData("SCHEDULE extra\nWELSPECS\nWELL_A /\n/\n")]
+    [InlineData("SCHEDULE\nWELSPECS extra\nWELL_A /\n/\n")]
+    [InlineData("SCHEDULE\n'WELSPECS'\nWELL_A /\n/\n")]
+    [InlineData("SCHEDULE\nWELSPECS /\n")]
+    public void InspectorRequiresSoleUnquotedLineTokenForScheduleCandidates(string deck)
+    {
+        var inspection = Inspect(deck);
+
+        Assert.Empty(inspection.WellNames!);
+        Assert.Empty(inspection.ScheduleTimeline!);
+    }
+
+    [Fact]
+    public void InspectorOmitsMalformedScheduleRecordsAndKeepsLexicalDateValues()
+    {
+        var inspection = Inspect("SCHEDULE\nWELSPECS\n1INVALID /\nGOOD-NAME /\n'bad\u0001name' /\n/\nDATES\n01 JAN 2024 /\n1 JAN 2024 24:00 /\n31 FEB 0000 /\n/\nTSTEP\n01 .5 1. 1e9999 -1 2 /\n/\n");
+
+        Assert.Equal(["GOOD-NAME"], inspection.WellNames);
+        Assert.Equal(2, inspection.ScheduleTimeline!.Count);
+        Assert.Equal(new EclipseScheduleDate("31", "FEB", "0000"), Assert.Single(inspection.ScheduleTimeline[0].Records!));
+        Assert.Equal(["01", "2"], inspection.ScheduleTimeline[1].Steps);
+    }
+
+    [Fact]
+    public async Task ServiceReturnsScheduleLimitAsModel422WithoutInspection()
+    {
+        var path = Path.Combine(root, "models", "limit.DATA");
+        var deck = new StringBuilder("SCHEDULE\nWELSPECS\n");
+        for (var index = 0; index <= 1_000; index++) deck.Append("WELL_").Append(index).Append(" /\n");
+        deck.Append("/\n");
+        await File.WriteAllTextAsync(path, deck.ToString(), TestContext.Current.CancellationToken);
+        await using var stream = File.OpenRead(path);
+        var hash = Convert.ToHexStringLower(await SHA256.HashDataAsync(stream, TestContext.Current.CancellationToken));
+        var service = new EclipseDataInspectionService(new StorageResolver(Options.Create(new WorkerOptions { StorageRoot = root })));
+
+        var result = await service.InspectAsync(new("models/limit.DATA", hash), TestContext.Current.CancellationToken);
+
+        var response = Assert.IsType<ModelValidationResponse>(result.Body);
+        Assert.Equal(422, result.HttpStatus);
+        Assert.Equal("ECLIPSE_DATA_SCHEDULE_LIMIT", response.Error!.Code);
+        Assert.Null(response.Inspection);
     }
 
     [Theory]

@@ -169,6 +169,45 @@ class SoftwareIntegrationValidationDispatcherTests {
     }
 
     @Test
+    void dataValidationPersistsAndReturnsOnlyFrozenV2InspectionFields() throws Exception {
+        Seed seed = seed("CASE.DATA");
+        RESPONSE.set("""
+                {"status":"READY","studies":[],"modelKind":"eclipse_100",
+                 "inspection":{"schemaVersion":"eclipse-data-inspection/2","caseName":"CASE.DATA","sections":["RUNSPEC","SCHEDULE"],"unitSystem":"METRIC","phases":["OIL"],"dimensions":null,
+                 "wellNames":["WELL-2","WELL-1"],"scheduleTimeline":[{"kind":"DATES","records":[{"day":"1","month":"JAN","year":"2025","time":null}]},{"kind":"TSTEP","steps":["0.5","2"]}]}}
+                """);
+
+        dispatcher().validate(seed.versionId());
+
+        JsonNode expected = objectMapper.readTree("""
+                {"schemaVersion":"eclipse-data-inspection/2","caseName":"CASE.DATA","sections":["RUNSPEC","SCHEDULE"],"unitSystem":"METRIC","phases":["OIL"],"dimensions":null,
+                 "wellNames":["WELL-2","WELL-1"],"scheduleTimeline":[{"kind":"DATES","records":[{"day":"1","month":"JAN","year":"2025","time":null}]},{"kind":"TSTEP","steps":["0.5","2"]}]}
+                """);
+        SoftwareIntegrationModelVersionEntity version = versionMapper.selectById(seed.versionId());
+        assertThat(objectMapper.readTree(version.getInspectionJson())).isEqualTo(expected);
+        assertThat(softwareIntegrationService.getProject(seed.projectId()).models().get(0).versions().get(0).inspection())
+                .isEqualTo(expected);
+    }
+
+    @Test
+    void unsafeV2WellNamesFromWorkerCannotPersistOrBeExposed() {
+        Seed seed = seed("CASE.DATA");
+        RESPONSE.set("""
+                {"status":"READY","studies":[],"modelKind":"eclipse_100",
+                 "inspection":{"schemaVersion":"eclipse-data-inspection/2","caseName":"CASE.DATA","sections":[],"unitSystem":null,"phases":[],"dimensions":null,
+                 "wellNames":["net.pipe://localhost/pipe/private-id","WELL_PASSWD"],"scheduleTimeline":[]}}
+                """);
+
+        dispatcher().validate(seed.versionId());
+
+        SoftwareIntegrationModelVersionEntity version = versionMapper.selectById(seed.versionId());
+        assertThat(version.getStatus()).isEqualTo("INVALID");
+        assertThat(version.getInspectionJson()).isNull();
+        assertThat(version.getValidationMessage()).doesNotContain("net.pipe", "private-id", "passwd");
+        assertThat(softwareIntegrationService.getProject(seed.projectId()).models().get(0).versions().get(0).inspection()).isNull();
+    }
+
+    @Test
     void extensionModelKindMismatchAndEclipseStudiesAreRejected() {
         Seed dataWithPipesimKind = seed("CASE.DATA");
         RESPONSE.set("""

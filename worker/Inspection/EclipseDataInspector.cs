@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 using Grdp.SoftwareIntegration.Worker.Contracts;
 
 namespace Grdp.SoftwareIntegration.Worker.Inspection;
@@ -25,7 +26,16 @@ public static class EclipseDataInspector
         {
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, FileOptions.SequentialScan);
             using var reader = new StreamReader(stream, new UTF8Encoding(false, true), detectEncodingFromByteOrderMarks: false, bufferSize: 64 * 1024);
-            return new Parser(caseName).Read(reader);
+            var v1 = new Parser(caseName).Read(reader);
+            using var scheduleStream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, FileOptions.SequentialScan);
+            using var scheduleReader = new StreamReader(scheduleStream, new UTF8Encoding(false, true), detectEncodingFromByteOrderMarks: false, bufferSize: 64 * 1024);
+            var schedule = new ScheduleParser().Read(scheduleReader);
+            return v1 with
+            {
+                SchemaVersion = "eclipse-data-inspection/2",
+                WellNames = schedule.WellNames,
+                ScheduleTimeline = schedule.Events
+            };
         }
         catch (DecoderFallbackException)
         {
@@ -270,4 +280,317 @@ public static class EclipseDataInspector
         }
         private static void Fail(string code, string message) => throw new EclipseDataInspectionException(code, message);
     }
+
+    // This lexer intentionally retains only the current record and accepted output, never the deck.
+    private sealed class ScheduleParser
+    {
+        private const int MaxWells = 1_000;
+        private const int MaxEvents = 1_000;
+        private const int MaxDates = 4_000;
+        private const int MaxSteps = 8_000;
+        private const int MaxNameScalars = 128;
+        private readonly List<string> wellNames = [];
+        private readonly HashSet<string> wellNameSet = new(StringComparer.Ordinal);
+        private readonly List<EclipseScheduleEvent> events = [];
+        private readonly List<LexToken> record = [];
+        private readonly StringBuilder token = new();
+        private static readonly Regex TStepDecimal = new("^[+]?[0-9]+(?:\\.[0-9]+)?(?:[Ee][+-]?[0-9]+)?$", RegexOptions.CultureInvariant);
+        private Candidate? candidate;
+        private string? lineToken;
+        private int lineUnquotedTokens;
+        private int lineNonSlashTokens;
+        private int lineSlashTokens;
+        private bool lineHasSlash;
+        private bool quoted;
+        private bool quotePending;
+        private bool currentQuoted;
+        private bool currentClosedQuote;
+        private bool tokenTooLong;
+        private bool comment;
+        private bool previousHyphen;
+        private bool previousWasCarriageReturn;
+        private int acceptedDates;
+        private int acceptedSteps;
+
+        public ScheduleResult Read(TextReader reader)
+        {
+            int value;
+            while ((value = reader.Read()) >= 0) Process((char)value);
+            if (quotePending) CloseQuotedToken(closed: false);
+            FinishLine(endOfFile: true);
+            // An open candidate is deliberately discarded: no slash means no completed block.
+            return new(wellNames, events);
+        }
+
+        private void Process(char value)
+        {
+            if (value == '\ufeff' && !quoted && !comment && lineUnquotedTokens == 0 && token.Length == 0) return;
+            if (value == '\0') Fail("ECLIPSE_DATA_NUL_BYTE", "The ECLIPSE .DATA file contains a NUL byte.");
+            if (value is '\r' or '\n')
+            {
+                if (quotePending) CloseQuotedToken(closed: false);
+                if (value == '\n' && previousWasCarriageReturn) { previousWasCarriageReturn = false; return; }
+                FinishLine(endOfFile: false);
+                previousWasCarriageReturn = value == '\r';
+                return;
+            }
+            previousWasCarriageReturn = false;
+            if (comment) return;
+            if (quoted)
+            {
+                if (quotePending)
+                {
+                    if (value == '\'') { Append(value); quotePending = false; return; }
+                    CloseQuotedToken(closed: true);
+                    Process(value);
+                    return;
+                }
+                if (value == '\'') quotePending = true; else Append(value);
+                return;
+            }
+            if (value == '\'')
+            {
+                FinishToken();
+                quoted = true;
+                currentQuoted = true;
+                currentClosedQuote = false;
+                previousHyphen = false;
+                return;
+            }
+            if (value == '-' && previousHyphen)
+            {
+                if (token.Length > 0) token.Length--;
+                FinishToken();
+                comment = true;
+                previousHyphen = false;
+                return;
+            }
+            if (value == '/')
+            {
+                FinishToken();
+                lineSlashTokens++;
+                lineHasSlash = true;
+                if (candidate is not null)
+                {
+                    if (record.Count > 0) FinishRecord();
+                }
+                previousHyphen = false;
+                return;
+            }
+            if (char.IsWhiteSpace(value))
+            {
+                FinishToken();
+                previousHyphen = false;
+                return;
+            }
+            Append(value);
+            previousHyphen = value == '-';
+        }
+
+        private void FinishLine(bool endOfFile)
+        {
+            FinishToken();
+            if (candidate is not null && lineSlashTokens == 1 && lineNonSlashTokens == 0) FinishCandidate();
+            if (candidate is null && !lineHasSlash && lineUnquotedTokens == 1 && IsCandidateKeyword(lineToken))
+            {
+                if (lineToken!.Equals("SCHEDULE", StringComparison.OrdinalIgnoreCase))
+                {
+                    scheduleSeen = true;
+                }
+                else if (scheduleSeen)
+                {
+                    candidate = new Candidate(lineToken.ToUpperInvariant());
+                }
+            }
+            quoted = false;
+            quotePending = false;
+            comment = false;
+            previousHyphen = false;
+            currentQuoted = false;
+            currentClosedQuote = false;
+            lineToken = null;
+            lineUnquotedTokens = 0;
+            lineNonSlashTokens = 0;
+            lineSlashTokens = 0;
+            lineHasSlash = false;
+        }
+
+        private bool scheduleSeen;
+
+        private void CloseQuotedToken(bool closed)
+        {
+            quoted = false;
+            quotePending = false;
+            currentClosedQuote = closed;
+            FinishToken();
+        }
+
+        private void Append(char value)
+        {
+            if (token.Length < 1025) token.Append(value); else tokenTooLong = true;
+        }
+
+        private void FinishToken()
+        {
+            if (token.Length == 0 && !currentQuoted) return;
+            var value = token.ToString();
+            var lex = new LexToken(value, currentQuoted, currentClosedQuote || !currentQuoted, tokenTooLong);
+            lineNonSlashTokens++;
+            if (candidate is null)
+            {
+                if (!lex.Quoted)
+                {
+                    lineUnquotedTokens++;
+                    if (lineUnquotedTokens == 1) lineToken = value;
+                }
+            }
+            else
+            {
+                record.Add(lex);
+            }
+            token.Clear();
+            tokenTooLong = false;
+            currentQuoted = false;
+            currentClosedQuote = false;
+        }
+
+        private void FinishRecord()
+        {
+            candidate!.AddRecord(record);
+            record.Clear();
+        }
+
+        private void FinishCandidate()
+        {
+            var completed = candidate!;
+            candidate = null;
+            if (completed.Keyword == "WELSPECS")
+            {
+                foreach (var name in completed.Wells)
+                {
+                    if (wellNameSet.Contains(name)) continue;
+                    if (wellNames.Count == MaxWells) Limit();
+                    wellNameSet.Add(name);
+                    wellNames.Add(name);
+                }
+                return;
+            }
+            if (completed.Dates.Count == 0 && completed.Steps.Count == 0) return;
+            if (events.Count == MaxEvents) Limit();
+            if (acceptedDates + completed.Dates.Count > MaxDates || acceptedSteps + completed.Steps.Count > MaxSteps) Limit();
+            acceptedDates += completed.Dates.Count;
+            acceptedSteps += completed.Steps.Count;
+            events.Add(completed.Keyword == "DATES"
+                ? new EclipseScheduleEvent("DATES", completed.Dates)
+                : new EclipseScheduleEvent("TSTEP", Steps: completed.Steps));
+        }
+
+        private static bool IsCandidateKeyword(string? value) => value is not null &&
+            (value.Equals("SCHEDULE", StringComparison.OrdinalIgnoreCase)
+             || value.Equals("WELSPECS", StringComparison.OrdinalIgnoreCase)
+             || value.Equals("DATES", StringComparison.OrdinalIgnoreCase)
+             || value.Equals("TSTEP", StringComparison.OrdinalIgnoreCase));
+
+        private static void Limit() => Fail("ECLIPSE_DATA_SCHEDULE_LIMIT", "The ECLIPSE .DATA schedule inspection limit was exceeded.");
+        private static void Fail(string code, string message) => throw new EclipseDataInspectionException(code, message);
+
+        private sealed class Candidate(string keyword)
+        {
+            public string Keyword { get; } = keyword;
+            public List<string> Wells { get; } = [];
+            public HashSet<string> WellSet { get; } = new(StringComparer.Ordinal);
+            public List<EclipseScheduleDate> Dates { get; } = [];
+            public List<string> Steps { get; } = [];
+
+            public void AddRecord(IReadOnlyList<LexToken> tokens)
+            {
+                if (Keyword == "WELSPECS")
+                {
+                    if (tokens.Count == 0 || !TryWellName(tokens[0], out var name) || !WellSet.Add(name)) return;
+                    Wells.Add(name);
+                    if (Wells.Count > MaxWells) Limit();
+                }
+                else if (Keyword == "DATES")
+                {
+                    if (TryDate(tokens, out var date)) Dates.Add(date);
+                    if (Dates.Count > MaxDates) Limit();
+                }
+                else if (Keyword == "TSTEP")
+                {
+                    foreach (var step in tokens)
+                    {
+                        if (!step.Quoted && !step.TooLong && IsFiniteDecimal(step.Value)) Steps.Add(step.Value);
+                        if (Steps.Count > MaxSteps) Limit();
+                    }
+                }
+            }
+
+            private static bool TryWellName(LexToken token, out string name)
+            {
+                name = token.Value;
+                if (name.Length == 0 || token.TooLong || (token.Quoted && !token.ClosedQuote) || ScalarCount(name) > MaxNameScalars || name.EnumerateRunes().Any(Rune.IsControl)) return false;
+                if (ContainsSensitiveWellNameContent(name)) return false;
+                if (token.Quoted) return true;
+                return name.Length is >= 1 and <= 128
+                    && name[0] is >= 'A' and <= 'Z' or >= 'a' and <= 'z'
+                    && name.Skip(1).All(value => value is >= 'A' and <= 'Z' or >= 'a' and <= 'z' or >= '0' and <= '9' or '_' or '.' or '-');
+            }
+
+            private static bool TryDate(IReadOnlyList<LexToken> tokens, out EclipseScheduleDate date)
+            {
+                date = default!;
+                if (tokens.Count is < 3 or > 4 || tokens.Any(token => token.Quoted || token.TooLong)) return false;
+                var day = tokens[0].Value;
+                var month = tokens[1].Value.ToUpperInvariant();
+                var year = tokens[2].Value;
+                if (!IsDay(day) || !IsMonth(month) || year.Length != 4 || !year.All(char.IsAsciiDigit)
+                    || (tokens.Count == 4 && !IsTime(tokens[3].Value))) return false;
+                date = new(day, month, year, tokens.Count == 4 ? tokens[3].Value : null);
+                return true;
+            }
+
+            private static int ScalarCount(string value) => value.EnumerateRunes().Count();
+            private static bool IsDay(string value) => int.TryParse(value, out var day) && value == day.ToString() && day is >= 1 and <= 31;
+            private static bool IsMonth(string value) => value is "JAN" or "FEB" or "MAR" or "APR" or "MAY" or "JUN" or "JUL" or "AUG" or "SEP" or "OCT" or "NOV" or "DEC";
+            private static bool IsTime(string value)
+            {
+                if (value.Length is not (5 or 8) || value[2] != ':' || (value.Length == 8 && value[5] != ':')) return false;
+                if (!int.TryParse(value[..2], out var hour) || !int.TryParse(value.Substring(3, 2), out var minute)) return false;
+                return value.Length == 5
+                    ? hour is >= 0 and <= 23 && minute is >= 0 and <= 59
+                    : int.TryParse(value[6..], out var second) && hour is >= 0 and <= 23 && minute is >= 0 and <= 59 && second is >= 0 and <= 59;
+            }
+            private static bool IsFiniteDecimal(string value)
+            {
+                return TStepDecimal.IsMatch(value)
+                    && double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var number)
+                    && double.IsFinite(number)
+                    && number >= 0;
+            }
+
+            private static bool ContainsSensitiveWellNameContent(string value)
+            {
+                if (value.Contains('/') || value.Contains('\\') || value.Contains(':') || value.Contains("..", StringComparison.Ordinal)) return true;
+                var normalized = value.ToLowerInvariant();
+                return normalized.Contains("net.pipe", StringComparison.Ordinal)
+                    || normalized.Contains("password", StringComparison.Ordinal)
+                    || normalized.Contains("passwd", StringComparison.Ordinal)
+                    || normalized.Contains("secret", StringComparison.Ordinal)
+                    || normalized.Contains("token", StringComparison.Ordinal)
+                    || normalized.Contains("credential", StringComparison.Ordinal)
+                    || normalized.Contains("cookie", StringComparison.Ordinal)
+                    || normalized.Contains("authorization", StringComparison.Ordinal)
+                    || normalized.Contains("bearer", StringComparison.Ordinal)
+                    || normalized.Contains("license", StringComparison.Ordinal)
+                    || normalized.Contains("api_key", StringComparison.Ordinal)
+                    || normalized.Contains("apikey", StringComparison.Ordinal)
+                    || normalized.Contains("server", StringComparison.Ordinal)
+                    || normalized.Contains("environment", StringComparison.Ordinal);
+            }
+        }
+
+        private sealed record LexToken(string Value, bool Quoted, bool ClosedQuote, bool TooLong);
+    }
+
+    private sealed record ScheduleResult(IReadOnlyList<string> WellNames, IReadOnlyList<EclipseScheduleEvent> Events);
 }

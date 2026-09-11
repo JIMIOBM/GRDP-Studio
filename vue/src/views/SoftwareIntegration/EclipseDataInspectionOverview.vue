@@ -7,6 +7,49 @@ import { useSoftwareIntegrationStore } from '@/stores/softwareIntegration'
 const store = useSoftwareIntegrationStore()
 const { activeModel, activeVersion, activeVersionId, versions } = storeToRefs(store)
 const inspection = computed(() => activeVersion.value?.inspection || null)
+const maxWellNames = 1000
+const maxScheduleEvents = 1000
+const maxDateRecords = 4000
+const maxLexicalValueLength = 1024
+
+const lexicalValue = value => typeof value === 'string' && value.length > 0 && value.length <= maxLexicalValueLength
+  ? value
+  : null
+
+const inspectionV2 = computed(() => {
+  const value = inspection.value
+  if (value?.schemaVersion !== 'eclipse-data-inspection/2') return null
+
+  const wellNames = Array.isArray(value.wellNames)
+    ? value.wellNames.slice(0, maxWellNames).map(lexicalValue).filter(Boolean)
+    : []
+  let dateCount = 0
+  const schedule = Array.isArray(value.scheduleTimeline)
+    ? value.scheduleTimeline.slice(0, maxScheduleEvents).flatMap((event, eventIndex) => {
+      if (!event || typeof event !== 'object') return []
+      if (event.kind === 'DATES' && Array.isArray(event.records)) {
+        const records = event.records.slice(0, maxDateRecords - dateCount).flatMap((record, recordIndex) => {
+          if (!record || typeof record !== 'object') return []
+          const day = lexicalValue(record.day)
+          const month = lexicalValue(record.month)
+          const year = lexicalValue(record.year)
+          const time = record.time == null ? null : lexicalValue(record.time)
+          if (!day || !month || !year || (record.time != null && !time)) return []
+          return [{ id: `${eventIndex}-${recordIndex}`, day, month, year, time }]
+        })
+        dateCount += records.length
+        return records.length ? [{ id: eventIndex, kind: 'DATES', records }] : []
+      }
+      if (event.kind === 'TSTEP' && Array.isArray(event.steps)) {
+        const steps = event.steps.filter(step => typeof step === 'string' && step.length > 0)
+        return steps.length ? [{ id: eventIndex, kind: 'TSTEP', steps: steps.map((step, stepIndex) => ({ id: `${eventIndex}-${stepIndex}`, step })) }] : []
+      }
+      return []
+    })
+    : []
+
+  return { wellNames, schedule }
+})
 
 const changeVersion = async versionId => {
   try {
@@ -64,6 +107,39 @@ const changeVersion = async versionId => {
         <div v-else><dt>网格维度</dt><dd>未知</dd></div>
       </dl>
     </section>
+
+    <template v-if="inspectionV2">
+      <section class="overview-section" aria-labelledby="eclipse-well-names-title">
+        <h2 id="eclipse-well-names-title">井名</h2>
+        <div class="inspection-content">
+          <div v-if="inspectionV2.wellNames.length" class="well-tags" aria-label="识别到的井名">
+            <el-tag v-for="(wellName, index) in inspectionV2.wellNames" :key="`${wellName}-${index}`" class="value-tag">{{ wellName }}</el-tag>
+          </div>
+          <p v-else class="empty-copy">未识别</p>
+        </div>
+      </section>
+
+      <section class="overview-section" aria-labelledby="eclipse-schedule-title">
+        <h2 id="eclipse-schedule-title">计划记录</h2>
+        <div v-if="inspectionV2.schedule.length" class="schedule-sections">
+          <section v-for="event in inspectionV2.schedule" :key="event.id" class="schedule-section" :aria-label="event.kind">
+            <h3>{{ event.kind }}</h3>
+            <el-table v-if="event.kind === 'DATES'" :data="event.records" border size="small" max-height="300">
+              <el-table-column type="index" label="#" width="54" align="center" />
+              <el-table-column prop="day" label="日" min-width="100" />
+              <el-table-column prop="month" label="月" min-width="100" />
+              <el-table-column prop="year" label="年" min-width="100" />
+              <el-table-column label="时间" min-width="120"><template #default="{ row }">{{ row.time || '-' }}</template></el-table-column>
+            </el-table>
+            <el-table v-else :data="event.steps" border size="small" max-height="300">
+              <el-table-column type="index" label="#" width="54" align="center" />
+              <el-table-column prop="step" label="步长" min-width="180" />
+            </el-table>
+          </section>
+        </div>
+        <el-empty v-else description="未识别到 DATES 或 TSTEP 计划记录" :image-size="56" />
+      </section>
+    </template>
   </section>
 </template>
 
@@ -76,5 +152,6 @@ h1 { margin: 0; font-size: 19px; font-weight: 600; }.model-header p { margin: 5p
 .overview-section { margin-top: 16px; border: 1px solid #e4e7ed; }.overview-section h2 { margin: 0; padding: 12px 16px; border-bottom: 1px solid #e4e7ed; font-size: 14px; font-weight: 600; }
 .metadata-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; margin: 0; }.metadata-grid > div { min-width: 0; padding: 13px 16px; border-bottom: 1px solid #ebeef5; }.metadata-grid > div:nth-last-child(-n + 3) { border-bottom: 0; }.metadata-grid .wide { grid-column: span 3; }
 dt { margin-bottom: 5px; color: #909399; font-size: 12px; } dd { min-width: 0; margin: 0; overflow-wrap: anywhere; color: #303133; font-size: 13px; }.monospace { font-family: Consolas, monospace; }.value-tag { margin-right: 6px; }
+.inspection-content { padding: 16px; }.well-tags { display: flex; flex-wrap: wrap; gap: 6px; }.well-tags .value-tag { margin: 0; }.empty-copy { margin: 0; color: #909399; font-size: 13px; }.schedule-sections { padding: 16px; }.schedule-section + .schedule-section { margin-top: 20px; }.schedule-section h3 { margin: 0 0 10px; color: #606266; font-size: 13px; font-weight: 600; }
 @media (max-width: 760px) { .eclipse-inspection-overview { padding: 16px; }.metadata-grid { grid-template-columns: 1fr; }.metadata-grid .wide { grid-column: auto; }.metadata-grid > div { border-bottom: 1px solid #ebeef5; }.metadata-grid > div:last-child { border-bottom: 0; } }
 </style>
