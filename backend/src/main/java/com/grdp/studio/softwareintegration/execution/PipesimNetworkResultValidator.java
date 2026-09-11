@@ -24,11 +24,14 @@ public class PipesimNetworkResultValidator {
 
     public ValidatedResult validate(String expectedRunTask, String expectedStudy, JsonNode result) {
         require("network".equals(expectedRunTask), "Unsupported network runTask");
+        require(result != null && result.isObject(), "result has an invalid shape");
+        String contract = requireString(result, "resultContract", "resultContract");
+        if ("VALID_PARTIAL".equals(contract)) return validatePartial(expectedStudy, result);
+        require("VALID_FULL".equals(contract), "Invalid resultContract");
         requireObject(result, ROOT_FIELDS, "result");
         requireText(result, "schemaVersion", "pipesim-network-result/1");
         requireText(result, "model_kind", "network");
         requireText(result, "runTask", expectedRunTask);
-        requireText(result, "resultContract", "VALID_FULL");
         requireText(result, "study", expectedStudy);
         requireText(result, "simulationState", "Completed");
         validateTopology(result.get("topology"));
@@ -42,6 +45,24 @@ public class PipesimNetworkResultValidator {
         require(validateQuality(result.get("quality")).equals(missingPaths),
                 "quality entries must exactly identify cleaned numeric nulls");
         return new ValidatedResult(SoftwareIntegrationRunStatus.SUCCEEDED, "VALID_FULL", result);
+    }
+
+    private ValidatedResult validatePartial(String expectedStudy, JsonNode result) {
+        requireText(result, "schemaVersion", "pipesim-network-result/1");
+        requireText(result, "model_kind", "network");
+        requireText(result, "runTask", "network");
+        requireText(result, "study", expectedStudy);
+        requireText(result, "simulationState", "Completed");
+        validatePartialTopology(result.get("topology"));
+        return new ValidatedResult(SoftwareIntegrationRunStatus.PARTIAL_SUCCEEDED, "VALID_PARTIAL", result);
+    }
+
+    private void validatePartialTopology(JsonNode topology) {
+        require(topology != null && topology.isObject(), "topology has an invalid shape");
+        JsonNode nodes = requireArray(topology.get("nodes"), "topology.nodes");
+        require(!nodes.isEmpty(), "topology.nodes must not be empty");
+        JsonNode edges = requireArray(topology.get("edges"), "topology.edges");
+        require(!edges.isEmpty(), "topology.edges must not be empty");
     }
 
     private void validateTopology(JsonNode topology) {

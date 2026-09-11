@@ -514,6 +514,7 @@ public class SoftwareIntegrationRunDispatcher {
                 terminalStatus = validated.terminalStatus();
                 contract = validated.contract();
                 result = validated.result();
+                requireWorkerResultStatus(snapshot.state(), terminalStatus, "network".equals(run.getRunType()));
             }
             SoftwareIntegrationRunStatus current = SoftwareIntegrationRunStatus.valueOf(run.getStatus());
             if (current != SoftwareIntegrationRunStatus.CANCEL_REQUESTED && current != SoftwareIntegrationRunStatus.COLLECTING) {
@@ -528,8 +529,10 @@ public class SoftwareIntegrationRunDispatcher {
                         "Successful run is missing manifest.json");
             }
             JsonNode error = sanitizeForRun(run, snapshot.error());
-            if (terminalStatus == SoftwareIntegrationRunStatus.PARTIAL_SUCCEEDED && error == null) {
-                error = runStore.error("PROFILE_PARTIAL", "节点分析有效，但 PT 剖面未产生有效结果");
+            if (terminalStatus == SoftwareIntegrationRunStatus.PARTIAL_SUCCEEDED) {
+                error = "network".equals(run.getRunType())
+                        ? runStore.error("NETWORK_RESULT_LIMITED", "管网计算已完成，但可展示结果受限")
+                        : error == null ? runStore.error("PROFILE_PARTIAL", "节点分析有效，但 PT 剖面未产生有效结果") : error;
             }
             boolean completed = runStore.complete(run.getId(), terminalStatus, contract,
                     result, error, sanitizeForRun(run, snapshot.cleanup()), published);
@@ -556,6 +559,17 @@ public class SoftwareIntegrationRunDispatcher {
             if (published != null) artifactPublisher.discard(published);
             if (finishCancellationThatWonDuringPublication(run.getId(), snapshot)) return;
             fail(run.getId(), "RESULT_PUBLICATION_FAILED", "结果或 Artifact 元数据发布失败");
+        }
+    }
+
+    private static void requireWorkerResultStatus(String workerState, SoftwareIntegrationRunStatus terminalStatus,
+                                                  boolean network) {
+        if (!network) return;
+        String expected = terminalStatus.name();
+        String actual = workerState == null ? "" : workerState.toUpperCase(Locale.ROOT);
+        if (!expected.equals(actual)) {
+            throw new PipesimResultValidator.ResultValidationException(
+                    "Worker state does not match network result contract", null, "schema");
         }
     }
 

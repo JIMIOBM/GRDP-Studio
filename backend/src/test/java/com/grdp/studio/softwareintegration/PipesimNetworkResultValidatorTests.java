@@ -8,6 +8,8 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.catchThrowable;
@@ -47,10 +49,6 @@ class PipesimNetworkResultValidatorTests {
         wrongTask.put("runTask", "profile");
         assertRejected(wrongTask);
 
-        ObjectNode partial = validResult();
-        partial.put("resultContract", "VALID_PARTIAL");
-        assertRejected(partial);
-
         ObjectNode notCompleted = validResult();
         notCompleted.put("simulationState", "Failed");
         assertRejected(notCompleted);
@@ -61,6 +59,28 @@ class PipesimNetworkResultValidatorTests {
 
         assertThatThrownBy(() -> validator.validate("profile", "Network Study", validResult()))
                 .isInstanceOf(PipesimNetworkResultValidator.ResultValidationException.class);
+    }
+
+    @Test
+    void acceptsLimitedPartialNetworkResultWithoutFullProfileOrQualityValidation() {
+        ObjectNode partial = validResult();
+        partial.put("resultContract", "VALID_PARTIAL");
+        partial.remove(List.of("system", "node", "profiles", "summary", "messages", "quality"));
+
+        var validated = validator.validate("network", "Network Study", partial);
+
+        assertThat(validated.terminalStatus()).isEqualTo(SoftwareIntegrationRunStatus.PARTIAL_SUCCEEDED);
+        assertThat(validated.contract()).isEqualTo("VALID_PARTIAL");
+        assertThat(validated.result()).isSameAs(partial);
+    }
+
+    @Test
+    void rejectsPartialNetworkResultWithoutSafeTopology() {
+        ObjectNode partial = validResult();
+        partial.put("resultContract", "VALID_PARTIAL");
+        ((ArrayNode) partial.path("topology").path("edges")).removeAll();
+
+        assertRejected(partial);
     }
 
     @Test

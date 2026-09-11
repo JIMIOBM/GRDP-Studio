@@ -495,6 +495,54 @@ class SoftwareIntegrationRunFlowTests {
     }
 
     @Test
+    void partialNetworkResultIsPersistedWithLimitedResultWarning() throws Exception {
+        Seed seed = seed("READY", "models/network/partial/network.pips", "PIPESIM_NETWORK");
+        long runId = runService.create(seed.version().getId(), request("Network Study", "network")).id();
+        SoftwareIntegrationRunDispatcher dispatcher = dispatcher();
+        dispatcher.dispatch();
+
+        Path manifest = STORAGE_ROOT.resolve("jobs/" + runId + "/output/manifest.json");
+        Files.createDirectories(manifest.getParent());
+        Files.writeString(manifest, """
+                {"schemaVersion":"grdp-worker-artifact-manifest/1","runId":%d,
+                 "generatedAtUtc":"2026-09-11T00:00:00Z","files":[]}
+                """.formatted(runId));
+        fakeWorker.snapshot = new WorkerRunSnapshot(runId, "PARTIAL_SUCCEEDED", 4, "worker-1", "generation-1",
+                List.of(
+                        new WorkerRunEvent(1, "PREPARING", Instant.now(), "preparing"),
+                        new WorkerRunEvent(2, "RUNNING_NETWORK", Instant.now(), "network"),
+                        new WorkerRunEvent(3, "COLLECTING", Instant.now(), "collecting"),
+                        new WorkerRunEvent(4, "PARTIAL_SUCCEEDED", Instant.now(), "limited result")), partialNetworkResult(), null,
+                List.of(new WorkerRunArtifact("jobs/" + runId + "/output/manifest.json",
+                        Files.size(manifest), sha256(manifest), "application/json")),
+                objectMapper.readTree("{\"processTreeExitConfirmed\":true}"));
+
+        dispatcher.poll();
+
+        assertThat(runStore.find(runId).getStatus()).isEqualTo("PARTIAL_SUCCEEDED");
+        assertThat(runStore.find(runId).getResultContract()).isEqualTo("VALID_PARTIAL");
+        assertThat(runStore.find(runId).getResultJson()).contains("pipesim-network-result/1");
+        assertThat(runService.get(runId).error().path("code").asText()).isEqualTo("NETWORK_RESULT_LIMITED");
+    }
+
+    @Test
+    void rejectsNetworkWorkerStatusAndResultContractMismatch() throws Exception {
+        Seed seed = seed("READY", "models/network/mismatch/network.pips", "PIPESIM_NETWORK");
+        long runId = runService.create(seed.version().getId(), request("Network Study", "network")).id();
+        SoftwareIntegrationRunDispatcher dispatcher = dispatcher();
+        dispatcher.dispatch();
+        fakeWorker.snapshot = new WorkerRunSnapshot(runId, "SUCCEEDED", 1, "worker-1", "generation-1",
+                List.of(), partialNetworkResult(), null, List.of(), null);
+
+        dispatcher.poll();
+
+        assertThat(runStore.find(runId).getStatus()).isEqualTo("FAILED");
+        assertThat(runStore.find(runId).getResultJson()).isNull();
+        assertThat(runService.get(runId).error().path("code").asText())
+                .isEqualTo("INVALID_NETWORK_RESULT_CONTRACT");
+    }
+
+    @Test
     void rejectedNetworkResultsPersistAllowlistedSafeReasonClasses() throws Exception {
         ObjectNode schema = (ObjectNode) networkResult();
         schema.put("schemaVersion", "pipesim-network-result/2");
@@ -1278,6 +1326,13 @@ class SoftwareIntegrationRunFlowTests {
                     {"path":"node.Pressure.Sink 1","code":"UNAVAILABLE"},
                     {"path":"profiles.Source 1 -> Sink 1.Pressure[1]","code":"NON_FINITE"}]}
                 """);
+    }
+
+    private JsonNode partialNetworkResult() {
+        ObjectNode result = (ObjectNode) networkResult();
+        result.put("resultContract", "VALID_PARTIAL");
+        result.remove(List.of("system", "node", "profiles", "summary", "messages", "quality"));
+        return result;
     }
 
     private JsonNode eclipseResult(long eclEndSize, String eclEndSha) {
