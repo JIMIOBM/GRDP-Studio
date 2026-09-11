@@ -10,3 +10,5 @@ vue/*.log
 backend/target/
 backend/.m2/
 backend/.env
+/outputs/
+/output/

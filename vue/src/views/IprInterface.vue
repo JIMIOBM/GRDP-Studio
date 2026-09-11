@@ -31,6 +31,8 @@ import RelativePermeabilityContent from '@/views/DataManagement/RelativePermeabi
 import WellDataTableContent from '@/views/DataManagement/WellDataTableContent.vue'
 import WellboreStructureContent from '@/views/WellboreCapacity/WellboreStructureContent.vue'
 import SingleWellProductivityInterface from '@/views/SingleWellProductivityInterface.vue'
+import PipelineCapacityContent from '@/views/PipelineCapacity/PipelineCapacityContent.vue'
+import { ensurePipelineNavigation, findPipelinePageNode, pipelinePageForCommand, resolvePipelinePage } from '@/utils/pipelineNavigation'
 import { NODETYPE } from '@/constants/nodeType'
 import { analyticMethodApi, dataManagementApi, dynamicBalanceApi, materialBalanceApi, nodeApi, notifyApi, parametersApi, projectApi, typicalCurveApi, waterInvasionApi, wellApi } from '@/api/docker'
 import { pvtStorageApi } from '@/api/pvtStorage'
@@ -1606,6 +1608,7 @@ const refreshPvtNodesForWell = async wellName => {
   pvtGroup.defaultExpanded = false
   // 仅在用户通过顶部“PVT模型”创建过第二入口后维护镜像，避免默认改变目录结构。
   syncWellborePvtGroup(well, pvtGroup)
+  ensurePipelineNavigation(well.children)
   return pvtGroup.children
 }
 
@@ -3931,6 +3934,13 @@ const handleSelect = async (node) => { // 点击左侧树节点
   activeNodeId.value = node.id
   activeNode.value = node
 
+  if (node.type === 'pipeline-capacity' || node.type === 'pipeline-temperature-group') return
+  if (node.type === 'pipeline-capacity-page') {
+    currentView.value = 'pipeline-capacity'
+    currentViewNode.value = { wellName: nodeWellName, pipelineSection: resolvePipelinePage(node.section), commandKey: Date.now() }
+    return
+  }
+
   if (node.type === NODETYPE.NodeType_ProductivityEvaluationModifiedIsochronalWellTest) {
     await router.push({
       name: 'SingleWellProductivity',
@@ -4096,7 +4106,21 @@ const handleSelect = async (node) => { // 点击左侧树节点
   if (node.type === NODETYPE.NodeType_Well) return
 }
 
+function openPipelinePage(section) {
+  const wellName = currentViewNode.value?.wellName || selectedWellName.value || activeNode.value?.wellName || ''
+  currentView.value = 'pipeline-capacity'
+  currentViewNode.value = { wellName, pipelineSection: resolvePipelinePage(section), commandKey: Date.now() }
+  const node = findPipelinePageNode(treeData.value, wellName, section, true)
+  if (node) { activeNodeId.value = node.id; activeNode.value = node }
+}
+
 const handleCommand = async ({ group, name, parent }) => { // 接收顶部菜单栏的点击事件
+  if (group === '管束能力') {
+    const wellName = selectedWellName.value || activeNode.value?.wellName || ''
+    currentViewNode.value = { wellName }
+    openPipelinePage(pipelinePageForCommand(name))
+    return
+  }
   // 顶部菜单栏“单井产能”板块：跳转到独立的单井产能工作台。
   if (group === '单井产能') {
     const activeWellName = selectedWellName.value || activeNode.value?.wellName || (
@@ -4417,6 +4441,16 @@ onBeforeUnmount(() => {
           'pvt-yellow-theme': isPvtView
         }"
       >
+        <PipelineCapacityContent
+          v-if="currentView === 'pipeline-capacity'"
+          :key="`pipeline-${currentViewNode?.wellName || 'project'}`"
+          :well-name="currentViewNode?.wellName || ''"
+          :project-id="PROJECT_ID"
+          :gas-reservoir-id="GAS_RESERVOIR_ID"
+          :command-key="currentViewNode?.commandKey || 0"
+          :initial-section="currentViewNode?.pipelineSection || 'flow'"
+          @navigate="openPipelinePage"
+        />
         <SingleWellProductivityInterface
           v-if="currentView === 'isochronal-test'"
           :key="currentViewNode?.viewInstanceKey"

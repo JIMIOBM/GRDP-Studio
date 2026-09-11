@@ -7,8 +7,10 @@
  * 具体树数据与节点业务仍由各工作台页面负责。
  */
 import TreeNode from '@/views/TreeNode.vue'
+import { watch } from 'vue'
+import { ensurePipelineNavigation } from '@/utils/pipelineNavigation'
 
-defineProps({
+const props = defineProps({
   nodes: { type: Array, default: () => [] },
   activeId: { type: [String, Number], default: '' },
   keyword: { type: String, default: '' },
@@ -23,6 +25,7 @@ const emit = defineEmits([
   'expand',
   'node-contextmenu'
 ])
+watch(() => props.nodes, nodes => ensurePipelineNavigation(nodes), { deep: true, immediate: true })
 </script>
 
 <template>
