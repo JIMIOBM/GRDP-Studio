@@ -6,7 +6,6 @@ import PipelineBoundaryPage from './PipelineBoundaryPage.vue'
 import PipelineFlowPage from './PipelineFlowPage.vue'
 import PipelineComparisonPage from './PipelineComparisonPage.vue'
 import PipelineConstraintPage from './PipelineConstraintPage.vue'
-import PipelineConstraintsOverview from './PipelineConstraintsOverview.vue'
 import PipelineTopologyEditor from './PipelineTopologyEditor.vue'
 import PipelineTemperatureEditor from './PipelineTemperatureEditor.vue'
 import PipelineGasPropertyPage from './PipelineGasPropertyPage.vue'
@@ -20,7 +19,7 @@ const emit = defineEmits(['navigate'])
 const s = usePipelineWorkspace(props)
 const title = computed(() => pipelinePageTitles[s.activePage])
 const editable = computed(() => ['flow', 'boundary', 'hydrate'].includes(s.activePage))
-const hasResults = computed(() => ['flow', 'equipment', 'hydrate', 'constraints', 'comparison'].includes(s.activePage))
+const hasResults = computed(() => ['flow', 'equipment', 'hydrate', 'comparison'].includes(s.activePage))
 const pageBusy = computed(() => hasResults.value ? !!(s.batchBusy || s.busy) : s.busy)
 const pageError = computed(() => hasResults.value ? s.batchError : s.error)
 const pageStale = computed(() => s.batchStale)
@@ -55,7 +54,6 @@ defineExpose({ dirty: computed(() => s.dirty), mayDiscard: s.mayDiscard })
     <PipelineBoundaryPage v-if="s.activePage === 'boundary'" :state="s" @navigate="navigate" />
     <PipelineFlowPage v-else-if="s.activePage === 'flow'" :state="s" />
     <PipelineComparisonPage v-else-if="s.activePage === 'comparison'" :state="s" @navigate="navigate" />
-    <PipelineConstraintsOverview v-else-if="s.activePage === 'constraints'" :state="s" @navigate="navigate" />
     <PipelineConstraintPage v-else :key="s.activePage" :state="s" :kind="s.activePage" @navigate="navigate" />
     <footer class="status-bar" :class="{ 'storage-warning': s.storageError }">
       <span v-if="s.storageError">{{ s.storageError }}</span>

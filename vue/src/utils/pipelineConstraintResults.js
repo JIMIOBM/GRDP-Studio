@@ -29,27 +29,6 @@ export function constraintDataRows(detail, kind, current) {
   })
 }
 
-export function constraintStatus(rows, empty = 'not_evaluated') {
-  if (!rows.length) return empty
-  if (rows.some(row => ['fail', 'risk'].includes(row.status))) return 'fail'
-  if (rows.some(row => row.status === 'equilibrium')) return 'equilibrium'
-  if (rows.some(row => row.status === 'conditional')) return 'conditional'
-  if (rows.some(row => !['pass', 'not_applicable'].includes(row.status))) return 'not_evaluated'
-  return rows.every(row => row.status === 'not_applicable') ? 'not_applicable' : 'pass'
-}
-
-export function batchConstraintSummary(detail, current) {
-  return ['equipment', 'hydrate', 'erosion', 'freeze'].map((kind, index) => {
-    const inactive = ['erosion', 'freeze'].includes(kind)
-    const rows = inactive ? [] : constraintDataRows(detail, kind, current)
-    return { kind, name: ['关键设备', '水合物', '冲蚀', '冻堵'][index],
-      status: inactive ? 'inactive'
-        : constraintStatus(rows, current && kind === 'equipment' && !topologyEquipment(detail?.graph).length ? 'not_applicable' : 'not_evaluated'),
-      evaluatedCount: rows.filter(row => ['pass', 'fail', 'risk', 'equilibrium', 'conditional'].includes(row.status)).length,
-      totalCount: rows.length }
-  })
-}
-
 export function constraintChartSeries(rows, id, kind, metric) {
   const selected = rows.filter(row => (kind === 'equipment' ? row.id : row.edgeId || row.id) === id)
     .filter(row => conditionTime(row.operatingAt) != null)

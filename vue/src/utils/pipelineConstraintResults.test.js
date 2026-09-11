@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { batchConstraintSummary, constraintDataRows, constraintChartSeries, topologyEquipment } from './pipelineConstraintResults.js'
+import { constraintDataRows, constraintChartSeries, topologyEquipment } from './pipelineConstraintResults.js'
 import { PIPELINE_BATCH_VERSION, batchInputMark } from './pipelineBatch.js'
 
 function fixture() {
@@ -36,16 +36,13 @@ test('hydrate retains same-point temperatures and conditional/equilibrium values
   assert.equal(constraintChartSeries(rows,'pipe','hydrate','margin')[0].data[0][1],0)
   rows[0].status='not_evaluated'
   assert.equal(constraintChartSeries(rows,'pipe','hydrate','margin')[0].data[0][1],null)
-  assert.equal(batchConstraintSummary(detail,true).find(row=>row.kind==='hydrate').status,'conditional')
 })
 
-test('old or stale batches never expose fabricated constraint values and inactive kinds stay inactive',()=>{
+test('old or stale batches never expose fabricated constraint values',()=>{
   const detail=fixture()
   assert.deepEqual(constraintDataRows(detail,'equipment',false),[])
-  assert.deepEqual(batchConstraintSummary(detail,false).map(row=>row.status),['not_evaluated','not_evaluated','inactive','inactive'])
   detail.result.algorithmVersion='network-batch-1.0'
   assert.deepEqual(constraintDataRows(detail,'hydrate',true),[])
-  assert.deepEqual(batchConstraintSummary(detail,true).map(row=>row.status),['not_evaluated','not_evaluated','inactive','inactive'])
 })
 
 test('available water is a calculation input; omitted water remains unknown rather than assuming free water',()=>{

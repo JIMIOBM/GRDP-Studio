@@ -6,7 +6,7 @@ import { pipelinePageTitles, pipelineTemperaturePages, resolvePipelinePage } fro
 import { pipelineSectionFields, normalizePipelineInput, sectionInput, reconcilePipelinePage } from '@/utils/pipelinePageState'
 import { hydrateBoundary, boundaryTimeIssue } from '@/utils/pipelineBoundary'
 import { pipelinePvtChanged } from '@/utils/pipelinePvtModel'
-import { batchConstraintSummary, constraintDataRows, topologyEquipment } from '@/utils/pipelineConstraintResults'
+import { constraintDataRows, topologyEquipment } from '@/utils/pipelineConstraintResults'
 import { boundaryComparisonRows } from '@/utils/pipelineBoundaryComparison'
 import { flowThermalSourceChanged } from '@/utils/pipelineFlowThermal'
 import { PIPELINE_BATCH_VERSION, resolveSavedNetworkTopology, batchInputMark, batchDataRows as makeBatchRows, batchChartSeries as makeBatchCharts, batchExportRows } from '@/utils/pipelineBatch'
@@ -54,11 +54,10 @@ export function usePipelineWorkspace(props) {
   const equipmentCatalog = computed(() => topologyEquipment(savedGraph.value))
   const equipmentRows = computed(() => constraintDataRows(batchDetail.value, 'equipment', currentBatch.value))
   const hydrateRows = computed(() => constraintDataRows(batchDetail.value, 'hydrate', currentBatch.value))
-  const summaryChecks = computed(() => batchConstraintSummary(batchDetail.value, currentBatch.value))
   const comparisonRows = computed(() => boundaryComparisonRows(batchDetail.value, currentBatch.value))
   const batchSaved = computed(() => !!batchDetail.value?.id)
   const batchGasModel = computed(() => batchDetail.value?.input?.gasModel || null)
-  const resultPages = ['flow', 'equipment', 'hydrate', 'constraints', 'comparison']
+  const resultPages = ['flow', 'equipment', 'hydrate', 'comparison']
   const errorText = e => e?.response?.data?.msg || e?.msg || e?.message || '操作失败'
 
   async function openSection() {
@@ -295,6 +294,6 @@ export function usePipelineWorkspace(props) {
     batchResult, batchStale, batchError, batchBusy, batchDataRows, batchChartSeries, canBatchSave,
     batchSaved, batchGasModel, equipmentCatalog, equipmentRows, hydrateRows, comparisonRows,
     savedGraph, topologyError, topologyLoading, boundaryTopologyNotice, loaded, activePage, panel,
-    busy, error, storageError, savedMark, dirty, pageDirty, canCalculate, tabTitle, f, summaryChecks,
+    busy, error, storageError, savedMark, dirty, pageDirty, canCalculate, tabTitle, f,
     mayDiscard, topologySaved, loadTopology, loadModel, calculate, save, savePage, reloadPage, exportResult, statusLabels })
 }

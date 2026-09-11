@@ -23,7 +23,7 @@ const constraints = [
 
 export const pipelinePageTitles = {
   flow: '管流计算', boundary: '边界条件', topology: '管网拓扑结构', pvt: 'PVT模型',
-  constraints: '约束条件', comparison: '管流结果对比',
+  comparison: '管流结果对比',
   ...Object.fromEntries(constraints.map(page => [page.section, page.label])),
   ...Object.fromEntries(pipelineTemperaturePages.map(page => [page.section, page.label]))
 }

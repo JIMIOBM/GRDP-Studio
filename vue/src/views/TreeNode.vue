@@ -40,7 +40,10 @@ const toggle = () => {
 
 const handleClick = () => {
   if (props.node.disabled) return
-  emit('select', props.node)
+  const directoryOnly = props.node.type === 'well-data-static-pressure' ||
+    props.node.type === 'pipeline-constraints-group' ||
+    (props.node.type === 'pipeline-capacity-page' && props.node.section === 'constraints')
+  if (!directoryOnly) emit('select', props.node)
   if (hasChildren()) {
     toggle()
   }

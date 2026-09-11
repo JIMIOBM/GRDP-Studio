@@ -40,7 +40,7 @@ const render=fixture=>renderer.renderToString(Vue.createSSRApp({ssrRender,setup:
 }}))
 
 test('all constraint and comparison templates compile with the common panel and time-chart components',()=>{
-  for(const name of ['PipelineConstraintPage','PipelineConstraintsOverview','PipelineComparisonPage','PipelineParameterPanel','PipelineCapacityContent'])
+  for(const name of ['PipelineConstraintPage','PipelineComparisonPage','PipelineParameterPanel','PipelineCapacityContent'])
     assert.doesNotThrow(()=>compileScript(read(name),{id:name,inlineTemplate:true}))
 })
 
