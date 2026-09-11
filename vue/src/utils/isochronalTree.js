@@ -25,6 +25,8 @@ export const loadIsochronalTreeNodes = async ({
     id: `${wellNode.id}-productivity-test-isochronal-${record.testId}`,
     label: `等时试井${record.testNo}`,
     type: ISOCHRONAL_RECORD_NODE_TYPE,
+    projectId,
+    gasReservoirId,
     wellName,
     testId: record.testId,
     testNo: record.testNo,

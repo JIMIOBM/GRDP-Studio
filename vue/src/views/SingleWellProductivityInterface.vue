@@ -18,6 +18,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import RibbonMenu from '@/components/RibbonMenu.vue'
 import WorkspaceSidebar from '@/components/WorkspaceSidebar.vue'
 import { isLossRecord, lossRecordLabel, deleteLossRecord, removeSavedTreeRecord } from '@/utils/lossRecordActions'
+import { isProductivityTestRecord, deleteProductivityTestRecord } from '@/utils/productivityTestRecordActions'
 import BinomialPressureContent from '@/views/WellControlInventory/BinomialPressureContent.vue'
 import ModifiedIsochronalContent from '@/views/SingleWellProductivity/ModifiedIsochronalContent.vue'
 import ExponentialContent from '@/views/SingleWellProductivity/ExponentialContent.vue'
@@ -104,11 +105,13 @@ const route = useRoute()
 const router = useRouter()
 const PROJECT_ID = resolveWorkspaceContextId(
   props.projectId,
+  props.embeddedNode?.projectId,
   route.query.projectId,
   WORKSPACE_PROJECT_ID
 )
 const GAS_RESERVOIR_ID = resolveWorkspaceContextId(
   props.gasReservoirId,
+  props.embeddedNode?.gasReservoirId,
   route.query.gasReservoirId,
   WORKSPACE_GAS_RESERVOIR_ID
 )
@@ -541,7 +544,7 @@ const isStableRecordNode = node => [
 
 const closeStableContextMenu = () => { stableContextMenu.value.visible = false }
 const handleStableContextMenu = (node, event) => {
-  if (!isStableRecordNode(node) && !isLossRecord(node) && !isPvtRecord(node)) return closeStableContextMenu()
+  if (!isStableRecordNode(node) && !isLossRecord(node) && !isPvtRecord(node) && !isProductivityTestRecord(node)) return closeStableContextMenu()
   stableContextMenu.value = {
     visible: true,
     x: Math.max(8, Math.min(event.clientX, window.innerWidth - 190)),
@@ -580,7 +583,7 @@ const handleSidebarExpand = async node => {
       await loadIsochronalNodes(node.wellName)
     } else if (node.type === 'productivity-test-modified-isochronal-method') {
       await loadModifiedIsochronalNodes(node.wellName)
-    } else if (node.type === OWNED_PRODUCTIVITY_METHOD_NODE_TYPE) {
+    } else if (node.type === OWNED_PRODUCTIVITY_METHOD_NODE_TYPE || OWNED_PRODUCTIVITY_METHOD_NODE_TYPES.has(node.type)) {
       await loadOwnedProductivityNodes(node.wellName, { testMethod: node.testMethod })
     } else if (node.type === THEORETICAL_STABLE_METHOD_NODE_TYPE) {
       await loadTheoreticalStableNodes(node.wellName)
@@ -632,6 +635,37 @@ const renameStableNode = async () => {
 const deleteStableNode = async () => {
   const node = stableContextMenu.value.node
   closeStableContextMenu()
+  if (isProductivityTestRecord(node)) {
+    try {
+      await ElMessageBox.confirm(`删除“${node.label}”及其输入、二项式/指数式计算结果和IPR曲线？此操作不可撤销。`, '删除产能试井记录', {
+        type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消'
+      })
+      await deleteProductivityTestRecord(node)
+      removeSavedTreeRecord(workspaceTreeData.value, node)
+      if (String(workspaceActiveNodeId.value) === String(node.id)) workspaceActiveNodeId.value = ''
+      if (activeModule.value === '产能试井' && Number(activeProductivityTestId.value) === Number(node.testId)
+          && selectedWellName.value === node.wellName && Number(PROJECT_ID) === Number(node.projectId)
+          && Number(GAS_RESERVOIR_ID) === Number(node.gasReservoirId)) {
+        activeProductivityTestId.value = null
+        activeEvaluationId.value = null
+        storedProductivityTest.value = null
+        calculationOutput.value = null
+        resultDirty.value = false
+        savedInputSignature.value = ''
+        pressureWorkspaceKey.value += 1
+        activeMethod.value = ''
+        const query = { ...route.query }
+        delete query.testId
+        delete query.evaluationId
+        delete query.method
+        await router.replace({ query })
+      }
+      ElMessage.success(`${node.label}已删除`)
+    } catch (error) {
+      if (error !== 'cancel' && error !== 'close') ElMessage.error(error?.response?.data?.msg || error.message || '删除产能试井记录失败')
+    }
+    return
+  }
   if (isPvtRecord(node)) {
     try {
       await ElMessageBox.confirm(`删除“${node.label}”及其天然气、地层水、岩石性质的输入和计算结果？此操作不可撤销。`, '删除PVT记录', {
@@ -900,7 +934,7 @@ const handleSidebarSelect = async node => {
   }
 
   // “产能试井”仅作为目录层级，不代表一条真实试井记录。
-  if (isProductivityTestNode || node.type === ISOCHRONAL_METHOD_NODE_TYPE) return
+  if (isProductivityTestNode || node.type === ISOCHRONAL_METHOD_NODE_TYPE || OWNED_PRODUCTIVITY_METHOD_NODE_TYPES.has(node.type)) return
 
   if (node.type === OWNED_PRODUCTIVITY_METHOD_NODE_TYPE ||
       OWNED_PRODUCTIVITY_METHOD_NODE_TYPES.has(node.type)) {
@@ -1013,7 +1047,6 @@ const handleSidebarSelect = async node => {
         : '二项式'
       operationType.value = detail.record?.operationType === 'injection' ? 'injection' : 'production'
       await nextTick()
-      await pressureContentRef.value?.loadWellData?.()
       pressureContentRef.value?.restorePersisted?.(detail)
     } catch (error) {
       ElMessage.error(error.response?.data?.msg || error.message || '等时试井记录读取失败')
@@ -1548,6 +1581,7 @@ onBeforeUnmount(() => window.removeEventListener('click', closeStableContextMenu
                 :external-operation-type="operationType"
                 :pvt-result-rows="selectedPvtRecord?.gasResultRows || []" :pvt-record="selectedPvtRecord"
                 :stored-test="storedProductivityTest"
+                :restore-only="!!activeProductivityTestId"
                 :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID"
                 @result-change="handleResultChange"
                 @source-input-sync="handleSourceInputSync" />

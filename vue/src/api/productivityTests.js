@@ -1,6 +1,10 @@
 import request from '@/utils/request'
 
 export const productivityTestsApi = {
+  delete: (testId, projectId, gasReservoirId, wellName, testMethod) =>
+    request.delete(`/productivity-tests/${testId}`, {
+      params: { projectId, gasReservoirId, wellName, testMethod }
+    }),
   list: (projectId, gasReservoirId, wellName, testMethod = 'modified-isochronal') =>
     request.get('/productivity-tests', {
       params: { projectId, gasReservoirId, wellName, testMethod }

@@ -69,7 +69,9 @@ const props = defineProps({
   externalOperationType: { type: String, default: 'production' },
   pvtResultRows: { type: Array, default: () => [] },
   pvtRecord: { type: Object, default: null },
-  storedTest: { type: Object, default: null }
+  storedTest: { type: Object, default: null },
+  // 从目录打开历史记录时只恢复数据库快照，不抢先读取原平台的新建默认数据。
+  restoreOnly: { type: Boolean, default: false }
 })
 const emit = defineEmits(['result-change', 'source-input-sync'])
 const TEST_TYPES = [
@@ -1713,6 +1715,7 @@ const applyOriginalInputRows = detail => {
 }
 
 const syncOriginalInputDefaults = async () => {
+  if (props.restoreOnly) return
   if (!isOwnedTestType()) return
   if (props.storedTest || !selectedWellName.value || !inputRows.value.length) return
   const syncKey = [selectedWellName.value, activeTestType.value,
@@ -2772,7 +2775,7 @@ watch(() => props.pvtRecord, () => {
 watch(() => props.viewKey, async () => {
   selectedWellName.value = props.initialWellName || props.wellNames[0] || ''
   clearWorkspace()
-  if (!await applyStoredTest() && selectedWellName.value) {
+  if (!await applyStoredTest() && !props.restoreOnly && selectedWellName.value) {
     await loadWellData()
     await syncOriginalInputDefaults().catch(error =>
       console.warn('智慧气藏原始试井参数同步失败', error))
@@ -2782,7 +2785,7 @@ watch(() => props.storedTest, () => { void applyStoredTest() }, { deep: true })
 
 onMounted(async () => {
   window.addEventListener('resize', handleResize)
-  if (!await applyStoredTest() && selectedWellName.value) {
+  if (!await applyStoredTest() && !props.restoreOnly && selectedWellName.value) {
     await loadWellData()
     await syncOriginalInputDefaults().catch(error =>
       console.warn('智慧气藏原始试井参数同步失败', error))

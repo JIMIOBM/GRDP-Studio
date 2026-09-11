@@ -44,6 +44,7 @@ import { isPvtRecord, samePvtRecord, deletePvtTreeRecord } from '@/utils/pvtReco
 import { wellboreLossApi } from '@/api/wellboreLoss'
 import { surfaceLossApi } from '@/api/surfaceLoss'
 import { isLossRecord, lossRecordLabel, deleteLossRecord, removeSavedTreeRecord } from '@/utils/lossRecordActions'
+import { isProductivityTestRecord, deleteProductivityTestRecord } from '@/utils/productivityTestRecordActions'
 import { dynamicProductivityApi } from '@/api/dynamicProductivity'
 import { theoreticalProductivityApi } from '@/api/theoreticalProductivity'
 import { createPvtDraftRecord } from '@/utils/pvtRecords'
@@ -53,6 +54,7 @@ import {
   loadAllOwnedProductivityTestTreeNodes,
   loadOwnedProductivityTestTreeNodes,
   OWNED_PRODUCTIVITY_METHOD_NODE_TYPE,
+  OWNED_PRODUCTIVITY_METHOD_NODE_TYPES,
   OWNED_PRODUCTIVITY_RECORD_NODE_TYPE
 } from '@/utils/ownedProductivityTestTree'
 import {
@@ -446,9 +448,10 @@ const getVentLossApi = node => node.lossType === 'surface' ? surfaceLossApi : we
 const getVentLossLabel = node => node?.lossType === 'surface' ? '地面损耗' : '井筒损耗'
 const isTheoreticalRecord = node => [THEORETICAL_STABLE_RECORD_NODE_TYPE, THEORETICAL_UNSTABLE_RECORD_NODE_TYPE].includes(node?.type)
 const isDiagnosticRecord = item => item?.type === DIAGNOSTIC_CURVE_RECORD_TYPE
-const isTreeContextMenuNode = (item) => isInventoryResultNode(item) || isTypicalCurveResultNode(item) || isLossRecord(item) || isTheoreticalRecord(item) || isPvtRecord(item) || isDiagnosticRecord(item)
+const isTreeContextMenuNode = (item) => isInventoryResultNode(item) || isTypicalCurveResultNode(item) || isLossRecord(item) || isTheoreticalRecord(item) || isPvtRecord(item) || isDiagnosticRecord(item) || isProductivityTestRecord(item)
 
 const treeContextMenuLabel = computed(() => {
+  if (isProductivityTestRecord(treeContextMenu.value.node)) return '删除产能试井记录'
   if (isDiagnosticRecord(treeContextMenu.value.node)) return '删除诊断曲线记录'
   if (isPvtRecord(treeContextMenu.value.node)) return '删除PVT记录'
   if (isLossRecord(treeContextMenu.value.node)) return `删除${lossRecordLabel(treeContextMenu.value.node)}记录`
@@ -4065,6 +4068,25 @@ const handleDeleteContextNode = async () => {
 
   if (!node) return
 
+  if (isProductivityTestRecord(node)) {
+    try {
+      await ElMessageBox.confirm(`删除“${node.label}”及其输入、二项式/指数式计算结果和IPR曲线？此操作不可撤销。`, '删除产能试井记录', {
+        type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消'
+      })
+      await deleteProductivityTestRecord(node)
+      removeSavedTreeRecord(treeData.value, node)
+      if (String(activeNodeId.value) === String(node.id)) { activeNodeId.value = ''; activeNode.value = null }
+      if (String(currentViewNode.value?.id) === String(node.id)) {
+        currentView.value = null
+        currentViewNode.value = null
+      }
+      ElMessage.success(`${node.label}已删除`)
+    } catch (error) {
+      if (error !== 'cancel' && error !== 'close') ElMessage.error(error?.response?.data?.msg || error.message || '删除产能试井记录失败')
+    }
+    return
+  }
+
   if (isPvtRecord(node)) {
     try {
       await ElMessageBox.confirm(`删除“${node.label}”及其天然气、地层水、岩石性质的输入和计算结果？此操作不可撤销。`, '删除PVT记录', {
@@ -4313,6 +4335,8 @@ const handleSelect = async (node) => { // 点击左侧树节点
         module: '产能试井',
         method: '修正等时',
         well: nodeWellName,
+        projectId: node.projectId ?? PROJECT_ID,
+        gasReservoirId: node.gasReservoirId ?? GAS_RESERVOIR_ID,
         testId: node.testId || node.resultId,
         ...(node.evaluationId ? { evaluationId: node.evaluationId } : {})
       }
@@ -4347,13 +4371,16 @@ const handleSelect = async (node) => { // 点击左侧树节点
     return
   }
 
+  if (OWNED_PRODUCTIVITY_METHOD_NODE_TYPES.has(node.type)) return
   if (node.type === OWNED_PRODUCTIVITY_METHOD_NODE_TYPE) {
     await router.push({
       name: 'SingleWellProductivity',
       query: {
         module: '产能试井',
         method: node.pageMethod || (node.testMethod === 'one-point' ? '一点法' : '回压试井'),
-        well: nodeWellName
+        well: nodeWellName,
+        projectId: node.projectId ?? PROJECT_ID,
+        gasReservoirId: node.gasReservoirId ?? GAS_RESERVOIR_ID
       }
     })
     return
@@ -4366,6 +4393,8 @@ const handleSelect = async (node) => { // 点击左侧树节点
         module: '产能试井',
         method: node.pageMethod || (node.testMethod === 'one-point' ? '一点法' : '回压试井'),
         well: nodeWellName,
+        projectId: node.projectId ?? PROJECT_ID,
+        gasReservoirId: node.gasReservoirId ?? GAS_RESERVOIR_ID,
         testId: node.testId
       }
     })
@@ -4778,7 +4807,7 @@ const handleNodeExpand = async node => {
       })
       return
     }
-    if (node.type === OWNED_PRODUCTIVITY_METHOD_NODE_TYPE) {
+    if (node.type === OWNED_PRODUCTIVITY_METHOD_NODE_TYPE || OWNED_PRODUCTIVITY_METHOD_NODE_TYPES.has(node.type)) {
       await loadOwnedProductivityTestTreeNodes({
         treeData: treeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID,
         wellName, testMethod: node.testMethod
@@ -4940,7 +4969,9 @@ onBeforeUnmount(() => {
         <ReservoirWorkspaceContent v-if="currentView === 'reservoir-feature'" :reservoir="currentViewNode.reservoir"
           :command="currentViewNode.command" />
         <SingleWellProductivityInterface v-if="currentView === 'isochronal-test'"
-          :key="currentViewNode?.viewInstanceKey" embedded :embedded-node="currentViewNode" />
+          :key="currentViewNode?.viewInstanceKey" embedded :embedded-node="currentViewNode"
+          :project-id="currentViewNode?.projectId ?? PROJECT_ID"
+          :gas-reservoir-id="currentViewNode?.gasReservoirId ?? GAS_RESERVOIR_ID" />
         <PvtPropertiesContent v-if="currentView === 'pvt-properties'"
           :key="currentViewNode?.viewInstanceKey || currentViewNode?.id || currentViewNode?.wellName"
           :well-name="currentViewNode?.wellName" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID"

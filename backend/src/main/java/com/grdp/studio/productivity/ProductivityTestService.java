@@ -74,6 +74,31 @@ public class ProductivityTestService {
                 projectId, gasReservoirId, wellName.trim(), testMethod);
     }
 
+    @Transactional
+    public void delete(long testId, long projectId, long gasReservoirId, String wellName, String testMethod) {
+        validateMethod(testMethod);
+        if (testId <= 0 || projectId <= 0 || gasReservoirId <= 0 || wellName == null || wellName.isBlank()) {
+            throw new BusinessException(400, "试井记录归属信息不完整，无法删除");
+        }
+        // 锁定并校验完整归属；所有子表操作仅限这个记录，失败时整体回滚。
+        one("""
+                SELECT id FROM project_well_productivity_test
+                WHERE id=? AND project_id=? AND project_gas_reservoir_id=? AND well_name=? AND test_method=?
+                FOR UPDATE
+                """, new Object[]{testId, projectId, gasReservoirId, wellName.trim(), testMethod},
+                "试井记录不存在或不属于当前井和方法");
+        for (String kind : List.of("binomial", "exponential")) {
+            String output = "project_well_productivity_" + kind + "_output";
+            jdbc.update("DELETE FROM " + output + "_item WHERE output_id IN (SELECT id FROM " + output + " WHERE test_id=?)", testId);
+            jdbc.update("DELETE FROM project_well_productivity_" + kind + "_ipr_item WHERE output_id IN (SELECT id FROM " + output + " WHERE test_id=?)", testId);
+            jdbc.update("DELETE FROM " + output + " WHERE test_id=?", testId);
+        }
+        jdbc.update("DELETE FROM project_well_productivity_test_input_item WHERE input_id IN (SELECT id FROM project_well_productivity_test_input WHERE test_id=?)", testId);
+        jdbc.update("DELETE FROM project_well_productivity_test_input WHERE test_id=?", testId);
+        jdbc.update("DELETE FROM project_well_productivity_test WHERE id=? AND project_id=? AND project_gas_reservoir_id=? AND well_name=? AND test_method=?",
+                testId, projectId, gasReservoirId, wellName.trim(), testMethod);
+    }
+
     public Detail detail(long testId, long projectId, long gasReservoirId, String wellName) {
         Map<String, Object> test = one("""
                 SELECT id,pvt_id,test_no,test_name,test_date,operation_type,test_method,well_name,well_type,status
