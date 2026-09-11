@@ -38,9 +38,22 @@ export const backPressurePotentialDifference = (
   reservoirPotential,
   flowingPotential,
   operationType = 'production'
-) => operationType === 'injection'
-  ? flowingPotential - reservoirPotential
-  : reservoirPotential - flowingPotential
+) => {
+  const reservoir = Number(reservoirPotential)
+  const flowing = Number(flowingPotential)
+  if (![reservoir, flowing].every(Number.isFinite)) return Number.NaN
+  return operationType === 'injection'
+    ? flowing - reservoir
+    : reservoir - flowing
+}
+
+// 原始平台会在每个试井日期内从 1 重新编号。多个日期合并分析时，
+// 当前表格的可见行号才是本次计算唯一、连续的测点编号。
+export const resequenceBackPressurePoints = points =>
+  (Array.isArray(points) ? points : []).map((point, index) => ({
+    ...point,
+    sequence: index + 1
+  }))
 
 // Back-pressure binomial equation:
 //   deltaPsi = A*q + B*q^2
@@ -92,15 +105,25 @@ export const fitBackPressureExponential = points => {
 }
 
 export const solveBackPressureBinomialRate = (potentialDifference, darcy, nonDarcy) => {
-  if (!Number.isFinite(potentialDifference) || potentialDifference <= 0) return 0
-  if (nonDarcy > 1e-12) {
-    return (-darcy + Math.sqrt(darcy ** 2 + 4 * nonDarcy * potentialDifference)) /
-      (2 * nonDarcy)
+  const difference = Number(potentialDifference)
+  const darcyCoefficient = Number(darcy)
+  const nonDarcyCoefficient = Number(nonDarcy)
+  if (![difference, darcyCoefficient, nonDarcyCoefficient].every(Number.isFinite) ||
+      difference <= 0 || darcyCoefficient < 0 || nonDarcyCoefficient < 0) return 0
+  if (nonDarcyCoefficient > 1e-12) {
+    // 避免 A 很大时 -A + sqrt(A² + x) 发生灾难性消减。
+    return (2 * difference) /
+      (darcyCoefficient + Math.sqrt(darcyCoefficient ** 2 + 4 * nonDarcyCoefficient * difference))
   }
-  return darcy > 1e-12 ? potentialDifference / darcy : 0
+  return darcyCoefficient > 1e-12 ? difference / darcyCoefficient : 0
 }
 
-export const solveBackPressureExponentialRate = (potentialDifference, coefficient, exponent) =>
-  Number.isFinite(potentialDifference) && potentialDifference > 0
-    ? coefficient * potentialDifference ** exponent
-    : 0
+export const solveBackPressureExponentialRate = (potentialDifference, coefficient, exponent) => {
+  const difference = Number(potentialDifference)
+  const productivityCoefficient = Number(coefficient)
+  const productivityExponent = Number(exponent)
+  if (![difference, productivityCoefficient, productivityExponent].every(Number.isFinite) ||
+      difference <= 0 || productivityCoefficient <= 0 || productivityExponent <= 0) return 0
+  const rate = productivityCoefficient * difference ** productivityExponent
+  return Number.isFinite(rate) && rate >= 0 ? rate : 0
+}

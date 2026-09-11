@@ -9,6 +9,7 @@ import {
   backPressurePotentialDifference,
   fitBackPressureBinomial,
   fitBackPressureExponential,
+  resequenceBackPressurePoints,
   solveBackPressureBinomialRate,
   solveBackPressureExponentialRate
 } from '@/utils/backPressureCalculation'
@@ -21,20 +22,35 @@ const getStoredToken = () => {
   }
 }
 
-const getDeliverabilityTest = (projectId, gasReservoirId, wellName) =>
-  axios.get(
-    `/docker-api/projects/${projectId}/gasreservoirs/${gasReservoirId}/wells/${encodeURIComponent(wellName)}/deliverabilitytestdata`,
-    {
-      params: { page: 1, size: -1 },
-      timeout: 30000,
-      withCredentials: true,
-      headers: {
-        'Process-Env': 'prod',
-        'X-Project-Id': String(projectId),
-        ...(getStoredToken() ? { token: getStoredToken() } : {})
-      }
+// 当前工作台属于气藏 5，但原平台的历史产能试井数据仍归档在气藏 4。
+// 优先读取当前气藏；仅当接口明确返回 404 时回退历史归档气藏，避免影响
+// 当前气藏下的计算、保存及其他数据请求。
+const DELIVERABILITY_ARCHIVE_RESERVOIR_ID = 4
+const requestDeliverabilityTest = (projectId, gasReservoirId, wellName) => axios.get(
+  `/docker-api/projects/${projectId}/gasreservoirs/${gasReservoirId}/wells/${encodeURIComponent(wellName)}/deliverabilitytestdata`,
+  {
+    params: { page: 1, size: -1 },
+    timeout: 30000,
+    withCredentials: true,
+    headers: {
+      'Process-Env': 'prod',
+      'X-Project-Id': String(projectId),
+      ...(getStoredToken() ? { token: getStoredToken() } : {})
     }
-  )
+  }
+)
+
+const getDeliverabilityTest = async (projectId, gasReservoirId, wellName) => {
+  try {
+    return await requestDeliverabilityTest(projectId, gasReservoirId, wellName)
+  } catch (error) {
+    if (
+      error.response?.status !== 404 ||
+      Number(gasReservoirId) === DELIVERABILITY_ARCHIVE_RESERVOIR_ID
+    ) throw error
+    return requestDeliverabilityTest(projectId, DELIVERABILITY_ARCHIVE_RESERVOIR_ID, wellName)
+  }
+}
 
 const props = defineProps({
   wellNames: { type: Array, default: () => [] },
@@ -53,7 +69,9 @@ const props = defineProps({
   externalOperationType: { type: String, default: 'production' },
   pvtResultRows: { type: Array, default: () => [] },
   pvtRecord: { type: Object, default: null },
-  storedTest: { type: Object, default: null }
+  storedTest: { type: Object, default: null },
+  // 从目录打开历史记录时只恢复数据库快照，不抢先读取原平台的新建默认数据。
+  restoreOnly: { type: Boolean, default: false }
 })
 const emit = defineEmits(['result-change', 'source-input-sync'])
 const TEST_TYPES = [
@@ -439,18 +457,26 @@ const createBlankRow = (sequence) => ({
   flowingPressure: null
 })
 
+const swapInputPressureColumns = () => {
+  inputRows.value.forEach(row => {
+    const recoveryPressure = row.recoveryPressure
+    row.recoveryPressure = row.flowingPressure
+    row.flowingPressure = recoveryPressure
+  })
+  result.value = null
+  activePanel.value = 'input'
+}
+
 const applySourceRows = () => {
   originalInputSyncKey = ''
   const matching = sourceRows.value.filter(row => row.testType === activeTestType.value)
   hasMethodData.value = matching.length > 0
-  inputRows.value = matching.map((row, index) => ({
-    ...row,
-    sequence: row.sequence ?? index + 1
-  }))
+  inputRows.value = resequenceBackPressurePoints(matching)
   if (!inputRows.value.length) {
     const count = activeTestType.value === 'one-point' ? 1 : 4
     inputRows.value = Array.from({ length: count }, (_, index) => createBlankRow(index + 1))
   }
+  if (operationType.value === 'injection') swapInputPressureColumns()
 
   const pressure = inputRows.value
     .map(row => row.recoveryPressure)
@@ -569,7 +595,7 @@ const buildPayload = () => ({
   pvtResultRows: props.pvtResultRows,
   migrationNonDarcyCoefficient: null,
   points: inputRows.value.map((row, index) => ({
-    sequence: Number(row.sequence || index + 1),
+    sequence: index + 1,
     flowRate: row.flowRate === '' || row.flowRate === null ? null : Number(row.flowRate),
     equivalentFlowRate: row.equivalentFlowRate === '' || row.equivalentFlowRate === null
       ? null
@@ -585,7 +611,7 @@ const buildPayload = () => ({
     ? sourceRows.value
       .filter(row => row.testType === 'back-pressure')
       .map((row, index) => ({
-        sequence: Number(row.sequence || index + 1),
+        sequence: index + 1,
         flowRate: row.flowRate,
         flowingPressure: row.flowingPressure,
         recoveryPressure: row.recoveryPressure
@@ -845,7 +871,7 @@ const normalizeLocalPoints = (
         throw new Error('采气时地层/恢复压力必须大于测试流压')
       }
       if (injection && flowingPressure <= recoveryPressure) {
-        throw new Error('注气时测试流压必须大于地层/恢复压力')
+        throw new Error(`注气时井底注入压力必须大于地层压力（当前 ${flowingPressure} MPa ≤ ${recoveryPressure} MPa）`)
       }
       const reservoirPotential = pressurePotential(recoveryPressure, method, pvtCurve)
       const flowingPotential = pressurePotential(flowingPressure, method, pvtCurve)
@@ -869,6 +895,12 @@ const normalizeLocalPoints = (
     })
     .sort((left, right) => left.sequence - right.sequence)
   if (normalized.length < minimum) throw new Error(`${methodName.value}至少需要 ${minimum} 个有效测试点`)
+  if (normalized.some(point => !Number.isInteger(point.sequence) || point.sequence <= 0)) {
+    throw new Error('测点序号必须为大于 0 的整数')
+  }
+  if (new Set(normalized.map(point => point.sequence)).size !== normalized.length) {
+    throw new Error('测点序号不能重复')
+  }
   return normalized
 }
 
@@ -1683,6 +1715,7 @@ const applyOriginalInputRows = detail => {
 }
 
 const syncOriginalInputDefaults = async () => {
+  if (props.restoreOnly) return
   if (!isOwnedTestType()) return
   if (props.storedTest || !selectedWellName.value || !inputRows.value.length) return
   const syncKey = [selectedWellName.value, activeTestType.value,
@@ -1800,7 +1833,7 @@ const analyze = async () => {
   }
   calculating.value = true
   try {
-    if (activeTestType.value === 'one-point') {
+    if (activeTestType.value === 'one-point' && calculationResultType.value === 'binomial') {
       await syncOriginalInputDefaults()
     }
     const payload = buildPayload()
@@ -1881,7 +1914,10 @@ const renderChart = () => {
   const minimumRate = Math.min(...rateValues)
   const maximumRate = Math.max(...rateValues)
   const clipLine = line => {
-    if (line.length < 2 || !Number.isFinite(minimumRate) || !Number.isFinite(maximumRate)) return line
+    // 一点法指数式只有一个实测点，但回归线覆盖完整产量范围。
+    // 单点时若按实测最小/最大产量裁剪，会把整条线压缩成同一个坐标。
+    if (line.length < 2 || !Number.isFinite(minimumRate) || !Number.isFinite(maximumRate) ||
+        Math.abs(maximumRate - minimumRate) <= 1e-12) return line
     const sorted = [...line]
       .filter(point => [point.flowRate, point.transformedPressure].every(value => Number.isFinite(Number(value))))
       .sort((left, right) => Number(left.flowRate) - Number(right.flowRate))
@@ -2134,8 +2170,8 @@ const renderChart = () => {
       {
         id: 'analysis-legend-panel',
         type: 'group',
-        right: 16,
-        top: 62,
+        right: 42,
+        top: 52,
         z: 100,
         zlevel: 20,
         draggable: true,
@@ -2145,8 +2181,8 @@ const renderChart = () => {
       {
         id: 'analysis-formula-panel',
         type: 'group',
-        right: 46,
-        bottom: 72,
+        right: 42,
+        bottom: 70,
         z: 100,
         zlevel: 20,
         draggable: true,
@@ -2192,6 +2228,7 @@ const renderIprChart = () => {
   const chartInstance = ensureChart()
   if (!chartInstance) return
   const injection = result.value.operationType === 'injection'
+  const isExponentialResult = result.value.calculationResultType === 'exponential'
   const iprCurves = Array.isArray(result.value.iprCurves) && result.value.iprCurves.length
     ? result.value.iprCurves
     : [{ formationPressure: result.value.formationPressure, points: result.value.iprCurve || [] }]
@@ -2221,7 +2258,10 @@ const renderIprChart = () => {
     type: 'line',
     showSymbol: false,
     symbol: 'none',
-    smooth: true,
+    // 指数式 IPR 已按压力网格密集采样；再次使用贝塞尔平滑会让控制点
+    // 在局部向左回摆，形成不符合物理规律的 S 形折返。保留原始密集
+    // 点连线即可得到平滑且单调的曲线，二项式仍沿用原展示效果。
+    smooth: !isExponentialResult,
     data: (curve.points || []).map(point => [point.flowRate, point.flowingPressure]),
     lineStyle: { width: 1.7, color: iprColors[index % iprColors.length] },
     itemStyle: { color: iprColors[index % iprColors.length] }
@@ -2660,6 +2700,15 @@ const switchChart = async (chartType) => {
 }
 
 const handleResize = () => chart?.resize()
+// 不仅监听浏览器窗口，也响应外层目录、参数栏导致的图表容器尺寸变化。
+let chartResizeObserver = null
+watch(chartEl, element => {
+  chartResizeObserver?.disconnect()
+  if (element) {
+    chartResizeObserver ||= new ResizeObserver(handleResize)
+    chartResizeObserver.observe(element)
+  }
+})
 
 watch(selectedDataTable, value => {
   if (!value) {
@@ -2711,20 +2760,22 @@ watch(() => props.externalCalculationResult, value => {
 watch(() => props.externalOperationType, value => {
   const normalized = value === 'injection' ? 'injection' : 'production'
   if (operationType.value === normalized) return
+  swapInputPressureColumns()
   operationType.value = normalized
   persistedIsochronalDetail.value = null
   result.value = null
   activePanel.value = 'input'
 })
-watch(() => props.pvtResultRows, () => {
-  if (calculationMethod.value !== 'pseudo-pressure') return
+watch(() => props.pvtRecord, () => {
+  // 任一方法更换 PVT 参数来源都要作废旧结果，但不清空用户录入的测点。
   result.value = null
   activePanel.value = 'input'
+  emit('result-change', null, { stored: false })
 })
 watch(() => props.viewKey, async () => {
   selectedWellName.value = props.initialWellName || props.wellNames[0] || ''
   clearWorkspace()
-  if (!await applyStoredTest() && selectedWellName.value) {
+  if (!await applyStoredTest() && !props.restoreOnly && selectedWellName.value) {
     await loadWellData()
     await syncOriginalInputDefaults().catch(error =>
       console.warn('智慧气藏原始试井参数同步失败', error))
@@ -2734,7 +2785,7 @@ watch(() => props.storedTest, () => { void applyStoredTest() }, { deep: true })
 
 onMounted(async () => {
   window.addEventListener('resize', handleResize)
-  if (!await applyStoredTest() && selectedWellName.value) {
+  if (!await applyStoredTest() && !props.restoreOnly && selectedWellName.value) {
     await loadWellData()
     await syncOriginalInputDefaults().catch(error =>
       console.warn('智慧气藏原始试井参数同步失败', error))
@@ -2745,6 +2796,7 @@ defineExpose({ analyze, loadWellData, replaceInputRows, switchPanel, getPersiste
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize)
+  chartResizeObserver?.disconnect()
   chart?.dispose()
   chart = null
 })
@@ -2799,7 +2851,7 @@ onBeforeUnmount(() => {
             </el-radio-group>
           </el-form-item>
           <el-form-item label="注采类型">
-            <el-radio-group v-model="operationType">
+            <el-radio-group v-model="operationType" @change="swapInputPressureColumns">
               <el-radio label="production">采气</el-radio>
               <el-radio
                 label="injection"
@@ -2939,7 +2991,7 @@ onBeforeUnmount(() => {
     <div v-if="selectedDataTable" class="bottom-tabs">
       <button :class="{ active: activePanel === 'input' }" @click="switchPanel('input')">数据列表</button>
       <button :class="{ active: activePanel === 'analysis' }" @click="switchPanel('analysis')">
-        结果分析
+        结果分析图
       </button>
     </div>
 
@@ -3150,6 +3202,11 @@ $border: #dcdfe6;
   padding: 0 12px;
   flex-shrink: 0;
 
+  // 回压、等时和一点法共用此控件，选中色与修正等时统一。
+  input[type='radio'] {
+    accent-color: #303133;
+  }
+
   label {
     display: inline-flex;
     align-items: center;
@@ -3187,17 +3244,25 @@ $border: #dcdfe6;
 }
 
 .bottom-tabs {
-  height: 38px;
+  // 回压、等时和一点法共用此标签栏，与修正等时保持相同的紧凑样式。
+  height: 30px;
   display: flex;
-  justify-content: center;
-  border-top: 1px solid $border;
+  justify-content: flex-start;
+  border-top: 1px solid #e4e7ed;
   flex-shrink: 0;
+  background: #fff;
 
   button {
-    min-width: 150px;
+    height: 30px;
+    min-width: 82px;
+    padding: 0 14px;
     border: 0;
-    border-right: 1px solid $border;
+    border-right: 1px solid #e4e7ed;
     background: #fff;
+    color: #333;
+    font: inherit;
+    font-size: 13px;
+    white-space: nowrap;
     cursor: pointer;
 
     &:disabled {
@@ -3206,9 +3271,10 @@ $border: #dcdfe6;
     }
 
     &.active {
-      background: $yellow;
-      color: #111;
+      background: #fff;
+      color: #202020;
       font-weight: 600;
+      box-shadow: inset 0 3px 0 $yellow;
     }
   }
 }

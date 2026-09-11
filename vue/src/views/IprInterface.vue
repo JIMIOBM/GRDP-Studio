@@ -9,12 +9,13 @@
  * 顶部“单井产能”命令进入独立工作台；左侧目录中的已保存记录则在
  * 当前 /ipr 页面内打开，和其它目录节点保持一致。
  */
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete } from '@element-plus/icons-vue'
 import RibbonMenu from '@/components/RibbonMenu.vue'
 import WorkspaceSidebar from '@/components/WorkspaceSidebar.vue'
+import ReservoirWorkspaceContent from '@/views/Reservoir/ReservoirWorkspaceContent.vue'
 import WaterInvasionContent from '@/views/WellControlInventory/WaterInvasionContent.vue'
 import MaterialBalanceContent from '@/views/WellControlInventory/MaterialBalanceContent.vue'
 import FlowBalanceContent from '@/views/WellControlInventory/FlowBalanceContent.vue'
@@ -30,38 +31,59 @@ import PvtPropertiesContent from '@/views/DataManagement/PvtPropertiesContent.vu
 import RelativePermeabilityContent from '@/views/DataManagement/RelativePermeabilityContent.vue'
 import WellDataTableContent from '@/views/DataManagement/WellDataTableContent.vue'
 import WellboreStructureContent from '@/views/WellboreCapacity/WellboreStructureContent.vue'
+import TemperatureModelContent from '@/views/WellboreCapacity/TempratrueModel.vue'
+import PressureConversion from '@/views/WellboreCapacity/PressureConversion.vue'
+import LiquidLoadingContent from '@/views/WellboreCapacity/LiquidLoadingContent.vue'
+import HydratePredictionContent from '@/views/WellboreCapacity/HydratePredictionContent.vue'
 import SingleWellProductivityInterface from '@/views/SingleWellProductivityInterface.vue'
 import PipelineCapacityContent from '@/views/PipelineCapacity/PipelineCapacityContent.vue'
 import { ensurePipelineNavigation, findPipelinePageNode, pipelinePageForCommand, resolvePipelinePage } from '@/utils/pipelineNavigation'
 import { NODETYPE } from '@/constants/nodeType'
 import { analyticMethodApi, dataManagementApi, dynamicBalanceApi, materialBalanceApi, nodeApi, notifyApi, parametersApi, projectApi, typicalCurveApi, waterInvasionApi, wellApi } from '@/api/docker'
 import { pvtStorageApi } from '@/api/pvtStorage'
+import { diagnosticCurveApi } from '@/api/diagnosticCurve'
+import { isPvtRecord, samePvtRecord, deletePvtTreeRecord } from '@/utils/pvtRecordActions'
+import { wellboreLossApi } from '@/api/wellboreLoss'
+import { surfaceLossApi } from '@/api/surfaceLoss'
+import { isLossRecord, lossRecordLabel, deleteLossRecord, removeSavedTreeRecord } from '@/utils/lossRecordActions'
+import { isProductivityTestRecord, deleteProductivityTestRecord } from '@/utils/productivityTestRecordActions'
 import { dynamicProductivityApi } from '@/api/dynamicProductivity'
 import { theoreticalProductivityApi } from '@/api/theoreticalProductivity'
 import { createPvtDraftRecord } from '@/utils/pvtRecords'
 import { acquireNotifySocket } from '@/utils/notifySocket'
-import { loadAllModifiedIsochronalTreeNodes } from '@/utils/modifiedIsochronalTree'
+import { loadAllModifiedIsochronalTreeNodes, loadModifiedIsochronalTreeNodes } from '@/utils/modifiedIsochronalTree'
 import {
   loadAllOwnedProductivityTestTreeNodes,
+  loadOwnedProductivityTestTreeNodes,
   OWNED_PRODUCTIVITY_METHOD_NODE_TYPE,
+  OWNED_PRODUCTIVITY_METHOD_NODE_TYPES,
   OWNED_PRODUCTIVITY_RECORD_NODE_TYPE
 } from '@/utils/ownedProductivityTestTree'
 import {
   ISOCHRONAL_METHOD_NODE_TYPE,
   ISOCHRONAL_RECORD_NODE_TYPE,
-  loadAllIsochronalTreeNodes
+  loadAllIsochronalTreeNodes,
+  loadIsochronalTreeNodes
 } from '@/utils/isochronalTree'
 import {
+  DYNAMIC_PRODUCTIVITY_NODE_TYPE,
   DYNAMIC_STABLE_METHOD_NODE_TYPE,
   DYNAMIC_STABLE_RECORD_NODE_TYPE,
+  DYNAMIC_UNSTABLE_METHOD_NODE_TYPE,
+  DYNAMIC_UNSTABLE_RECORD_NODE_TYPE,
   loadAllDynamicStableTreeNodes,
-  loadDynamicStableTreeNodes
+  loadDynamicStableTreeNodes,
+  loadDynamicUnstableTreeNodes
 } from '@/utils/dynamicStableTree'
 import {
+  THEORETICAL_CALCULATION_NODE_TYPE,
   THEORETICAL_STABLE_METHOD_NODE_TYPE,
   THEORETICAL_STABLE_RECORD_NODE_TYPE,
+  THEORETICAL_UNSTABLE_METHOD_NODE_TYPE,
+  THEORETICAL_UNSTABLE_RECORD_NODE_TYPE,
   loadAllTheoreticalStableTreeNodes,
-  loadTheoreticalStableTreeNodes
+  loadTheoreticalStableTreeNodes,
+  loadTheoreticalUnstableTreeNodes
 } from '@/utils/theoreticalStableTree'
 import {
   getNextRelativePermeabilityIndex,
@@ -72,16 +94,31 @@ import {
   workspacePendingCommand,
   workspacePendingNode,
   workspaceSelectedWellName,
+  resolveWorkspaceTargetWellName,
   workspaceTreeCollapsed,
   workspaceTreeData,
   workspaceTreeHydrated,
-  workspaceTreeKeyword
+  workspaceTreeKeyword,
+  workspaceRibbonScope,
+  ensureWorkspaceReservoir,
+  setWorkspaceRibbonScope,
+  selectWorkspaceNodeScope,
+  getReservoirCommandLocation,
+  resolveReservoirLocation,
+  activateReservoirCommand
 } from '@/utils/workspaceTreeState'
+import {
+  RESERVOIR_LOSS_METHOD_NODE_TYPE,
+  RESERVOIR_LOSS_RECORD_NODE_TYPE,
+  loadReservoirLossTreeNodes
+} from '@/utils/reservoirGeologicalLossTree'
 
 // 当前工作台所使用的项目和气藏。
-const PROJECT_ID = 6
+const PROJECT_ID = 7
 const GAS_RESERVOIR_ID = 4
 const router = useRouter()
+const route = useRoute()
+ensureWorkspaceReservoir({ projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID })
 const FLOW_BALANCE_NODE_TYPE = NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure
 
 const WELL_GROUPS = [
@@ -119,7 +156,8 @@ const WELL_DATA_NODES = [
       }
     ]
   },
-  { type: 'well-data-pvt-group', label: 'PVT性质' },
+  // PVT 子节点改为懒加载：只有用户展开“PVT性质”时才查询该井的记录。
+  { type: 'well-data-pvt-group', label: 'PVT性质', lazy: true },
   { type: 'well-data-relative-permeability-group', label: '相渗数据' }
 ]
 
@@ -128,6 +166,8 @@ const WELL_DATA_NODES = [
 const WELLBORE_PVT_GROUP_TYPE = 'wellbore-pvt-group'
 const PVT_ENTRY_DATA_MANAGEMENT = 'data-management'
 const PVT_ENTRY_WELLBORE = 'wellbore-capacity'
+const DIAGNOSTIC_CURVE_GROUP_TYPE = 'well-data-diagnostic-curve-group'
+const DIAGNOSTIC_CURVE_RECORD_TYPE = 'well-data-diagnostic-curve'
 
 const NODE_GROUP_BY_TYPE = {
   [NODETYPE.NodeType_WaterInvasionAnalysis]: 'well-control-inventory',  //水侵分析节点，要放到井控库存下面
@@ -156,7 +196,7 @@ const NODE_LABEL_BY_TYPE = {
   [NODETYPE.NodeType_AnalysisMethods]: '解析法',
   [NODETYPE.NodeType_DynamicOriginalGasInplace]: '物质平衡',
   [NODETYPE.NodeType_DynamicMaterialBalanceMethodBlasingame]: '动态平衡',
-  [NODETYPE.NodeType_TypicalCurve]: '诊断曲线',
+  [NODETYPE.NodeType_TypicalCurve]: '图版法',
   [FLOW_BALANCE_NODE_TYPE]: '流动平衡',
   [NODETYPE.NodeType_TypicalCurveBlasingame]: 'Blasingame',
   [NODETYPE.NodeType_TypicalCurveWattenbarger]: 'Wattenbarger',
@@ -170,10 +210,40 @@ const NODE_LABEL_BY_TYPE = {
 }
 
 const treeData = workspaceTreeData
+// 共享目录可能仍持有旧显示名；只改典型曲线分组，不改独立的诊断曲线功能。
+const normalizeTypicalCurveLabels = nodes => {
+  nodes.forEach(node => {
+    if (Number(node.type) === NODETYPE.NodeType_TypicalCurve) node.label = '图版法'
+    if (Array.isArray(node.children)) normalizeTypicalCurveLabels(node.children)
+  })
+}
+normalizeTypicalCurveLabels(treeData.value)
 const activeNodeId = workspaceActiveNodeId  // 当前左侧树选中的节点 ID. 用于高亮显示
 const activeNode = ref(null)  // 当前选中的完整节点对象
 const currentView = ref(null)  // currentView.value = 'water-invasion'，即确定右侧部分区域所显示的界面
 const currentViewNode = ref(null)  // 传给右侧内容组件的节点对象
+
+// 库功能用可刷新/可回退的完整地址定位；目录选择本身不改变右侧页面。
+watch(() => route.query, query => {
+  const target = resolveReservoirLocation(query)
+  if (!target) {
+    if (currentView.value === 'reservoir-feature') {
+      currentView.value = null
+      currentViewNode.value = null
+    }
+    return
+  }
+  activateReservoirCommand(target)
+  currentView.value = 'reservoir-feature'
+  currentViewNode.value = target
+}, { immediate: true })
+
+watch(currentView, view => {
+  // 打开井的具体内容后清理旧库地址，防止刷新恢复成此前的库功能。
+  if (view && view !== 'reservoir-feature' && route.query.scope === 'reservoir') {
+    router.replace({ name: 'IprInterface' })
+  }
+})
 const WELL_CONTROL_VIEWS = new Set([
   'water-invasion',
   'analytic-method',
@@ -375,9 +445,19 @@ const getTypicalCurveResultName = (item) => {
 const isTypicalCurveResultNode = (item) => Boolean(getTypicalCurveResultName(item))
 const isInventoryResultNode = (item) => Boolean(getInventoryResultName(item))
 
-const isTreeContextMenuNode = (item) => isInventoryResultNode(item) || isTypicalCurveResultNode(item)
+const isVentLossRecord = item => item?.type === RESERVOIR_LOSS_RECORD_NODE_TYPE && ['wellbore', 'surface'].includes(item.lossType)
+const getVentLossApi = node => node.lossType === 'surface' ? surfaceLossApi : wellboreLossApi
+const getVentLossLabel = node => node?.lossType === 'surface' ? '地面损耗' : '井筒损耗'
+const isTheoreticalRecord = node => [THEORETICAL_STABLE_RECORD_NODE_TYPE, THEORETICAL_UNSTABLE_RECORD_NODE_TYPE].includes(node?.type)
+const isDiagnosticRecord = item => item?.type === DIAGNOSTIC_CURVE_RECORD_TYPE
+const isTreeContextMenuNode = (item) => isInventoryResultNode(item) || isTypicalCurveResultNode(item) || isLossRecord(item) || isTheoreticalRecord(item) || isPvtRecord(item) || isDiagnosticRecord(item) || isProductivityTestRecord(item)
 
 const treeContextMenuLabel = computed(() => {
+  if (isProductivityTestRecord(treeContextMenu.value.node)) return '删除产能试井记录'
+  if (isDiagnosticRecord(treeContextMenu.value.node)) return '删除诊断曲线记录'
+  if (isPvtRecord(treeContextMenu.value.node)) return '删除PVT记录'
+  if (isLossRecord(treeContextMenu.value.node)) return `删除${lossRecordLabel(treeContextMenu.value.node)}记录`
+  if (isTheoreticalRecord(treeContextMenu.value.node)) return '删除记录'
   const resultName = getTypicalCurveResultName(treeContextMenu.value.node) || getInventoryResultName(treeContextMenu.value.node)
   if (resultName) return `删除${resultName}结果`
   return '删除水侵动态分析结果'
@@ -670,6 +750,8 @@ const createPvtPropertyNodes = (wellName, wellId, records = []) =>
     type: 'well-data-pvt',
     wellName,
     pvtId: record.pvtId,
+    projectId: PROJECT_ID,
+    gasReservoirId: GAS_RESERVOIR_ID,
     pvtIndex: record.pvtNo,
     status: record.status,
     sourceType: record.sourceType,
@@ -677,10 +759,25 @@ const createPvtPropertyNodes = (wellName, wellId, records = []) =>
     children: []
   }))
 
+const createDiagnosticCurveNodes = (wellName, wellId, records = []) =>
+  records.map(record => ({
+    id: `${wellId || wellName}-diagnostic-curve-${record.diagnosticId}`,
+    label: record.diagnosticName || `诊断曲线${record.diagnosticNo}`,
+    type: DIAGNOSTIC_CURVE_RECORD_TYPE,
+    wellName,
+    diagnosticId: record.diagnosticId,
+    diagnosticNo: record.diagnosticNo,
+    projectId: PROJECT_ID,
+    gasReservoirId: GAS_RESERVOIR_ID,
+    status: record.status,
+    children: []
+  }))
+
 const createWellborePvtPropertyNodes = (wellName, wellId, sourceNodes = []) =>
   sourceNodes.map(node => ({
     ...node,
     id: `${wellId || wellName}-wellbore-pvt-${node.pvtId || node.pvtIndex}`,
+    label: String(node.label || '').replace(/^PVT性质/, 'PVT模型'),
     pvtEntry: PVT_ENTRY_WELLBORE,
     children: []
   }))
@@ -706,7 +803,7 @@ const syncWellborePvtGroup = (well, sourceGroup, { create = false, expand = fals
     wellboreGroup.children.push(mirrorGroup)
   }
 
-  mirrorGroup.label = sourceGroup.label
+  mirrorGroup.label = 'PVT模型'
   mirrorGroup.children = createWellborePvtPropertyNodes(wellName, well.id, sourceGroup.children)
   if (expand) {
     const wellRoot = getWellGroup()
@@ -746,6 +843,39 @@ const createWellDataNodes = (wellName, wellId) =>
         }))
     }))
 
+const createDefaultWellboreNodes = (wellName, wellId) => [
+  {
+    id: `wellbore-structure-${wellName}`,
+    label: '井身结构',
+    type: 'wellbore-structure',
+    wellName,
+    children: []
+  },
+  {
+    id: `${wellId || wellName}-${WELLBORE_PVT_GROUP_TYPE}`,
+    label: 'PVT模型',
+    type: WELLBORE_PVT_GROUP_TYPE,
+    wellName,
+    pvtEntry: PVT_ENTRY_WELLBORE,
+    defaultExpanded: false,
+    children: []
+  },
+  {
+    id: `wellbore-liquid-loading-${wellName}`,
+    label: '井筒积液',
+    type: 'wellbore-liquid-loading',
+    wellName,
+    children: []
+  },
+  {
+    id: `wellbore-hydrate-${wellName}`,
+    label: '水合物',
+    type: 'wellbore-hydrate',
+    wellName,
+    children: []
+  }
+]
+
 const createEmptyWell = (wellName, wellId) => ({ //创建一口空井
   id: wellId || `well-${wellName}`,
   label: wellName,
@@ -760,7 +890,9 @@ const createEmptyWell = (wellName, wellId) => ({ //创建一口空井
     defaultExpanded: false,
     children: group.id === 'data-management'
       ? createWellDataNodes(wellName, wellId)
-      : []
+      : group.id === 'wellbore-capacity'
+        ? createDefaultWellboreNodes(wellName, wellId)
+        : []
   }))
 })
 
@@ -818,24 +950,34 @@ const ensureWell = (wellName, wellId) => { //确保井存在
           existingNode.defaultExpanded = dataNode.defaultExpanded
         }
       })
+    } else if (group.id === 'wellbore-capacity') {
+      createDefaultWellboreNodes(wellName, wellItem.id).forEach(defaultNode => {
+        const existingNode = groupItem.children.find(item => item.type === defaultNode.type)
+        if (!existingNode) {
+          groupItem.children.push(defaultNode)
+        }
+      })
     }
   })
 
   return wellItem
 }
 
-const openWellboreStructure = wellName => {
+const openWellboreStructure = (wellName, moduleType = 'wellbore-structure') => {
   const wellItem = ensureWell(wellName, `well-${wellName}`)
   const wellboreGroup = wellItem?.children.find(item => item.type === 'wellbore-capacity')
   if (!wellItem || !wellboreGroup) return
 
-  const nodeId = `wellbore-structure-${wellName}`
+  const nodeId = `${moduleType}-${wellName}`
   let node = wellboreGroup.children.find(item => item.id === nodeId)
   if (!node) {
     node = {
       id: nodeId,
-      label: '井身结构',
-      type: 'wellbore-structure',
+      label: moduleType === 'wellbore-temperature' ? '温度模型'
+        : moduleType === 'wellbore-pressure' ? '压力折算-折算方法'
+          : moduleType === 'wellbore-liquid-loading' ? '井筒积液'
+            : moduleType === 'wellbore-hydrate' ? '水合物' : '井身结构',
+      type: moduleType,
       wellName,
       children: []
     }
@@ -851,16 +993,18 @@ const openWellboreStructure = wellName => {
   selectedWellName.value = wellName
   activeNodeId.value = node.id
   activeNode.value = node
-  currentView.value = 'wellbore-structure'
+  currentView.value = moduleType
   currentViewNode.value = node
 }
 
 const WELL_CONTROL_NODE_ORDER = new Map([
   [NODETYPE.NodeType_WaterInvasionAnalysis, 10],
-  [NODETYPE.NodeType_AnalysisMethods, 20],
-  [NODETYPE.NodeType_DynamicOriginalGasInplace, 30],
+  [NODETYPE.NodeType_DynamicOriginalGasInplace, 20],
+  [FLOW_BALANCE_NODE_TYPE, 30],
   [NODETYPE.NodeType_DynamicMaterialBalanceMethodBlasingame, 40],
-  [NODETYPE.NodeType_TypicalCurve, 50]
+  [NODETYPE.NodeType_AnalysisMethods, 50],
+  [DIAGNOSTIC_CURVE_GROUP_TYPE, 55],
+  [NODETYPE.NodeType_TypicalCurve, 60]
 ])
 
 const TYPICAL_CURVE_NODE_ORDER = new Map([
@@ -879,6 +1023,16 @@ const sortNodesByFixedOrder = (nodes, orderMap) => {
     return String(a?.label || '').localeCompare(String(b?.label || ''), 'zh-Hans')
   })
 }
+
+// 已加载的共享目录也按同一规则排序，不必等到重新加载结果时才更新。
+const sortExistingWellControlNodes = nodes => {
+  nodes.forEach(node => {
+    if (!Array.isArray(node.children)) return
+    if (node.type === 'well-control-inventory') sortNodesByFixedOrder(node.children, WELL_CONTROL_NODE_ORDER)
+    sortExistingWellControlNodes(node.children)
+  })
+}
+sortExistingWellControlNodes(treeData.value)
 
 const addAnalysisNode = (wellName, rawNode) => {  // 添加分析节点
   const nodeType = rawNode?.nodeType ?? rawNode?.type
@@ -921,13 +1075,13 @@ const addBlasingameNode = (wellName, rawNode = {}) => {
 
   const parentId = `${wellItem.id}-diagnostic-curve`
   let diagnosticNode = inventoryGroup.children.find(item =>
-    item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve || item.label === '诊断曲线'
+   item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve
   )
 
   if (!diagnosticNode) {
     diagnosticNode = {
       id: parentId,
-      label: '诊断曲线',
+      label: '图版法',
       type: NODETYPE.NodeType_TypicalCurve,
       wellName,
       defaultExpanded: false,
@@ -969,12 +1123,12 @@ const addNpiNode = (wellName, rawNode = {}) => {
 
   const parentId = `${wellItem.id}-diagnostic-curve`
   let diagnosticNode = inventoryGroup.children.find(item =>
-    item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve || item.label === '诊断曲线'
+   item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve
   )
   if (!diagnosticNode) {
     diagnosticNode = {
       id: parentId,
-      label: '诊断曲线',
+      label: '图版法',
       type: NODETYPE.NodeType_TypicalCurve,
       wellName,
       defaultExpanded: false,
@@ -1010,12 +1164,12 @@ const addTransientNode = (wellName, rawNode = {}) => {
 
   const parentId = `${wellItem.id}-diagnostic-curve`
   let diagnosticNode = inventoryGroup.children.find(item =>
-    item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve || item.label === '诊断曲线'
+    item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve
   )
   if (!diagnosticNode) {
     diagnosticNode = {
       id: parentId,
-      label: '诊断曲线',
+      label: '图版法',
       type: NODETYPE.NodeType_TypicalCurve,
       wellName,
       defaultExpanded: false,
@@ -1051,13 +1205,13 @@ const addWattenbargerNode = (wellName, rawNode = {}) => {
 
   const parentId = `${wellItem.id}-diagnostic-curve`
   let diagnosticNode = inventoryGroup.children.find(item =>
-    item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve || item.label === '诊断曲线'
+    item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve
   )
 
   if (!diagnosticNode) {
     diagnosticNode = {
       id: parentId,
-      label: '诊断曲线',
+      label: '图版法',
       type: NODETYPE.NodeType_TypicalCurve,
       wellName,
       defaultExpanded: false,
@@ -1098,7 +1252,7 @@ const findWattenbargerTreeNodeForWell = (wellName) => {
   )
   const inventoryGroup = wellItem?.children?.find(item => item.type === 'well-control-inventory')
   const diagnosticNode = inventoryGroup?.children?.find(item =>
-    item.type === NODETYPE.NodeType_TypicalCurve || item.label === '诊断曲线'
+    item.type === NODETYPE.NodeType_TypicalCurve || ['图版法', '诊断曲线'].includes(item.label)
   )
   return diagnosticNode?.children?.find(isWattenbargerNode) || null
 }
@@ -1111,7 +1265,7 @@ const revealWattenbargerNode = (wellName) => {
   )
   const inventoryGroup = wellItem?.children?.find(item => item.type === 'well-control-inventory')
   const diagnosticNode = inventoryGroup?.children?.find(item =>
-    item.type === NODETYPE.NodeType_TypicalCurve || item.label === '诊断曲线'
+    item.type === NODETYPE.NodeType_TypicalCurve || ['图版法', '诊断曲线'].includes(item.label)
   )
 
   if (wellItem) wellItem.expanded = true
@@ -1127,13 +1281,13 @@ const addAGNode = (wellName, rawNode = {}) => {
 
   const parentId = `${wellItem.id}-diagnostic-curve`
   let diagnosticNode = inventoryGroup.children.find(item =>
-    item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve || item.label === '诊断曲线'
+    item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve
   )
 
   if (!diagnosticNode) {
     diagnosticNode = {
       id: parentId,
-      label: '诊断曲线',
+      label: '图版法',
       type: NODETYPE.NodeType_TypicalCurve,
       wellName,
       defaultExpanded: false,
@@ -1251,6 +1405,22 @@ const collectWellsFromProject = (payload, allowedWellNames = null) => {
 }
 
 const rebuildProjectTree = (payload, allowedWellNames = null) => {
+  // 从已有项目详情取当前库名称，不为顶部菜单额外遍历或请求所有井。
+  const findReservoir = value => {
+    if (!value || typeof value !== 'object') return null
+    if (Number(value.nodeType) === NODETYPE.NodeType_GasReservoir
+      && Number(value.nodeId ?? value.id) === GAS_RESERVOIR_ID) return value
+    for (const child of Object.values(value)) {
+      const found = findReservoir(child)
+      if (found) return found
+    }
+    return null
+  }
+  const reservoir = findReservoir(payload)
+  if (reservoir) ensureWorkspaceReservoir({
+    projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID,
+    label: reservoir.nodeTitle || reservoir.name || reservoir.label
+  })
   const wells = collectWellsFromProject(payload, allowedWellNames)
   const wellGroup = getWellGroup()
   if (!wellGroup) return
@@ -1435,6 +1605,7 @@ const applyTypicalCurveNodes = (node, targetWellName = '') => {
     const nodeType = item?.nodeType ?? item?.type
     const nextInTypicalCurve = inTypicalCurve ||
       nodeType === NODETYPE.NodeType_TypicalCurve ||
+      nodeName === '图版法' ||
       nodeName === '典型曲线' ||
       nodeName === '诊断曲线'
 
@@ -1499,14 +1670,18 @@ const refreshProjectTree = async () => { //加在项目树
       loadReservoirWellNames()
     ])
     if (projectResult.status === 'rejected') throw projectResult.reason
-    const names = namesResult.status === 'fulfilled' ? namesResult.value : null
+    // 气藏接口偶发返回空 wells 时，仍保留项目接口已经返回的井，避免整棵目录被空集合过滤掉。
+    const names = namesResult.status === 'fulfilled' && namesResult.value.size
+      ? namesResult.value
+      : null
     if (namesResult.status === 'rejected') {
       reservoirWellNames.value = null
       console.warn('当前气藏井列表加载失败，项目树暂按项目数据展示', namesResult.reason)
     }
     rebuildProjectTree(normalizePayload(projectResult.value), names)
     await refreshOtherDataNodes()
-    await refreshAllPvtNodes()
+    // 不在登录/刷新时遍历所有井请求 PVT；大量并发请求会让目录初始化变慢，
+    // 也会在单个接口异常时制造整页“全部报错”的假象。
     return Boolean(getWellGroup()?.children?.length)
   } catch (error) {
     console.warn('项目树加载失败', error)
@@ -1606,10 +1781,43 @@ const refreshPvtNodesForWell = async wellName => {
   // 目录固定存在，子节点每次整体替换并严格等于 project_well_pvt 查询结果。
   pvtGroup.children = createPvtPropertyNodes(wellName, well.id, records)
   pvtGroup.defaultExpanded = false
-  // 仅在用户通过顶部“PVT模型”创建过第二入口后维护镜像，避免默认改变目录结构。
+  // 井筒能力下的“PVT模型”固定存在，并与数据管理中的PVT数据库记录保持同步。
   syncWellborePvtGroup(well, pvtGroup)
   ensurePipelineNavigation(well.children)
   return pvtGroup.children
+}
+
+const refreshDiagnosticCurveNodesForWell = async wellName => {
+  const well = ensureWell(wellName, `well-${wellName}`)
+  const inventoryGroup = well?.children.find(item => item.type === 'well-control-inventory')
+  if (!inventoryGroup) return []
+
+  const response = await diagnosticCurveApi.listRecords(PROJECT_ID, GAS_RESERVOIR_ID, wellName)
+  const payload = normalizePayload(response)
+  const records = Array.isArray(payload)
+    ? payload
+    : Array.isArray(payload?.items)
+      ? payload.items
+      : []
+
+  let diagGroup = inventoryGroup.children.find(item => item.type === DIAGNOSTIC_CURVE_GROUP_TYPE)
+
+  if (!diagGroup) {
+    diagGroup = {
+      id: `${well.id || wellName}-diagnostic-curve-group`,
+      label: '诊断曲线',
+      type: DIAGNOSTIC_CURVE_GROUP_TYPE,
+      wellName,
+      defaultExpanded: false,
+      children: []
+    }
+    inventoryGroup.children.push(diagGroup)
+    sortNodesByFixedOrder(inventoryGroup.children, WELL_CONTROL_NODE_ORDER)
+  }
+
+  diagGroup.children = createDiagnosticCurveNodes(wellName, well.id, records)
+  diagGroup.defaultExpanded = false
+  return diagGroup.children
 }
 
 const refreshAllPvtNodes = async () => {
@@ -1681,6 +1889,26 @@ const handlePvtSaved = async saved => {
   }
 }
 
+const handleDiagnosticSaved = async saved => {
+  const wellName = saved?.wellName || currentViewNode.value?.wellName
+  const diagnosticNo = Number(saved?.diagnosticNo ?? currentViewNode.value?.diagnosticNo)
+  if (!wellName || !Number.isFinite(diagnosticNo)) return
+
+  try {
+    const nodes = await refreshDiagnosticCurveNodesForWell(wellName)
+    const dataNode = nodes.find(node => Number(node.diagnosticNo) === diagnosticNo)
+    if (!dataNode) return
+    activeNodeId.value = dataNode.id
+    activeNode.value = dataNode
+    currentViewNode.value = {
+      ...currentViewNode.value,
+      ...dataNode
+    }
+  } catch (error) {
+    console.warn('诊断曲线保存成功，但左侧目录刷新失败', error)
+  }
+}
+
 const getPvtInitialPropertyTab = () => '天然气性质'
 
 const parsePvtSettings = value => {
@@ -1698,32 +1926,32 @@ const toPvtEditorRecord = (detail, fallbackGasRows = []) => ({
   index: detail?.record?.pvtNo,
   gasRows: detail?.gasInput
     ? [[
-        detail.gasInput.gasType,
-        detail.gasInput.specificGravity,
-        detail.gasInput.hydrogenSulfide,
-        detail.gasInput.carbonDioxide,
-        detail.gasInput.nitrogen,
-        detail.gasInput.condensateOilDensity
-      ]]
+      detail.gasInput.gasType,
+      detail.gasInput.specificGravity,
+      detail.gasInput.hydrogenSulfide,
+      detail.gasInput.carbonDioxide,
+      detail.gasInput.nitrogen,
+      detail.gasInput.condensateOilDensity
+    ]]
     // 某个旧 PVT 可能先保存了地层水或岩石，尚未写入天然气输入表。
     // 此时仍按井从 project_gas_property 回填基础气体性质，避免数据列表显示为空。
     : fallbackGasRows.map(row => [...row]),
   waterRows: detail?.waterInput
     ? [[
-        detail.waterInput.salinity,
-        detail.waterInput.formationPressure,
-        detail.waterInput.formationTemperature
-      ]]
+      detail.waterInput.salinity,
+      detail.waterInput.formationPressure,
+      detail.waterInput.formationTemperature
+    ]]
     : [],
   rockRows: detail?.rockInput ? [[detail.rockInput.porosity]] : [],
   rockResultRows: detail?.rockResults || [],
   rockState: detail?.rockInput
     ? {
-        porosity: detail.rockInput.porosity,
-        rockType: detail.rockInput.rockType,
-        calculationMethod: detail.rockInput.calculationMethod,
-        settings: parsePvtSettings(detail?.settings?.rock)
-      }
+      porosity: detail.rockInput.porosity,
+      rockType: detail.rockInput.rockType,
+      calculationMethod: detail.rockInput.calculationMethod,
+      settings: parsePvtSettings(detail?.settings?.rock)
+    }
     : null,
   gasResultRows: detail?.gasResults || [],
   waterResultRows: (detail?.waterResults || []).map(row => ({
@@ -2214,20 +2442,20 @@ const getMaterialBalanceNodeOnce = async (wellName, delayMs = 1200, gasReservoir
   const requestedType = Number(gasReservoirType)
   const allowedNodeTypes = requestedType === 2
     ? [
-        NODETYPE.NodeType_ConfinedGasReservoirMaterialBalanceMethodForActualStaticPressure,
-        NODETYPE.NodeType_ConfinedGasReservoirMaterialBalanceMethodForCalculatedStaticPressure
-      ]
+      NODETYPE.NodeType_ConfinedGasReservoirMaterialBalanceMethodForActualStaticPressure,
+      NODETYPE.NodeType_ConfinedGasReservoirMaterialBalanceMethodForCalculatedStaticPressure
+    ]
     : requestedType === 1
       ? [
-          NODETYPE.NodeType_ConstantVolumeGasReservoirMaterialBalanceMethodForActualStaticPressure,
-          NODETYPE.NodeType_ConstantVolumeReservoirMaterialBalanceMethodForCalculatedStaticPressure
-        ]
+        NODETYPE.NodeType_ConstantVolumeGasReservoirMaterialBalanceMethodForActualStaticPressure,
+        NODETYPE.NodeType_ConstantVolumeReservoirMaterialBalanceMethodForCalculatedStaticPressure
+      ]
       : [
-          NODETYPE.NodeType_ConfinedGasReservoirMaterialBalanceMethodForActualStaticPressure,
-          NODETYPE.NodeType_ConfinedGasReservoirMaterialBalanceMethodForCalculatedStaticPressure,
-          NODETYPE.NodeType_ConstantVolumeGasReservoirMaterialBalanceMethodForActualStaticPressure,
-          NODETYPE.NodeType_ConstantVolumeReservoirMaterialBalanceMethodForCalculatedStaticPressure
-        ]
+        NODETYPE.NodeType_ConfinedGasReservoirMaterialBalanceMethodForActualStaticPressure,
+        NODETYPE.NodeType_ConfinedGasReservoirMaterialBalanceMethodForCalculatedStaticPressure,
+        NODETYPE.NodeType_ConstantVolumeGasReservoirMaterialBalanceMethodForActualStaticPressure,
+        NODETYPE.NodeType_ConstantVolumeReservoirMaterialBalanceMethodForCalculatedStaticPressure
+      ]
   const resultNode = (wellNode?.subNodes || []).find(item => {
     const type = Number(item.nodeType ?? item.type)
     return allowedNodeTypes.includes(type)
@@ -2252,13 +2480,13 @@ const waitForMaterialBalanceResult = async (wellName, gasReservoirType, maxRetri
 
     try {
       const { rootNode, resultNode } =
-          await getMaterialBalanceNodeOnce(wellName, 0, gasReservoirType)
+        await getMaterialBalanceNodeOnce(wellName, 0, gasReservoirType)
 
       const materialBalanceRows = resultNode
-          ? await getMaterialBalanceRowsForWell(wellName, {
-            silentError: true
-          }, gasReservoirType)
-          : []
+        ? await getMaterialBalanceRowsForWell(wellName, {
+          silentError: true
+        }, gasReservoirType)
+        : []
 
       latestResult = {
         rootNode,
@@ -2809,7 +3037,7 @@ const runMaterialBalanceForSelectedWell = async (recalculateOptions = {}) => {
     // const materialBalanceRows = await getMaterialBalanceRowsForWell(targetWellName, { silentError: true })
     //
     // 日志确认成功后，等待首次创建的节点和结果数据完成落库。
-    const {rootNode, resultNode, materialBalanceRows} = await waitForMaterialBalanceResult(
+    const { rootNode, resultNode, materialBalanceRows } = await waitForMaterialBalanceResult(
       targetWellName,
       gasReservoirType,
       60
@@ -3229,12 +3457,15 @@ const handleDynamicBalanceRecalculate = async (params = {}) => {
   }
 }
 
-const runDiagnosticCurveForSelectedWell = () => {
-  const targetWellName = selectedWellName.value
+const runDiagnosticCurveForSelectedWell = (commandWellName = '') => {
+  const targetWellName = (typeof commandWellName === 'string' && commandWellName.trim()) ||
+    resolveWorkspaceTargetWellName(activeNode.value?.wellName || selectedWellName.value)
   if (!targetWellName) {
     ElMessage.warning('请先在左侧选择一口井')
     return
   }
+  // 只在用户点击功能入口后提交选井，点击左侧目录仍不会刷新右侧内容。
+  selectedWellName.value = targetWellName
   currentView.value = 'diagnostic-curve'
   currentViewNode.value = { wellName: targetWellName }
 }
@@ -3400,7 +3631,7 @@ const resolveWattenbargerMinimumWaterGasRatio = async (options = {}) => {
   }
 }
 
-const runWattenbargerForSelectedWell = async (options={}) => {
+const runWattenbargerForSelectedWell = async (options = {}) => {
   const targetWellName = options.wellName || selectedWellName.value
   if (!targetWellName) {
     ElMessage.warning('请先在左侧选择一口井')
@@ -3519,7 +3750,7 @@ const runAGForSelectedWell = async (params = {}) => {
 
   typicalCurveRunning.value = true
   const logWaiter = createAGLogWaiter(targetWellName)
-   try {
+  try {
     const fittingFailure = typicalCurveApi.fitting({
       gasReservoirId: Number(GAS_RESERVOIR_ID),
       projectId: Number(PROJECT_ID),
@@ -3743,11 +3974,27 @@ const openAGNode = async (node) => {
 }
 
 const initTree = async () => {
-  if (!workspaceTreeHydrated.value) {
+  const hasWellNodes = Boolean(getWellGroup()?.children?.length)
+  if (!workspaceTreeHydrated.value || !hasWellNodes) {
     // 接口失败或返回空目录时不能标记为已加载，否则本次会话后续切回
     // IPR 页面也不会再次请求，左侧会一直只剩“井 / 库 / 库群”。
     workspaceTreeHydrated.value = await refreshProjectTree()
   }
+}
+
+// IPR 是登录后的首屏：这里只补齐两套目录骨架，不读取任何稳定流历史记录。
+// 具体接口由 handleNodeExpand 在用户展开对应方法目录时调用。
+const loadAllStableProductivityTreeNodes = async () => {
+  await loadAllTheoreticalStableTreeNodes({
+    treeData: treeData.value,
+    projectId: PROJECT_ID,
+    gasReservoirId: GAS_RESERVOIR_ID
+  })
+  await loadAllDynamicStableTreeNodes({
+    treeData: treeData.value,
+    projectId: PROJECT_ID,
+    gasReservoirId: GAS_RESERVOIR_ID
+  })
 }
 
 const loadWellChildren = async (node, force = false) => {
@@ -3765,8 +4012,11 @@ const loadWellChildren = async (node, force = false) => {
       refreshAnalyticMethodNodes(wellName),
       refreshMaterialBalanceNodes(wellName),
       refreshFlowBalanceNodes(wellName),
-      refreshTypicalCurveNodes(wellName)
+      refreshTypicalCurveNodes(wellName),
+      refreshDiagnosticCurveNodesForWell(wellName),
     ])
+    // 基础目录可能被刷新器替换，再补一次无请求的理论/动态目录骨架。
+    await loadAllStableProductivityTreeNodes()
     node.childrenLoaded = true
   } finally {
     node.childrenLoading = false
@@ -3785,7 +4035,7 @@ const handleNodeContextMenu = (node, event) => {
   }
 
   const menuWidth = 240
-  const menuHeight = 42
+  const menuHeight = isVentLossRecord(node) ? 84 : 42
   const x = Math.min(event.clientX, window.innerWidth - menuWidth - 8)
   const y = Math.min(event.clientY, window.innerHeight - menuHeight - 8)
 
@@ -3797,12 +4047,108 @@ const handleNodeContextMenu = (node, event) => {
   }
 }
 
+const handleRenameVentLoss = async () => {
+  const node = treeContextMenu.value.node
+  closeTreeContextMenu()
+  if (!isVentLossRecord(node)) return
+  try {
+    const { value } = await ElMessageBox.prompt('请输入记录名称', '重命名', {
+      inputValue: node.label,
+      inputValidator: value => !!value?.trim() && value.trim().length <= 100 || '名称需为1～100个字符'
+    })
+    const response = await getVentLossApi(node).rename(node.lossRecordId, value.trim(), node.projectId, node.gasReservoirId)
+    node.label = (response?.data ?? response).recordName
+    ElMessage.success('名称已修改')
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') console.error('修改损耗记录名称失败', error)
+  }
+}
+
 const handleDeleteContextNode = async () => {
   const node = treeContextMenu.value.node
   const deleteLabel = treeContextMenuLabel.value
   closeTreeContextMenu()
 
   if (!node) return
+
+  if (isProductivityTestRecord(node)) {
+    try {
+      await ElMessageBox.confirm(`删除“${node.label}”及其输入、二项式/指数式计算结果和IPR曲线？此操作不可撤销。`, '删除产能试井记录', {
+        type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消'
+      })
+      await deleteProductivityTestRecord(node)
+      removeSavedTreeRecord(treeData.value, node)
+      if (String(activeNodeId.value) === String(node.id)) { activeNodeId.value = ''; activeNode.value = null }
+      if (String(currentViewNode.value?.id) === String(node.id)) {
+        currentView.value = null
+        currentViewNode.value = null
+      }
+      ElMessage.success(`${node.label}已删除`)
+    } catch (error) {
+      if (error !== 'cancel' && error !== 'close') ElMessage.error(error?.response?.data?.msg || error.message || '删除产能试井记录失败')
+    }
+    return
+  }
+
+  if (isPvtRecord(node)) {
+    try {
+      await ElMessageBox.confirm(`删除“${node.label}”及其天然气、地层水、岩石性质的输入和计算结果？此操作不可撤销。`, '删除PVT记录', {
+        type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消'
+      })
+      const { target, removedIds } = await deletePvtTreeRecord(node, treeData.value, { projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID })
+      if (removedIds.includes(String(activeNodeId.value))) { activeNodeId.value = ''; activeNode.value = null }
+      if (currentView.value === 'pvt-properties' && samePvtRecord(currentViewNode.value, target)) {
+        currentView.value = null
+        currentViewNode.value = null
+      }
+      ElMessage.success('PVT记录已删除')
+    } catch (error) {
+      if (error !== 'cancel' && error !== 'close') ElMessage.error(error?.msg || error.response?.data?.msg || error.message || '删除PVT记录失败')
+    }
+    return
+  }
+
+  if (isLossRecord(node)) {
+    try {
+      await ElMessageBox.confirm(`删除“${node.label}”及其输入、计算结果和相关明细？此操作不可撤销。`, '删除记录', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
+      await deleteLossRecord(node)
+      removeSavedTreeRecord(treeData.value, node)
+      if (String(activeNodeId.value) === String(node.id)) { activeNodeId.value = ''; activeNode.value = null }
+      if (route.query.feature === lossRecordLabel(node) && Number(route.query.lossRecordId) === Number(node.lossRecordId)
+        && Number(route.query.projectId) === Number(node.projectId)
+        && Number(route.query.gasReservoirId) === Number(node.gasReservoirId)) {
+        const query = { ...route.query }
+        delete query.lossRecordId
+        await router.replace({ query })
+      }
+      ElMessage.success(`${lossRecordLabel(node)}记录已删除`)
+    } catch (error) {
+      if (error !== 'cancel' && error !== 'close') ElMessage.error(error.response?.data?.msg || error.message || '删除损耗记录失败')
+    }
+    return
+  }
+
+  if (isTheoreticalRecord(node)) {
+    try {
+      await ElMessageBox.confirm(`删除“${node.label}”及其输入、输出和IPR曲线？此操作不可撤销。`, '删除记录', {
+        type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消'
+      })
+      const projectId = node.projectId ?? PROJECT_ID
+      const gasReservoirId = node.gasReservoirId ?? GAS_RESERVOIR_ID
+      if (!node.wellName || !(Number(node.unstableId ?? node.stableId) > 0)) throw new Error('记录归属信息不完整，无法删除')
+      if (node.type === THEORETICAL_UNSTABLE_RECORD_NODE_TYPE) {
+        await theoreticalProductivityApi.deleteUnstable(node.unstableId, projectId, gasReservoirId, node.wellName)
+      } else {
+        await theoreticalProductivityApi.deleteStable(node.stableId, projectId, gasReservoirId, node.wellName)
+      }
+      removeSavedTreeRecord(treeData.value, node)
+      if (String(activeNodeId.value) === String(node.id)) { activeNodeId.value = ''; activeNode.value = null }
+      ElMessage.success(`${node.label}已删除`)
+    } catch (error) {
+      if (error !== 'cancel' && error !== 'close') ElMessage.error(error.response?.data?.msg || error.message || '删除记录失败')
+    }
+    return
+  }
 
   if (node.type === NODETYPE.NodeType_WaterInvasionAnalysis) {
     const wellName = node.wellName || selectedWellName.value
@@ -3903,6 +4249,21 @@ const handleDeleteContextNode = async () => {
     return
   }
 
+  if (isDiagnosticRecord(node)) {
+    try {
+      await ElMessageBox.confirm(`删除"${node.label}"及其输入和计算结果？此操作不可撤销。`, '删除诊断曲线记录', {
+        type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消'
+      })
+      await diagnosticCurveApi.deleteRecord(node.diagnosticId, PROJECT_ID, GAS_RESERVOIR_ID, node.wellName)
+      removeTreeNode(node)
+      clearCurrentViewAfterDelete(node)
+      ElMessage.success('诊断曲线记录已删除')
+    } catch (error) {
+      if (error !== 'cancel' && error !== 'close') ElMessage.error(error.response?.data?.msg || error.message || '删除诊断曲线记录失败')
+    }
+    return
+  }
+
   if (!isTypicalCurveResultNode(node)) {
     ElMessage.info(`${deleteLabel}：删除接口待确认`)
     return
@@ -3927,14 +4288,49 @@ const handleDeleteContextNode = async () => {
 
 const handleSelect = async (node) => { // 点击左侧树节点
   closeTreeContextMenu()
+  if (!node || node.disabled) return
+  const scope = selectWorkspaceNodeScope(node)
+  if (scope === 'reservoir') {
+    activeNodeId.value = node.id
+    activeNode.value = node
+
+    // 损耗方法目录仅负责选择/展开；只有最末级计算记录才切换右侧界面。
+    const isReservoirLossTreeNode = [
+      RESERVOIR_LOSS_METHOD_NODE_TYPE,
+      RESERVOIR_LOSS_RECORD_NODE_TYPE
+    ].includes(node.type)
+    if (isReservoirLossTreeNode && node.type !== RESERVOIR_LOSS_RECORD_NODE_TYPE) return
+
+    if (node.command) {
+      const location = getReservoirCommandLocation(node.command)
+      if (location && node.type === RESERVOIR_LOSS_RECORD_NODE_TYPE) {
+        location.query.lossRecordId = node.lossRecordId
+      }
+      if (location) await router.push(location)
+    }
+    return
+  }
   const isWellMenuGroup = WELL_GROUPS.some(group => group.id === node.type)
   const nodeWellName = node.wellName || (node.type === NODETYPE.NodeType_Well ? node.label : '')
 
-  if (nodeWellName) selectedWellName.value = nodeWellName
   activeNodeId.value = node.id
   activeNode.value = node
 
-  if (node.type === 'pipeline-capacity' || node.type === 'pipeline-temperature-group') return
+  // 井节点和单井产能各级目录只负责选择/展开目录，不能改变右侧正在展示的内容。
+  // nodeWellName 仍保留在 activeNode 中，用户随后点击顶部计算命令时会以该井为目标。
+  const isProductivityDirectory = [
+    THEORETICAL_CALCULATION_NODE_TYPE,
+    DYNAMIC_PRODUCTIVITY_NODE_TYPE,
+    THEORETICAL_STABLE_METHOD_NODE_TYPE,
+    THEORETICAL_UNSTABLE_METHOD_NODE_TYPE,
+    DYNAMIC_STABLE_METHOD_NODE_TYPE,
+    DYNAMIC_UNSTABLE_METHOD_NODE_TYPE
+  ].includes(node.type)
+  if (node.type === NODETYPE.NodeType_Well || isWellMenuGroup || isProductivityDirectory || node.type === 'pipeline-temperature-group') return
+
+  // 只有真正打开某条记录/功能节点时，才同步右侧使用的井名。
+  if (nodeWellName) selectedWellName.value = nodeWellName
+
   if (node.type === 'pipeline-capacity-page') {
     currentView.value = 'pipeline-capacity'
     currentViewNode.value = { wellName: nodeWellName, pipelineSection: resolvePipelinePage(node.section), commandKey: Date.now() }
@@ -3948,6 +4344,8 @@ const handleSelect = async (node) => { // 点击左侧树节点
         module: '产能试井',
         method: '修正等时',
         well: nodeWellName,
+        projectId: node.projectId ?? PROJECT_ID,
+        gasReservoirId: node.gasReservoirId ?? GAS_RESERVOIR_ID,
         testId: node.testId || node.resultId,
         ...(node.evaluationId ? { evaluationId: node.evaluationId } : {})
       }
@@ -3955,13 +4353,43 @@ const handleSelect = async (node) => { // 点击左侧树节点
     return
   }
 
+  // IPR 首屏也要处理理论/动态产能的具体记录。此前这里漏掉了，
+  // 用户首次点记录不会跳转也不会读取详情，先点顶部菜单后才会由另一个页面接管。
+  if ([THEORETICAL_STABLE_RECORD_NODE_TYPE, DYNAMIC_STABLE_RECORD_NODE_TYPE].includes(node.type)
+    && node.stableId) {
+    await router.push({
+      name: 'SingleWellProductivity',
+      query: {
+        module: node.type === THEORETICAL_STABLE_RECORD_NODE_TYPE ? '理论计算' : '动态产能',
+        method: '稳定流', well: nodeWellName,
+        projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, stableId: node.stableId
+      }
+    })
+    return
+  }
+
+  if ([DYNAMIC_UNSTABLE_RECORD_NODE_TYPE, THEORETICAL_UNSTABLE_RECORD_NODE_TYPE].includes(node.type) && node.unstableId) {
+    await router.push({
+      name: 'SingleWellProductivity',
+      query: {
+        module: node.type === THEORETICAL_UNSTABLE_RECORD_NODE_TYPE ? '理论计算' : '动态产能',
+        method: '不稳定流', well: nodeWellName,
+        projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, stableId: node.unstableId
+      }
+    })
+    return
+  }
+
+  if (OWNED_PRODUCTIVITY_METHOD_NODE_TYPES.has(node.type)) return
   if (node.type === OWNED_PRODUCTIVITY_METHOD_NODE_TYPE) {
     await router.push({
       name: 'SingleWellProductivity',
       query: {
         module: '产能试井',
         method: node.pageMethod || (node.testMethod === 'one-point' ? '一点法' : '回压试井'),
-        well: nodeWellName
+        well: nodeWellName,
+        projectId: node.projectId ?? PROJECT_ID,
+        gasReservoirId: node.gasReservoirId ?? GAS_RESERVOIR_ID
       }
     })
     return
@@ -3974,6 +4402,8 @@ const handleSelect = async (node) => { // 点击左侧树节点
         module: '产能试井',
         method: node.pageMethod || (node.testMethod === 'one-point' ? '一点法' : '回压试井'),
         well: nodeWellName,
+        projectId: node.projectId ?? PROJECT_ID,
+        gasReservoirId: node.gasReservoirId ?? GAS_RESERVOIR_ID,
         testId: node.testId
       }
     })
@@ -3992,11 +4422,30 @@ const handleSelect = async (node) => { // 点击左侧树节点
     return
   }
 
-  if (isWellMenuGroup) return
-
   if (node.type === 'well-data-pvt-group' || node.type === WELLBORE_PVT_GROUP_TYPE) {
     // “PVT性质”只是目录：点击时仅由树组件展开或收起，不打开任何具体记录。
     // 只有点击 PVT性质3、PVT性质4 等子节点时才查询详情并进入修改页面。
+    return
+  }
+
+  if (node.type === DIAGNOSTIC_CURVE_GROUP_TYPE) {
+    // "诊断曲线"只是目录：点击时仅由树组件展开或收起，不打开任何具体记录。
+    return
+  }
+
+  if (node.type === DIAGNOSTIC_CURVE_RECORD_TYPE) {
+    try {
+      if (!node.diagnosticId) throw new Error('该诊断曲线节点缺少数据库ID，请刷新目录后重试')
+      currentView.value = 'diagnostic-curve'
+      currentViewNode.value = {
+        ...node,
+        wellName: nodeWellName,
+        diagnosticId: node.diagnosticId,
+        viewInstanceKey: `${node.id}-${Date.now()}`
+      }
+    } catch (error) {
+      ElMessage.error(error?.msg || error?.response?.data?.msg || error.message || '诊断曲线加载失败')
+    }
     return
   }
 
@@ -4014,6 +4463,8 @@ const handleSelect = async (node) => { // 点击左侧树节点
       const fallbackGasRows = response?.data?.gasInput
         ? []
         : await getDefaultPvtGasRows(nodeWellName)
+      // 等待期间用户可能已进入库功能，迟到的井数据不能覆盖新的库页面。
+      if (activeNodeId.value !== node.id || workspaceRibbonScope.value !== 'well') return
       currentView.value = 'pvt-properties'
       currentViewNode.value = {
         ...node,
@@ -4034,8 +4485,8 @@ const handleSelect = async (node) => { // 点击左侧树节点
     return
   }
 
-  if (node.type === 'wellbore-structure') {
-    currentView.value = 'wellbore-structure'
+  if (['wellbore-structure', 'wellbore-temperature', 'wellbore-pressure', 'wellbore-liquid-loading', 'wellbore-hydrate'].includes(node.type)) {
+    currentView.value = node.type
     currentViewNode.value = node
     return
   }
@@ -4103,40 +4554,61 @@ const handleSelect = async (node) => { // 点击左侧树节点
     return
   }
 
-  if (node.type === NODETYPE.NodeType_Well) return
 }
 
 function openPipelinePage(section) {
   const wellName = currentViewNode.value?.wellName || selectedWellName.value || activeNode.value?.wellName || ''
+  if (wellName) selectedWellName.value = wellName
   currentView.value = 'pipeline-capacity'
   currentViewNode.value = { wellName, pipelineSection: resolvePipelinePage(section), commandKey: Date.now() }
   const node = findPipelinePageNode(treeData.value, wellName, section, true)
   if (node) { activeNodeId.value = node.id; activeNode.value = node }
 }
 
-const handleCommand = async ({ group, name, parent }) => { // 接收顶部菜单栏的点击事件
+const handleCommand = async ({ group, name, parent, wellName: commandWellName }) => { // 接收顶部菜单栏的点击事件
+  if (workspaceRibbonScope.value === 'reservoir') {
+    const location = getReservoirCommandLocation({ group, name, parent })
+    if (location) await router.push(location)
+    else ElMessage.info('此公共功能暂未接入库工作区')
+    return // 库的物质平衡/图版法等同名菜单，不能落入下方单井计算分支。
+  }
+  if (route.query.scope === 'reservoir') await router.replace({ name: 'IprInterface' })
   if (group === '管束能力') {
-    const wellName = selectedWellName.value || activeNode.value?.wellName || ''
+    const wellName = (typeof commandWellName === 'string' && commandWellName.trim()) ||
+      resolveWorkspaceTargetWellName(activeNode.value?.wellName || selectedWellName.value)
+    if (!wellName) {
+      ElMessage.warning('请先在左侧选择一口井')
+      return
+    }
     currentViewNode.value = { wellName }
     openPipelinePage(pipelinePageForCommand(name))
     return
   }
   // 顶部菜单栏“单井产能”板块：跳转到独立的单井产能工作台。
   if (group === '单井产能') {
-    const activeWellName = selectedWellName.value || activeNode.value?.wellName || (
+    const activeWellName = activeNode.value?.wellName || (
       activeNode.value?.type === NODETYPE.NodeType_Well ? activeNode.value.label : ''
-    )
+    ) || selectedWellName.value
     if (!activeWellName) {
       ElMessage.warning('请先在左侧选择一口井')
       return
     }
+
+    // 从登录后的 IPR 首屏第一次进入理论/动态产能时，也必须携带首次计算标记。
+    // 单井产能页内的顶部菜单原本会设置该标记，而这里漏传后就会出现：
+    // 第一次只切换页面，第二次点击同一菜单才真正调用计算接口。
+    const shouldCalculateOnEntry = ['理论计算', '动态产能'].includes(parent || name)
+      && ['稳定流', '不稳定流'].includes(name)
 
     await router.push({
       name: 'SingleWellProductivity',
       query: {
         module: parent || name,
         method: parent ? name : '',
-        well: activeWellName
+        well: activeWellName,
+        projectId: PROJECT_ID,
+        gasReservoirId: GAS_RESERVOIR_ID,
+        ...(shouldCalculateOnEntry ? { initialCalc: '1' } : {})
       }
     })
     return
@@ -4174,7 +4646,7 @@ const handleCommand = async ({ group, name, parent }) => { // 接收顶部菜单
     return
   }
 
-  if (group === '井筒能力' && name === '井身结构') {
+  if (group === '井筒能力' && ['井身结构', '温度模型', '折算方法', '井筒积液', '水合物'].includes(name)) {
     const activeWellName = selectedWellName.value || activeNode.value?.wellName || (
       activeNode.value?.type === NODETYPE.NodeType_Well ? activeNode.value.label : ''
     )
@@ -4183,7 +4655,11 @@ const handleCommand = async ({ group, name, parent }) => { // 接收顶部菜单
       return
     }
 
-    openWellboreStructure(activeWellName)
+    const moduleType = name === '温度模型' ? 'wellbore-temperature'
+      : name === '折算方法' ? 'wellbore-pressure'
+        : name === '井筒积液' ? 'wellbore-liquid-loading'
+          : name === '水合物' ? 'wellbore-hydrate' : 'wellbore-structure'
+    openWellboreStructure(activeWellName, moduleType)
     return
   }
 
@@ -4291,7 +4767,7 @@ const handleCommand = async ({ group, name, parent }) => { // 接收顶部菜单
       runFlowBalanceForSelectedWell()
       break
     case '诊断曲线':
-      runDiagnosticCurveForSelectedWell()
+      runDiagnosticCurveForSelectedWell(commandWellName)
       break
     case 'Blasingame':
       runBlasingameForSelectedWell()
@@ -4317,10 +4793,86 @@ const handleCommand = async ({ group, name, parent }) => { // 接收顶部菜单
 }
 
 const handleNodeExpand = async node => {
+  if (node?.type === RESERVOIR_LOSS_METHOD_NODE_TYPE) {
+    await loadReservoirLossTreeNodes({ treeData, node })
+    return
+  }
   const wellName = node?.wellName
   if (!wellName) return
 
-  if (node.type === 'data-management') {
+  try {
+    // 展开模块目录时只读取该井、该模块的记录；刷新页面不会批量请求。
+    if (node.type === THEORETICAL_CALCULATION_NODE_TYPE) {
+      await Promise.all([
+        loadTheoreticalStableTreeNodes({
+          treeData: treeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName
+        }),
+        loadTheoreticalUnstableTreeNodes({
+          treeData: treeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName
+        })
+      ])
+      return
+    }
+    if (node.type === DYNAMIC_PRODUCTIVITY_NODE_TYPE) {
+      await Promise.all([
+        loadDynamicStableTreeNodes({
+          treeData: treeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName
+        }),
+        loadDynamicUnstableTreeNodes({
+          treeData: treeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName
+        })
+      ])
+      return
+    }
+    if (node.type === ISOCHRONAL_METHOD_NODE_TYPE) {
+      await loadIsochronalTreeNodes({
+        treeData: treeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName
+      })
+      return
+    }
+    if (node.type === 'productivity-test-modified-isochronal-method') {
+      await loadModifiedIsochronalTreeNodes({
+        treeData: treeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName
+      })
+      return
+    }
+    if (node.type === OWNED_PRODUCTIVITY_METHOD_NODE_TYPE || OWNED_PRODUCTIVITY_METHOD_NODE_TYPES.has(node.type)) {
+      await loadOwnedProductivityTestTreeNodes({
+        treeData: treeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID,
+        wellName, testMethod: node.testMethod
+      })
+      return
+    }
+    if (node.type === THEORETICAL_STABLE_METHOD_NODE_TYPE) {
+      await loadTheoreticalStableTreeNodes({
+        treeData: treeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName
+      })
+      return
+    }
+    if (node.type === THEORETICAL_UNSTABLE_METHOD_NODE_TYPE) {
+      await loadTheoreticalUnstableTreeNodes({
+        treeData: treeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName
+      })
+      return
+    }
+    if (node.type === DYNAMIC_STABLE_METHOD_NODE_TYPE) {
+      await loadDynamicStableTreeNodes({
+        treeData: treeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName
+      })
+      return
+    }
+    if (node.type === DYNAMIC_UNSTABLE_METHOD_NODE_TYPE) {
+      await loadDynamicUnstableTreeNodes({
+        treeData: treeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName
+      })
+      return
+    }
+  } catch (error) {
+    ElMessage.warning(error?.response?.data?.msg || error?.message || '目录记录加载失败')
+    return
+  }
+
+  if (node.type === 'well-data-pvt-group') {
     try {
       await refreshPvtNodesForWell(wellName)
     } catch (error) {
@@ -4342,6 +4894,15 @@ const handleNodeExpand = async node => {
       } catch (error) {
         console.warn(`井 ${wellName} 的井筒PVT目录加载失败`, error)
       }
+    }
+    return
+  }
+
+  if (node.type === DIAGNOSTIC_CURVE_GROUP_TYPE) {
+    try {
+      await refreshDiagnosticCurveNodesForWell(wellName)
+    } catch (error) {
+      console.warn(`井 ${wellName} 的诊断曲线目录加载失败`, error)
     }
     return
   }
@@ -4371,7 +4932,7 @@ onMounted(async () => {
 
   try {
     await initTree()
-    void Promise.allSettled([
+    await Promise.allSettled([
       loadAllModifiedIsochronalTreeNodes({
         treeData: treeData.value,
         projectId: PROJECT_ID,
@@ -4388,6 +4949,8 @@ onMounted(async () => {
         gasReservoirId: GAS_RESERVOIR_ID
       })
     ])
+    // 产能试井加载器同样会修改“单井产能”分支，因此最后恢复稳定流记录。
+    await loadAllStableProductivityTreeNodes()
   } catch (error) {
     console.error('工作台目录初始化失败', error)
   }
@@ -4418,29 +4981,22 @@ onBeforeUnmount(() => {
   -->
   <div class="ipr-container">
     <!--    顶部菜单栏目-->
-    <RibbonMenu @command="handleCommand" />
+    <RibbonMenu :scope="workspaceRibbonScope" @scope-change="setWorkspaceRibbonScope" @command="handleCommand" />
 
 
     <div class="ipr-main">
       <!-- 公共左侧目录：与单井产能工作台共用 WorkspaceSidebar.vue。 -->
-      <WorkspaceSidebar
-        v-model:keyword="wellKeyword"
-        v-model:collapsed="sideTreeCollapsed"
-        :nodes="filteredTreeData"
-        :active-id="activeNodeId"
-        @select="handleSelect"
-        @expand="handleNodeExpand"
-        @node-contextmenu="handleNodeContextMenu"
-      />
+      <WorkspaceSidebar v-model:keyword="wellKeyword" v-model:collapsed="sideTreeCollapsed" :nodes="filteredTreeData"
+        :active-id="activeNodeId" @select="handleSelect" @expand="handleNodeExpand"
+        @node-contextmenu="handleNodeContextMenu" />
 
       <!--     右侧的主要内容区域-->
-      <main
-        class="content-area"
-        :class="{
-          'well-control-theme': isWellControlView,
-          'pvt-yellow-theme': isPvtView
-        }"
-      >
+      <main class="content-area" :class="{
+        'well-control-theme': isWellControlView,
+        'pvt-yellow-theme': isPvtView
+      }">
+        <ReservoirWorkspaceContent v-if="currentView === 'reservoir-feature'" :reservoir="currentViewNode.reservoir"
+          :command="currentViewNode.command" />
         <PipelineCapacityContent
           v-if="currentView === 'pipeline-capacity'"
           :key="`pipeline-${currentViewNode?.wellName || 'project'}`"
@@ -4451,36 +5007,30 @@ onBeforeUnmount(() => {
           :initial-section="currentViewNode?.pipelineSection || 'flow'"
           @navigate="openPipelinePage"
         />
-        <SingleWellProductivityInterface
-          v-if="currentView === 'isochronal-test'"
-          :key="currentViewNode?.viewInstanceKey"
-          embedded
-          :embedded-node="currentViewNode"
-        />
-        <PvtPropertiesContent
-          v-if="currentView === 'pvt-properties'"
+        <SingleWellProductivityInterface v-if="currentView === 'isochronal-test'"
+          :key="currentViewNode?.viewInstanceKey" embedded :embedded-node="currentViewNode"
+          :project-id="currentViewNode?.projectId ?? PROJECT_ID"
+          :gas-reservoir-id="currentViewNode?.gasReservoirId ?? GAS_RESERVOIR_ID" />
+        <PvtPropertiesContent v-if="currentView === 'pvt-properties'"
           :key="currentViewNode?.viewInstanceKey || currentViewNode?.id || currentViewNode?.wellName"
-          :well-name="currentViewNode?.wellName"
-          :project-id="PROJECT_ID"
-          :gas-reservoir-id="GAS_RESERVOIR_ID"
-          :pvt-index="currentViewNode?.pvtIndex"
-          :initial-record="currentViewNode?.initialRecord"
+          :well-name="currentViewNode?.wellName" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID"
+          :pvt-index="currentViewNode?.pvtIndex" :initial-record="currentViewNode?.initialRecord"
           :initial-property-tab="currentViewNode?.initialPropertyTab || lastPvtPropertyTab"
-          @property-tab-change="handlePvtPropertyTabChange"
-          @saved="handlePvtSaved"
-        />
-        <RelativePermeabilityContent
-          v-if="currentView === 'relative-permeability'"
+          @property-tab-change="handlePvtPropertyTabChange" @saved="handlePvtSaved" />
+        <RelativePermeabilityContent v-if="currentView === 'relative-permeability'"
           :key="currentViewNode?.viewInstanceKey || currentViewNode?.id || `${currentViewNode?.wellName}-${currentViewNode?.relativePermeabilityIndex}`"
-          :well-name="currentViewNode?.wellName"
-          :project-id="PROJECT_ID"
-          :gas-reservoir-id="GAS_RESERVOIR_ID"
+          :well-name="currentViewNode?.wellName" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID"
           :relative-permeability-index="currentViewNode?.relativePermeabilityIndex"
           @imported="handleRelativePermeabilityImported"
         />
         <WellDataTableContent v-if="currentView === 'well-data-table'"
           :data-type="currentViewNode?.dataType" :well-name="currentViewNode?.wellName"
           :well-names="projectWellNames" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
+        <TemperatureModelContent v-if="currentView === 'wellbore-temperature'"
+          :key="currentViewNode?.id" :node="currentViewNode" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
+        <PressureConversion v-if="currentView === 'wellbore-pressure'" :key="currentViewNode?.id" :node="currentViewNode" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
+        <LiquidLoadingContent v-if="currentView === 'wellbore-liquid-loading'" :key="currentViewNode?.id" :node="currentViewNode" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
+        <HydratePredictionContent v-if="currentView === 'wellbore-hydrate'" :key="currentViewNode?.id" :node="currentViewNode" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
         <WellboreStructureContent v-if="currentView === 'wellbore-structure'"
           :key="currentViewNode?.id" :well-name="currentViewNode?.wellName"
           :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
@@ -4490,13 +5040,12 @@ onBeforeUnmount(() => {
         <AnalyticMethodContent v-if="currentView === 'analytic-method'" :node="currentViewNode" :project-id="PROJECT_ID"
           :gas-reservoir-id="GAS_RESERVOIR_ID" :recalculating="analyticMethodRunning"
           @recalculate="runAnalyticMethodForSelectedWell" />
-        <MaterialBalanceContent v-if="currentView === 'material-balance'" :node="currentViewNode" :project-id="PROJECT_ID"
-                                :gas-reservoir-id="GAS_RESERVOIR_ID" :recalculating="materialBalanceRunning"
-                                @refresh-tree="handleRefreshTree" @recalculate="runMaterialBalanceForSelectedWell"/>
-        <FlowBalanceContent v-if="currentView === 'flow-balance'" :node="currentViewNode"
-                            :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID"
-                            :recalculating="flowBalanceRunning" @recalculate="handleFlowBalanceRecalculate"
-                            @refresh-tree="handleRefreshTree" />
+        <MaterialBalanceContent v-if="currentView === 'material-balance'" :node="currentViewNode"
+          :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" :recalculating="materialBalanceRunning"
+          @refresh-tree="handleRefreshTree" @recalculate="runMaterialBalanceForSelectedWell" />
+        <FlowBalanceContent v-if="currentView === 'flow-balance'" :node="currentViewNode" :project-id="PROJECT_ID"
+          :gas-reservoir-id="GAS_RESERVOIR_ID" :recalculating="flowBalanceRunning"
+          @recalculate="handleFlowBalanceRecalculate" @refresh-tree="handleRefreshTree" />
         <BlasingameContent v-if="currentView === 'blasingame'" :node="currentViewNode" :project-id="PROJECT_ID"
           :gas-reservoir-id="GAS_RESERVOIR_ID" @recalculate="runBlasingameForSelectedWell" />
         <NpiContent v-if="currentView === 'npi'" :node="currentViewNode" :project-id="PROJECT_ID"
@@ -4507,21 +5056,23 @@ onBeforeUnmount(() => {
           @recalculate="runTransientForSelectedWell" />
         <WattenbargerContent v-if="currentView === 'wattenbarger'" :node="currentViewNode" :project-id="PROJECT_ID"
           :gas-reservoir-id="GAS_RESERVOIR_ID" :recalculating="typicalCurveRunning"
-          @recalculate="runWattenbargerForSelectedWell"/>
+          @recalculate="runWattenbargerForSelectedWell" />
         <DynamicBalanceContent v-if="currentView === 'dynamic-balance'" :node="currentViewNode" :project-id="PROJECT_ID"
           :gas-reservoir-id="GAS_RESERVOIR_ID" :recalculating="dynamicBalanceRunning"
           @recalculate="handleDynamicBalanceRecalculate" />
         <AGContent v-if="currentView === 'Agarwal-Gardner'" :node="currentViewNode" :project-id="PROJECT_ID"
           :gas-reservoir-id="GAS_RESERVOIR_ID" @recalculate="runAGForSelectedWell" />
         <DiagnosticCurveContent v-if="currentView === 'diagnostic-curve'" :node="currentViewNode"
-          :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID"
-          @recalculate="runDiagnosticCurveForSelectedWell" />
+          :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" @recalculate="runDiagnosticCurveForSelectedWell"
+          @saved="handleDiagnosticSaved" />
       </main>
     </div>
 
     <Teleport to="body">
       <div v-if="treeContextMenu.visible" class="tree-context-menu"
         :style="{ left: `${treeContextMenu.x}px`, top: `${treeContextMenu.y}px` }" @click.stop @contextmenu.prevent>
+        <button v-if="isVentLossRecord(treeContextMenu.node)" class="tree-context-menu-item" type="button"
+          @click="handleRenameVentLoss">重命名{{ getVentLossLabel(treeContextMenu.node) }}记录</button>
         <button class="tree-context-menu-item" type="button" @click="handleDeleteContextNode">
           <el-icon class="tree-context-menu-icon">
             <Delete />
@@ -4535,6 +5086,7 @@ onBeforeUnmount(() => {
 
 <style lang="scss" scoped>
 $accent-yellow: #f4d000;
+
 .ipr-container {
   height: 100vh;
   display: flex;

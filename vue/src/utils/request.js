@@ -57,6 +57,8 @@ request.interceptors.response.use(
     return res
   },
   (error) => {
+    // 多个并行计算请求由业务页面汇总为一条带测点序号的错误，避免重复弹窗。
+    if (error.config?.silentError) return Promise.reject(error)
     const message = error.code === 'ECONNABORTED'
       ? '本地服务响应超时，请检查后端服务'
       : (error.response?.data?.msg || error.message || '网络异常')

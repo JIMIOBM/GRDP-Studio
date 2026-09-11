@@ -2,6 +2,30 @@ import request from '@/utils/request'
 
 /** 理论计算稳定流专属新库接口；数值计算仍复用旧平台接口。 */
 export const theoreticalProductivityApi = {
+  // 理论计算不稳定流拥有独立于动态产能的编号、默认参数和历史快照。
+  getUnstableDefaultParameters: (projectId, gasReservoirId, wellName) =>
+    request.get('/theoretical-productivity/unstable/default-parameters', {
+      params: { projectId, gasReservoirId, wellName }
+    }),
+  saveUnstableDefaultParameters: data =>
+    request.post('/theoretical-productivity/unstable/default-parameters', data),
+  calculateUnstable: data =>
+    request.post('/theoretical-productivity/unstable/calculate', data, { timeout: 180000 }),
+  listUnstable: (projectId, gasReservoirId, wellName) =>
+    request.get('/theoretical-productivity/unstable', {
+      params: { projectId, gasReservoirId, wellName }
+    }),
+  getUnstable: (unstableId, projectId, gasReservoirId, wellName) =>
+    request.get(`/theoretical-productivity/unstable/${unstableId}`, {
+      params: { projectId, gasReservoirId, wellName }
+    }),
+  saveUnstable: data => request.post('/theoretical-productivity/unstable/save', data),
+  renameUnstable: (unstableId, data) =>
+    request.patch(`/theoretical-productivity/unstable/${unstableId}/name`, data),
+  deleteUnstable: (unstableId, projectId, gasReservoirId, wellName) =>
+    request.delete(`/theoretical-productivity/unstable/${unstableId}`, {
+      params: { projectId, gasReservoirId, wellName }
+    }),
   // 读取一口井的井级默认参数；顶部首次计算会写这里，但不会生成“稳定流N”。
   getDefaultParameters: (projectId, gasReservoirId, wellName) =>
     request.get('/theoretical-productivity/stable/default-parameters', {

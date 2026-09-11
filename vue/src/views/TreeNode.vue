@@ -29,10 +29,17 @@ const toggle = () => {
   expanded.value = !expanded.value
   // 展开状态写回公共树节点，跨工作台重新渲染时保持原状。
   props.node.expanded = expanded.value
-  if (expanded.value) emit('expand', props.node)
+  // 公共目录会在两个工作台之间复用。有时节点保留了“已展开”状态，
+  // 但其懒加载结果尚未读取；这时用户第一次点击会变成收起操作。
+  // 对尚未加载的懒节点，无论本次是展开还是收起，都立即触发一次读取，
+  // 避免必须再点第二次才调用对应接口。
+  if (expanded.value || (props.node.lazy && !props.node.loaded)) {
+    emit('expand', props.node)
+  }
 }
 
 const handleClick = () => {
+  if (props.node.disabled) return
   emit('select', props.node)
   if (hasChildren()) {
     toggle()
@@ -42,6 +49,7 @@ const handleClick = () => {
 const onChildSelect = (n) => emit('select', n)
 const onChildExpand = (n) => emit('expand', n)
 const handleContextMenu = (event) => {
+  if (props.node.disabled) return
   emit('node-contextmenu', props.node, event)
 }
 const onChildContextMenu = (node, event) => emit('node-contextmenu', node, event)
@@ -51,7 +59,8 @@ const onChildContextMenu = (node, event) => emit('node-contextmenu', node, event
   <div class="tree-node">
     <div
       class="node-label"
-      :class="{ active: node.id === activeId }"
+      :class="{ active: node.id === activeId, disabled: node.disabled }"
+      :aria-disabled="Boolean(node.disabled)"
       @click="handleClick"
       @contextmenu.prevent.stop="handleContextMenu"
     >
@@ -105,6 +114,13 @@ const onChildContextMenu = (node, event) => emit('node-contextmenu', node, event
   &.active {
     background-color: #e3effd;
     color: #4084d9;
+  }
+
+  &.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    text-decoration: line-through;
+    background: transparent;
   }
 
   .caret {

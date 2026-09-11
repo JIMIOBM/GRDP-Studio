@@ -34,6 +34,36 @@ public class WaterPvtService {
     private static final int MAX_POINT_COUNT = 500;
     private static final double ZERO_PRESSURE_CALCULATION_EPSILON_MPA = 1e-6;
 
+    public record FlowWater(double density, Double viscosity) {}
+    /** Request-scoped session: lazy tools, exact-state memoization, serialized calc/read pairs. */
+    public java.util.function.BiFunction<Double, Double, FlowWater> flowSession(
+            WaterPvtCurveRequest base, boolean needViscosity, String token, String cookie, String processEnv) {
+        validateRequest(base);
+        var headers = forwardedHeaders(token, cookie, processEnv);
+        var cache = new java.util.HashMap<String, FlowWater>();
+        long[] ids = {0, 0};
+        return (pressure, temperature) -> {
+            synchronized (cache) {
+                String key = pressure + ":" + temperature;
+                if (cache.containsKey(key)) return cache.get(key);
+                if (ids[0] == 0) ids[0] = createToolbox(DENSITY_ALGORITHM, base.projectId(), headers);
+                var input = buildInput(base, pressure);
+                input.put("temperature", temperature);
+                double density = extractCurveValue(calculateAndGetResult(ids[0], input, headers), List.of("waterDensity", "density"), "地层水密度");
+                Double viscosity = null;
+                if (needViscosity) {
+                    if (ids[1] == 0) ids[1] = createToolbox(VISCOSITY_ALGORITHM, base.projectId(), headers);
+                    viscosity = extractCurveValue(calculateAndGetResult(ids[1], input, headers), List.of("waterViscosity", "viscosity"), "地层水粘度");
+                }
+                if (!Double.isFinite(density) || density <= 0 || (viscosity != null && (!Double.isFinite(viscosity) || viscosity <= 0)))
+                    throw new BusinessException(502, "地层水物性无效");
+                var result = new FlowWater(density, viscosity);
+                cache.put(key, result);
+                return result;
+            }
+        };
+    }
+
     private final OriginalPlatformClient originalPlatformClient;
     private final ObjectMapper objectMapper;
 

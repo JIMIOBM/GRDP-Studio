@@ -25,7 +25,7 @@ public class ProjectServiceImpl
     public IPage<ProjectResponse> pageProjects(long page, long size, String keyword) {
         LambdaQueryWrapper<ProjectEntity> query = new LambdaQueryWrapper<ProjectEntity>()
                 .like(StringUtils.hasText(keyword), ProjectEntity::getName, keyword)
-                .orderByDesc(ProjectEntity::getUpdatedAt);
+                .orderByDesc(ProjectEntity::getCreatedAt);
 
         return page(new Page<ProjectEntity>(page, size), query).convert(ProjectResponse::from);
     }

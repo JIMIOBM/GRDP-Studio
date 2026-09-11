@@ -15,8 +15,6 @@ const form = ref({
   password: ''
 })
 
-console.log("test")
-
 const rules = {
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
   password: [{ required: true, message: '请输入密码', trigger: 'blur' }]
@@ -55,7 +53,7 @@ const onLogin = async () => {
     try {
       // The business backend does not own authentication. Authenticate once
       // against the original platform and use that identity locally as well.
-      // await loginDockerPlatform()
+      await loginDockerPlatform()
       const account = {
         id: form.value.username,
         username: form.value.username,
