@@ -514,7 +514,9 @@ export const calculateExponentialCoefficientCurve = ({
     throw new Error('计算IPR曲线的最大地层压力必须大于大气压')
   }
   if (!Number.isFinite(c) || c <= 0) throw new Error(`${coefficientLabel}必须大于 0`)
-  if (!Number.isFinite(n) || n <= 0) throw new Error(`${exponentLabel}必须大于 0`)
+  if (!Number.isFinite(n) || n < 0.5 || n > 1) {
+    throw new Error(`${exponentLabel}必须在 0.5～1 之间`)
+  }
 
   const method = normalizeCoefficientPressureMethod(calculationMethod)
   const pvtCurve = normalizeCoefficientPvtCurve(pvtResultRows)
@@ -548,4 +550,29 @@ export const calculateExponentialCoefficientCurve = ({
     limitRate: points.at(-1).flowRate,
     points
   }
+}
+
+export const calculateExponentialCoefficientIprFamily = ({
+  reservoirPressure,
+  levels = 10,
+  ...curveOptions
+}) => {
+  const maximumPressure = Number(reservoirPressure)
+  const levelCount = Math.max(1, Math.floor(Number(levels)) || 10)
+  if (!Number.isFinite(maximumPressure) || maximumPressure <= ATMOSPHERIC_PRESSURE_MPA) {
+    throw new Error('计算IPR曲线的最大地层压力必须大于大气压')
+  }
+
+  return Array.from({ length: levelCount }, (_, index) => ({
+    level: index + 1,
+    reservoirPressure: maximumPressure * (levelCount - index) / levelCount
+  }))
+    .filter(item => item.reservoirPressure > ATMOSPHERIC_PRESSURE_MPA)
+    .map(item => ({
+      ...item,
+      curve: calculateExponentialCoefficientCurve({
+        ...curveOptions,
+        reservoirPressure: item.reservoirPressure
+      })
+    }))
 }
