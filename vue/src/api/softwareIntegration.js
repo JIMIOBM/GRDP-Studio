@@ -48,8 +48,8 @@ export const softwareIntegrationApi = {
     const data = new FormData()
     data.append('file', file)
     return request.post(`/software-integration/projects/${projectId}/models`, data, {
-      timeout: 10 * 60 * 1000,
-      headers: { 'Content-Type': 'multipart/form-data' }
+      // Let the browser attach the multipart boundary automatically.
+      timeout: 10 * 60 * 1000
     })
   }
 }

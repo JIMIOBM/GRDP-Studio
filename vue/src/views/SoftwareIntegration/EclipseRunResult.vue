@@ -34,12 +34,35 @@ const series = computed(() => result.value?.summary?.series || [])
 const seriesKey = (item, index) => `${item.keyword}:${item.objectName || ''}:${index}`
 const selectedSeries = computed(() => series.value.find((item, index) => seriesKey(item, index) === selectedSeriesKey.value) || null)
 const hasSummary = computed(() => result.value?.summary !== null && Array.isArray(result.value?.summary?.series))
-const cleanupEntries = computed(() => Object.entries(props.run?.cleanup || {}).map(([key, value]) => ({ key, value: formatValue(value) })))
-const error = computed(() => props.run?.error || null)
+const safeCode = value => typeof value === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(value) ? value : null
+const cleanupFields = new Map([
+  ['processTreeExitConfirmed', '进程树已退出'],
+  ['inputDeleted', '输入副本已删除'],
+  ['workDirectoryDeleted', '工作目录已删除'],
+  ['killUsed', '已执行终止清理']
+])
+const cleanupEntries = computed(() => {
+  const cleanup = props.run?.cleanup
+  if (!cleanup || typeof cleanup !== 'object' || Array.isArray(cleanup)) return []
+  return [...cleanupFields].flatMap(([key, label]) => typeof cleanup[key] === 'boolean'
+    ? [{ key: label, value: cleanup[key] ? '是' : '否' }]
+    : [])
+})
+const error = computed(() => {
+  const value = props.run?.error
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  return {
+    category: safeCode(value.category),
+    code: safeCode(value.code),
+    retryable: value.retryable === true
+  }
+})
+const failedRunGuidance = computed(() => error.value?.retryable
+  ? '请确认运行环境后，从运行页面重新提交该版本。'
+  : '请检查模型版本的验证状态或选择其他已验证版本。')
 const outputFiles = computed(() => result.value?.outputFiles || [])
 const artifacts = computed(() => props.run?.artifacts || [])
 const seriesLabel = item => item.objectName ? `${item.keyword} · ${item.objectName}` : item.keyword
-const formatValue = value => value === null || value === undefined ? '-' : (typeof value === 'object' ? JSON.stringify(value) : String(value))
 const formatSize = value => Number.isFinite(Number(value)) ? `${Number(value).toLocaleString()} B` : '-'
 const resizeChart = () => chart?.resize()
 
@@ -87,6 +110,12 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="eclipse-result">
+    <el-result v-if="!result" icon="info" title="尚无已验证真实计算结果" :sub-title="error ? failedRunGuidance : '尚未选择成功运行；仅在真实运行通过结果契约后展示 ECLEND、Summary 和 Artifact。'">
+      <template v-if="error" #extra>
+        <el-tag type="danger">{{ error.category || 'EXECUTION' }} / {{ error.code || 'RUN_NOT_ACCEPTED' }}</el-tag>
+      </template>
+    </el-result>
+    <template v-else>
     <section class="result-panel">
       <div class="panel-heading"><div><span class="kicker">ECLIPSE 100</span><h2>ECLEND 计数</h2></div><el-tag :type="run?.status === 'SUCCEEDED' ? 'success' : 'info'">{{ run?.status || '-' }}</el-tag></div>
       <div v-if="counts" class="count-strip"><div v-for="item in countItems" :key="item.key"><span>{{ item.label }}</span><strong :class="{ failure: ['problems', 'errors', 'bugs'].includes(item.key) && item.value > 0 }">{{ item.value }}</strong></div></div>
@@ -95,7 +124,7 @@ onBeforeUnmount(() => {
 
     <section v-if="error || cleanupEntries.length" class="result-panel state-panel">
       <div class="panel-heading"><div><h2>错误与清理状态</h2></div></div>
-      <dl v-if="error" class="error-grid"><div><dt>类别</dt><dd>{{ error.category || '-' }}</dd></div><div><dt>代码</dt><dd>{{ error.code || '-' }}</dd></div><div><dt>消息</dt><dd>{{ error.message || error.msg || '-' }}</dd></div><div><dt>可重试</dt><dd>{{ error.retryable ? '是' : '否' }}</dd></div></dl>
+      <dl v-if="error" class="error-grid"><div><dt>类别</dt><dd>{{ error.category || '-' }}</dd></div><div><dt>代码</dt><dd>{{ error.code || '-' }}</dd></div><div><dt>消息</dt><dd>运行失败详情已隐藏。</dd></div><div><dt>可重试</dt><dd>{{ error.retryable ? '是' : '否' }}</dd></div></dl>
       <el-table v-if="cleanupEntries.length" :data="cleanupEntries" border size="small"><el-table-column prop="key" label="清理项" min-width="200" /><el-table-column prop="value" label="状态" min-width="280" show-overflow-tooltip /></el-table>
     </section>
 
@@ -118,6 +147,7 @@ onBeforeUnmount(() => {
       <el-table v-if="artifacts.length" :data="artifacts" border size="small" max-height="320"><el-table-column prop="name" label="文件名" min-width="210" show-overflow-tooltip /><el-table-column prop="type" label="类型" min-width="120" /><el-table-column label="大小" width="120"><template #default="{ row }">{{ formatSize(row.sizeBytes) }}</template></el-table-column><el-table-column prop="sha256" label="SHA-256" min-width="280" show-overflow-tooltip /><el-table-column prop="expiresAt" label="到期时间" min-width="170" /></el-table>
       <el-empty v-else description="当前运行没有已发布的 Artifact" :image-size="56" />
     </section>
+    </template>
   </section>
 </template>
 

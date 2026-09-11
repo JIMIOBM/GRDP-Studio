@@ -19,6 +19,7 @@ import com.grdp.studio.softwareintegration.mapper.SoftwareIntegrationModelVersio
 import com.grdp.studio.softwareintegration.mapper.SoftwareIntegrationProjectMapper;
 import com.grdp.studio.softwareintegration.service.SoftwareIntegrationRunService;
 import com.grdp.studio.softwareintegration.service.SoftwareIntegrationCapabilityService;
+import com.grdp.studio.softwareintegration.support.EclipseDataInspectionValidator;
 import com.grdp.studio.softwareintegration.support.SoftwareIntegrationDiagnosticSanitizer;
 import com.grdp.studio.softwareintegration.support.SoftwareIntegrationProperties;
 import com.grdp.studio.softwareintegration.support.SoftwareIntegrationRunExceptionHandler.RunException;
@@ -101,6 +102,9 @@ public class SoftwareIntegrationRunServiceImpl implements SoftwareIntegrationRun
             }
             if (!"eclipse".equals(runType) || !request.isStudyProvided() || request.getStudy() != null) {
                 throw new RunException(HttpStatus.BAD_REQUEST, "ECLIPSE 运行必须使用 runType=eclipse 且 study=null");
+            }
+            if (EclipseDataInspectionValidator.parsePersisted(version.getInspectionJson()) == null) {
+                throw new RunException(HttpStatus.CONFLICT, "ECLIPSE 模型版本缺少有效检查信息，请重新验证");
             }
         } else {
             if (!request.isStudyProvided() || request.getStudy() == null || request.getStudy().isBlank()) {

@@ -58,6 +58,8 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -214,6 +216,42 @@ class SoftwareIntegrationRunFlowTests {
         assertThatThrownBy(() -> runService.create(eclipse.version().getId(), request(null, "eclipse")))
                 .isInstanceOf(RunException.class)
                 .satisfies(error -> assertThat(((RunException) error).status()).isEqualTo(HttpStatus.CONFLICT));
+    }
+
+    @Test
+    void eclipseRunCreationRequiresValidPersistedInspectionWithoutDisclosingItsContents() throws Exception {
+        Seed eclipse = seed("READY", "models/eclipse/inspection/CASE.DATA", "ECLIPSE_100");
+        eclipse.version().setInspectionJson(null);
+        jdbcTemplate.update("UPDATE software_integration_model_version SET inspection_json = NULL WHERE id = ?",
+                eclipse.version().getId());
+
+        assertThatThrownBy(() -> runService.create(eclipse.version().getId(), request(null, "eclipse")))
+                .isInstanceOf(RunException.class)
+                .satisfies(error -> {
+                    assertThat(((RunException) error).status()).isEqualTo(HttpStatus.CONFLICT);
+                    assertThat(error.getMessage()).isEqualTo("ECLIPSE 模型版本缺少有效检查信息，请重新验证");
+                });
+        assertThat(runStore.listByVersion(eclipse.version().getId(), 10)).isEmpty();
+
+        String sensitiveMalformedInspection = """
+                {"schemaVersion":"eclipse-data-inspection/1","caseName":"C:\\\\private\\\\CASE.DATA",
+                 "sections":[],"unitSystem":null,"phases":[],"dimensions":null,"deck":"private deck content"}
+                """;
+        eclipse.version().setInspectionJson(sensitiveMalformedInspection);
+        versionMapper.updateById(eclipse.version());
+        String response = mockMvc.perform(post("/software-integration/model-versions/{id}/runs", eclipse.version().getId())
+                        .contentType("application/json")
+                        .content("{\"study\":null,\"runType\":\"eclipse\",\"parameters\":null}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(409))
+                .andExpect(jsonPath("$.msg").value("ECLIPSE 模型版本缺少有效检查信息，请重新验证"))
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        assertThat(response).doesNotContain("C:\\\\private", "private deck content");
+        assertThat(runStore.listByVersion(eclipse.version().getId(), 10)).isEmpty();
+
+        eclipse.version().setInspectionJson(validEclipseInspection());
+        versionMapper.updateById(eclipse.version());
+        assertThat(runService.create(eclipse.version().getId(), request(null, "eclipse")).runType()).isEqualTo("eclipse");
     }
 
     @Test
@@ -454,6 +492,49 @@ class SoftwareIntegrationRunFlowTests {
             assertThat(event.getStatus()).isEqualTo("RUNNING_NETWORK");
             assertThat(event.getMessage()).isEqualTo("Worker 正在执行管网模拟");
         });
+    }
+
+    @Test
+    void rejectedNetworkResultsPersistAllowlistedSafeReasonClasses() throws Exception {
+        ObjectNode schema = (ObjectNode) networkResult();
+        schema.put("schemaVersion", "pipesim-network-result/2");
+        assertNetworkContractFailure("schema", schema);
+
+        ObjectNode topology = (ObjectNode) networkResult();
+        ((ArrayNode) topology.path("topology").path("nodes")).removeAll();
+        assertNetworkContractFailure("topology", topology);
+
+        ObjectNode profile = (ObjectNode) networkResult();
+        ((ArrayNode) profile.path("profiles")).removeAll();
+        assertNetworkContractFailure("profile", profile);
+
+        ObjectNode quality = (ObjectNode) networkResult();
+        ((ArrayNode) quality.path("quality")).remove(0);
+        assertNetworkContractFailure("quality", quality);
+
+        ObjectNode study = (ObjectNode) networkResult();
+        study.put("study", "C:\\private\\model.pips license=secret");
+        assertNetworkContractFailure("study", study);
+
+        ObjectNode numeric = (ObjectNode) networkResult();
+        ((ObjectNode) numeric.path("system").get(0).path("values").get(0)).put("value", "100");
+        assertNetworkContractFailure("numeric", numeric);
+    }
+
+    @Test
+    void rejectedWellResultRetainsExistingGenericContractFailure() throws Exception {
+        Seed seed = seed("READY", "models/well/invalid-contract.pips");
+        long runId = runService.create(seed.version().getId(), request("Study 1", "nodal")).id();
+        SoftwareIntegrationRunDispatcher dispatcher = dispatcher();
+        dispatcher.dispatch();
+        fakeWorker.snapshot = new WorkerRunSnapshot(runId, "SUCCEEDED", 1, "worker-1", "generation-1",
+                List.of(), partialResult(), null, List.of(), null);
+
+        dispatcher.poll();
+
+        assertThat(runStore.find(runId).getStatus()).isEqualTo("FAILED");
+        assertThat(runService.get(runId).error().path("code").asText()).isEqualTo("RESULT_CONTRACT_INVALID");
+        assertThat(runService.get(runId).error().has("reasonClass")).isFalse();
     }
 
     @Test
@@ -1121,6 +1202,7 @@ class SoftwareIntegrationRunFlowTests {
         version.setModelKind(eclipse ? "eclipse_100"
                 : ("PIPESIM_NETWORK".equals(simulatorType) ? "network" : "black_oil_liquid"));
         version.setStudiesJson(eclipse ? null : "Study 1\nStudy 2\nNetwork Study");
+        version.setInspectionJson(eclipse ? validEclipseInspection() : null);
         version.setCreatedAt(now);
         version.setUpdatedAt(now);
         versionMapper.insert(version);
@@ -1140,6 +1222,13 @@ class SoftwareIntegrationRunFlowTests {
         return request;
     }
 
+    private static String validEclipseInspection() {
+        return """
+                {"schemaVersion":"eclipse-data-inspection/1","caseName":"CASE.DATA","sections":[],
+                 "unitSystem":null,"phases":[],"dimensions":null}
+                """;
+    }
+
     private JsonNode partialResult() {
         return objectMapper.readTree("""
                 {"schemaVersion":"pipesim-well-result/1","model_kind":"black_oil_liquid","runTask":"combined","resultContract":"VALID_PARTIAL",
@@ -1147,6 +1236,27 @@ class SoftwareIntegrationRunFlowTests {
                           "depth":{"displayUnit":null,"semantics":"unspecified"},"temperature":{"displayUnit":null,"semantics":"unspecified"}},
                  "ipr":[{"flow":1.0,"pressure":2.0}],"vlp":[{"flow":1.0,"pressure":2.0}],"profile":[]}
                 """);
+    }
+
+    private void assertNetworkContractFailure(String reasonClass, JsonNode result) throws Exception {
+        Seed seed = seed("READY", "models/network/invalid-" + UUID.randomUUID() + ".pips", "PIPESIM_NETWORK");
+        long runId = runService.create(seed.version().getId(), request("Network Study", "network")).id();
+        SoftwareIntegrationRunDispatcher dispatcher = dispatcher();
+        dispatcher.dispatch();
+        fakeWorker.snapshot = new WorkerRunSnapshot(runId, "SUCCEEDED", 1, "worker-1", "generation-1",
+                List.of(), result, null, List.of(), null);
+
+        dispatcher.poll();
+
+        assertThat(runStore.find(runId).getStatus()).isEqualTo("FAILED");
+        assertThat(runStore.find(runId).getResultJson()).isNull();
+        JsonNode error = runService.get(runId).error();
+        assertThat(error.path("category").asText()).isEqualTo("VALIDATION");
+        assertThat(error.path("code").asText()).isEqualTo("INVALID_NETWORK_RESULT_CONTRACT");
+        assertThat(error.path("message").asText()).isEqualTo("Simulator returned data but it was not accepted for display.");
+        assertThat(error.path("reasonClass").asText()).isEqualTo(reasonClass);
+        assertThat(error.path("retryable").asBoolean()).isFalse();
+        assertThat(error.toString()).doesNotContain("C:\\private", "license=secret");
     }
 
     private JsonNode networkResult() {

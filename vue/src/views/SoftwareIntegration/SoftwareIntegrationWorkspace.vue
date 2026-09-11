@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
+import { useRoute } from 'vue-router'
 import { Document, DocumentAdd, Folder, UploadFilled } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useSoftwareIntegrationStore } from '@/stores/softwareIntegration'
@@ -8,6 +9,7 @@ import EclipseDataInspectionOverview from './EclipseDataInspectionOverview.vue'
 import PipesimModelRunPage from './PipesimModelRunPage.vue'
 
 const store = useSoftwareIntegrationStore()
+const route = useRoute()
 const {
   projects,
   projectDetails,
@@ -15,6 +17,7 @@ const {
   activeProjectDetail,
   activeProjectId,
   activeModel,
+  activeVersion,
   loadingProjects
 } = storeToRefs(store)
 const creating = ref(false)
@@ -28,7 +31,73 @@ const treeCollapsed = ref(false)
 const activeTreeId = ref('')
 const selectedModelId = ref('')
 const selectedTreeProjectId = ref(null)
+const pendingExternalImport = ref(null)
 let workspaceMounted = false
+const safeRequestMessage = fallback => fallback
+
+const importIntents = {
+  'import-pipesim-well': {
+    action: '导入 PIPESIM 井筒模型',
+    guidance: '选择一个 .pips 文件或 PIPESIM ZIP 模型包。模型类型由 Worker 验证。',
+    accept: '.pips,.PIPS,.zip,.ZIP'
+  },
+  'import-pipesim-network': {
+    action: '导入 PIPESIM 管网模型',
+    guidance: '选择一个 .pips 文件或 PIPESIM ZIP 模型包。模型类型由 Worker 验证。',
+    accept: '.pips,.PIPS,.zip,.ZIP'
+  },
+  'import-eclipse-100': {
+    action: '导入 ECLIPSE 100 DATA 文件',
+    guidance: '仅选择一个 .DATA 文件。ECLIPSE MVP 不支持 INCLUDE 指令或 ZIP 依赖包，Worker 将验证文件。',
+    accept: '.data,.DATA'
+  }
+}
+const importIntent = computed(() => importIntents[route.query.intent] || null)
+const importActionLabel = computed(() => importIntent.value?.action || '导入模型')
+const importGuidance = computed(() => importIntent.value?.guidance || '支持 PIPESIM .pips、ZIP 模型包和 ECLIPSE 单 .DATA；ECLIPSE 不支持 INCLUDE 或 ZIP 依赖包。')
+const fileAccept = computed(() => importIntent.value?.accept || '.pips,.PIPS,.data,.DATA,.zip,.ZIP')
+
+const eclipseInspectionSchemas = new Set(['eclipse-data-inspection/1', 'eclipse-data-inspection/2'])
+const eclipseSectionOrder = ['RUNSPEC', 'GRID', 'EDIT', 'PROPS', 'REGIONS', 'SOLUTION', 'SUMMARY', 'SCHEDULE']
+const eclipsePhaseOrder = ['OIL', 'WATER', 'GAS']
+const eclipseUnitSystems = new Set(['METRIC', 'FIELD', 'LAB', 'PVT-M'])
+const hasOrderedValues = (value, allowed) => Array.isArray(value) && value.every((item, index) =>
+  typeof item === 'string' && allowed.includes(item) && (index === 0 || allowed.indexOf(value[index - 1]) < allowed.indexOf(item)))
+const isSafeEclipseInspection = value => {
+  if (!value || typeof value !== 'object' || !eclipseInspectionSchemas.has(value.schemaVersion)) return false
+  const expectedFields = value.schemaVersion === 'eclipse-data-inspection/2'
+    ? ['schemaVersion', 'caseName', 'sections', 'unitSystem', 'phases', 'dimensions', 'wellNames', 'scheduleTimeline']
+    : ['schemaVersion', 'caseName', 'sections', 'unitSystem', 'phases', 'dimensions']
+  if (Object.keys(value).length !== expectedFields.length || !expectedFields.every(key => Object.hasOwn(value, key)) ||
+    typeof value.caseName !== 'string' || !value.caseName || value.caseName.length > 255 || /[\\/]/.test(value.caseName) ||
+    !hasOrderedValues(value.sections, eclipseSectionOrder) || !hasOrderedValues(value.phases, eclipsePhaseOrder) ||
+    !(value.unitSystem === null || eclipseUnitSystems.has(value.unitSystem))) return false
+  if (value.dimensions !== null && (!value.dimensions || typeof value.dimensions !== 'object' || Object.keys(value.dimensions).length !== 3 ||
+    !['nx', 'ny', 'nz'].every(key => Number.isInteger(value.dimensions[key]) && value.dimensions[key] > 0 && value.dimensions[key] <= 1000000))) return false
+  if (value.schemaVersion === 'eclipse-data-inspection/1') return true
+  if (!Array.isArray(value.wellNames) || value.wellNames.length > 1000 || !Array.isArray(value.scheduleTimeline) || value.scheduleTimeline.length > 1000 ||
+    !value.wellNames.every(name => typeof name === 'string' && name.length > 0 && name.length <= 1024 && !/[\\/:]/.test(name) && !name.includes('..') && !/[\u0000-\u001f\u007f]/.test(name))) return false
+  let dateCount = 0
+  let tstepCount = 0
+  return value.scheduleTimeline.every(event => {
+    if (!event || typeof event !== 'object') return false
+    if (event.kind === 'DATES' && Array.isArray(event.records)) {
+      if (Object.keys(event).length !== 2 || (dateCount += event.records.length) > 4000) return false
+      return event.records.every(record => record && typeof record === 'object' && Object.keys(record).length === 4 &&
+        typeof record.day === 'string' && /^(?:[1-9]|[12][0-9]|3[01])$/.test(record.day) &&
+        typeof record.month === 'string' && /^(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)$/.test(record.month) &&
+        typeof record.year === 'string' && /^\d{4}$/.test(record.year) &&
+        (record.time == null || (typeof record.time === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/.test(record.time))))
+    }
+    if (event.kind === 'TSTEP' && Array.isArray(event.steps)) {
+      if (Object.keys(event).length !== 2 || (tstepCount += event.steps.length) > 8000) return false
+      return event.steps.every(step => typeof step === 'string' && /^\+?\d+(?:\.\d+)?(?:[Ee][+-]?\d+)?$/.test(step) && Number.isFinite(Number(step)) && Number(step) >= 0)
+    }
+    return false
+  })
+}
+const eclipseRunAvailable = computed(() => activeVersion.value?.status === 'READY' && activeVersion.value?.modelKind === 'eclipse_100' &&
+  isSafeEclipseInspection(activeVersion.value?.inspection))
 
 const activeModels = computed(() => activeProjectDetail.value?.models || [])
 const wellModelKinds = new Set(['black_oil_liquid', 'basic_gas', 'legacy_well'])
@@ -93,7 +162,7 @@ const loadProjects = async () => {
       await store.loadRunHistory(store.activeVersionId)
     }
   } catch (error) {
-    ElMessage.error(error?.msg || error?.message || '软件项目加载失败')
+    ElMessage.error(safeRequestMessage('软件项目加载失败，请稍后重试'))
   }
 }
 
@@ -102,7 +171,9 @@ const selectResource = async (node) => {
   if (node.type === 'project') {
     selectedModelId.value = ''
     selectedTreeProjectId.value = node.projectId
-    return store.selectProject(node.projectId)
+    const detail = await store.selectProject(node.projectId)
+    await flushPendingExternalImport()
+    return detail
   }
   if (node.type === 'model') {
     selectedTreeProjectId.value = node.projectId
@@ -118,7 +189,7 @@ const activateResource = async node => {
   try {
     await store.activateModel(node.projectId, node.modelId)
   } catch (error) {
-    ElMessage.error(error?.msg || error?.message || '模型页面加载失败')
+    ElMessage.error(safeRequestMessage('模型页面加载失败，请稍后重试'))
   }
 }
 
@@ -133,9 +204,10 @@ const createProject = async () => {
       activeTreeId.value = `project-${project.id}`
       selectedTreeProjectId.value = project.id
     }
+    await flushPendingExternalImport()
     ElMessage.success('软件项目已创建')
   } catch (error) {
-    ElMessage.error(error?.msg || error?.message || '软件项目创建失败')
+    ElMessage.error(safeRequestMessage('软件项目创建失败，请稍后重试'))
   } finally { creating.value = false }
 }
 
@@ -149,7 +221,7 @@ const removeProject = async () => {
     selectedModelId.value = ''
     ElMessage.success('项目已移入回收站')
   } catch (error) {
-    ElMessage.error(error?.msg || error?.message || '软件项目删除失败')
+    ElMessage.error(safeRequestMessage('软件项目删除失败，请稍后重试'))
   }
 }
 
@@ -169,22 +241,32 @@ const openImportModel = async () => {
     }
     chooseModel()
   } catch (error) {
-    ElMessage.error(error?.msg || error?.message || '软件项目加载失败')
+    ElMessage.error(safeRequestMessage('软件项目加载失败，请稍后重试'))
   }
 }
 const revalidateModel = async (versionId) => {
   try {
     await store.revalidateModel(activeProject.value.id, versionId)
   } catch (error) {
-    ElMessage.error(error?.msg || error?.message || '重新验证请求失败')
+    ElMessage.error(safeRequestMessage('重新验证请求失败，请稍后重试'))
   }
 }
-const uploadModel = async (event) => {
-  const [file] = event.target.files
-  event.target.value = ''
-  if (!file || !activeProject.value) return
-  if (!/\.(pips|data|zip)$/i.test(file.name)) return ElMessage.error('仅支持 .pips、.DATA 或 ZIP 模型包')
-  if (file.size > 500 * 1024 * 1024) return ElMessage.error('模型文件不能超过500MB')
+const uploadFile = async (file, intent = route.query.intent) => {
+  if (!file) return false
+  const accepted = intent === 'import-eclipse-100' ? /\.data$/i : /\.(pips|zip)$/i
+  const acceptedLabel = intent === 'import-eclipse-100' ? '.DATA' : '.pips 或 ZIP'
+  if (!accepted.test(file.name)) {
+    ElMessage.error(`当前入口仅支持 ${acceptedLabel} 文件`)
+    return false
+  }
+  if (file.size > 500 * 1024 * 1024) {
+    ElMessage.error('模型文件不能超过500MB')
+    return false
+  }
+  if (!activeProject.value) {
+    ElMessage.warning('请先创建或选择软件项目，再导入模型')
+    return false
+  }
   uploading.value = true
   const projectId = activeProject.value.id
   try {
@@ -192,8 +274,37 @@ const uploadModel = async (event) => {
     if (activeProjectId.value === projectId) activeTreeId.value = `project-${detail.project.id}`
     ElMessage.success('模型已保存，等待 Worker 异步验证')
   } catch (error) {
-    ElMessage.error(error?.msg || error?.message || '模型上传失败')
-  } finally { uploading.value = false }
+    ElMessage.error(safeRequestMessage('模型上传失败，请稍后重试'))
+    return false
+  } finally {
+    uploading.value = false
+  }
+  return true
+}
+const uploadModel = async (event) => {
+  const [file] = event.target.files || []
+  event.target.value = ''
+  await uploadFile(file)
+}
+const importExternalFile = async (file, intent) => {
+  for (let attempt = 0; attempt < 20 && loadingProjects.value; attempt += 1) {
+    await new Promise(resolve => window.setTimeout(resolve, 100))
+  }
+  pendingExternalImport.value = { file, intent }
+  if (!activeProject.value) {
+    ElMessage.warning('文件已暂存，请先创建或选择软件项目')
+    return true
+  }
+  const result = await uploadFile(file, intent)
+  if (pendingExternalImport.value?.file === file) pendingExternalImport.value = null
+  return result
+}
+const flushPendingExternalImport = async () => {
+  const pending = pendingExternalImport.value
+  if (!pending || !activeProject.value) return false
+  const result = await uploadFile(pending.file, pending.intent)
+  if (pendingExternalImport.value === pending) pendingExternalImport.value = null
+  return result
 }
 
 onMounted(() => {
@@ -204,7 +315,7 @@ onBeforeUnmount(() => {
   workspaceMounted = false
   store.cleanup()
 })
-defineExpose({ openCreateDialog, openImportModel })
+defineExpose({ openCreateDialog, openImportModel, importExternalFile })
 </script>
 
 <template>
@@ -238,7 +349,10 @@ defineExpose({ openCreateDialog, openImportModel })
       </template>
     </aside>
     <main class="software-content">
-    <EclipseDataInspectionOverview v-if="activeModel && store.isEclipseModel" />
+    <template v-if="activeModel && store.isEclipseModel">
+      <EclipseDataInspectionOverview />
+      <PipesimModelRunPage v-if="eclipseRunAvailable" />
+    </template>
     <PipesimModelRunPage v-else-if="activeModel" />
     <template v-else>
     <header class="workspace-header">
@@ -251,25 +365,27 @@ defineExpose({ openCreateDialog, openImportModel })
       </div>
     </header>
 
-    <div v-if="!activeProject" class="empty-state">
-      <p>未选择软件项目</p>
-      <span>请使用顶部“新建项目”创建项目，或在左侧资源树中选择已有项目。</span>
+     <div v-if="!activeProject" class="empty-state">
+       <p>未选择软件项目</p>
+       <span>{{ importIntent ? `当前导入请求将保留；请先创建项目，再${importActionLabel}。` : '请创建项目，或在左侧资源树中选择已有项目。' }}</span>
+       <el-button type="primary" @click="openCreateDialog">创建软件项目</el-button>
     </div>
 
     <template v-else>
-      <div class="workspace-toolbar">
-        <div><strong>模拟模型</strong><span>支持 PIPESIM .pips 和 ECLIPSE 单 .DATA；ECLIPSE 暂不支持 INCLUDE 或 ZIP 依赖包</span></div>
-        <input ref="fileInput" accept=".pips,.data,.DATA,.zip" class="hidden-input" type="file" @change="uploadModel" />
-        <el-button :loading="uploading" plain @click="chooseModel"><el-icon><UploadFilled /></el-icon>导入模型</el-button>
-      </div>
-      <div v-if="!activeModels.length" class="empty-models">
-        <el-icon><DocumentAdd /></el-icon>
-        <p>暂无模型资源。导入模型后 Worker 将异步读取 Study 并验证兼容性。</p>
+       <div class="workspace-toolbar">
+         <div><strong>模拟模型</strong><span>{{ importGuidance }}</span></div>
+         <input ref="fileInput" :accept="fileAccept" class="hidden-input" type="file" @change="uploadModel" />
+         <el-button :loading="uploading" plain @click="chooseModel"><el-icon><UploadFilled /></el-icon>{{ importActionLabel }}</el-button>
+       </div>
+       <div v-if="!activeModels.length" class="empty-models">
+         <el-icon><DocumentAdd /></el-icon>
+         <p>{{ importIntent ? `暂无模型资源。${importGuidance}` : '暂无模型资源。导入模型后 Worker 将异步读取 Study 并验证兼容性。' }}</p>
+         <el-button :loading="uploading" type="primary" @click="chooseModel">{{ importActionLabel }}</el-button>
       </div>
       <el-table v-else :data="activeModels" row-key="id" class="models-table" :row-class-name="({ row }) => row.id === selectedModelId ? 'selected-model-row' : ''" @row-dblclick="row => activateResource({ type: 'model', id: `model-${row.id}`, projectId: activeProject.id, modelId: row.id })">
         <el-table-column label="模型" min-width="220"><template #default="{ row }"><strong>{{ row.name }}</strong><small>{{ simulatorTypeLabel(row) }}</small></template></el-table-column>
         <el-table-column label="版本" min-width="90"><template #default="{ row }">v{{ row.versions?.[0]?.versionNo || '-' }}</template></el-table-column>
-        <el-table-column label="验证状态" min-width="150"><template #default="{ row }"><el-tooltip :content="row.versions?.[0]?.validationMessage || '等待 Worker 验证'" placement="top"><el-tag :type="row.versions?.[0]?.status === 'READY' ? 'success' : row.versions?.[0]?.status === 'VALIDATING' ? 'primary' : 'warning'">{{ row.versions?.[0]?.status || 'UPLOADED' }}</el-tag></el-tooltip></template></el-table-column>
+        <el-table-column label="验证状态" min-width="150"><template #default="{ row }"><el-tooltip :content="row.versions?.[0]?.status === 'READY' ? '模型版本已通过 Worker 验证' : '等待 Worker 验证或需要重新验证'" placement="top"><el-tag :type="row.versions?.[0]?.status === 'READY' ? 'success' : row.versions?.[0]?.status === 'VALIDATING' ? 'primary' : 'warning'">{{ row.versions?.[0]?.status || 'UPLOADED' }}</el-tag></el-tooltip></template></el-table-column>
         <el-table-column label="Study" min-width="260"><template #default="{ row }"><span v-if="row.versions?.[0]?.studies?.length">{{ row.versions[0].studies.join('、') }}</span><span v-else class="muted">等待 Worker 验证</span></template></el-table-column>
         <el-table-column label="操作" width="120">
           <template #default="{ row }">
@@ -315,7 +431,7 @@ h1 { margin: 0; font-size: 18px; font-weight: 500; }.description { margin: 6px 0
 .header-actions { display: flex; gap: 10px; }
 .workspace-toolbar { margin: 26px 0 16px; }.workspace-toolbar span { margin-left: 12px; color: #909399; font-size: 13px; }.hidden-input { display: none; }
 .empty-state, .empty-models { min-height: 380px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; color: #909399; }
-.empty-state p { margin: 0 0 8px; color: #606266; font-size: 14px; }.empty-state span { font-size: 13px; }.empty-models .el-icon { color: #4084d9; font-size: 48px; }.models-table { border-top: 3px solid #f4d000; } small { display: block; margin-top: 4px; color: #909399; }.muted { color: #909399; }
+.empty-state p { margin: 0 0 8px; color: #606266; font-size: 14px; }.empty-state span { font-size: 13px; }.empty-state .el-button { margin-top: 16px; }.empty-models .el-icon { color: #4084d9; font-size: 48px; }.empty-models .el-button { margin-top: 8px; }.models-table { border-top: 3px solid #f4d000; } small { display: block; margin-top: 4px; color: #909399; }.muted { color: #909399; }
 :deep(.selected-model-row > td.el-table__cell) { background: #eef5ff !important; }
 @media (max-width: 900px) { .software-content > .workspace-header, .software-content > .workspace-toolbar, .software-content > .empty-state, .software-content > .empty-models, .software-content > .models-table { margin-left: 20px; margin-right: 20px; }.workspace-header, .workspace-toolbar { align-items: flex-start; flex-direction: column; }.header-actions { width: 100%; } }
 </style>

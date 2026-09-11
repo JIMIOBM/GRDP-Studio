@@ -9,6 +9,10 @@ import PipesimProfileResult from './PipesimProfileResult.vue'
 import PipesimRunHistory from './PipesimRunHistory.vue'
 import EclipseRunResult from './EclipseRunResult.vue'
 
+const props = defineProps({
+  eclipsePresentation: { type: Boolean, default: true }
+})
+
 const store = useSoftwareIntegrationStore()
 const {
   activeModel,
@@ -28,7 +32,8 @@ const {
   activeElapsedMillis,
   loadingHistory,
   submittingRun,
-  cancellingRun
+  cancellingRun,
+  runPollingUnavailable
 } = storeToRefs(store)
 
 const activeTab = ref('nodal')
@@ -57,9 +62,12 @@ const wellRunTypeOptions = [
 ]
 const runTypeOptions = computed(() => {
   if (isNetworkModel.value) return [{ value: 'network', label: '管网模拟' }]
-  if (isEclipseModel.value) return [{ value: 'eclipse', label: 'ECLIPSE 计算' }]
   return isWellModel.value ? wellRunTypeOptions : []
 })
+const isEclipseRunPresentation = computed(() => props.eclipsePresentation && activeVersion.value?.modelKind === 'eclipse_100')
+const eclipsePresentationAvailable = computed(() => isEclipseRunPresentation.value &&
+  activeVersion.value?.status === 'READY' && Boolean(activeVersion.value?.inspection))
+const eclipseRunRequest = computed(() => ({ study: null, runType: 'eclipse', parameters: null }))
 const displayRun = computed(() => activeRun.value || selectedRun.value)
 const isFiniteNumber = value => typeof value === 'number' && Number.isFinite(value)
 const validWellResult = computed(() => {
@@ -121,7 +129,7 @@ const isPartial = computed(() => selectedRun.value?.status === 'PARTIAL_SUCCEEDE
   validWellResult.value?.resultContract === 'VALID_PARTIAL')
 const canRun = computed(() => activeVersion.value?.status === 'READY' &&
   (isNetworkModel.value || isWellModel.value || isEclipseModel.value) &&
-  (isEclipseModel.value || persistedStudies.value.includes(selectedStudy.value)) &&
+  (isEclipseModel.value ? eclipsePresentationAvailable.value : persistedStudies.value.includes(selectedStudy.value)) &&
   !hasActiveRun.value && !submittingRun.value)
 const modelTypeLabel = computed(() => {
   if (isNetworkModel.value) return 'PIPESIM 管网模型'
@@ -142,6 +150,31 @@ const stages = computed(() => {
 })
 const currentStageIndex = computed(() => stages.value.findIndex(stage => stage.status === displayRun.value?.status))
 const selectedError = computed(() => selectedRun.value?.error || null)
+const safeCode = value => typeof value === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(value) ? value : null
+const safeRunError = computed(() => selectedError.value ? {
+  category: safeCode(selectedError.value.category) || 'EXECUTION',
+  code: safeCode(selectedError.value.code) || 'RUN_NOT_ACCEPTED',
+  retryable: selectedError.value.retryable === true
+} : null)
+const readyVersionCount = computed(() => versions.value.filter(version => version.status === 'READY').length)
+const selectedModelGuidance = computed(() => {
+  if (activeVersion.value?.status !== 'READY') return '等待此版本完成验证，或选择一个 READY 版本后再运行。'
+  if (isEclipseModel.value) return '该版本使用固定 ECLIPSE 执行契约，不选择 Study，也不覆盖参数。'
+  if (!persistedStudies.value.length) return '此 READY 版本未返回可运行的 Study，请重新验证模型。'
+  return '选择模型已有 Study 和兼容运行类型后，可创建真实运行任务。'
+})
+const terminalRunGuidance = computed(() => {
+  if (!displayRun.value || !['FAILED', 'CANCELLED', 'TIMED_OUT', 'WORKER_LOST'].includes(displayRun.value.status)) return ''
+  if (displayRun.value.status === 'CANCELLED') return '任务已取消。确认 Study 后可重新提交运行。'
+  if (displayRun.value.status === 'TIMED_OUT') return '运行已超时。请确认模型与运行环境后重新提交。'
+  if (displayRun.value.status === 'WORKER_LOST') return 'Worker 状态已丢失。请确认 Worker 可用后重新提交。'
+  return safeRunError.value?.retryable ? '请确认运行环境后重新提交该版本。' : '请检查模型版本和 Study，必要时重新验证后再运行。'
+})
+const networkContractRejected = computed(() => isNetworkModel.value && !validNetworkResult.value &&
+  (Boolean(selectedRun.value?.result) || ['INVALID_NETWORK_RESULT_CONTRACT', 'RESULT_CONTRACT_INVALID'].includes(safeCode(selectedError.value?.code))) &&
+  ['SUCCEEDED', 'PARTIAL_SUCCEEDED', 'FAILED'].includes(selectedRun.value?.status))
+const historicalSuccessfulNetworkRun = computed(() => runHistory.value.find(run => run.id !== selectedRun.value?.id &&
+  run.runType === 'network' && run.status === 'SUCCEEDED' && run.resultContract === 'VALID_FULL'))
 
 const formatElapsed = value => {
   const total = Math.max(0, Math.floor(Number(value || 0) / 1000))
@@ -150,19 +183,46 @@ const formatElapsed = value => {
   const seconds = total % 60
   return hours ? `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}` : `${minutes}:${String(seconds).padStart(2, '0')}`
 }
-const errorMessage = error => error?.msg || error?.message || '请求失败'
+const errorMessage = () => '请求失败，请稍后重试'
+const eclipseErrorCategories = new Set(['MODEL', 'ENVIRONMENT', 'EXECUTION', 'SOLVER', 'CLEANUP'])
+const eclipseErrorCodes = new Set([
+  'ECLIPSE_UNAVAILABLE',
+  'ECLIPSE_VERSION_MISMATCH',
+  'ECLIPSE_INCLUDE_UNSUPPORTED',
+  'ECLIPSE_CLEANUP_FAILED',
+  'ECLIPSE_RUN_FAILED',
+  'ECLIPSE_SOLVER_FAILED'
+])
+const eclipseRequestErrorMessage = (error, message) => {
+  const tokens = [
+    eclipseErrorCategories.has(error?.category) ? error.category : null,
+    eclipseErrorCodes.has(error?.code) ? error.code : null
+  ].filter(Boolean)
+  return tokens.length ? `${message}（${tokens.join(' / ')}）` : message
+}
+const isEclipseVersion = versionId => {
+  const version = versions.value.find(item => item.id === versionId)
+  return version?.modelKind === 'eclipse_100' || /\.data$/i.test(version?.originalName || '')
+}
 
 const changeVersion = async versionId => {
-  try { await store.selectVersion(versionId) } catch (error) { ElMessage.error(errorMessage(error)) }
+  try { await store.selectVersion(versionId) } catch (error) {
+    ElMessage.error(isEclipseVersion(versionId)
+      ? eclipseRequestErrorMessage(error, '切换 ECLIPSE 模型版本失败，请稍后重试')
+      : errorMessage(error))
+  }
 }
 const submitRun = async () => {
+  if (!canRun.value) return
   try {
     const detail = await store.createRun()
     if (!detail) return
     activeTab.value = isEclipseModel.value ? 'eclipse' : (isNetworkModel.value ? 'network' : (runType.value === 'profile' ? 'profile' : 'nodal'))
     ElMessage.success('运行任务已创建')
   } catch (error) {
-    ElMessage.error(errorMessage(error))
+    ElMessage.error(isEclipseModel.value
+      ? eclipseRequestErrorMessage(error, '创建 ECLIPSE 运行失败，请稍后重试')
+      : errorMessage(error))
   }
 }
 const cancelRun = async () => {
@@ -181,8 +241,15 @@ const selectHistoryRun = async runId => {
     else if (detail.runType === 'eclipse') activeTab.value = 'eclipse'
     else if (detail.runType === 'profile') activeTab.value = 'profile'
   } catch (error) {
-    ElMessage.error(errorMessage(error))
+    const historyRun = runHistory.value.find(run => run.id === runId)
+    ElMessage.error(historyRun?.runType === 'eclipse'
+      ? eclipseRequestErrorMessage(error, '加载 ECLIPSE 运行记录失败，请稍后重试')
+      : errorMessage(error))
   }
+}
+const selectHistoricalSuccessfulNetworkRun = () => {
+  if (historicalSuccessfulNetworkRun.value) selectHistoryRun(historicalSuccessfulNetworkRun.value.id)
+  else activeTab.value = 'history'
 }
 
 watch(() => selectedRun.value?.id, () => {
@@ -199,6 +266,7 @@ watch([isNetworkModel, isWellModel, isEclipseModel], ([networkModel, wellModel, 
   }
   if (eclipseModel) {
     runType.value = 'eclipse'
+    selectedStudy.value = null
     activeTab.value = 'eclipse'
     return
   }
@@ -206,6 +274,17 @@ watch([isNetworkModel, isWellModel, isEclipseModel], ([networkModel, wellModel, 
   else if (!wellModel) runType.value = ''
   if (activeTab.value === 'network') activeTab.value = selectedRun.value?.runType === 'profile' ? 'profile' : 'nodal'
 }, { immediate: true })
+
+const reloadEclipseRunHistory = async () => {
+  if (!eclipsePresentationAvailable.value || !activeVersionId.value) return []
+  return store.loadRunHistory(activeVersionId.value)
+}
+
+watch([isEclipseRunPresentation, eclipsePresentationAvailable, activeVersionId], ([eclipsePresentation, available]) => {
+  if (eclipsePresentation && available) reloadEclipseRunHistory()
+}, { immediate: true })
+
+defineExpose({ eclipseRunRequest, reloadEclipseRunHistory })
 </script>
 
 <template>
@@ -224,32 +303,73 @@ watch([isNetworkModel, isWellModel, isEclipseModel], ([networkModel, wellModel, 
       </div>
     </header>
 
-    <div class="run-controls">
-      <label>
+    <section class="model-readiness" aria-label="模型就绪状态">
+      <div><span>版本</span><strong>{{ versions.length }}</strong></div>
+      <div><span>READY</span><strong>{{ readyVersionCount }}</strong></div>
+      <p>{{ selectedModelGuidance }}</p>
+    </section>
+
+      <div class="run-controls" :class="{ 'eclipse-run-controls': isEclipseRunPresentation }">
+        <label>
         <span>模型版本</span>
         <el-select :model-value="activeVersionId" :disabled="hasActiveRun" @change="changeVersion">
           <el-option v-for="version in versions" :key="version.id" :value="version.id" :label="`v${version.versionNo} · ${version.status}`" />
         </el-select>
       </label>
-      <label v-if="!isEclipseModel">
+        <label v-if="!isEclipseRunPresentation">
         <span>Study</span>
         <el-select v-model="selectedStudy" :disabled="hasActiveRun || activeVersion?.status !== 'READY'" placeholder="请选择已有 Study">
           <el-option v-for="study in persistedStudies" :key="study" :value="study" :label="study" />
         </el-select>
       </label>
-      <div class="run-type-control">
+        <div v-if="!isEclipseRunPresentation" class="run-type-control">
         <span>运行类型</span>
         <el-radio-group v-model="runType" :disabled="hasActiveRun">
           <el-radio-button v-for="option in runTypeOptions" :key="option.value" :value="option.value">{{ option.label }}</el-radio-button>
         </el-radio-group>
       </div>
-      <div class="control-actions">
-        <el-button type="primary" :loading="submittingRun" :disabled="!canRun" @click="submitRun">运行</el-button>
-        <el-button type="danger" plain :loading="cancellingRun" :disabled="!activeRun?.cancellable" @click="cancelRun">取消</el-button>
+        <div v-if="!isEclipseRunPresentation || eclipsePresentationAvailable" class="control-actions">
+          <el-button type="primary" :loading="submittingRun" :disabled="!canRun" @click="submitRun">运行</el-button>
+          <el-button type="danger" plain :loading="cancellingRun" :disabled="!activeRun?.cancellable" @click="cancelRun">取消</el-button>
+        </div>
       </div>
-    </div>
 
-    <div v-if="displayRun && hasActiveRun" class="stage-strip" aria-label="真实运行阶段">
+      <el-alert
+        v-if="isEclipseRunPresentation && !eclipsePresentationAvailable"
+        class="eclipse-unavailable"
+        title="ECLIPSE 运行不可用"
+        :description="activeVersion?.status !== 'READY' ? '请等待模型版本验证为 READY。' : '当前 READY 版本缺少 DATA 检查信息，不能展示或创建 ECLIPSE 运行。'"
+        type="warning"
+        :closable="false"
+        show-icon
+      />
+      <div v-else-if="isEclipseRunPresentation" class="eclipse-request-summary">
+        <span>运行类型：ECLIPSE</span><span>Study：不适用</span><span>参数：不覆盖</span>
+      </div>
+
+    <el-alert
+      v-if="runPollingUnavailable"
+      class="run-state-alert"
+      title="运行状态暂时无法刷新"
+      description="已停止自动刷新，避免持续加载。请稍后在运行记录中重新选择该运行查看持久状态。"
+      type="warning"
+      :closable="false"
+      show-icon
+    />
+    <section v-if="displayRun" class="run-provenance" aria-label="真实运行来源">
+      <span>模型：{{ displayRun.modelName || activeModel.name }}</span><span>版本：v{{ displayRun.versionNo || activeVersion?.versionNo || '-' }}</span><span>Study：{{ displayRun.study || '不适用' }}</span><span>运行 ID：{{ displayRun.id }}</span><span>创建：{{ displayRun.createdAt || '-' }}</span><span>用时：{{ formatElapsed(displayRun.elapsedMillis) }}</span>
+    </section>
+    <el-alert
+      v-if="terminalRunGuidance"
+      class="run-state-alert"
+      :title="statusMeta[displayRun.status]?.[0] || displayRun.status"
+      :description="terminalRunGuidance"
+      type="warning"
+      :closable="false"
+      show-icon
+    />
+
+    <div v-if="(!isEclipseRunPresentation || eclipsePresentationAvailable) && displayRun && hasActiveRun" class="stage-strip" aria-label="真实运行阶段">
       <div v-for="(stage, index) in stages" :key="stage.status" class="stage" :class="{ active: currentStageIndex === index, done: currentStageIndex > index }">
         <i />
         <span>{{ stage.label }}</span>
@@ -266,16 +386,27 @@ watch([isNetworkModel, isWellModel, isEclipseModel], ([networkModel, wellModel, 
       show-icon
     />
 
-    <div v-if="selectedError && !isEclipseModel" class="structured-error">
+    <div v-if="safeRunError && !isEclipseModel" class="structured-error">
       <dl>
-        <div><dt>类别</dt><dd>{{ selectedError.category }}</dd></div>
-        <div><dt>代码</dt><dd>{{ selectedError.code }}</dd></div>
-        <div><dt>消息</dt><dd>{{ selectedError.message }}</dd></div>
-        <div><dt>可重试</dt><dd>{{ selectedError.retryable ? '是' : '否' }}</dd></div>
+        <div><dt>类别</dt><dd>{{ safeRunError.category }}</dd></div>
+        <div><dt>代码</dt><dd>{{ safeRunError.code }}</dd></div>
+        <div><dt>消息</dt><dd>运行失败详情已隐藏。</dd></div>
+        <div><dt>可重试</dt><dd>{{ safeRunError.retryable ? '是' : '否' }}</dd></div>
       </dl>
     </div>
+    <el-alert
+      v-if="networkContractRejected"
+      class="run-state-alert"
+      title="模拟器已返回数据，但结果未通过展示契约"
+      description="该数据未被当作已计算结果展示，因此不会绘制图表或结果表。请查看运行记录，或选择一条历史成功运行。"
+      type="warning"
+      :closable="false"
+      show-icon
+    >
+      <template #default><el-button link type="primary" @click="selectHistoricalSuccessfulNetworkRun">{{ historicalSuccessfulNetworkRun ? '选择历史成功运行' : '查看运行记录' }}</el-button></template>
+    </el-alert>
 
-    <el-tabs v-model="activeTab" class="result-tabs">
+    <el-tabs v-if="!isEclipseRunPresentation || eclipsePresentationAvailable" v-model="activeTab" class="result-tabs">
        <el-tab-pane v-if="isWellModel" label="节点分析" name="nodal">
         <PipesimNodalResult :result="validWellResult" />
       </el-tab-pane>
@@ -307,11 +438,14 @@ watch([isNetworkModel, isWellModel, isEclipseModel], ([networkModel, wellModel, 
 h1 { margin: 0; font-size: 19px; font-weight: 600; }
 .model-header p { margin: 5px 0 0; color: #909399; font-size: 12px; }
 .run-summary { display: flex; align-items: center; gap: 12px; color: #606266; font-size: 13px; }
+.model-readiness, .run-provenance { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 22px; margin-top: 14px; padding: 11px 14px; border: 1px solid #e4e9f0; background: #f8fafc; color: #606266; font-size: 12px; }.model-readiness div { display: flex; align-items: baseline; gap: 5px; }.model-readiness strong { color: #2b3d52; font-size: 16px; }.model-readiness p { flex: 1 1 300px; margin: 0; }.run-provenance span { overflow-wrap: anywhere; }.run-state-alert { margin-bottom: 14px; }
 .run-controls { display: grid; grid-template-columns: minmax(150px, 210px) minmax(170px, 240px) auto auto; align-items: end; gap: 14px; padding: 18px 0; }
+.run-controls.eclipse-run-controls { grid-template-columns: minmax(150px, 210px) auto; }
 .run-controls label, .run-type-control { min-width: 0; }
 .run-controls label > span, .run-type-control > span { display: block; margin-bottom: 6px; color: #606266; font-size: 12px; }
 .run-controls .el-select { width: 100%; }
 .control-actions { display: flex; gap: 8px; }
+.eclipse-unavailable { margin-bottom: 14px; }.eclipse-request-summary { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 0 0 14px; padding: 11px 14px; border: 1px solid #e4e9f0; background: #f8fafc; color: #606266; font-size: 12px; }
 .stage-strip { display: flex; align-items: center; gap: 0; min-height: 48px; margin-bottom: 14px; padding: 0 18px; border: 1px solid #e4e9f0; background: #f8fafc; }
 .stage { position: relative; min-width: 120px; display: flex; align-items: center; gap: 7px; color: #909399; font-size: 12px; }
 .stage:not(:last-of-type)::after { content: ''; width: 48px; height: 1px; margin: 0 10px; background: #d7dee8; }

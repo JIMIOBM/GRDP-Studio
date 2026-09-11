@@ -34,6 +34,7 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
   const loadingHistory = ref(false)
   const submittingRun = ref(false)
   const cancellingRun = ref(false)
+  const runPollingUnavailable = ref(false)
   const elapsedClock = ref(Date.now())
 
   let validationPollTimer
@@ -108,6 +109,7 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
   const beginNavigation = () => {
     navigationGeneration += 1
     invalidateRunRequests()
+    runPollingUnavailable.value = false
     return navigationGeneration
   }
 
@@ -255,10 +257,12 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
 
   const startRunPolling = runId => {
     stopRunPolling()
+    runPollingUnavailable.value = false
     const generation = runPollGeneration
     const expectedNavigation = navigationGeneration
     const expectedVersionId = activeVersionId.value
 
+    let consecutiveFailures = 0
     const poll = async () => {
       try {
         const detail = unwrap(await softwareIntegrationApi.getRun(runId))
@@ -276,8 +280,15 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
           }
           return
         }
+        consecutiveFailures = 0
       } catch {
         if (generation !== runPollGeneration) return
+        consecutiveFailures += 1
+        if (consecutiveFailures >= 3) {
+          runPollingUnavailable.value = true
+          stopRunPolling()
+          return
+        }
       }
       if (generation === runPollGeneration) runPollTimer = window.setTimeout(poll, 2000)
     }
@@ -474,6 +485,7 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
     loadingHistory,
     submittingRun,
     cancellingRun,
+    runPollingUnavailable,
     activeProjectDetail,
     activeProject,
     activeModel,

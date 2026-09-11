@@ -535,9 +535,16 @@ public class SoftwareIntegrationRunDispatcher {
                     result, error, sanitizeForRun(run, snapshot.cleanup()), published);
             if (!completed) artifactPublisher.discard(published);
         } catch (PipesimResultValidator.ResultValidationException
-                 | EclipseSummaryResultValidator.ResultValidationException exception) {
+                  | EclipseSummaryResultValidator.ResultValidationException exception) {
             if (published != null) artifactPublisher.discard(published);
             if (finishCancellationThatWonDuringPublication(run.getId(), snapshot)) return;
+            if (exception instanceof PipesimResultValidator.ResultValidationException pipesimException
+                    && pipesimException.networkReasonClass() != null) {
+                failWithWorkerError(run.getId(), runStore.invalidNetworkResultContract(
+                        pipesimException.networkReasonClass()), "INVALID_NETWORK_RESULT_CONTRACT",
+                        "Simulator returned data but it was not accepted for display.");
+                return;
+            }
             String schema = "eclipse".equals(run.getRunType()) ? "eclipse-summary-result/1"
                     : ("network".equals(run.getRunType()) ? "pipesim-network-result/1" : "pipesim-well-result/1");
             fail(run.getId(), "RESULT_CONTRACT_INVALID", "Worker 结果不符合 " + schema);

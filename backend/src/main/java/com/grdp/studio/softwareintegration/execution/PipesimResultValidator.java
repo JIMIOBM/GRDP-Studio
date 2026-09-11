@@ -24,14 +24,34 @@ public class PipesimResultValidator {
             PipesimWellResultValidator.ValidatedResult validated = wellValidator.validate(expectedRunTask, result);
             return new ValidatedResult(validated.terminalStatus(), validated.contract(), validated.result());
         } catch (PipesimWellResultValidator.ResultValidationException
-                 | PipesimNetworkResultValidator.ResultValidationException exception) {
-            throw new ResultValidationException(exception.getMessage(), exception);
+                  | PipesimNetworkResultValidator.ResultValidationException exception) {
+            String networkReasonClass = exception instanceof PipesimNetworkResultValidator.ResultValidationException
+                    ? networkReasonClass(exception.getMessage()) : null;
+            throw new ResultValidationException(exception.getMessage(), exception, networkReasonClass);
         }
+    }
+
+    private static String networkReasonClass(String message) {
+        if (message == null) return "schema";
+        if (message.startsWith("topology")) return "topology";
+        if (message.startsWith("profile") || message.startsWith("profiles")) return "profile";
+        if (message.startsWith("quality") || message.startsWith("result contains duplicate")) return "quality";
+        if (message.equals("Invalid study")) return "study";
+        if (message.contains("finite numbers") || message.contains("unavailable sentinel")
+                || message.contains("numeric null")) return "numeric";
+        return "schema";
     }
 
     public record ValidatedResult(SoftwareIntegrationRunStatus terminalStatus, String contract, JsonNode result) {}
 
     public static class ResultValidationException extends RuntimeException {
-        public ResultValidationException(String message, Throwable cause) { super(message, cause); }
+        private final String networkReasonClass;
+
+        public ResultValidationException(String message, Throwable cause, String networkReasonClass) {
+            super(message, cause);
+            this.networkReasonClass = networkReasonClass;
+        }
+
+        public String networkReasonClass() { return networkReasonClass; }
     }
 }

@@ -10,6 +10,7 @@ import tools.jackson.databind.node.ObjectNode;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 class PipesimNetworkResultValidatorTests {
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -108,9 +109,46 @@ class PipesimNetworkResultValidatorTests {
         assertRejected(duplicateNullPath);
     }
 
+    @Test
+    void classifiesRejectedNetworkContractsWithoutExposingValidationText() {
+        ObjectNode wrongSchema = validResult();
+        wrongSchema.put("schemaVersion", "pipesim-network-result/2");
+        assertThat(rejectionReason(wrongSchema)).isEqualTo("schema");
+
+        ObjectNode noNodes = validResult();
+        ((ArrayNode) noNodes.path("topology").path("nodes")).removeAll();
+        assertThat(rejectionReason(noNodes)).isEqualTo("topology");
+
+        ObjectNode noProfiles = validResult();
+        ((ArrayNode) noProfiles.path("profiles")).removeAll();
+        assertThat(rejectionReason(noProfiles)).isEqualTo("profile");
+
+        ObjectNode missingQuality = validResult();
+        ((ArrayNode) missingQuality.path("quality")).remove(0);
+        assertThat(rejectionReason(missingQuality)).isEqualTo("quality");
+
+        ObjectNode wrongStudy = validResult();
+        wrongStudy.put("study", "C:\\private\\model.pips");
+        assertThat(rejectionReason(wrongStudy)).isEqualTo("study");
+
+        ObjectNode textualNumericValue = validResult();
+        ((ObjectNode) textualNumericValue.path("system").get(0).path("values").get(0)).put("value", "100");
+        assertThat(rejectionReason(textualNumericValue)).isEqualTo("numeric");
+    }
+
     private void assertRejected(JsonNode result) {
         assertThatThrownBy(() -> validator.validate("network", "Network Study", result))
                 .isInstanceOf(PipesimNetworkResultValidator.ResultValidationException.class);
+    }
+
+    private String rejectionReason(JsonNode result) {
+        var resultValidator = new com.grdp.studio.softwareintegration.execution.PipesimResultValidator(
+                new com.grdp.studio.softwareintegration.execution.PipesimWellResultValidator(), validator);
+        Throwable rejection = catchThrowable(() -> resultValidator.validate("network", "Network Study", result));
+        assertThat(rejection).isInstanceOf(
+                com.grdp.studio.softwareintegration.execution.PipesimResultValidator.ResultValidationException.class);
+        return ((com.grdp.studio.softwareintegration.execution.PipesimResultValidator.ResultValidationException) rejection)
+                .networkReasonClass();
     }
 
     private ObjectNode validResult() {

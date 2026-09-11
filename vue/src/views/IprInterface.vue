@@ -10,7 +10,7 @@
  * 用户点击顶部“单井产能”板块的命令时，本页面只负责路由跳转，
  * 不再在 IprInterface.vue 内渲染单井产能的业务界面。
  */
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete } from '@element-plus/icons-vue'
@@ -55,6 +55,16 @@ const PROJECT_ID = 6
 // 4
 const GAS_RESERVOIR_ID = 4
 const SOFTWARE_INTEGRATION_WORKSPACE = 'software-integration'
+const SOFTWARE_INTEGRATION_IMPORT_INTENTS = {
+  'software-integration.model.import.pipesim-well': 'import-pipesim-well',
+  'software-integration.model.import.pipesim-network': 'import-pipesim-network',
+  'software-integration.model.import.eclipse-100': 'import-eclipse-100'
+}
+const SOFTWARE_INTEGRATION_IMPORT_ACCEPTS = {
+  'import-pipesim-well': '.pips,.PIPS,.zip,.ZIP',
+  'import-pipesim-network': '.pips,.PIPS,.zip,.ZIP',
+  'import-eclipse-100': '.data,.DATA'
+}
 const route = useRoute()
 const router = useRouter()
 const FLOW_BALANCE_NODE_TYPE = NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure
@@ -141,6 +151,8 @@ const activeNode = ref(null)  // 当前选中的完整节点对象
 const currentView = ref(null)  // currentView.value = 'water-invasion'，即确定右侧部分区域所显示的界面
 const currentViewNode = ref(null)  // 传给右侧内容组件的节点对象
 const softwareIntegrationWorkspace = ref(null)
+const softwareIntegrationImportInput = ref(null)
+let pendingSoftwareIntegrationImport = null
 const softwareIntegrationActiveNodeId = ref('')
 const isSoftwareIntegration = computed(
   () => route.query.workspace === SOFTWARE_INTEGRATION_WORKSPACE
@@ -206,6 +218,74 @@ watch(
   }
 )
 
+const handoffSoftwareIntegrationImport = async pendingImport => {
+  await nextTick()
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    if (pendingSoftwareIntegrationImport !== pendingImport) return
+    const workspace = softwareIntegrationWorkspace.value
+    if (workspace?.importExternalFile) {
+      try {
+        await workspace.importExternalFile(pendingImport.file, pendingImport.intent)
+      } catch {
+        ElMessage.error('模型导入失败，请稍后重试')
+      } finally {
+        if (pendingSoftwareIntegrationImport === pendingImport) pendingSoftwareIntegrationImport = null
+      }
+      return
+    }
+    await new Promise(resolve => window.setTimeout(resolve, 50))
+  }
+  if (pendingSoftwareIntegrationImport === pendingImport) {
+    pendingSoftwareIntegrationImport = null
+    ElMessage.error('导入工作区未能打开，请重新选择模型文件')
+  }
+}
+
+const handleSoftwareIntegrationImportFile = async event => {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file) return
+
+  const intent = event.target.dataset.intent
+  if (!SOFTWARE_INTEGRATION_IMPORT_ACCEPTS[intent]) return
+  const pendingImport = { file, intent }
+  pendingSoftwareIntegrationImport = pendingImport
+
+  try {
+    await router.push({
+      name: 'IprInterface',
+      query: {
+        ...route.query,
+        workspace: SOFTWARE_INTEGRATION_WORKSPACE,
+        intent
+      }
+    })
+    await handoffSoftwareIntegrationImport(pendingImport)
+  } catch {
+    if (pendingSoftwareIntegrationImport === pendingImport) pendingSoftwareIntegrationImport = null
+    ElMessage.error('无法打开软件集成工作区，请稍后重试')
+  }
+}
+
+const dispatchSoftwareIntegrationCommand = commandId => {
+  const intent = SOFTWARE_INTEGRATION_IMPORT_INTENTS[commandId]
+  if (!intent) return false
+
+  if (pendingSoftwareIntegrationImport) {
+    ElMessage.warning('当前模型正在导入，请等待完成后再选择文件')
+    return true
+  }
+
+  // The native picker must open in this Ribbon command's trusted click event.
+  const input = softwareIntegrationImportInput.value
+  if (!input) return true
+  input.dataset.intent = intent
+  input.accept = SOFTWARE_INTEGRATION_IMPORT_ACCEPTS[intent]
+  input.value = ''
+  input.click()
+  return true
+}
+
 const handleRibbonTabChange = async tabName => {
   activeRibbonTabName.value = tabName
   const query = { ...route.query }
@@ -214,6 +294,7 @@ const handleRibbonTabChange = async tabName => {
     query.workspace = SOFTWARE_INTEGRATION_WORKSPACE
   } else {
     delete query.workspace
+    delete query.intent
   }
 
   const currentWorkspace = route.query.workspace
@@ -3975,14 +4056,22 @@ const handleSelect = async (node) => { // 点击左侧树节点
 }
 
 const handleCommand = async ({ group, name, parent, commandId }) => { // 接收顶部菜单栏的点击事件
+  if (dispatchSoftwareIntegrationCommand(commandId)) return
+
   if (isSoftwareIntegration.value) {
     if (commandId === 'software-integration.project.create') {
       softwareIntegrationWorkspace.value?.openCreateDialog()
-    } else if (commandId === 'software-integration.model.import-pipesim') {
-      softwareIntegrationWorkspace.value?.openImportModel()
+    } else if (commandId === 'software-integration.project.save') {
+      ElMessage.info('软件集成内容已自动保存。')
+    } else if (commandId?.startsWith('software-integration.')) {
+      return
     } else {
       ElMessage.info(`${name} 功能正在开发中`)
     }
+    return
+  }
+
+  if (commandId?.startsWith('software-integration.')) {
     return
   }
 
@@ -4246,6 +4335,12 @@ onBeforeUnmount(() => {
     单井产能板块通过 handleCommand 跳转到独立页面，不在本模板内渲染。
   -->
   <div class="ipr-container">
+    <input
+      ref="softwareIntegrationImportInput"
+      class="software-integration-import-bridge"
+      type="file"
+      @change="handleSoftwareIntegrationImportFile"
+    />
     <!--    顶部菜单栏目-->
     <RibbonMenu
       :active-tab-name="activeRibbonTabName"
@@ -4345,6 +4440,10 @@ onBeforeUnmount(() => {
     </Teleport>
   </div>
 </template>
+
+<style scoped>
+.software-integration-import-bridge { display: none; }
+</style>
 
 <style lang="scss" scoped>
 $accent-yellow: #f4d000;

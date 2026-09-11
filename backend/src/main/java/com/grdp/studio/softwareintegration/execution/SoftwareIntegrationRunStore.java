@@ -25,10 +25,13 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
 import java.util.function.Consumer;
 
 @Component
 public class SoftwareIntegrationRunStore {
+    private static final Set<String> NETWORK_RESULT_REASON_CLASSES = Set.of(
+            "schema", "topology", "profile", "quality", "study", "numeric");
     private static final List<String> ACTIVE_STATUSES = List.of(
             "CLAIMED", "PREPARING", "RUNNING_NODAL", "RUNNING_PROFILE", "RUNNING_NETWORK", "RUNNING_ECLIPSE", "COLLECTING", "CANCEL_REQUESTED");
     private final SoftwareIntegrationRunMapper runMapper;
@@ -420,6 +423,19 @@ public class SoftwareIntegrationRunStore {
         node.put("message", message);
         node.put("retryable", retryable(code));
         return node;
+    }
+
+    public JsonNode invalidNetworkResultContract(String reasonClass) {
+        if (!NETWORK_RESULT_REASON_CLASSES.contains(reasonClass)) {
+            throw new IllegalArgumentException("Invalid network result reason class");
+        }
+        var error = objectMapper.createObjectNode();
+        error.put("category", "VALIDATION");
+        error.put("code", "INVALID_NETWORK_RESULT_CONTRACT");
+        error.put("message", "Simulator returned data but it was not accepted for display.");
+        error.put("reasonClass", reasonClass);
+        error.put("retryable", false);
+        return error;
     }
 
     private SoftwareIntegrationRunEntity transitionLocked(SoftwareIntegrationRunEntity current,

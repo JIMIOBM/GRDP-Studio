@@ -93,8 +93,8 @@ const defaultTabs = [
             popperClass: 'software-model-import-popover',
             dropdownItems: ['PIPESIM 井筒模型', 'PIPESIM Network 模型'],
             dropdownCommandIds: {
-              'PIPESIM 井筒模型': 'software-integration.model.import-pipesim',
-              'PIPESIM Network 模型': 'software-integration.model.import-pipesim'
+              'PIPESIM 井筒模型': 'software-integration.model.import.pipesim-well',
+              'PIPESIM Network 模型': 'software-integration.model.import.pipesim-network'
             }
           },
           { type: 'large', label: '保存', icon: '生成报告', commandId: 'software-integration.project.save' }
@@ -103,7 +103,7 @@ const defaultTabs = [
       {
         title: '数值模拟',
         columns: [
-          { type: 'large', label: 'ECLIPSE', icon: 'Eclipse' },
+          { type: 'large', label: 'ECLIPSE', icon: 'Eclipse', commandId: 'software-integration.model.import.eclipse-100' },
           { type: 'large', label: 'INTERSECT', icon: 'CMG' },
           { type: 'large', label: '扩展接口', icon: '接口配置' }
         ]
@@ -111,7 +111,7 @@ const defaultTabs = [
       {
         title: '井筒模拟',
         columns: [
-          { type: 'large', label: 'PIPESIM 井筒', icon: 'PIPESIM', commandId: 'software-integration.model.import-pipesim' },
+          { type: 'large', label: 'PIPESIM 井筒', icon: 'PIPESIM', commandId: 'software-integration.model.import.pipesim-well' },
           { type: 'large', label: 'wellcat', icon: '井身结构' },
           { type: 'large', label: '扩展接口', icon: '接口配置' }
         ]
@@ -119,7 +119,7 @@ const defaultTabs = [
       {
         title: '管网模拟',
         columns: [
-          { type: 'large', label: 'PIPESIM Network', icon: '管流计算', commandId: 'software-integration.model.import-pipesim' },
+          { type: 'large', label: 'PIPESIM Network', icon: '管流计算', commandId: 'software-integration.model.import.pipesim-network' },
           { type: 'large', label: 'wellcat', icon: '约束条件' },
           { type: 'large', label: '扩展接口', icon: '接口配置' }
         ]
