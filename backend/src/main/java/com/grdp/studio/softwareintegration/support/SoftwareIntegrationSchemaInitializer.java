@@ -36,11 +36,12 @@ public class SoftwareIntegrationSchemaInitializer implements ApplicationRunner {
                 CREATE TABLE IF NOT EXISTS software_integration_model_version (
                   id BIGINT AUTO_INCREMENT PRIMARY KEY, model_id BIGINT NOT NULL, version_no INT NOT NULL, original_name VARCHAR(255) NOT NULL,
                   storage_key VARCHAR(1024) NOT NULL, sha256 CHAR(64) NOT NULL, size_bytes BIGINT NOT NULL, status VARCHAR(50) NOT NULL,
-                  model_kind VARCHAR(50), validation_message VARCHAR(1000), studies_json TEXT, created_at DATETIME(3) NOT NULL, updated_at DATETIME(3) NOT NULL,
+                  model_kind VARCHAR(50), validation_message VARCHAR(1000), studies_json TEXT, inspection_json %s, created_at DATETIME(3) NOT NULL, updated_at DATETIME(3) NOT NULL,
                   UNIQUE KEY uk_software_integration_model_version (model_id, version_no), KEY idx_software_integration_model_version_model (model_id)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-                """);
+                """.formatted(h2InspectionType()));
         ensureModelVersionKindColumn();
+        ensureModelVersionInspectionColumn();
         backfillModelVersionKinds();
         String database = jdbcTemplate.execute((ConnectionCallback<String>)
                 connection -> connection.getMetaData().getDatabaseProductName());
@@ -112,6 +113,27 @@ public class SoftwareIntegrationSchemaInitializer implements ApplicationRunner {
                     columnType(connection, "software_integration_model_version", "model_kind") != null));
             if (!nowExists) throw exception;
         }
+    }
+
+    private void ensureModelVersionInspectionColumn() {
+        boolean exists = Boolean.TRUE.equals(jdbcTemplate.execute((ConnectionCallback<Boolean>) connection ->
+                columnType(connection, "software_integration_model_version", "inspection_json") != null));
+        if (exists) return;
+        boolean h2 = jdbcTemplate.execute((ConnectionCallback<String>) connection ->
+                connection.getMetaData().getDatabaseProductName()).toLowerCase().contains("h2");
+        try {
+            jdbcTemplate.execute("ALTER TABLE software_integration_model_version ADD COLUMN inspection_json "
+                    + (h2 ? "CLOB" : "LONGTEXT") + " NULL");
+        } catch (DataAccessException exception) {
+            boolean nowExists = Boolean.TRUE.equals(jdbcTemplate.execute((ConnectionCallback<Boolean>) connection ->
+                    columnType(connection, "software_integration_model_version", "inspection_json") != null));
+            if (!nowExists) throw exception;
+        }
+    }
+
+    private String h2InspectionType() {
+        return jdbcTemplate.execute((ConnectionCallback<String>) connection ->
+                connection.getMetaData().getDatabaseProductName()).toLowerCase().contains("h2") ? "CLOB" : "LONGTEXT";
     }
 
     private void backfillModelVersionKinds() {

@@ -4,6 +4,7 @@ import { storeToRefs } from 'pinia'
 import { Document, DocumentAdd, Folder, UploadFilled } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useSoftwareIntegrationStore } from '@/stores/softwareIntegration'
+import EclipseDataInspectionOverview from './EclipseDataInspectionOverview.vue'
 import PipesimModelRunPage from './PipesimModelRunPage.vue'
 
 const store = useSoftwareIntegrationStore()
@@ -36,7 +37,7 @@ const latestKnownModelKind = model => model?.versions?.find(version => version.s
 const modelFamily = model => {
   const kind = latestKnownModelKind(model)
   if (kind === 'network') return 'network'
-  if (kind === 'eclipse_100') return 'eclipse'
+  if (kind === 'eclipse_100' || model?.versions?.some(version => /\.data$/i.test(version.originalName || ''))) return 'eclipse'
   return wellModelKinds.has(kind) ? 'well' : 'unknown'
 }
 const simulatorTypeLabel = model => {
@@ -88,7 +89,7 @@ const loadProjects = async () => {
       activeTreeId.value = `project-${activeProjectId.value}`
       selectedTreeProjectId.value = activeProjectId.value
     }
-    if (workspaceMounted && store.activeModelId && store.activeVersionId) {
+    if (workspaceMounted && store.activeModelId && store.activeVersionId && !store.isEclipseModel) {
       await store.loadRunHistory(store.activeVersionId)
     }
   } catch (error) {
@@ -237,7 +238,8 @@ defineExpose({ openCreateDialog, openImportModel })
       </template>
     </aside>
     <main class="software-content">
-    <PipesimModelRunPage v-if="activeModel" />
+    <EclipseDataInspectionOverview v-if="activeModel && store.isEclipseModel" />
+    <PipesimModelRunPage v-else-if="activeModel" />
     <template v-else>
     <header class="workspace-header">
       <div>

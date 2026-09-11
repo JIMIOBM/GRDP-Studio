@@ -20,6 +20,7 @@ public class SoftwareIntegrationModelVersionEntity {
     private String modelKind;
     private String validationMessage;
     private String studiesJson;
+    private String inspectionJson;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     public Long getId() { return id; }
@@ -44,6 +45,8 @@ public class SoftwareIntegrationModelVersionEntity {
     public void setValidationMessage(String validationMessage) { this.validationMessage = validationMessage; }
     public String getStudiesJson() { return studiesJson; }
     public void setStudiesJson(String studiesJson) { this.studiesJson = studiesJson; }
+    public String getInspectionJson() { return inspectionJson; }
+    public void setInspectionJson(String inspectionJson) { this.inspectionJson = inspectionJson; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }

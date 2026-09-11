@@ -83,6 +83,16 @@ class SoftwareIntegrationMigrationContractTests {
     }
 
     @Test
+    void eclipseInspectionMigrationAndInitializerUseNullableLongText() throws Exception {
+        Path backend = Path.of("").toAbsolutePath().normalize();
+        if (!backend.getFileName().toString().equalsIgnoreCase("backend")) backend = backend.resolve("backend");
+        String sql = Files.readString(backend.resolve(
+                "deploy/mysql/migrations/010_software_integration_eclipse_data_inspection.sql"));
+        assertThat(sql).contains("information_schema.columns", "inspection_json LONGTEXT NULL", "PREPARE grdp_eclipse_inspection_column");
+        assertThat(sql.toUpperCase()).doesNotContain("DROP ", "DELETE ", "UPDATE ", " BLOB");
+    }
+
+    @Test
     void schemaInitializerRepeatablyUpgradesAnExistingRunTable() {
         DriverManagerDataSource dataSource = new DriverManagerDataSource(
                 "jdbc:h2:mem:acceptance-upgrade;MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1", "sa", "");
@@ -114,6 +124,12 @@ class SoftwareIntegrationMigrationContractTests {
                   AND LOWER(column_name) = 'model_kind'
                 """, Integer.class);
         assertThat(modelKindColumns).isEqualTo(1);
+        Integer inspectionColumns = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM information_schema.columns
+                WHERE LOWER(table_name) = 'software_integration_model_version'
+                  AND LOWER(column_name) = 'inspection_json'
+                """, Integer.class);
+        assertThat(inspectionColumns).isEqualTo(1);
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT model_kind FROM software_integration_model_version WHERE id = 1", String.class))
                 .isEqualTo("legacy_well");

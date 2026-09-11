@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Grdp.SoftwareIntegration.Worker.Contracts;
 using Grdp.SoftwareIntegration.Worker.Execution;
+using Grdp.SoftwareIntegration.Worker.Inspection;
 using Grdp.SoftwareIntegration.Worker.Storage;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.Extensions.Options;
@@ -53,6 +54,7 @@ builder.Services.AddSingleton<PtkValidationService>();
 builder.Services.AddSingleton<EclipseLauncher>();
 builder.Services.AddSingleton<EclipseExecutionCoordinator>();
 builder.Services.AddSingleton<EclipseValidationService>();
+builder.Services.AddSingleton<EclipseDataInspectionService>();
 builder.Services.AddSingleton<EclipseRunService>();
 
 var app = builder.Build();
@@ -127,6 +129,21 @@ app.MapPost("/api/models/validate", async (
         StatusCodes.Status409Conflict => Results.Conflict(outcome.Body),
         StatusCodes.Status422UnprocessableEntity => Results.UnprocessableEntity(outcome.Body),
         StatusCodes.Status503ServiceUnavailable => Results.Json(outcome.Body, statusCode: outcome.HttpStatus),
+        _ => Results.BadRequest(outcome.Body)
+    };
+});
+
+app.MapPost("/api/models/inspect", async (
+    ModelValidationRequest request,
+    EclipseDataInspectionService service,
+    CancellationToken cancellationToken) =>
+{
+    var outcome = await service.InspectAsync(request, cancellationToken);
+    return outcome.HttpStatus switch
+    {
+        StatusCodes.Status200OK => Results.Ok(outcome.Body),
+        StatusCodes.Status404NotFound => Results.NotFound(outcome.Body),
+        StatusCodes.Status422UnprocessableEntity => Results.UnprocessableEntity(outcome.Body),
         _ => Results.BadRequest(outcome.Body)
     };
 });

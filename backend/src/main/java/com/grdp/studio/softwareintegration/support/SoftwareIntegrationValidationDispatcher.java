@@ -61,7 +61,8 @@ public class SoftwareIntegrationValidationDispatcher {
             String body = objectMapper.writeValueAsString(java.util.Map.of(
                     "modelStorageKey", storageKey,
                     "expectedSha256", version.getSha256()));
-            HttpRequest request = HttpRequest.newBuilder(URI.create(properties.getWorkerBaseUrl() + "/api/models/validate"))
+            HttpRequest request = HttpRequest.newBuilder(URI.create(properties.getWorkerBaseUrl()
+                    + (eclipse ? "/api/models/inspect" : "/api/models/validate")))
                     .header("Content-Type", "application/json").timeout(Duration.ofMinutes(2))
                     .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8)).build();
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
@@ -90,10 +91,19 @@ public class SoftwareIntegrationValidationDispatcher {
                     update(version, "INVALID", "ECLIPSE_STUDY_UNSUPPORTED: ECLIPSE 模型不得返回 Study", null);
                     return;
                 }
+                String inspection = null;
+                if (eclipse) {
+                    try {
+                        inspection = EclipseDataInspectionValidator.validateAndSerialize(payload.get("inspection"), objectMapper);
+                    } catch (IllegalArgumentException exception) {
+                        update(version, "INVALID", "INSPECTION_RESPONSE_INVALID: Worker inspection metadata is invalid", null);
+                        return;
+                    }
+                }
                 String readyMessage = payload.path("message").asText("模型验证完成");
                 if (eclipse) readyMessage = SoftwareIntegrationEclipseSanitizer.sanitizeText(readyMessage);
                 if (!persistReady(version, modelKind, simulatorType,
-                        readyMessage, eclipse ? null : String.join("\n", studies))) {
+                        readyMessage, eclipse ? null : String.join("\n", studies), inspection)) {
                     update(version, "INVALID", "模型版本所属模型不存在", null);
                     return;
                 }
@@ -101,8 +111,10 @@ public class SoftwareIntegrationValidationDispatcher {
                 JsonNode error = payload.path("error");
                 String code = error.path("code").asText(payload.path("code").asText());
                 String category = error.path("category").asText(payload.path("category").asText());
-                boolean includeUnsupported = eclipse && "ECLIPSE_INCLUDE_UNSUPPORTED".equals(code);
-                boolean environment = !includeUnsupported && (response.statusCode() == 409 || response.statusCode() == 503
+                boolean inspectionInputError = eclipse && ("ECLIPSE_INCLUDE_UNSUPPORTED".equals(code)
+                        || (code != null && (code.startsWith("ECLIPSE_DATA_")
+                        || code.startsWith("ECLIPSE_RESOURCE_") || code.startsWith("ECLIPSE_ENCODING_"))));
+                boolean environment = !inspectionInputError && (response.statusCode() == 409 || response.statusCode() == 503
                         || "ENVIRONMENT_ERROR".equals(payload.path("status").asText())
                         || "ENVIRONMENT".equals(category) || "ECLIPSE_UNAVAILABLE".equals(code)
                         || "ECLIPSE_VERSION_MISMATCH".equals(code));
@@ -126,10 +138,10 @@ public class SoftwareIntegrationValidationDispatcher {
     }
 
     private synchronized boolean persistReady(SoftwareIntegrationModelVersionEntity version, String modelKind,
-                                               String simulatorType, String message, String studies) {
+                                                String simulatorType, String message, String studies, String inspection) {
         SoftwareIntegrationModelEntity model = modelMapper.selectById(version.getModelId());
         if (model == null || model.getDeletedAt() != null) return false;
-        update(version, "READY", message, studies, modelKind);
+        update(version, "READY", message, studies, inspection, modelKind);
         SoftwareIntegrationModelVersionEntity newestReady = versionMapper.selectOne(
                 new LambdaQueryWrapper<SoftwareIntegrationModelVersionEntity>()
                         .eq(SoftwareIntegrationModelVersionEntity::getModelId, version.getModelId())
@@ -171,16 +183,22 @@ public class SoftwareIntegrationValidationDispatcher {
     }
 
     private void update(SoftwareIntegrationModelVersionEntity version, String status, String message, String studies) {
-        update(version, status, message, studies, null);
+        update(version, status, message, studies, null, null);
     }
 
     private void update(SoftwareIntegrationModelVersionEntity version, String status, String message,
                         String studies, String modelKind) {
+        update(version, status, message, studies, null, modelKind);
+    }
+
+    private void update(SoftwareIntegrationModelVersionEntity version, String status, String message,
+                        String studies, String inspection, String modelKind) {
         LambdaUpdateWrapper<SoftwareIntegrationModelVersionEntity> update =
                 new LambdaUpdateWrapper<SoftwareIntegrationModelVersionEntity>()
                 .eq(SoftwareIntegrationModelVersionEntity::getId, version.getId())
                 .set(SoftwareIntegrationModelVersionEntity::getStatus, status)
                 .set(SoftwareIntegrationModelVersionEntity::getStudiesJson, studies)
+                .set(SoftwareIntegrationModelVersionEntity::getInspectionJson, inspection)
                 .set(SoftwareIntegrationModelVersionEntity::getUpdatedAt, LocalDateTime.now());
         if (modelKind != null) update.set(SoftwareIntegrationModelVersionEntity::getModelKind, modelKind);
         String sanitizedMessage = SoftwareIntegrationDiagnosticSanitizer.sanitize(message);

@@ -10,7 +10,18 @@ public sealed record ModelValidationResponse(
     string Message,
     string? ModelKind = null,
     string? Well = null,
-    WorkerError? Error = null);
+    WorkerError? Error = null,
+    EclipseDataInspection? Inspection = null);
+
+public sealed record EclipseDataInspection(
+    string SchemaVersion,
+    string CaseName,
+    IReadOnlyList<string> Sections,
+    string? UnitSystem,
+    IReadOnlyList<string> Phases,
+    EclipseDimensions? Dimensions);
+
+public sealed record EclipseDimensions(int Nx, int Ny, int Nz);
 
 public sealed record RunExecuteRequest(
     long RunId,

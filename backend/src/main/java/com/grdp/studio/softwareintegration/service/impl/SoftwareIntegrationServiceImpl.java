@@ -1,6 +1,7 @@
 package com.grdp.studio.softwareintegration.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.grdp.studio.common.BusinessException;
 import com.grdp.studio.softwareintegration.dto.SoftwareIntegrationModelResponse;
 import com.grdp.studio.softwareintegration.dto.SoftwareIntegrationProjectDetailResponse;
@@ -148,7 +149,14 @@ public class SoftwareIntegrationServiceImpl implements SoftwareIntegrationServic
         if (version == null) throw new BusinessException(404, "模型版本不存在");
         SoftwareIntegrationModelEntity model = modelMapper.selectById(version.getModelId());
         if (model == null || !Long.valueOf(projectId).equals(model.getProjectId())) throw new BusinessException(404, "模型版本不存在");
-        version.setStatus("UPLOADED"); version.setValidationMessage(null); version.setStudiesJson(null); version.setUpdatedAt(LocalDateTime.now()); versionMapper.updateById(version);
+        LocalDateTime now = LocalDateTime.now();
+        versionMapper.update(null, new LambdaUpdateWrapper<SoftwareIntegrationModelVersionEntity>()
+                .eq(SoftwareIntegrationModelVersionEntity::getId, versionId)
+                .set(SoftwareIntegrationModelVersionEntity::getStatus, "UPLOADED")
+                .set(SoftwareIntegrationModelVersionEntity::getValidationMessage, null)
+                .set(SoftwareIntegrationModelVersionEntity::getStudiesJson, null)
+                .set(SoftwareIntegrationModelVersionEntity::getInspectionJson, null)
+                .set(SoftwareIntegrationModelVersionEntity::getUpdatedAt, now));
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override public void afterCommit() { validationDispatcher.validate(versionId); }
         });

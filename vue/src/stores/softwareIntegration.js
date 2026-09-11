@@ -59,7 +59,7 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
   const activeModelKind = computed(() => activeVersion.value?.modelKind || '')
   const isNetworkModel = computed(() => activeModelKind.value === 'network')
   const isWellModel = computed(() => wellModelKinds.has(activeModelKind.value))
-  const isEclipseModel = computed(() => activeModelKind.value === 'eclipse_100')
+  const isEclipseModel = computed(() => activeModelKind.value === 'eclipse_100' || /\.data$/i.test(activeVersion.value?.originalName || ''))
   const persistedStudies = computed(() => activeVersion.value?.status === 'READY' && Array.isArray(activeVersion.value.studies)
     ? activeVersion.value.studies
     : [])
@@ -357,7 +357,7 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
     syncRunTypeForModel()
     const studies = persistedStudies.value
     selectedStudy.value = isEclipseModel.value ? '' : (studies.includes(selectedStudy.value) ? selectedStudy.value : (studies[0] || ''))
-    await loadRunHistory(versionId, true, generation)
+    if (!isEclipseModel.value) await loadRunHistory(versionId, true, generation)
     if (!matchesRunContext(generation, versionId)) return null
     return activeVersion.value
   }

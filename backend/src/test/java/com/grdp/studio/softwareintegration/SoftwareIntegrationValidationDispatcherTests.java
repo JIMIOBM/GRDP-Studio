@@ -40,6 +40,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class SoftwareIntegrationValidationDispatcherTests {
     private static final AtomicReference<String> RESPONSE = new AtomicReference<>();
     private static final AtomicReference<String> REQUEST = new AtomicReference<>();
+    private static final AtomicReference<String> INSPECTION_REQUEST = new AtomicReference<>();
     private static final AtomicInteger RESPONSE_STATUS = new AtomicInteger(200);
     private static HttpServer server;
 
@@ -55,6 +56,10 @@ class SoftwareIntegrationValidationDispatcherTests {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/api/models/validate", exchange -> {
             REQUEST.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            respond(exchange, RESPONSE_STATUS.get(), RESPONSE.get());
+        });
+        server.createContext("/api/models/inspect", exchange -> {
+            INSPECTION_REQUEST.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             respond(exchange, RESPONSE_STATUS.get(), RESPONSE.get());
         });
         server.start();
@@ -74,6 +79,8 @@ class SoftwareIntegrationValidationDispatcherTests {
         jdbcTemplate.execute("DELETE FROM software_integration_model");
         jdbcTemplate.execute("DELETE FROM software_integration_project");
         REQUEST.set(null);
+        INSPECTION_REQUEST.set(null);
+        RESPONSE.set(null);
         RESPONSE_STATUS.set(200);
     }
 
@@ -139,7 +146,8 @@ class SoftwareIntegrationValidationDispatcherTests {
     void dataValidationPersistsEclipseTypeKindAndStrictlyEmptyStudies() {
         Seed seed = seed("CASE.DATA");
         RESPONSE.set("""
-                {"status":"READY","studies":[],"message":"ECLIPSE validation complete","modelKind":"eclipse_100"}
+                {"status":"READY","studies":[],"message":"ECLIPSE validation complete","modelKind":"eclipse_100",
+                 "inspection":{"schemaVersion":"eclipse-data-inspection/1","caseName":"CASE.DATA","sections":["RUNSPEC","GRID","SOLUTION"],"unitSystem":"METRIC","phases":["OIL","WATER"],"dimensions":{"nx":10,"ny":20,"nz":30}}}
                 """);
 
         dispatcher().validate(seed.versionId());
@@ -148,11 +156,15 @@ class SoftwareIntegrationValidationDispatcherTests {
         assertThat(version.getStatus()).isEqualTo("READY");
         assertThat(version.getModelKind()).isEqualTo("eclipse_100");
         assertThat(version.getStudiesJson()).isNull();
+        assertThat(version.getInspectionJson()).contains("eclipse-data-inspection/1", "CASE.DATA");
+        assertThat(INSPECTION_REQUEST.get()).isNotNull();
+        assertThat(REQUEST.get()).isNull();
         assertThat(modelMapper.selectById(seed.modelId()).getSimulatorType()).isEqualTo("ECLIPSE_100");
         assertThat(softwareIntegrationService.getProject(seed.projectId()).models()).singleElement()
                 .satisfies(model -> {
                     assertThat(model.simulatorType()).isEqualTo("ECLIPSE_100");
                     assertThat(model.versions().get(0).studies()).isEmpty();
+                    assertThat(model.versions().get(0).inspection().path("caseName").asText()).isEqualTo("CASE.DATA");
                 });
     }
 
@@ -207,6 +219,58 @@ class SoftwareIntegrationValidationDispatcherTests {
         SoftwareIntegrationModelVersionEntity environment = versionMapper.selectById(unavailable.versionId());
         assertThat(environment.getStatus()).isEqualTo("ENVIRONMENT_ERROR");
         assertThat(environment.getValidationMessage()).startsWith("ECLIPSE_UNAVAILABLE:");
+    }
+
+    @Test
+    void invalidInspectionAndInspectionInputErrorsAreInvalidAndDoNotLeak() {
+        Seed invalidSchema = seed("CASE.DATA");
+        RESPONSE.set("""
+                {"status":"READY","studies":[],"modelKind":"eclipse_100","inspection":{"schemaVersion":"eclipse-data-inspection/1","caseName":"C:\\\\private\\\\CASE.DATA","sections":[],"unitSystem":null,"phases":[],"dimensions":null}}
+                """);
+        dispatcher().validate(invalidSchema.versionId());
+        SoftwareIntegrationModelVersionEntity invalid = versionMapper.selectById(invalidSchema.versionId());
+        assertThat(invalid.getStatus()).isEqualTo("INVALID");
+        assertThat(invalid.getInspectionJson()).isNull();
+        assertThat(invalid.getValidationMessage()).doesNotContain("private");
+
+        Seed encoding = seed("CASE2.DATA");
+        RESPONSE_STATUS.set(503);
+        RESPONSE.set("""
+                {"status":"ENVIRONMENT_ERROR","error":{"category":"ENVIRONMENT","code":"ECLIPSE_DATA_INVALID_UTF8","message":"C:\\\\private\\\\deck.DATA"}}
+                """);
+        dispatcher().validate(encoding.versionId());
+        SoftwareIntegrationModelVersionEntity encodingInvalid = versionMapper.selectById(encoding.versionId());
+        assertThat(encodingInvalid.getStatus()).isEqualTo("INVALID");
+        assertThat(encodingInvalid.getValidationMessage()).doesNotContain("private", "C:\\");
+    }
+
+    @Test
+    void revalidationClearsExistingInspectionBeforeAsyncDispatch() {
+        Seed seed = seed("CASE.DATA");
+        SoftwareIntegrationModelVersionEntity version = versionMapper.selectById(seed.versionId());
+        version.setStatus("READY");
+        version.setInspectionJson("{\"schemaVersion\":\"eclipse-data-inspection/1\"}");
+        versionMapper.updateById(version);
+        RESPONSE.set("""
+                {"status":"INVALID","studies":[],"modelKind":null,
+                 "error":{"category":"MODEL","code":"ECLIPSE_INCLUDE_UNSUPPORTED","message":"INCLUDE is unsupported","retryable":false}}
+                """);
+
+        softwareIntegrationService.revalidateModel(seed.projectId(), seed.versionId());
+
+        awaitTerminalValidation(seed.versionId());
+        assertThat(versionMapper.selectById(seed.versionId()).getInspectionJson()).isNull();
+    }
+
+    private void awaitTerminalValidation(long versionId) {
+        long deadline = System.currentTimeMillis() + 5000;
+        while (System.currentTimeMillis() < deadline) {
+            SoftwareIntegrationModelVersionEntity version = versionMapper.selectById(versionId);
+            if (version == null || (!"UPLOADED".equals(version.getStatus()) && !"VALIDATING".equals(version.getStatus()))) {
+                return;
+            }
+            try { Thread.sleep(10); } catch (InterruptedException exception) { Thread.currentThread().interrupt(); return; }
+        }
     }
 
     private Seed seed() {
