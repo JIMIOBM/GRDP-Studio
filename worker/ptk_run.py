@@ -19,6 +19,7 @@ from ptk_normalization import (  # noqa: E402
 )
 from ptk_network import (  # noqa: E402
     build_network_result,
+    build_safe_partial_network_result,
     extract_topology,
     format_validation_issues,
     inspect_network,
@@ -196,12 +197,19 @@ def _execute_network(model, study, emit_event):
             "The PIPESIM Network result could not be normalized ({0}).".format(type(exc).__name__),
         )
     if not validate_network_result(result, study):
-        raise AdapterFailure(
+        result = build_safe_partial_network_result(result)
+        if result is None:
+            raise AdapterFailure(
+                "PROTOCOL",
+                "INVALID_NETWORK_RESULT_CONTRACT",
+                "The normalized Network result has no safe topology for a limited display.",
+            )
+        return result, [_error(
             "PROTOCOL",
-            "INVALID_NETWORK_RESULT_CONTRACT",
-            "The normalized Network result does not satisfy the result contract.",
-        )
-    return result
+            "NETWORK_RESULT_LIMITED",
+            "PIPESIM Network returned partial display data; full result validation did not pass.",
+        )]
+    return result, []
 
 
 def execute_request(request, model_factory=None, emit_event=None):
@@ -236,13 +244,13 @@ def execute_request(request, model_factory=None, emit_event=None):
             if study not in _study_names(model):
                 raise AdapterFailure("MODEL", "STUDY_NOT_FOUND", "The selected Study does not exist in the model.")
             if run_task == "network":
-                result = _execute_network(model, study, emit_event)
+                result, warnings = _execute_network(model, study, emit_event)
                 return {
                     "type": "result",
-                    "status": "ok",
+                    "status": "partial" if result["resultContract"] == "VALID_PARTIAL" else "ok",
                     "result": result,
                     "error": None,
-                    "warnings": [],
+                    "warnings": warnings,
                 }
             components, model_kind = _run_components(model)
             well_name = components["Well"][0]

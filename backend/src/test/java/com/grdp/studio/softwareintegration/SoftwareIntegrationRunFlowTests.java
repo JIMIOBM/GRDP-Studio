@@ -482,9 +482,7 @@ class SoftwareIntegrationRunFlowTests {
         assertThat(runStore.find(runId).getResultJson()).contains("pipesim-network-result/1");
         var detail = runService.get(runId);
         assertThat(detail.result().toString())
-                .contains("[local path]")
-                .contains("[redacted]")
-                .doesNotContain("C:\\\\Users", "private-result");
+                .doesNotContain("C:\\\\Users", "private-result", "net.pipe://");
         assertThat(detail.events()).allSatisfy(event -> {
             if (event.message() != null) assertThat(event.message()).doesNotContain("private-event", "net.pipe://localhost/pipe/private-event");
         });
@@ -1314,14 +1312,14 @@ class SoftwareIntegrationRunFlowTests {
                  "topology":{"nodes":[{"id":"Source 1","componentType":"SOURCE"},{"id":"Sink 1","componentType":"SINK"}],
                    "edges":[{"source":"Source 1","destination":"Sink 1","sourcePort":"OUTLET"}],
                    "counts":{"nodes":2,"edges":1,"sources":1,"sinks":1,"flowlines":1}},
-                  "system":[{"variable":"Pressure","unit":"bar","values":[{"name":"Network","value":{"C:\\\\Users\\\\operator\\\\secret":100.0}}]}],
+                   "system":[{"variable":"Pressure","unit":"bar","values":[{"name":"Network","value":{"average":100.0}}]}],
                  "node":[{"variable":"Pressure","unit":"bar","values":[{"name":"Sink 1","value":null}]}],
                  "profiles":[{"branch":"Source 1 -> Sink 1","pointCount":2,"variables":[
                    {"variable":"TotalDistance","unit":"m","values":[0.0,100.0]},
                    {"variable":"Pressure","unit":"bar","values":[100.0,null]},
                    {"variable":"Temperature","unit":"degC","values":[20.0]}]}],
                   "summary":{"info":["completed"],"warnings":[],"errors":[]},
-                   "messages":["Processing C:\\\\Users\\\\operator\\\\network.tnt","Using net.pipe://localhost/pipe/private-result"],
+                    "messages":["Network simulation completed"],
                   "quality":[
                     {"path":"node.Pressure.Sink 1","code":"UNAVAILABLE"},
                     {"path":"profiles.Source 1 -> Sink 1.Pressure[1]","code":"NON_FINITE"}]}

@@ -86,52 +86,136 @@ const validWellResult = computed(() => {
     isFiniteNumber(point?.pressure) && isFiniteNumber(point?.temperature))) return null
   return result
 })
-const isNetworkVariable = entry => entry && typeof entry.variable === 'string' &&
-  (entry.unit === null || typeof entry.unit === 'string') && Array.isArray(entry.values)
-const isNetworkTableVariable = entry => isNetworkVariable(entry) && entry.values.every(value =>
-  value && typeof value.name === 'string' && Object.prototype.hasOwnProperty.call(value, 'value'))
-const isNetworkProfile = profile => {
-  if (!profile || typeof profile.branch !== 'string' || !Number.isInteger(profile.pointCount) ||
+const isNetworkVariable = entry => entry && isSafeTopologyText(entry.variable) &&
+  (entry.unit === null || isSafeTopologyText(entry.unit)) && Array.isArray(entry.values)
+const isNumericValue = value => value === null || isFiniteNumber(value) ||
+  (Array.isArray(value) && value.length > 0 && value.every(isNumericValue)) ||
+  (value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length > 0 &&
+    Object.values(value).every(isNumericValue))
+const copyNumericValue = value => Array.isArray(value)
+  ? value.map(copyNumericValue)
+  : value && typeof value === 'object'
+    ? Object.fromEntries(Object.entries(value).map(([key, item]) => [key, copyNumericValue(item)]))
+    : value
+const copyNetworkTableVariable = entry => {
+  if (!isNetworkVariable(entry) || !entry.values.length) return null
+  const values = []
+  for (const value of entry.values) {
+    if (!value || !isSafeTopologyText(value.name) || !Object.prototype.hasOwnProperty.call(value, 'value')) return null
+    if (!isNumericValue(value.value)) return null
+    values.push({ name: value.name, value: copyNumericValue(value.value) })
+  }
+  return { variable: entry.variable, unit: entry.unit, values }
+}
+const copyNetworkProfile = profile => {
+  if (!profile || !isSafeTopologyText(profile.branch) || !Number.isInteger(profile.pointCount) ||
     profile.pointCount < 0 || !Array.isArray(profile.variables) ||
-    !profile.variables.every(isNetworkVariable)) return false
-  const distance = profile.variables.find(variable => variable.variable === 'TotalDistance')?.values
-  const pressure = profile.variables.find(variable => variable.variable === 'Pressure')?.values
+    !profile.variables.every(isNetworkVariable)) return null
+  const variables = profile.variables.map(variable => {
+    return isNumericValue(variable.values)
+      ? { variable: variable.variable, unit: variable.unit, values: copyNumericValue(variable.values) }
+      : null
+  })
+  if (variables.some(variable => !variable)) return null
+  const distance = variables.find(variable => variable.variable === 'TotalDistance')?.values
+  const pressure = variables.find(variable => variable.variable === 'Pressure')?.values
   const finiteOrGap = value => value === null || isFiniteNumber(value)
-  return Array.isArray(distance) && distance.length > 0 && Array.isArray(pressure) &&
-    distance.length === pressure.length && profile.pointCount >= distance.length &&
-    distance.every(finiteOrGap) && pressure.every(finiteOrGap)
+  if (!Array.isArray(distance) || !distance.length || !Array.isArray(pressure) ||
+    distance.length !== pressure.length || profile.pointCount < distance.length ||
+    !distance.every(finiteOrGap) || !pressure.every(finiteOrGap)) return null
+  return { branch: profile.branch, pointCount: profile.pointCount, variables }
+}
+const hasExactFields = (value, fields) => value && typeof value === 'object' && !Array.isArray(value) &&
+  Object.keys(value).length === fields.length && fields.every(field => Object.prototype.hasOwnProperty.call(value, field))
+const isSafeTopologyText = (value, allowEmpty = false) => typeof value === 'string' && value.length <= 1000 &&
+  (allowEmpty ? value.length === 0 || value.trim().length > 0 : value.trim().length > 0) &&
+  !/[\u0000-\u001f\u007f-\u009f]/.test(value) &&
+  !/net\.pipe:\/\/localhost\/pipe\/[^\s'"]+|(?:^|[^a-z0-9])[a-z]:[\\/]/i.test(value)
+const safeNetworkTopology = topology => {
+  const nodes = topology?.nodes
+  const edges = topology?.edges
+  const counts = topology?.counts
+  if (!hasExactFields(topology, ['nodes', 'edges', 'counts']) || !Array.isArray(nodes) || !nodes.length || !nodes.every(node =>
+    hasExactFields(node, ['id', 'componentType']) && isSafeTopologyText(node.id) && isSafeTopologyText(node.componentType))) return null
+  const nodeIds = new Set(nodes.map(node => node.id))
+  if (nodeIds.size !== nodes.length || !Array.isArray(edges) || !edges.length || !edges.every(edge =>
+    hasExactFields(edge, ['source', 'destination', 'sourcePort']) && isSafeTopologyText(edge.source) &&
+    isSafeTopologyText(edge.destination) && isSafeTopologyText(edge.sourcePort, true) &&
+    nodeIds.has(edge.source) && nodeIds.has(edge.destination))) return null
+  if (!hasExactFields(counts, ['nodes', 'edges', 'sources', 'sinks', 'flowlines']) || !Object.values(counts).every(value =>
+    Number.isInteger(value) && value >= 0)) return null
+  const componentCount = componentTypes => nodes.filter(node =>
+    componentTypes.includes(node.componentType.toLowerCase())).length
+  if (counts.nodes !== nodes.length || counts.edges !== edges.length ||
+    counts.sources !== componentCount(['source', 'well']) || counts.sinks !== componentCount(['sink']) ||
+    counts.flowlines !== componentCount(['flowline'])) return null
+  return {
+    nodes: nodes.map(({ id, componentType }) => ({ id, componentType })),
+    edges: edges.map(({ source, destination, sourcePort }) => ({ source, destination, sourcePort })),
+    counts: { ...counts }
+  }
 }
 const validNetworkResult = computed(() => {
   if (!isNetworkModel.value) return null
   const result = selectedRun.value?.result
   const topology = result?.topology
-  const counts = topology?.counts
   if (!result || result.schemaVersion !== 'pipesim-network-result/1' || result.model_kind !== 'network' ||
     result.runTask !== 'network' || !['VALID_FULL', 'VALID_PARTIAL'].includes(result.resultContract) ||
     result.simulationState !== 'Completed') return null
   if (selectedRun.value?.runType !== 'network' || result.resultContract !== selectedRun.value?.resultContract ||
-    result.study !== selectedRun.value?.study) return null
-  if (result.resultContract === 'VALID_PARTIAL' && selectedRun.value?.status === 'PARTIAL_SUCCEEDED') return result
+    !isSafeTopologyText(result.study) || result.study !== selectedRun.value?.study) return null
+  const safeTopology = safeNetworkTopology(topology)
+  if (!safeTopology) return null
+  if (result.resultContract === 'VALID_PARTIAL' && selectedRun.value?.status === 'PARTIAL_SUCCEEDED') {
+    // Partial contracts guarantee only topology; do not pass optional raw fields to the renderer.
+    return {
+      schemaVersion: 'pipesim-network-result/1',
+      model_kind: 'network',
+      runTask: 'network',
+      resultContract: 'VALID_PARTIAL',
+      simulationState: 'Completed',
+      topology: safeTopology
+    }
+  }
   if (result.resultContract !== 'VALID_FULL') return null
-  if (!Array.isArray(topology?.nodes) || !topology.nodes.every(node =>
-    typeof node?.id === 'string' && typeof node.componentType === 'string')) return null
-  if (!Array.isArray(topology?.edges) || !topology.edges.every(edge =>
-    typeof edge?.source === 'string' && typeof edge.destination === 'string' &&
-    (edge.sourcePort === null || typeof edge.sourcePort === 'string'))) return null
-  if (!counts || !['nodes', 'edges', 'sources', 'sinks', 'flowlines'].every(field =>
-    Number.isInteger(counts[field]) && counts[field] >= 0)) return null
-  if (!Array.isArray(result.system) || !result.system.every(isNetworkTableVariable) ||
-    !Array.isArray(result.node) || !result.node.every(isNetworkTableVariable) ||
-    !Array.isArray(result.profiles) || !result.profiles.every(isNetworkProfile)) return null
+  if (!Array.isArray(result.system) || !Array.isArray(result.node) || !Array.isArray(result.profiles)) return null
+  const system = result.system.map(copyNetworkTableVariable)
+  const node = result.node.map(copyNetworkTableVariable)
+  const profiles = result.profiles.map(copyNetworkProfile)
+  if (system.some(entry => !entry) || node.some(entry => !entry) || profiles.some(profile => !profile)) return null
   if (!result.summary || !['info', 'warnings', 'errors'].every(field => Array.isArray(result.summary[field])) ||
-    !Array.isArray(result.messages) || !Array.isArray(result.quality) || !result.quality.every(item =>
-      typeof item?.path === 'string' && typeof item.code === 'string')) return null
-  return result
+    !['info', 'warnings', 'errors'].every(field => result.summary[field].every(isSafeTopologyText)) ||
+    !Array.isArray(result.messages) || !result.messages.every(isSafeTopologyText) ||
+    !Array.isArray(result.quality) || !result.quality.every(item =>
+       isSafeTopologyText(item?.path) && isSafeTopologyText(item.code))) return null
+  return {
+    schemaVersion: 'pipesim-network-result/1',
+    model_kind: 'network',
+    runTask: 'network',
+    resultContract: 'VALID_FULL',
+    study: result.study,
+    simulationState: 'Completed',
+    topology: safeTopology,
+    system,
+    node,
+    profiles,
+    summary: {
+      info: [...result.summary.info],
+      warnings: [...result.summary.warnings],
+      errors: [...result.summary.errors]
+    },
+    messages: [...result.messages],
+    quality: result.quality.map(({ path, code }) => ({ path, code }))
+  }
 })
 const isPartial = computed(() => selectedRun.value?.status === 'PARTIAL_SUCCEEDED' &&
   validWellResult.value?.resultContract === 'VALID_PARTIAL')
 const isNetworkPartial = computed(() => selectedRun.value?.status === 'PARTIAL_SUCCEEDED' &&
   validNetworkResult.value?.resultContract === 'VALID_PARTIAL')
+const networkTopologyUnavailable = computed(() => isNetworkModel.value &&
+  ['SUCCEEDED', 'PARTIAL_SUCCEEDED'].includes(selectedRun.value?.status) &&
+  ['VALID_FULL', 'VALID_PARTIAL'].includes(selectedRun.value?.result?.resultContract) &&
+  !validNetworkResult.value)
 const canRun = computed(() => activeVersion.value?.status === 'READY' &&
   (isNetworkModel.value || isWellModel.value || isEclipseModel.value) &&
   (isEclipseModel.value ? eclipsePresentationAvailable.value : persistedStudies.value.includes(selectedStudy.value)) &&
@@ -176,6 +260,7 @@ const terminalRunGuidance = computed(() => {
   return safeRunError.value?.retryable ? '请确认运行环境后重新提交该版本。' : '请检查模型版本和 Study，必要时重新验证后再运行。'
 })
 const networkContractRejected = computed(() => isNetworkModel.value && !validNetworkResult.value &&
+  !networkTopologyUnavailable.value &&
   (Boolean(selectedRun.value?.result) || ['INVALID_NETWORK_RESULT_CONTRACT', 'RESULT_CONTRACT_INVALID'].includes(safeCode(selectedError.value?.code))) &&
   ['SUCCEEDED', 'PARTIAL_SUCCEEDED', 'FAILED'].includes(selectedRun.value?.status))
 const historicalSuccessfulNetworkRun = computed(() => runHistory.value.find(run => run.id !== selectedRun.value?.id &&
@@ -395,6 +480,15 @@ defineExpose({ eclipseRunRequest, reloadEclipseRunHistory })
       class="network-partial-alert"
       title="部分真实计算结果"
       description="计算已完成，但完整展示校验未通过。仅展示实际返回的数据；未返回的拓扑、表格、图表或剖面字段会标记为不可用。"
+      type="warning"
+      :closable="false"
+      show-icon
+    />
+    <el-alert
+      v-if="networkTopologyUnavailable"
+      class="network-partial-alert"
+      title="管网结果不可用"
+      description="返回的管网拓扑或统计信息未通过安全展示校验。为避免展示错误结果，已隐藏管网图表和结果数据。"
       type="warning"
       :closable="false"
       show-icon

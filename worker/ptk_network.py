@@ -309,6 +309,193 @@ def build_network_result(results, topology, study):
     }
 
 
+def _safe_text(value, allow_empty=False):
+    return (
+        isinstance(value, str)
+        and (allow_empty or bool(value.strip()))
+        and not any(ord(character) < 32 or ord(character) == 127 for character in value)
+    )
+
+
+def _safe_port(value):
+    return _safe_text(value, allow_empty=True) and (value == "" or bool(value.strip()))
+
+
+def _safe_number(value):
+    return (
+        value is None
+        or (
+            not isinstance(value, bool)
+            and isinstance(value, Real)
+            and math.isfinite(value)
+            and not any(math.isclose(value, sentinel, rel_tol=1e-12) for sentinel in _PIPESIM_UNAVAILABLE_SENTINELS)
+        )
+    )
+
+
+def _safe_topology(topology):
+    if not isinstance(topology, Mapping) or set(topology) != {"nodes", "edges", "counts"}:
+        return None
+    nodes = topology.get("nodes")
+    edges = topology.get("edges")
+    counts = topology.get("counts")
+    if not isinstance(nodes, list) or not nodes or not isinstance(edges, list) or not edges:
+        return None
+    if not isinstance(counts, Mapping) or set(counts) != {"nodes", "edges", "sources", "sinks", "flowlines"}:
+        return None
+    if any(isinstance(value, bool) or not isinstance(value, int) or value < 0 for value in counts.values()):
+        return None
+    node_ids = set()
+    safe_nodes = []
+    for node in nodes:
+        if (
+            not isinstance(node, Mapping)
+            or set(node) != {"id", "componentType"}
+            or not _safe_text(node.get("id"))
+            or not _safe_text(node.get("componentType"))
+            or node["id"] in node_ids
+        ):
+            return None
+        node_ids.add(node["id"])
+        safe_nodes.append({"id": node["id"], "componentType": node["componentType"]})
+    safe_edges = []
+    for edge in edges:
+        if (
+            not isinstance(edge, Mapping)
+            or set(edge) != {"source", "destination", "sourcePort"}
+            or not _safe_text(edge.get("source"))
+            or not _safe_text(edge.get("destination"))
+            or not _safe_port(edge.get("sourcePort"))
+            or edge["source"] not in node_ids
+            or edge["destination"] not in node_ids
+        ):
+            return None
+        safe_edges.append({
+            "source": edge["source"],
+            "destination": edge["destination"],
+            "sourcePort": edge["sourcePort"],
+        })
+    if counts["nodes"] < len(safe_nodes) or counts["edges"] < len(safe_edges):
+        return None
+    return {"nodes": safe_nodes, "edges": safe_edges, "counts": dict(counts)}
+
+
+def _safe_scalar_series(groups):
+    if not isinstance(groups, list):
+        return []
+    safe_groups = []
+    variables = set()
+    for group in groups:
+        if (
+            not isinstance(group, Mapping)
+            or set(group) != {"variable", "unit", "values"}
+            or not _safe_text(group.get("variable"))
+            or not _safe_text(group.get("unit"), allow_empty=True)
+            or not isinstance(group.get("values"), list)
+            or group["variable"] in variables
+        ):
+            continue
+        names = set()
+        values = []
+        valid = True
+        for item in group["values"]:
+            if (
+                not isinstance(item, Mapping)
+                or set(item) != {"name", "value"}
+                or not _safe_text(item.get("name"))
+                or item["name"] in names
+                or not _safe_number(item.get("value"))
+            ):
+                valid = False
+                break
+            names.add(item["name"])
+            values.append({"name": item["name"], "value": item["value"]})
+        if valid and values:
+            variables.add(group["variable"])
+            safe_groups.append({"variable": group["variable"], "unit": group["unit"], "values": values})
+    return safe_groups
+
+
+def _safe_profiles(profiles):
+    if not isinstance(profiles, list):
+        return []
+    safe_profiles = []
+    branches = set()
+    for profile in profiles:
+        if (
+            not isinstance(profile, Mapping)
+            or set(profile) != {"branch", "pointCount", "variables"}
+            or not _safe_text(profile.get("branch"))
+            or isinstance(profile.get("pointCount"), bool)
+            or not isinstance(profile.get("pointCount"), int)
+            or profile["pointCount"] < 0
+            or not isinstance(profile.get("variables"), list)
+            or profile["branch"] in branches
+        ):
+            continue
+        variables = []
+        names = set()
+        for variable in profile["variables"]:
+            if (
+                not isinstance(variable, Mapping)
+                or set(variable) != {"variable", "unit", "values"}
+                or not _safe_text(variable.get("variable"))
+                or not _safe_text(variable.get("unit"), allow_empty=True)
+                or not isinstance(variable.get("values"), list)
+                or variable["variable"] in names
+                or len(variable["values"]) > profile["pointCount"]
+                or not all(_safe_number(value) for value in variable["values"])
+            ):
+                continue
+            names.add(variable["variable"])
+            variables.append({
+                "variable": variable["variable"],
+                "unit": variable["unit"],
+                "values": list(variable["values"]),
+            })
+        by_name = {variable["variable"]: variable["values"] for variable in variables}
+        distance = by_name.get("TotalDistance")
+        pressure = by_name.get("Pressure")
+        if not isinstance(distance, list) or not distance or not isinstance(pressure, list) or len(distance) != len(pressure):
+            continue
+        branches.add(profile["branch"])
+        safe_profiles.append({
+            "branch": profile["branch"],
+            "pointCount": profile["pointCount"],
+            "variables": variables,
+        })
+    return safe_profiles
+
+
+def build_safe_partial_network_result(result):
+    topology = _safe_topology(result.get("topology"))
+    if topology is None:
+        return None
+    system = _safe_scalar_series(result.get("system"))
+    node = _safe_scalar_series(result.get("node"))
+    profiles = _safe_profiles(result.get("profiles"))
+    summary = result.get("summary") if isinstance(result.get("summary"), Mapping) else {}
+    return {
+        "schemaVersion": "pipesim-network-result/1",
+        "model_kind": "network",
+        "runTask": "network",
+        "resultContract": "VALID_PARTIAL",
+        "study": result.get("study"),
+        "simulationState": "Completed",
+        "topology": topology,
+        "system": system,
+        "node": node,
+        "profiles": profiles,
+        "summary": {
+            "info": _messages(summary.get("info", [])),
+            "warnings": _messages(summary.get("warnings", [])),
+            "errors": _messages(summary.get("errors", [])),
+        },
+        "messages": _messages(result.get("messages", [])),
+        "quality": [],
+    }
+
+
 def validate_network_result(result, expected_study=None):
     if result.get("schemaVersion") != "pipesim-network-result/1":
         return False
@@ -356,18 +543,30 @@ def validate_network_result(result, expected_study=None):
         if value is None:
             add_path(path)
             missing_paths.add(path)
+            return True
         elif isinstance(value, Mapping):
+            has_numeric_leaf = False
             for key, item in value.items():
-                validate_numeric(item, "{0}.{1}".format(path, key))
+                has_numeric_leaf = validate_numeric(item, "{0}.{1}".format(path, key)) or has_numeric_leaf
+            if not has_numeric_leaf:
+                valid_values = False
+            return has_numeric_leaf
         elif isinstance(value, list):
+            has_numeric_leaf = False
             for index, item in enumerate(value):
-                validate_numeric(item, "{0}[{1}]".format(path, index))
+                has_numeric_leaf = validate_numeric(item, "{0}[{1}]".format(path, index)) or has_numeric_leaf
+            if not has_numeric_leaf:
+                valid_values = False
+            return has_numeric_leaf
         else:
             add_path(path)
             if isinstance(value, bool) or not isinstance(value, Real) or not math.isfinite(value):
                 valid_values = False
+                return False
             elif any(math.isclose(value, sentinel, rel_tol=1e-12) for sentinel in _PIPESIM_UNAVAILABLE_SENTINELS):
                 valid_values = False
+                return False
+            return True
 
     def validate_text(value, path):
         nonlocal valid_values

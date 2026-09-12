@@ -75,12 +75,144 @@ class PipesimNetworkResultValidatorTests {
     }
 
     @Test
+    void acceptsPartialNetworkResultWithEmptyOptionalUiSectionsAndAnEmptySourcePort() {
+        ObjectNode partial = partialResult();
+        ((ObjectNode) partial.path("topology").path("edges").get(0)).put("sourcePort", "");
+        partial.set("system", objectMapper.createArrayNode());
+        partial.set("node", objectMapper.createArrayNode());
+        partial.set("profiles", objectMapper.createArrayNode());
+        partial.set("summary", objectMapper.createObjectNode()
+                .set("info", objectMapper.createArrayNode())
+                .set("warnings", objectMapper.createArrayNode())
+                .set("errors", objectMapper.createArrayNode()));
+        partial.set("messages", objectMapper.createArrayNode());
+        partial.set("quality", objectMapper.createArrayNode());
+
+        assertThat(validator.validate("network", "Network Study", partial).terminalStatus())
+                .isEqualTo(SoftwareIntegrationRunStatus.PARTIAL_SUCCEEDED);
+    }
+
+    @Test
+    void rejectsUnsafeOrUnstructuredPartialUiData() {
+        ObjectNode unknownRootField = partialResult();
+        unknownRootField.put("unexpected", "data");
+        assertRejected(unknownRootField);
+
+        ObjectNode unsafeSummary = validResult();
+        unsafeSummary.put("resultContract", "VALID_PARTIAL");
+        ((ObjectNode) unsafeSummary.path("summary")).withArray("errors").add("C:\\private\\result.log");
+        assertRejected(unsafeSummary);
+
+        ObjectNode nonFiniteSystemValue = validResult();
+        nonFiniteSystemValue.put("resultContract", "VALID_PARTIAL");
+        ((ObjectNode) nonFiniteSystemValue.path("system").get(0).path("values").get(0)).put("value", Double.NaN);
+        assertRejected(nonFiniteSystemValue);
+
+        ObjectNode textualNodeValue = validResult();
+        textualNodeValue.put("resultContract", "VALID_PARTIAL");
+        ((ObjectNode) textualNodeValue.path("node").get(0).path("values").get(0)).put("value", "100");
+        assertRejected(textualNodeValue);
+
+        ObjectNode unsafeProfileVariable = validResult();
+        unsafeProfileVariable.put("resultContract", "VALID_PARTIAL");
+        ((ObjectNode) unsafeProfileVariable.path("profiles").get(0).path("variables").get(0))
+                .put("variable", "C:\\private\\Pressure");
+        assertRejected(unsafeProfileVariable);
+
+        ObjectNode textualProfileValue = validResult();
+        textualProfileValue.put("resultContract", "VALID_PARTIAL");
+        ((ArrayNode) textualProfileValue.path("profiles").get(0).path("variables").get(0).path("values"))
+                .set(0, objectMapper.getNodeFactory().textNode("0"));
+        assertRejected(textualProfileValue);
+    }
+
+    @Test
     void rejectsPartialNetworkResultWithoutSafeTopology() {
         ObjectNode partial = validResult();
         partial.put("resultContract", "VALID_PARTIAL");
         ((ArrayNode) partial.path("topology").path("edges")).removeAll();
 
         assertRejected(partial);
+    }
+
+    @Test
+    void rejectsPartialNetworkResultWithInvalidTopologyShapes() {
+        ObjectNode missingComponentType = partialResult();
+        ((ObjectNode) missingComponentType.path("topology").path("nodes").get(0)).remove("componentType");
+        assertRejected(missingComponentType);
+
+        ObjectNode blankNodeId = partialResult();
+        ((ObjectNode) blankNodeId.path("topology").path("nodes").get(0)).put("id", " ");
+        assertRejected(blankNodeId);
+
+        ObjectNode unsafeSourcePort = partialResult();
+        ((ObjectNode) unsafeSourcePort.path("topology").path("edges").get(0)).put("sourcePort", "\u0000");
+        assertRejected(unsafeSourcePort);
+
+        ObjectNode missingCounts = partialResult();
+        ((ObjectNode) missingCounts.path("topology")).remove("counts");
+        assertRejected(missingCounts);
+    }
+
+    @Test
+    void rejectsPartialNetworkResultWithUnknownEdgeNodeReferences() {
+        ObjectNode unknownSource = partialResult();
+        ((ObjectNode) unknownSource.path("topology").path("edges").get(0)).put("source", "Unknown Source");
+        assertRejected(unknownSource);
+
+        ObjectNode unknownDestination = partialResult();
+        ((ObjectNode) unknownDestination.path("topology").path("edges").get(0)).put("destination", "Unknown Sink");
+        assertRejected(unknownDestination);
+    }
+
+    @Test
+    void rejectsPartialNetworkResultWithInvalidTopologyCounts() {
+        ObjectNode negativeCount = partialResult();
+        ((ObjectNode) negativeCount.path("topology").path("counts")).put("sources", -1);
+        assertRejected(negativeCount);
+
+        ObjectNode tooFewNodes = partialResult();
+        ((ObjectNode) tooFewNodes.path("topology").path("counts")).put("nodes", 1);
+        assertRejected(tooFewNodes);
+
+        ObjectNode tooFewEdges = partialResult();
+        ((ObjectNode) tooFewEdges.path("topology").path("counts")).put("edges", 0);
+        assertRejected(tooFewEdges);
+    }
+
+    @Test
+    void rejectsFullNetworkResultWithoutPartialTopologyInvariants() {
+        ObjectNode duplicateNodeId = validResult();
+        ((ObjectNode) duplicateNodeId.path("topology").path("nodes").get(1)).put("id", "Source 1");
+        assertRejected(duplicateNodeId);
+
+        ObjectNode blankComponentType = validResult();
+        ((ObjectNode) blankComponentType.path("topology").path("nodes").get(0)).put("componentType", " ");
+        assertRejected(blankComponentType);
+
+        ObjectNode unknownSource = validResult();
+        ((ObjectNode) unknownSource.path("topology").path("edges").get(0)).put("source", "Unknown Source");
+        assertRejected(unknownSource);
+
+        ObjectNode blankDestination = validResult();
+        ((ObjectNode) blankDestination.path("topology").path("edges").get(0)).put("destination", " ");
+        assertRejected(blankDestination);
+
+        ObjectNode unsafeSourcePort = validResult();
+        ((ObjectNode) unsafeSourcePort.path("topology").path("edges").get(0)).put("sourcePort", "\u0000");
+        assertRejected(unsafeSourcePort);
+
+        ObjectNode negativeCount = validResult();
+        ((ObjectNode) negativeCount.path("topology").path("counts")).put("flowlines", -1);
+        assertRejected(negativeCount);
+
+        ObjectNode tooFewNodes = validResult();
+        ((ObjectNode) tooFewNodes.path("topology").path("counts")).put("nodes", 1);
+        assertRejected(tooFewNodes);
+
+        ObjectNode tooFewEdges = validResult();
+        ((ObjectNode) tooFewEdges.path("topology").path("counts")).put("edges", 0);
+        assertRejected(tooFewEdges);
     }
 
     @Test
@@ -127,6 +259,31 @@ class PipesimNetworkResultValidatorTests {
         ((ArrayNode) duplicateNullPath.path("node").get(0).path("values")).add(
                 duplicateNullPath.path("node").get(0).path("values").get(0).deepCopy());
         assertRejected(duplicateNullPath);
+    }
+
+    @Test
+    void rejectsEmptyNumericContainersInFullAndPartialResults() {
+        ObjectNode emptyFullObject = validResult();
+        ((ObjectNode) emptyFullObject.path("system").get(0).path("values").get(0))
+                .set("value", objectMapper.createObjectNode());
+        assertRejected(emptyFullObject);
+
+        ObjectNode emptyFullArray = validResult();
+        ((ObjectNode) emptyFullArray.path("system").get(0).path("values").get(0))
+                .set("value", objectMapper.createArrayNode());
+        assertRejected(emptyFullArray);
+
+        ObjectNode emptyPartialObject = validResult();
+        emptyPartialObject.put("resultContract", "VALID_PARTIAL");
+        ((ObjectNode) emptyPartialObject.path("system").get(0).path("values").get(0))
+                .set("value", objectMapper.createObjectNode());
+        assertRejected(emptyPartialObject);
+
+        ObjectNode emptyPartialArray = validResult();
+        emptyPartialArray.put("resultContract", "VALID_PARTIAL");
+        ((ObjectNode) emptyPartialArray.path("system").get(0).path("values").get(0))
+                .set("value", objectMapper.createArrayNode());
+        assertRejected(emptyPartialArray);
     }
 
     @Test
@@ -190,5 +347,12 @@ class PipesimNetworkResultValidatorTests {
                     {"path":"profiles.Source 1 -> Sink 1.TotalDistance[1]","code":"UNAVAILABLE"},
                     {"path":"profiles.Source 1 -> Sink 1.Pressure[1]","code":"NON_FINITE"}]}
                 """);
+    }
+
+    private ObjectNode partialResult() {
+        ObjectNode partial = validResult();
+        partial.put("resultContract", "VALID_PARTIAL");
+        partial.remove(List.of("system", "node", "profiles", "summary", "messages", "quality"));
+        return partial;
     }
 }

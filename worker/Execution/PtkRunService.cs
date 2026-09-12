@@ -251,11 +251,7 @@ public sealed partial class PtkRunService : IDisposable
             descriptors.Add(await artifacts.WriteJsonElementAsync(directories.Output, "normalized-result.json", result.Value));
             terminalState = envelopeStatus == "partial" ? "PARTIAL_SUCCEEDED" : "SUCCEEDED";
             terminalError = envelopeStatus == "partial" ? parsedWarning : null;
-            terminalMessage = terminalState == "PARTIAL_SUCCEEDED"
-                ? "Nodal result succeeded; profile failed and was retained as an empty partial result."
-                : request.RunTask == "network"
-                    ? "PIPESIM Network result completed successfully."
-                    : "PIPESIM result completed successfully.";
+            terminalMessage = CompletionMessage(terminalState, request.RunTask!);
 
             var sourceShaAfter = await storage.ComputeSha256Async(sourceModel, CancellationToken.None);
             if (!string.Equals(sourceShaAfter, request.ExpectedModelSha256, StringComparison.Ordinal))
@@ -430,7 +426,16 @@ public sealed partial class PtkRunService : IDisposable
         return null;
     }
 
-    private static bool TryReadEnvelope(
+    internal static string CompletionMessage(string terminalState, string runTask) =>
+        terminalState == "PARTIAL_SUCCEEDED"
+            ? runTask == "network"
+                ? "PIPESIM Network calculation completed with a limited display result."
+                : "Nodal result succeeded; profile failed and was retained as an empty partial result."
+            : runTask == "network"
+                ? "PIPESIM Network result completed successfully."
+                : "PIPESIM result completed successfully.";
+
+    internal static bool TryReadEnvelope(
         JsonElement envelope,
         string expectedRunTask,
         out string? status,
@@ -458,22 +463,32 @@ public sealed partial class PtkRunService : IDisposable
         if (status is not ("ok" or "partial") || !envelope.TryGetProperty("result", out var resultElement) || resultElement.ValueKind != JsonValueKind.Object) return false;
         if (expectedRunTask == "network")
         {
-            if (status != "ok" ||
-                !resultElement.TryGetProperty("schemaVersion", out var networkSchema) || networkSchema.GetString() != "pipesim-network-result/1" ||
+            if (!resultElement.TryGetProperty("schemaVersion", out var networkSchema) || networkSchema.GetString() != "pipesim-network-result/1" ||
                 !resultElement.TryGetProperty("model_kind", out var modelKind) || modelKind.GetString() != "network" ||
                 !resultElement.TryGetProperty("runTask", out var networkTask) || networkTask.GetString() != "network" ||
-                !resultElement.TryGetProperty("resultContract", out var networkContract) || networkContract.GetString() != "VALID_FULL" ||
                 !resultElement.TryGetProperty("study", out var study) || study.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(study.GetString()) ||
                 !resultElement.TryGetProperty("simulationState", out var simulationState) || simulationState.GetString() != "Completed" ||
-                !resultElement.TryGetProperty("topology", out var topology) || topology.ValueKind != JsonValueKind.Object ||
-                !topology.TryGetProperty("nodes", out var topologyNodes) || topologyNodes.ValueKind != JsonValueKind.Array || topologyNodes.GetArrayLength() == 0 ||
-                !topology.TryGetProperty("edges", out var topologyEdges) || topologyEdges.ValueKind != JsonValueKind.Array || topologyEdges.GetArrayLength() == 0 ||
+                !resultElement.TryGetProperty("topology", out var topology) || !HasValidNetworkTopology(topology))
+            {
+                return false;
+            }
+            if (!resultElement.TryGetProperty("resultContract", out var networkContract)) return false;
+            if (status == "partial")
+            {
+                if (networkContract.GetString() != "VALID_PARTIAL" ||
+                    !HasSafePartialNetworkPayload(resultElement) ||
+                    !TryReadNetworkLimitedWarning(envelope, out warning)) return false;
+                result = resultElement.Clone();
+                return true;
+            }
+            if (networkContract.GetString() != "VALID_FULL" ||
                 !resultElement.TryGetProperty("system", out var system) || system.ValueKind != JsonValueKind.Array ||
                 !resultElement.TryGetProperty("node", out var node) || node.ValueKind != JsonValueKind.Array ||
                 !resultElement.TryGetProperty("profiles", out var profiles) || profiles.ValueKind != JsonValueKind.Array || profiles.GetArrayLength() == 0 ||
                 !resultElement.TryGetProperty("summary", out var summary) || summary.ValueKind != JsonValueKind.Object ||
                 !resultElement.TryGetProperty("messages", out var messages) || messages.ValueKind != JsonValueKind.Array ||
-                !resultElement.TryGetProperty("quality", out var quality) || quality.ValueKind != JsonValueKind.Array)
+                !resultElement.TryGetProperty("quality", out var quality) || quality.ValueKind != JsonValueKind.Array ||
+                !HasSafePartialNetworkPayload(resultElement))
             {
                 return false;
             }
@@ -501,6 +516,157 @@ public sealed partial class PtkRunService : IDisposable
         }
         result = resultElement.Clone();
         return true;
+    }
+
+    private static bool HasValidNetworkTopology(JsonElement topology)
+    {
+        if (topology.ValueKind != JsonValueKind.Object ||
+            !HasExactlyProperties(topology, "nodes", "edges", "counts") ||
+            !topology.TryGetProperty("nodes", out var nodes) || nodes.ValueKind != JsonValueKind.Array || nodes.GetArrayLength() == 0 ||
+            !topology.TryGetProperty("edges", out var edges) || edges.ValueKind != JsonValueKind.Array || edges.GetArrayLength() == 0 ||
+            !topology.TryGetProperty("counts", out var counts) || counts.ValueKind != JsonValueKind.Object ||
+            !HasExactlyProperties(counts, "nodes", "edges", "sources", "sinks", "flowlines"))
+        {
+            return false;
+        }
+
+        var nodeIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var node in nodes.EnumerateArray())
+        {
+            if (node.ValueKind != JsonValueKind.Object ||
+                !HasExactlyProperties(node, "id", "componentType") ||
+                !node.TryGetProperty("id", out var id) || id.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(id.GetString()) ||
+                !node.TryGetProperty("componentType", out var componentType) || componentType.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(componentType.GetString()) ||
+                HasControlCharacter(id.GetString()!) || HasControlCharacter(componentType.GetString()!) ||
+                !nodeIds.Add(id.GetString()!))
+            {
+                return false;
+            }
+        }
+
+        foreach (var edge in edges.EnumerateArray())
+        {
+            if (edge.ValueKind != JsonValueKind.Object ||
+                !HasExactlyProperties(edge, "source", "destination", "sourcePort") ||
+                !edge.TryGetProperty("source", out var source) || source.ValueKind != JsonValueKind.String ||
+                !edge.TryGetProperty("destination", out var destination) || destination.ValueKind != JsonValueKind.String ||
+                !edge.TryGetProperty("sourcePort", out var sourcePort) || sourcePort.ValueKind != JsonValueKind.String ||
+                string.IsNullOrWhiteSpace(source.GetString()) || string.IsNullOrWhiteSpace(destination.GetString()) ||
+                sourcePort.GetString()!.Length != 0 && string.IsNullOrWhiteSpace(sourcePort.GetString()) ||
+                HasControlCharacter(source.GetString()!) || HasControlCharacter(destination.GetString()!) || HasControlCharacter(sourcePort.GetString()!) ||
+                !nodeIds.Contains(source.GetString()!) || !nodeIds.Contains(destination.GetString()!))
+            {
+                return false;
+            }
+        }
+
+        foreach (var countName in new[] { "nodes", "edges", "sources", "sinks", "flowlines" })
+        {
+            if (!counts.TryGetProperty(countName, out var count) || count.ValueKind != JsonValueKind.Number ||
+                !count.TryGetInt32(out var value) || value < 0)
+            {
+                return false;
+            }
+        }
+
+        return counts.GetProperty("nodes").GetInt32() == nodes.GetArrayLength() &&
+               counts.GetProperty("edges").GetInt32() == edges.GetArrayLength() &&
+               counts.GetProperty("sources").GetInt32() == CountComponents(nodes, "SOURCE") &&
+               counts.GetProperty("sinks").GetInt32() == CountComponents(nodes, "SINK") &&
+               counts.GetProperty("flowlines").GetInt32() == CountComponents(nodes, "FLOWLINE");
+    }
+
+    private static int CountComponents(JsonElement nodes, string componentType) => nodes.EnumerateArray().Count(node =>
+        string.Equals(node.GetProperty("componentType").GetString(), componentType, StringComparison.OrdinalIgnoreCase));
+
+    private static bool HasSafePartialNetworkPayload(JsonElement result)
+    {
+        foreach (var section in new[] { "system", "node" })
+        {
+            if (result.TryGetProperty(section, out var groups) &&
+                (groups.ValueKind != JsonValueKind.Array || !groups.EnumerateArray().All(IsSafeScalarSeries))) return false;
+        }
+        if (result.TryGetProperty("profiles", out var profiles) &&
+            (profiles.ValueKind != JsonValueKind.Array || !profiles.EnumerateArray().All(IsSafeProfile))) return false;
+        return true;
+    }
+
+    private static bool IsSafeScalarSeries(JsonElement group) =>
+        group.ValueKind == JsonValueKind.Object && HasExactlyProperties(group, "variable", "unit", "values") &&
+        IsSafeTextProperty(group, "variable", false) && IsSafeTextProperty(group, "unit", true) &&
+        group.TryGetProperty("values", out var values) && values.ValueKind == JsonValueKind.Array && values.GetArrayLength() > 0 &&
+        values.EnumerateArray().All(item => item.ValueKind == JsonValueKind.Object && HasExactlyProperties(item, "name", "value") &&
+            IsSafeTextProperty(item, "name", false) && item.TryGetProperty("value", out var value) && HasSafeNumericLeaves(value));
+
+    private static bool IsSafeProfile(JsonElement profile)
+    {
+        if (profile.ValueKind != JsonValueKind.Object || !HasExactlyProperties(profile, "branch", "pointCount", "variables") ||
+            !IsSafeTextProperty(profile, "branch", false) || !profile.TryGetProperty("pointCount", out var pointCount) ||
+            !pointCount.TryGetInt32(out var count) || count < 0 || !profile.TryGetProperty("variables", out var variables) || variables.ValueKind != JsonValueKind.Array)
+            return false;
+        return variables.GetArrayLength() > 0 &&
+               variables.EnumerateArray().All(variable => IsSafeProfileSeries(variable, count)) &&
+               HasMatchingRequiredProfileSeries(variables, "TotalDistance") &&
+               HasMatchingRequiredProfileSeries(variables, "Pressure");
+    }
+
+    private static bool IsSafeProfileSeries(JsonElement variable, int pointCount) =>
+        variable.ValueKind == JsonValueKind.Object && HasExactlyProperties(variable, "variable", "unit", "values") &&
+        IsSafeTextProperty(variable, "variable", false) && IsSafeTextProperty(variable, "unit", true) &&
+        variable.TryGetProperty("values", out var values) && values.ValueKind == JsonValueKind.Array &&
+        values.GetArrayLength() > 0 && values.GetArrayLength() <= pointCount &&
+        (variable.GetProperty("variable").GetString() == "BranchEquipment"
+            ? values.EnumerateArray().All(IsSafeTextValue)
+            : values.EnumerateArray().All(HasSafeNumericLeaves));
+
+    private static bool HasMatchingRequiredProfileSeries(JsonElement variables, string requiredVariable)
+    {
+        JsonElement? values = null;
+        foreach (var variable in variables.EnumerateArray())
+        {
+            if (variable.GetProperty("variable").GetString() == requiredVariable)
+            {
+                values = variable.GetProperty("values");
+                break;
+            }
+        }
+        return values is { ValueKind: JsonValueKind.Array } series && series.GetArrayLength() > 0 &&
+               variables.EnumerateArray().Any(variable => variable.GetProperty("variable").GetString() ==
+                   (requiredVariable == "TotalDistance" ? "Pressure" : "TotalDistance") &&
+                   variable.GetProperty("values").GetArrayLength() == series.GetArrayLength());
+    }
+
+    private static bool HasSafeNumericLeaves(JsonElement value) => value.ValueKind switch
+    {
+        JsonValueKind.Null => true,
+        JsonValueKind.Number => value.TryGetDouble(out var number) && double.IsFinite(number),
+        JsonValueKind.Array => value.GetArrayLength() > 0 && value.EnumerateArray().All(HasSafeNumericLeaves),
+        JsonValueKind.Object => value.EnumerateObject().Any() && value.EnumerateObject().All(property => HasSafeNumericLeaves(property.Value)),
+        _ => false
+    };
+
+    private static bool IsSafeTextValue(JsonElement value) => value.ValueKind == JsonValueKind.Null ||
+        value.ValueKind == JsonValueKind.String && !HasControlCharacter(value.GetString()!);
+
+    private static bool IsSafeTextProperty(JsonElement value, string property, bool allowEmpty) =>
+        value.TryGetProperty(property, out var text) && text.ValueKind == JsonValueKind.String &&
+        (allowEmpty || !string.IsNullOrWhiteSpace(text.GetString())) && !HasControlCharacter(text.GetString()!);
+
+    private static bool HasExactlyProperties(JsonElement value, params string[] names) =>
+        value.EnumerateObject().Select(property => property.Name).OrderBy(name => name).SequenceEqual(names.OrderBy(name => name), StringComparer.Ordinal);
+
+    private static bool HasControlCharacter(string value) => value.Any(char.IsControl);
+
+    private static bool TryReadNetworkLimitedWarning(JsonElement envelope, out WorkerError? warning)
+    {
+        warning = null;
+        if (!envelope.TryGetProperty("warnings", out var warnings) || warnings.ValueKind != JsonValueKind.Array || warnings.GetArrayLength() != 1) return false;
+        try
+        {
+            warning = JsonSerializer.Deserialize<WorkerError>(warnings[0], new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        }
+        catch (JsonException) { return false; }
+        return warning is { Category: "PROTOCOL", Code: "NETWORK_RESULT_LIMITED" };
     }
 
     private static string Fingerprint(RunExecuteRequest request)

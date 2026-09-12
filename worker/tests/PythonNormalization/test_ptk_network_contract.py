@@ -1,3 +1,4 @@
+import json
 import math
 import sys
 import tempfile
@@ -6,7 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from worker import ptk_run
-from worker.ptk_network import format_validation_issues, inspect_network
+from worker.ptk_network import format_validation_issues, inspect_network, validate_network_result
 
 
 class Named:
@@ -149,6 +150,8 @@ class PtkNetworkContractTests(unittest.TestCase):
         self.assertEqual(["RUNNING_NETWORK", "COLLECTING"], [item[0] for item in events])
         result = envelope["result"]
         self.assertEqual("pipesim-network-result/1", result["schemaVersion"])
+        self.assertEqual("VALID_FULL", result["resultContract"])
+        self.assertTrue(validate_network_result(result, "Study 1"))
         self.assertEqual("Study 1", result["study"])
         self.assertEqual(2, len(result["profiles"]))
         self.assertEqual("ft", result["profiles"][0]["variables"][1]["unit"])
@@ -191,14 +194,41 @@ class PtkNetworkContractTests(unittest.TestCase):
             result["quality"],
         )
 
-    def test_network_run_rejects_text_in_numeric_result_series(self):
+    def test_completed_strict_invalid_network_result_drops_string_numeric_from_partial(self):
         model = FakeNetworkModel()
         model.network_task.results.system["SystemOutletPressure"]["Line-1"] = "100"
 
         envelope, _ = self.execute(model)
 
-        self.assertEqual("error", envelope["status"])
-        self.assertEqual("INVALID_NETWORK_RESULT_CONTRACT", envelope["error"]["code"])
+        self.assertEqual("partial", envelope["status"])
+        self.assertIsNone(envelope["error"])
+        self.assertEqual("VALID_PARTIAL", envelope["result"]["resultContract"])
+        self.assertEqual([], envelope["result"]["system"])
+        self.assertNotIn('"value": "100"', json.dumps(envelope, allow_nan=False))
+        self.assertEqual(
+            {
+                "category": "PROTOCOL",
+                "code": "NETWORK_RESULT_LIMITED",
+                "message": "PIPESIM Network returned partial display data; full result validation did not pass.",
+                "retryable": False,
+            },
+            envelope["warnings"][0],
+        )
+        json.dumps(envelope, allow_nan=False)
+
+    def test_completed_strict_invalid_network_result_drops_empty_numeric_containers_from_partial(self):
+        for value in ({}, []):
+            with self.subTest(value=value):
+                model = FakeNetworkModel()
+                model.network_task.results.system["SystemOutletPressure"]["Line-1"] = value
+
+                envelope, _ = self.execute(model)
+
+                self.assertEqual("partial", envelope["status"])
+                self.assertEqual("VALID_PARTIAL", envelope["result"]["resultContract"])
+                self.assertEqual([], envelope["result"]["system"])
+                self.assertNotIn(value, [item["value"] for group in envelope["result"]["system"] for item in group["values"]])
+                json.dumps(envelope, allow_nan=False)
 
     def test_validation_issue_diagnostics_are_sanitized(self):
         issue = types.SimpleNamespace(
