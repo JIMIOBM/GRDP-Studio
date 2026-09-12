@@ -1,6 +1,6 @@
 # GRDP-Studio Software Integration Progress
 
-Last verified: 2026-09-10
+Last verified: 2026-09-12
 
 ## Repository State
 
@@ -99,6 +99,25 @@ five Artifacts with matching manifest/API SHA-256; source SHA unchanged; Worker 
 Run 8 repeated the same VALID_FULL topology/variable/profile/quality dimensions in 23.366 seconds,
 published five Artifacts, confirmed process-tree exit, and returned the Worker to idle.
 ```
+
+Latest Demo-first verification on 2026-09-12:
+
+```text
+CSN_308_Water Injection Network, Project 6 / Model Version 7 / Run 18
+CREATED -> QUEUED -> CLAIMED -> PREPARING -> RUNNING_NETWORK -> COLLECTING -> PARTIAL_SUCCEEDED
+VALID_PARTIAL in 15.564 seconds; PIPESIM returned simulationState=Completed.
+The Worker accepts the model's Source + Well source-count convention for partial results,
+removes raw simulator diagnostics from the limited display payload, and Spring Boot persists
+the safe topology as a real partial result. Vue labels it "部分真实计算结果" and does not
+claim complete tables, profiles, or a VALID_FULL result.
+
+Run 20 repeated the same real partial-result path after the Worker root-whitelist hardening:
+`PREPARING -> RUNNING_NETWORK -> COLLECTING -> PARTIAL_SUCCEEDED` in 18.645 seconds.
+```
+
+- The run page now presents persisted execution events, cleanup outcome and Artifact metadata without exposing paths, raw worker logs, or download links.
+- ECLIPSE successful runs without an RSM Summary now explicitly state that no usable Summary data was returned; no curve is inferred.
+- The demo workspace now follows the parsing/fusion visual language and provides a state-derived project -> import -> validation -> calculation -> result guide; its result page keeps audit metadata collapsed below the primary result.
 
 ### Environment And Lifecycle
 

@@ -304,7 +304,12 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
     if (requestGeneration !== runDetailGeneration || !matchesRunContext(expectedNavigation, expectedVersionId) ||
       detail?.id !== runId || detail?.modelVersionId !== expectedVersionId) return null
     selectedRun.value = detail
-    if (!isTerminalRunStatus(detail.status)) {
+    if (isTerminalRunStatus(detail.status)) {
+      activeRun.value = null
+      runPollingUnavailable.value = false
+      stopRunPolling()
+      syncElapsed(detail)
+    } else {
       activeRun.value = detail
       startRunPolling(detail.id)
       syncElapsed(detail)

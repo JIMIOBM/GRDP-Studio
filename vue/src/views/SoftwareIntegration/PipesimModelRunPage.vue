@@ -127,10 +127,15 @@ const copyNetworkProfile = profile => {
 }
 const hasExactFields = (value, fields) => value && typeof value === 'object' && !Array.isArray(value) &&
   Object.keys(value).length === fields.length && fields.every(field => Object.prototype.hasOwnProperty.call(value, field))
+const containsUnsafeLocalPath = value => {
+  let decoded = value
+  try { decoded = decodeURIComponent(value) } catch { /* Keep malformed URI text in its original form. */ }
+  return /(?:^|[^a-z0-9])(?:[a-z]:(?:[\\/]|[^\s])|\\\\[^\\/\s]+[\\/]|file:|net\.pipe:\/\/)|(?:^|[^a-z0-9:])\/\/[^/\s]+\//i.test(decoded)
+}
 const isSafeTopologyText = (value, allowEmpty = false) => typeof value === 'string' && value.length <= 1000 &&
   (allowEmpty ? value.length === 0 || value.trim().length > 0 : value.trim().length > 0) &&
   !/[\u0000-\u001f\u007f-\u009f]/.test(value) &&
-  !/net\.pipe:\/\/localhost\/pipe\/[^\s'"]+|(?:^|[^a-z0-9])[a-z]:[\\/]/i.test(value)
+  !containsUnsafeLocalPath(value)
 const safeNetworkTopology = topology => {
   const nodes = topology?.nodes
   const edges = topology?.edges
@@ -240,6 +245,50 @@ const stages = computed(() => {
 const currentStageIndex = computed(() => stages.value.findIndex(stage => stage.status === displayRun.value?.status))
 const selectedError = computed(() => selectedRun.value?.error || null)
 const safeCode = value => typeof value === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(value) ? value : null
+const executionEventTypes = new Set(['STATE', 'REQUEUED', 'WORKER'])
+const executionArtifactTypes = new Set(['manifest', 'normalized-result', 'raw-response', 'request', 'log', 'output'])
+const executionCleanupFields = new Map([
+  ['processTreeExitConfirmed', '进程树已退出'],
+  ['inputDeleted', '输入副本已删除'],
+  ['workDirectoryDeleted', '工作目录已删除'],
+  ['killUsed', '已执行终止清理']
+])
+const safeExecutionText = value => isSafeTopologyText(value) && value.length <= 240 ? value : null
+const safeTimestamp = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?$/.test(value) ? value : null
+const safeArtifactName = value => {
+  if (typeof value !== 'string' || value.length > 256) return null
+  const name = value.split(/[\\/]/).pop()
+  return /^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}$/.test(name) ? name : null
+}
+const safeSha256 = value => typeof value === 'string' && /^[a-f0-9]{64}$/i.test(value) ? value.toLowerCase() : null
+const isExecutionPanelRun = computed(() => displayRun.value && statusMeta[displayRun.value.status] &&
+  ['nodal', 'profile', 'combined', 'network', 'eclipse'].includes(displayRun.value.runType))
+const executionEvents = computed(() => {
+  if (!isExecutionPanelRun.value || !Array.isArray(displayRun.value.events)) return []
+  return displayRun.value.events.map(event => ({
+    type: executionEventTypes.has(event?.type) ? event.type : '受控事件',
+    status: statusMeta[event?.status]?.[0] || '状态不可用',
+    message: safeExecutionText(event?.message) || '受控事件消息不可用',
+    occurredAt: safeTimestamp(event?.occurredAt) || '时间不可用'
+  }))
+})
+const executionCleanup = computed(() => {
+  const cleanup = displayRun.value?.cleanup
+  if (!isExecutionPanelRun.value || !cleanup || typeof cleanup !== 'object' || Array.isArray(cleanup)) return []
+  return [...executionCleanupFields].flatMap(([key, label]) => typeof cleanup[key] === 'boolean'
+    ? [{ key: label, value: cleanup[key] ? '是' : '否' }]
+    : [])
+})
+const executionArtifacts = computed(() => {
+  if (!isExecutionPanelRun.value || !Array.isArray(displayRun.value.artifacts)) return []
+  return displayRun.value.artifacts.map(artifact => ({
+    name: safeArtifactName(artifact?.name) || '文件名不可用',
+    type: executionArtifactTypes.has(artifact?.type) ? artifact.type : '类型不可用',
+    size: Number.isSafeInteger(artifact?.sizeBytes) && artifact.sizeBytes >= 0 ? `${artifact.sizeBytes.toLocaleString()} B` : '大小不可用',
+    sha256: safeSha256(artifact?.sha256) || '校验值不可用',
+    expiresAt: artifact?.expiresAt === null || artifact?.expiresAt === undefined ? '-' : (safeTimestamp(artifact.expiresAt) || '到期时间不可用')
+  }))
+})
 const safeRunError = computed(() => selectedError.value ? {
   category: safeCode(selectedError.value.category) || 'EXECUTION',
   code: safeCode(selectedError.value.code) || 'RUN_NOT_ACCEPTED',
@@ -274,6 +323,7 @@ const formatElapsed = value => {
   return hours ? `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}` : `${minutes}:${String(seconds).padStart(2, '0')}`
 }
 const errorMessage = () => '请求失败，请稍后重试'
+const manualRefreshing = ref(false)
 const eclipseErrorCategories = new Set(['MODEL', 'ENVIRONMENT', 'EXECUTION', 'SOLVER', 'CLEANUP'])
 const eclipseErrorCodes = new Set([
   'ECLIPSE_UNAVAILABLE',
@@ -340,6 +390,21 @@ const selectHistoryRun = async runId => {
 const selectHistoricalSuccessfulNetworkRun = () => {
   if (historicalSuccessfulNetworkRun.value) selectHistoryRun(historicalSuccessfulNetworkRun.value.id)
   else activeTab.value = 'history'
+}
+const refreshRunManually = async () => {
+  const runId = displayRun.value?.id
+  if (!runId || manualRefreshing.value) return
+  manualRefreshing.value = true
+  try {
+    await store.selectRun(runId)
+    // Reload the persisted summary so a newly terminal run clears the stale active run.
+    await store.loadRunHistory(activeVersionId.value, false)
+    ElMessage.success('运行状态已刷新')
+  } catch (error) {
+    ElMessage.error(errorMessage(error))
+  } finally {
+    manualRefreshing.value = false
+  }
 }
 
 watch(() => selectedRun.value?.id, () => {
@@ -441,11 +506,11 @@ defineExpose({ eclipseRunRequest, reloadEclipseRunHistory })
       v-if="runPollingUnavailable"
       class="run-state-alert"
       title="运行状态暂时无法刷新"
-      description="已停止自动刷新，避免持续加载。请稍后在运行记录中重新选择该运行查看持久状态。"
+      description="已停止自动刷新，避免持续加载。可手动读取一次持久状态，或稍后在运行记录中重新选择该运行。"
       type="warning"
       :closable="false"
       show-icon
-    />
+    ><template #default><el-button link type="primary" :loading="manualRefreshing" @click="refreshRunManually">手动刷新</el-button></template></el-alert>
     <section v-if="displayRun" class="run-provenance" aria-label="真实运行来源">
       <span>模型：{{ displayRun.modelName || activeModel.name }}</span><span>版本：v{{ displayRun.versionNo || activeVersion?.versionNo || '-' }}</span><span>Study：{{ displayRun.study || '不适用' }}</span><span>运行 ID：{{ displayRun.id }}</span><span>创建：{{ displayRun.createdAt || '-' }}</span><span>用时：{{ formatElapsed(displayRun.elapsedMillis) }}</span>
     </section>
@@ -536,17 +601,55 @@ defineExpose({ eclipseRunRequest, reloadEclipseRunHistory })
         />
       </el-tab-pane>
     </el-tabs>
+    <details v-if="isExecutionPanelRun" class="execution-panel" aria-label="持久化执行详情">
+      <summary>
+        <span><strong>执行详情</strong><small>持久化事件、清理结果与 Artifact 元数据</small></span>
+        <span class="execution-count">事件 {{ executionEvents.length }} · Artifact {{ executionArtifacts.length }}</span>
+      </summary>
+      <div class="execution-panel-content">
+        <div class="execution-section">
+          <h3>事件 <span>{{ executionEvents.length }}</span></h3>
+          <div v-if="executionEvents.length" class="technical-table-scroll">
+            <el-table :data="executionEvents" border size="small" max-height="220" class="technical-table">
+              <el-table-column prop="type" label="类型" min-width="100" />
+              <el-table-column prop="status" label="状态" min-width="110" />
+              <el-table-column prop="message" label="消息" min-width="220" show-overflow-tooltip />
+              <el-table-column prop="occurredAt" label="时间" min-width="180" />
+            </el-table>
+          </div>
+          <p v-else class="execution-empty">当前运行没有持久化事件。</p>
+        </div>
+        <div v-if="executionCleanup.length" class="execution-section">
+          <h3>清理结果</h3>
+          <dl class="cleanup-grid"><div v-for="entry in executionCleanup" :key="entry.key"><dt>{{ entry.key }}</dt><dd>{{ entry.value }}</dd></div></dl>
+        </div>
+        <div class="execution-section">
+          <h3>Artifact <span>{{ executionArtifacts.length }}</span></h3>
+          <div v-if="executionArtifacts.length" class="technical-table-scroll">
+            <el-table :data="executionArtifacts" border size="small" max-height="220" class="technical-table">
+              <el-table-column prop="name" label="文件名" min-width="150" show-overflow-tooltip />
+              <el-table-column prop="type" label="类型" min-width="120" />
+              <el-table-column prop="size" label="大小" width="120" />
+              <el-table-column prop="sha256" label="SHA-256" min-width="260" show-overflow-tooltip />
+              <el-table-column prop="expiresAt" label="到期时间" min-width="180" />
+            </el-table>
+          </div>
+          <p v-else class="execution-empty">当前运行没有已发布的 Artifact。</p>
+        </div>
+      </div>
+    </details>
   </section>
 </template>
 
 <style lang="scss" scoped>
-.model-run-page { min-width: 0; min-height: 0; padding: 22px 28px 30px; color: #303133; overflow: auto; }
-.model-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding-bottom: 16px; border-bottom: 1px solid #e4e7ed; }
+.model-run-page { min-width: 0; min-height: 0; padding: 20px 24px 28px; color: #303133; overflow: auto; background: #fafafa; }
+.model-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 0 0 14px; border-bottom: 1px solid #dcdfe6; }
 .title-line { display: flex; align-items: center; gap: 10px; }
 h1 { margin: 0; font-size: 19px; font-weight: 600; }
 .model-header p { margin: 5px 0 0; color: #909399; font-size: 12px; }
 .run-summary { display: flex; align-items: center; gap: 12px; color: #606266; font-size: 13px; }
-.model-readiness, .run-provenance { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 22px; margin-top: 14px; padding: 11px 14px; border: 1px solid #e4e9f0; background: #f8fafc; color: #606266; font-size: 12px; }.model-readiness div { display: flex; align-items: baseline; gap: 5px; }.model-readiness strong { color: #2b3d52; font-size: 16px; }.model-readiness p { flex: 1 1 300px; margin: 0; }.run-provenance span { overflow-wrap: anywhere; }.run-state-alert { margin-bottom: 14px; }
+.model-readiness, .run-provenance { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; margin-top: 12px; padding: 9px 12px; border: 1px solid #e1e3e6; background: #f5f5f4; color: #606266; font-size: 12px; }.model-readiness div { display: flex; align-items: baseline; gap: 5px; }.model-readiness strong { color: #303133; font-size: 15px; }.model-readiness p { flex: 1 1 300px; margin: 0; }.run-provenance span { overflow-wrap: anywhere; }.run-state-alert { margin-bottom: 12px; }
+.execution-panel { min-width: 0; margin-top: 14px; border: 1px solid #dcdfe6; background: #fff; }.execution-panel summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 12px; cursor: pointer; list-style: none; color: #303133; font-size: 13px; }.execution-panel summary::-webkit-details-marker { display: none; }.execution-panel summary::before { content: '+'; margin-right: 8px; color: #606266; font-weight: 600; }.execution-panel[open] summary { border-bottom: 1px solid #e4e7ed; background: #f5f5f4; }.execution-panel[open] summary::before { content: '-'; }.execution-panel summary > span:first-of-type { display: flex; align-items: baseline; gap: 9px; min-width: 0; }.execution-panel summary small, .execution-count { color: #909399; font-size: 12px; font-weight: 400; }.execution-count { white-space: nowrap; }.execution-panel-content { padding: 12px; }.execution-section + .execution-section { margin-top: 14px; }.execution-section h3 { margin: 0 0 7px; color: #303133; font-size: 13px; }.execution-section h3 span { color: #909399; font-weight: 400; }.technical-table-scroll { overflow-x: auto; }.technical-table { min-width: 680px; }.execution-empty { margin: 0; padding: 8px 10px; color: #909399; font-size: 12px; background: #f5f5f4; }.cleanup-grid { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 0; padding: 9px 10px; background: #f5f5f4; font-size: 12px; }.cleanup-grid div { display: flex; gap: 6px; }.cleanup-grid dt { color: #737a84; }.cleanup-grid dd { margin: 0; color: #303133; }
 .run-controls { display: grid; grid-template-columns: minmax(150px, 210px) minmax(170px, 240px) auto auto; align-items: end; gap: 14px; padding: 18px 0; }
 .run-controls.eclipse-run-controls { grid-template-columns: minmax(150px, 210px) auto; }
 .run-controls label, .run-type-control { min-width: 0; }
@@ -554,26 +657,27 @@ h1 { margin: 0; font-size: 19px; font-weight: 600; }
 .run-controls .el-select { width: 100%; }
 .control-actions { display: flex; gap: 8px; }
 .eclipse-unavailable { margin-bottom: 14px; }.eclipse-request-summary { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 0 0 14px; padding: 11px 14px; border: 1px solid #e4e9f0; background: #f8fafc; color: #606266; font-size: 12px; }
-.stage-strip { display: flex; align-items: center; gap: 0; min-height: 48px; margin-bottom: 14px; padding: 0 18px; border: 1px solid #e4e9f0; background: #f8fafc; }
+.stage-strip { display: flex; align-items: center; gap: 0; min-height: 44px; margin-bottom: 12px; padding: 0 14px; border: 1px solid #dcdfe6; background: #f5f5f4; }
 .stage { position: relative; min-width: 120px; display: flex; align-items: center; gap: 7px; color: #909399; font-size: 12px; }
 .stage:not(:last-of-type)::after { content: ''; width: 48px; height: 1px; margin: 0 10px; background: #d7dee8; }
 .stage i { width: 8px; height: 8px; border: 2px solid #c0c4cc; border-radius: 50%; background: #fff; }
-.stage.active { color: #2b6cb3; font-weight: 600; }.stage.active i { border-color: #2b6cb3; background: #2b6cb3; }
-.stage.done { color: #67c23a; }.stage.done i { border-color: #67c23a; background: #67c23a; }
+.stage.active { color: #303133; font-weight: 600; }.stage.active i { border-color: #d9a300; background: #f4d000; box-shadow: 0 0 0 3px #fff3bf; }
+.stage.done { color: #606266; }.stage.done i { border-color: #606266; background: #606266; }
 .queue-stage { margin-left: auto; color: #606266; }
 .partial-alert, .network-partial-alert { margin-bottom: 14px; }.network-partial-alert { border: 2px solid #d97706; background: #fff7e6; }.network-partial-alert :deep(.el-alert__title) { color: #9a4d00; font-size: 16px; font-weight: 700; }.network-partial-alert :deep(.el-alert__description) { color: #7a430a; font-weight: 600; }
 .structured-error { margin-bottom: 14px; padding: 12px 14px; border-left: 3px solid #d94b4b; background: #fff3f3; color: #8b2525; }
 .structured-error dl { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 0; font-size: 12px; }
 .structured-error dl div { display: flex; gap: 5px; }.structured-error dt { color: #a85b5b; }.structured-error dd { margin: 0; }
-.result-tabs { min-height: 0; }.result-tabs :deep(.el-tabs__header) { margin-bottom: 14px; }.result-tabs :deep(.el-tabs__active-bar) { background: #f4d000; }.result-tabs :deep(.el-tabs__item.is-active) { color: #303133; font-weight: 600; }
+.result-tabs { min-height: 0; margin-top: 4px; padding: 0 12px 12px; border: 1px solid #dcdfe6; background: #fff; }.result-tabs :deep(.el-tabs__header) { margin: 0 -12px 12px; padding: 0 12px; border-bottom: 1px solid #e4e7ed; background: #f5f5f4; }.result-tabs :deep(.el-tabs__nav-wrap::after) { background: transparent; }.result-tabs :deep(.el-tabs__active-bar) { height: 3px; background: #f4d000; }.result-tabs :deep(.el-tabs__item) { height: 40px; color: #606266; font-size: 13px; }.result-tabs :deep(.el-tabs__item.is-active) { color: #303133; font-weight: 600; }
 @media (max-width: 1120px) {
   .run-controls { grid-template-columns: 1fr 1fr; }
   .control-actions { align-self: end; }
 }
 @media (max-width: 760px) {
-  .model-run-page { padding: 16px; }
+  .model-run-page { padding: 14px; }
   .model-header { align-items: flex-start; flex-direction: column; }
   .run-controls { grid-template-columns: 1fr; }
   .stage-strip { overflow-x: auto; }
+  .execution-panel summary { align-items: flex-start; }.execution-panel summary > span:first-of-type { flex-direction: column; gap: 2px; }.execution-count { display: none; }.execution-panel-content { padding: 10px; }.result-tabs { padding: 0 10px 10px; }.result-tabs :deep(.el-tabs__header) { margin-right: -10px; margin-left: -10px; padding: 0 10px; overflow-x: auto; }
 }
 </style>

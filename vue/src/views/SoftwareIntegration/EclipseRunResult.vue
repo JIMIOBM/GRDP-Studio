@@ -34,6 +34,15 @@ const series = computed(() => result.value?.summary?.series || [])
 const seriesKey = (item, index) => `${item.keyword}:${item.objectName || ''}:${index}`
 const selectedSeries = computed(() => series.value.find((item, index) => seriesKey(item, index) === selectedSeriesKey.value) || null)
 const hasSummary = computed(() => result.value?.summary !== null && Array.isArray(result.value?.summary?.series))
+const hasUsableSummary = computed(() => series.value.some(item => item.points.length > 0))
+const isTerminalSuccess = computed(() => props.run?.status === 'SUCCEEDED')
+const successfulResultUnavailable = computed(() => isTerminalSuccess.value && !result.value)
+const summaryNotice = computed(() => {
+  if (!isTerminalSuccess.value || !result.value || hasUsableSummary.value) return null
+  return result.value.summary === null
+    ? '本次 ECLIPSE 运行已成功结束，但未提供 RSM Summary 数据；页面不会补充或推测曲线。'
+    : '本次 ECLIPSE 运行已成功结束，但 RSM Summary 没有可用序列；页面不会补充或推测曲线。'
+})
 const safeCode = value => typeof value === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(value) ? value : null
 const cleanupFields = new Map([
   ['processTreeExitConfirmed', '进程树已退出'],
@@ -48,12 +57,24 @@ const cleanupEntries = computed(() => {
     ? [{ key: label, value: cleanup[key] ? '是' : '否' }]
     : [])
 })
+const allowedErrors = new Map([
+  ['ECLIPSE_UNAVAILABLE', 'ENVIRONMENT'],
+  ['ECLIPSE_VERSION_MISMATCH', 'ENVIRONMENT'],
+  ['ECLIPSE_INCLUDE_UNSUPPORTED', 'MODEL'],
+  ['ECLIPSE_CLEANUP_FAILED', 'CLEANUP'],
+  ['ECLIPSE_RUN_FAILED', 'EXECUTION'],
+  ['ECLIPSE_SOLVER_FAILED', 'SOLVER'],
+  ['LICENSE_UNAVAILABLE', 'LICENSE']
+])
 const error = computed(() => {
   const value = props.run?.error
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const category = safeCode(value.category)
+  const code = safeCode(value.code)
+  if (!code || allowedErrors.get(code) !== category) return null
   return {
-    category: safeCode(value.category),
-    code: safeCode(value.code),
+    category,
+    code,
     retryable: value.retryable === true
   }
 })
@@ -110,12 +131,13 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="eclipse-result">
-    <el-result v-if="!result" icon="info" title="尚无已验证真实计算结果" :sub-title="error ? failedRunGuidance : '尚未选择成功运行；仅在真实运行通过结果契约后展示 ECLEND、Summary 和 Artifact。'">
+    <el-result v-if="!result" icon="info" :title="successfulResultUnavailable ? '本次 ECLIPSE 运行已成功结束，但可验证运行结果不可用' : '尚无已验证真实计算结果'" :sub-title="successfulResultUnavailable ? '未接收到符合结果契约的运行结果，因此无法确认是否存在 RSM Summary，也不会展示推测数据。' : (error ? failedRunGuidance : '尚未选择成功运行；仅在真实运行通过结果契约后展示 ECLEND、Summary 和 Artifact。')">
       <template v-if="error" #extra>
-        <el-tag type="danger">{{ error.category || 'EXECUTION' }} / {{ error.code || 'RUN_NOT_ACCEPTED' }}</el-tag>
+        <el-tag type="danger">{{ error.category }} / {{ error.code }}</el-tag>
       </template>
     </el-result>
     <template v-else>
+    <el-alert v-if="summaryNotice" type="info" :closable="false" :title="summaryNotice" />
     <section class="result-panel">
       <div class="panel-heading"><div><span class="kicker">ECLIPSE 100</span><h2>ECLEND 计数</h2></div><el-tag :type="run?.status === 'SUCCEEDED' ? 'success' : 'info'">{{ run?.status || '-' }}</el-tag></div>
       <div v-if="counts" class="count-strip"><div v-for="item in countItems" :key="item.key"><span>{{ item.label }}</span><strong :class="{ failure: ['problems', 'errors', 'bugs'].includes(item.key) && item.value > 0 }">{{ item.value }}</strong></div></div>
