@@ -15,7 +15,15 @@ const PROFILE_VARIABLES = [
   { variable: 'DensityFluidInSitu', label: '原位流体密度', color: '#477A5B' },
   { variable: 'ZFactorGasInSitu', label: '原位气体 Z 因子', color: '#7C4D9E' }
 ]
-const COMPONENT_COLORS = ['#2B6CB3', '#D97706', '#477A5B', '#7C4D9E', '#B45353', '#3F7C85', '#6B7280']
+const TOPOLOGY_FAMILIES = [
+  { key: 'upstream', name: '上游 / 井', color: '#216B93' },
+  { key: 'transport', name: '输送', color: '#3F6178' },
+  { key: 'control', name: '控制', color: '#B7791F' },
+  { key: 'rotating', name: '旋转设备', color: '#76539B' },
+  { key: 'process', name: '工艺设备', color: '#4D7E67' },
+  { key: 'terminal', name: '出口', color: '#A94F4A' },
+  { key: 'quiet', name: '连接 / 其他', color: '#8995A3' }
+]
 
 const topologyElement = ref(null)
 const profileElement = ref(null)
@@ -94,25 +102,38 @@ const detailText = value => {
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
 })[character])
-const componentColor = componentType => {
-  const type = String(componentType || '')
-  const lower = type.toLowerCase()
-  if (lower.includes('source')) return '#2B6CB3'
-  if (lower.includes('sink')) return '#B45353'
-  let hash = 0
-  for (let index = 0; index < type.length; index += 1) hash = ((hash << 5) - hash + type.charCodeAt(index)) | 0
-  return COMPONENT_COLORS[Math.abs(hash) % COMPONENT_COLORS.length]
+const topologyFamily = componentType => {
+  const type = String(componentType || '').toLowerCase()
+  if (type.includes('source') || type.includes('well')) return 'upstream'
+  if (type.includes('sink')) return 'terminal'
+  if (type.includes('flowline') || type.includes('pipeline') || type.includes('pipe')) return 'transport'
+  if (type.includes('junction') || type.includes('manifold') || type.includes('tee')) return 'quiet'
+  if (type.includes('valve') || type.includes('choke') || type.includes('control') || type.includes('regulator')) return 'control'
+  if (type.includes('pump') || type.includes('compressor') || type.includes('turbine') || type.includes('rotat')) return 'rotating'
+  if (type.includes('separator') || type.includes('heater') || type.includes('cooler') || type.includes('exchanger') || type.includes('tank') || type.includes('process')) return 'process'
+  return 'quiet'
 }
+const topologyFamilyMeta = componentType =>
+  TOPOLOGY_FAMILIES.find(family => family.key === topologyFamily(componentType)) || TOPOLOGY_FAMILIES.at(-1)
 const componentSymbol = componentType => {
-  const lower = String(componentType || '').toLowerCase()
-  if (lower.includes('source')) return 'circle'
-  if (lower.includes('sink')) return 'rect'
-  if (lower.includes('junction')) return 'diamond'
-  return 'roundRect'
+  const type = String(componentType || '').toLowerCase()
+  if (type.includes('well')) return 'circle'
+  if (type.includes('source')) return 'triangle'
+  if (type.includes('sink')) return 'rect'
+  if (type.includes('flowline') || type.includes('pipeline') || type.includes('pipe')) return 'roundRect'
+  if (type.includes('junction') || type.includes('manifold') || type.includes('tee')) return 'circle'
+  if (type.includes('valve') || type.includes('choke') || type.includes('control') || type.includes('regulator')) return 'diamond'
+  if (type.includes('pump') || type.includes('compressor') || type.includes('turbine') || type.includes('rotat')) return 'pin'
+  if (type.includes('separator') || type.includes('heater') || type.includes('cooler') || type.includes('exchanger') || type.includes('tank') || type.includes('process')) return 'rect'
+  return 'circle'
+}
+const shortTopologyLabel = value => {
+  const text = String(value ?? '')
+  return text.length > 18 ? `${text.slice(0, 17)}…` : text
 }
 
 const graphData = () => {
-  const nodes = topologyNodes.value
+  const nodes = [...topologyNodes.value].sort((left, right) => String(left.id).localeCompare(String(right.id)))
   const edges = topologyEdges.value
   const ids = nodes.map(node => String(node.id))
   const knownIds = new Set(ids)
@@ -125,9 +146,10 @@ const graphData = () => {
     indegrees.set(destination, indegrees.get(destination) + 1)
     nextNodes.get(source).push(destination)
   })
+  nextNodes.forEach(destinations => destinations.sort((left, right) => left.localeCompare(right)))
 
   const levels = new Map()
-  const queue = ids.filter(id => indegrees.get(id) === 0)
+  const queue = ids.filter(id => indegrees.get(id) === 0).sort((left, right) => left.localeCompare(right))
   queue.forEach(id => levels.set(id, 0))
   for (let index = 0; index < queue.length; index += 1) {
     const source = queue[index]
@@ -137,12 +159,13 @@ const graphData = () => {
       if (indegrees.get(destination) === 0) queue.push(destination)
     })
   }
-  ids.forEach(id => {
-    if (levels.has(id)) return
+
+  // Remaining nodes are cycles. Keeping them in a deterministic rank makes every returned item visible without inferring flow.
+  ids.filter(id => !levels.has(id)).forEach((id, index) => {
     const incomingLevels = edges
       .filter(edge => String(edge.destination) === id && levels.has(String(edge.source)))
       .map(edge => levels.get(String(edge.source)))
-    levels.set(id, incomingLevels.length ? Math.max(...incomingLevels) + 1 : 0)
+    levels.set(id, incomingLevels.length ? Math.max(...incomingLevels) + 1 : index)
   })
 
   const columns = new Map()
@@ -151,25 +174,25 @@ const graphData = () => {
     if (!columns.has(level)) columns.set(level, [])
     columns.get(level).push(id)
   })
-  const categories = [...new Set(nodes.map(node => node.componentType))].map(name => ({
-    name,
-    itemStyle: { color: componentColor(name) }
-  }))
+  const categories = TOPOLOGY_FAMILIES.map(family => ({ name: family.name, itemStyle: { color: family.color } }))
   const data = nodes.map(node => {
     const id = String(node.id)
     const level = levels.get(id) || 0
     const column = columns.get(level)
     const row = column.indexOf(id)
+    const family = topologyFamilyMeta(node.componentType)
+    const quiet = family.key === 'quiet'
     return {
       id,
       name: id,
+      shortLabel: shortTopologyLabel(id),
       componentType: node.componentType,
-      category: categories.findIndex(category => category.name === node.componentType),
-      x: level * 230,
-      y: (row - (column.length - 1) / 2) * 92,
+      category: TOPOLOGY_FAMILIES.findIndex(category => category.key === family.key),
+      x: level * 178,
+      y: (row - (column.length - 1) / 2) * 72,
       symbol: componentSymbol(node.componentType),
-      symbolSize: 34,
-      itemStyle: { color: componentColor(node.componentType), borderColor: '#fff', borderWidth: 1.5 }
+      symbolSize: quiet ? 14 : 26,
+      itemStyle: { color: family.color, borderColor: quiet ? '#D4DCE5' : '#FFFFFF', borderWidth: quiet ? 1 : 1.5, opacity: quiet ? 0.72 : 1 }
     }
   })
   const links = edges.map((edge, index) => ({
@@ -201,27 +224,18 @@ const renderTopologyChart = async () => {
       formatter: params => {
         if (params.dataType === 'edge') {
           const port = params.data.sourcePort ? `<br/>源端口：${escapeHtml(params.data.sourcePort)}` : ''
-          return `${escapeHtml(params.data.source)} → ${escapeHtml(params.data.target)}${port}`
+          return `返回的连接方向<br/><strong>${escapeHtml(params.data.source)} → ${escapeHtml(params.data.target)}</strong>${port}`
         }
-        return `<strong>${escapeHtml(params.data.name)}</strong><br/>组件类型：${escapeHtml(params.data.componentType)}`
+        return `<strong>${escapeHtml(params.data.name)}</strong><br/>组件类型：${escapeHtml(params.data.componentType)}<br/>功能分类：${escapeHtml(TOPOLOGY_FAMILIES[params.data.category]?.name || '连接 / 其他')}`
       }
-    },
-    legend: {
-      show: categories.length > 0 && categories.length <= 10,
-      top: 8,
-      left: 'center',
-      data: categories.map(category => category.name),
-      itemWidth: 14,
-      itemHeight: 10,
-      textStyle: { color: '#606266', fontSize: 11 }
     },
     series: [{
       type: 'graph',
       layout: 'none',
-      left: 54,
-      right: 70,
-      top: categories.length && categories.length <= 10 ? 52 : 30,
-      bottom: 34,
+      left: 38,
+      right: 48,
+      top: 16,
+      bottom: 26,
       roam: true,
       draggable: false,
       data,
@@ -229,8 +243,9 @@ const renderTopologyChart = async () => {
       categories,
       edgeSymbol: ['none', 'arrow'],
       edgeSymbolSize: [0, 8],
-      label: { show: true, position: 'right', color: '#303133', fontSize: 11 },
-      lineStyle: { color: '#8A98AA', width: 1.4, opacity: 0.82, curveness: 0.04 },
+      label: { show: true, position: 'right', distance: 5, color: '#344254', fontSize: 10, formatter: params => params.data.shortLabel, overflow: 'truncate', width: 120, hideOverlap: true },
+      labelLayout: { hideOverlap: true },
+      lineStyle: { color: '#7D91A5', width: 1.25, opacity: 0.78, curveness: 0.06 },
       emphasis: { focus: 'adjacency', lineStyle: { width: 2.2, opacity: 1 } }
     }]
   }, true)
@@ -296,6 +311,10 @@ const resizeCharts = () => {
   topologyChart?.resize()
   profileChart?.resize()
 }
+const resetTopologyView = () => {
+  topologyChart?.dispatchAction({ type: 'restore' })
+  topologyChart?.resize()
+}
 const observeChartElements = async () => {
   await nextTick()
   chartResizeObserver?.disconnect()
@@ -356,8 +375,19 @@ onBeforeUnmount(() => {
 
     <section class="result-panel topology-panel">
       <div class="panel-heading">
-        <div><h3>有向拓扑</h3><p>箭头表示流向；可拖动画布并缩放查看节点和连接。</p></div>
-        <span>{{ topologyNodes.length }} 个节点 / {{ topologyEdges.length }} 条连接</span>
+        <div><h3>有向拓扑</h3><p>箭头表示 PIPESIM 返回的连接方向，不推断实际流向；可拖动画布并缩放查看。</p></div>
+        <div class="topology-heading-actions">
+          <span>{{ topologyNodes.length }} 个节点 / {{ topologyEdges.length }} 条连接</span>
+          <button type="button" class="topology-fit-button" @click="resetTopologyView">适应视图</button>
+        </div>
+      </div>
+      <div class="topology-legend" aria-label="拓扑功能分类图例">
+        <ul>
+          <li v-for="family in TOPOLOGY_FAMILIES" :key="family.key">
+            <span class="topology-legend-swatch" :style="{ backgroundColor: family.color }" aria-hidden="true" />
+            <span>{{ family.name }}</span>
+          </li>
+        </ul>
       </div>
       <div v-if="topologyNodes.length" ref="topologyElement" class="topology-chart" />
       <el-empty v-else :description="partial ? '当前部分结果未提供可展示的拓扑' : '当前结果没有拓扑节点'" :image-size="72" />
@@ -448,7 +478,15 @@ onBeforeUnmount(() => {
 .panel-heading h3 { margin: 0; font-size: 15px; }
 .panel-heading p { margin: 4px 0 0; color: #909399; font-size: 12px; }
 .panel-heading > span { flex: 0 0 auto; color: #737a84; font-size: 12px; }
-.topology-chart { width: 100%; height: 430px; min-height: 320px; border: 1px solid #e5eaf1; background: #fbfcfe; }
+.topology-heading-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; color: #737a84; font-size: 12px; white-space: nowrap; }
+.topology-fit-button { padding: 4px 8px; border: 1px solid #cbd6e2; border-radius: 2px; color: #42566b; background: #fff; font: inherit; cursor: pointer; }
+.topology-fit-button:hover { border-color: #2b6cb3; color: #1f5f96; }
+.topology-fit-button:focus-visible { outline: 2px solid #8fc0e8; outline-offset: 2px; }
+.topology-legend { margin: -2px 0 10px; overflow-x: auto; scrollbar-width: thin; }
+.topology-legend ul { display: flex; width: max-content; min-width: 100%; justify-content: center; gap: 14px; margin: 0; padding: 0; list-style: none; }
+.topology-legend li { display: flex; align-items: center; gap: 5px; flex: 0 0 auto; color: #606266; font-size: 11px; line-height: 16px; white-space: nowrap; }
+.topology-legend-swatch { width: 12px; height: 8px; border-radius: 1px; }
+.topology-chart { width: 100%; height: 400px; min-height: 300px; border: 1px solid #e5eaf1; background: #fbfcfe; }
 .profile-controls { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr); gap: 14px; margin-bottom: 12px; }
 .profile-controls label > span { display: block; margin-bottom: 6px; color: #606266; font-size: 12px; }
 .profile-controls .el-select { width: 100%; }
@@ -468,12 +506,14 @@ onBeforeUnmount(() => {
 .missing { color: #a8abb2; }
 @media (max-width: 760px) {
   .network-result-header, .panel-heading { align-items: flex-start; flex-direction: column; }
+  .topology-heading-actions { width: 100%; justify-content: space-between; white-space: normal; }
+  .topology-legend ul { justify-content: flex-start; }
   .count-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .count-item { border-bottom: 1px solid #e8edf3; }
   .count-item:nth-child(2n) { border-right: 0; }
   .count-item:last-child { border-bottom: 0; }
   .profile-controls, .diagnostic-grid { grid-template-columns: 1fr; }
-  .topology-chart { height: 350px; }
+  .topology-chart { height: 330px; min-height: 280px; }
   .profile-chart { height: 350px; }
 }
 </style>

@@ -118,6 +118,7 @@ Run 20 repeated the same real partial-result path after the Worker root-whitelis
 - The run page now presents persisted execution events, cleanup outcome and Artifact metadata without exposing paths, raw worker logs, or download links.
 - ECLIPSE successful runs without an RSM Summary now explicitly state that no usable Summary data was returned; no curve is inferred.
 - The demo workspace now follows the parsing/fusion visual language and provides a state-derived project -> import -> validation -> calculation -> result guide; its result page keeps audit metadata collapsed below the primary result.
+- The Network result topology is rendered as a compact PIPESIM-inspired equipment schematic: semantic well/source/sink/flowline/junction/control/rotating/process symbols, deterministic returned-connection orientation, safe hover detail, overlap-hidden short labels, and a responsive non-overlapping legend. It preserves every returned node and edge rather than inferring or dropping engineering components.
 
 ### Environment And Lifecycle
 
@@ -128,6 +129,10 @@ Run 20 repeated the same real partial-result path after the Worker root-whitelis
 - Worker capability detection finds PIPESIM 2022.1, Python 3.9, and the PTK module ZIP.
 
 ### ECLIPSE Migration Checkpoint
+
+- Verified real ECLIPSE success on 2026-09-13: `BRILLIG.DATA`, Software Project 7 / Model 11 / Version 13 / Run 25 completed as `SUCCEEDED / VALID_FULL` in 6.794 seconds through the browser -> Spring Boot -> Worker -> `eclrun -v 2024.1 eclipse` path. The fresh ECLEND reported `Problems=0`, `Errors=0`, and `Bugs=0`; the persisted result contains controlled ECLEND counts, output-file hashes, cleanup confirmation, and Artifact metadata. No usable RSM Summary was returned, and Vue explicitly reports that absence without inventing a curve.
+- Run 24 is retained as audit evidence of the fixed Worker/Backend ECLEND JSON casing mismatch: ECLIPSE had completed with zero ECLEND errors, but Backend rejected PascalCase count keys. The Worker now publishes the contract-required `comments`, `warnings`, `problems`, `errors`, and `bugs` keys, with regression coverage.
+- ECLIPSE v2 DATA inspection now omits only null `DATES`/`TSTEP` sibling fields, so a valid `TSTEP` schedule record is accepted by the strict Backend inspection contract. `BRILLIG.DATA` revalidation moved from `INVALID` to `READY` after this compatibility fix.
 
 - ECLIPSE 100 MVP implementation is committed in `79d7a9dc`: Spring Boot and migration support, Worker `eclrun` execution/cleanup/parsing, and Vue model/run/result UI are present. It is not yet deployed.
 - A separate C# probe project built successfully and launched the trusted local ECLIPSE 2024.1 installation. The process created current-run PRT, EGRID and INIT outputs and exited without leaving an ECLIPSE process behind.

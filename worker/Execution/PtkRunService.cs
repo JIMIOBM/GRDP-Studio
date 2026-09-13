@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Grdp.SoftwareIntegration.Worker.Contracts;
 using Grdp.SoftwareIntegration.Worker.Storage;
@@ -10,6 +11,12 @@ namespace Grdp.SoftwareIntegration.Worker.Execution;
 
 public sealed partial class PtkRunService : IDisposable
 {
+    private static readonly Regex DrivePath = new(@"(?<![a-z0-9])[a-z]:[\\/][^\s\""']*", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex UncPath = new(@"(?<!\\)\\\\[^\\/\s]+\\[^\s\""']+", RegexOptions.CultureInvariant);
+    private static readonly Regex UnixPath = new(@"(?<![a-z0-9:/])/(?:[^\s\""']+)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex FileUri = new(@"file://[^\s\""']+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex LocalPipe = new(@"net\.pipe://[^\s\""']+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex SensitiveText = new(@"\b(?:password|passwd|pwd|secret|credential(?:s)?|authorization|cookie|api[ _-]?key|access[ _-]?token|refresh[ _-]?token|token|license(?:[ _-]?(?:key|file|server))?)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private readonly StorageResolver storage;
     private readonly ArtifactStore artifacts;
     private readonly PtkExecutionCoordinator coordinator;
@@ -466,7 +473,7 @@ public sealed partial class PtkRunService : IDisposable
             if (!resultElement.TryGetProperty("schemaVersion", out var networkSchema) || networkSchema.GetString() != "pipesim-network-result/1" ||
                 !resultElement.TryGetProperty("model_kind", out var modelKind) || modelKind.GetString() != "network" ||
                 !resultElement.TryGetProperty("runTask", out var networkTask) || networkTask.GetString() != "network" ||
-                !resultElement.TryGetProperty("study", out var study) || study.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(study.GetString()) ||
+                !IsSafeTextProperty(resultElement, "study", false) ||
                 !resultElement.TryGetProperty("simulationState", out var simulationState) || simulationState.GetString() != "Completed" ||
                 !resultElement.TryGetProperty("topology", out var topology) || !HasValidNetworkTopology(topology))
             {
@@ -476,9 +483,8 @@ public sealed partial class PtkRunService : IDisposable
             if (status == "partial")
             {
                 if (networkContract.GetString() != "VALID_PARTIAL" ||
-                    !HasSafePartialNetworkPayload(resultElement) ||
                     !TryReadNetworkLimitedWarning(envelope, out warning)) return false;
-                result = resultElement.Clone();
+                result = SanitizePartialNetworkResult(resultElement);
                 return true;
             }
             if (networkContract.GetString() != "VALID_FULL" ||
@@ -488,7 +494,7 @@ public sealed partial class PtkRunService : IDisposable
                 !resultElement.TryGetProperty("summary", out var summary) || summary.ValueKind != JsonValueKind.Object ||
                 !resultElement.TryGetProperty("messages", out var messages) || messages.ValueKind != JsonValueKind.Array ||
                 !resultElement.TryGetProperty("quality", out var quality) || quality.ValueKind != JsonValueKind.Array ||
-                !HasSafePartialNetworkPayload(resultElement))
+                !HasSafeNetworkPayload(resultElement))
             {
                 return false;
             }
@@ -535,9 +541,8 @@ public sealed partial class PtkRunService : IDisposable
         {
             if (node.ValueKind != JsonValueKind.Object ||
                 !HasExactlyProperties(node, "id", "componentType") ||
-                !node.TryGetProperty("id", out var id) || id.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(id.GetString()) ||
-                !node.TryGetProperty("componentType", out var componentType) || componentType.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(componentType.GetString()) ||
-                HasControlCharacter(id.GetString()!) || HasControlCharacter(componentType.GetString()!) ||
+                !node.TryGetProperty("id", out var id) || !IsSafeTextValue(id, false) ||
+                !node.TryGetProperty("componentType", out var componentType) || !IsSafeTextValue(componentType, false) ||
                 !nodeIds.Add(id.GetString()!))
             {
                 return false;
@@ -548,12 +553,9 @@ public sealed partial class PtkRunService : IDisposable
         {
             if (edge.ValueKind != JsonValueKind.Object ||
                 !HasExactlyProperties(edge, "source", "destination", "sourcePort") ||
-                !edge.TryGetProperty("source", out var source) || source.ValueKind != JsonValueKind.String ||
-                !edge.TryGetProperty("destination", out var destination) || destination.ValueKind != JsonValueKind.String ||
-                !edge.TryGetProperty("sourcePort", out var sourcePort) || sourcePort.ValueKind != JsonValueKind.String ||
-                string.IsNullOrWhiteSpace(source.GetString()) || string.IsNullOrWhiteSpace(destination.GetString()) ||
-                sourcePort.GetString()!.Length != 0 && string.IsNullOrWhiteSpace(sourcePort.GetString()) ||
-                HasControlCharacter(source.GetString()!) || HasControlCharacter(destination.GetString()!) || HasControlCharacter(sourcePort.GetString()!) ||
+                !edge.TryGetProperty("source", out var source) || !IsSafeTextValue(source, false) ||
+                !edge.TryGetProperty("destination", out var destination) || !IsSafeTextValue(destination, false) ||
+                !edge.TryGetProperty("sourcePort", out var sourcePort) || !IsSafeTextValue(sourcePort, true) ||
                 !nodeIds.Contains(source.GetString()!) || !nodeIds.Contains(destination.GetString()!))
             {
                 return false;
@@ -569,9 +571,11 @@ public sealed partial class PtkRunService : IDisposable
             }
         }
 
+        var sourceCount = CountComponents(nodes, "SOURCE") + CountComponents(nodes, "WELL");
+        var reportedSourceCount = counts.GetProperty("sources").GetInt32();
         return counts.GetProperty("nodes").GetInt32() == nodes.GetArrayLength() &&
                counts.GetProperty("edges").GetInt32() == edges.GetArrayLength() &&
-               counts.GetProperty("sources").GetInt32() == CountComponents(nodes, "SOURCE") &&
+               reportedSourceCount == sourceCount &&
                counts.GetProperty("sinks").GetInt32() == CountComponents(nodes, "SINK") &&
                counts.GetProperty("flowlines").GetInt32() == CountComponents(nodes, "FLOWLINE");
     }
@@ -579,16 +583,49 @@ public sealed partial class PtkRunService : IDisposable
     private static int CountComponents(JsonElement nodes, string componentType) => nodes.EnumerateArray().Count(node =>
         string.Equals(node.GetProperty("componentType").GetString(), componentType, StringComparison.OrdinalIgnoreCase));
 
-    private static bool HasSafePartialNetworkPayload(JsonElement result)
+    private static JsonElement SanitizePartialNetworkResult(JsonElement result)
+    {
+        var sanitized = new JsonObject();
+        foreach (var property in new[]
+        {
+            "schemaVersion", "model_kind", "runTask", "resultContract", "study", "simulationState", "topology"
+        })
+        {
+            sanitized[property] = JsonNode.Parse(result.GetProperty(property).GetRawText());
+        }
+        foreach (var section in new[] { "system", "node" })
+        {
+            AddSanitizedPartialArray(result, sanitized, section, IsSafeScalarSeries);
+        }
+        AddSanitizedPartialArray(result, sanitized, "profiles", IsSafeProfile);
+        return JsonSerializer.SerializeToElement(sanitized);
+    }
+
+    private static bool HasSafeNetworkPayload(JsonElement result)
     {
         foreach (var section in new[] { "system", "node" })
         {
             if (result.TryGetProperty(section, out var groups) &&
                 (groups.ValueKind != JsonValueKind.Array || !groups.EnumerateArray().All(IsSafeScalarSeries))) return false;
         }
-        if (result.TryGetProperty("profiles", out var profiles) &&
-            (profiles.ValueKind != JsonValueKind.Array || !profiles.EnumerateArray().All(IsSafeProfile))) return false;
-        return true;
+        return !result.TryGetProperty("profiles", out var profiles) ||
+               profiles.ValueKind == JsonValueKind.Array && profiles.EnumerateArray().All(IsSafeProfile);
+    }
+
+    private static void AddSanitizedPartialArray(
+        JsonElement source,
+        JsonObject result,
+        string section,
+        Func<JsonElement, bool> isSafe)
+    {
+        if (!source.TryGetProperty(section, out var values) || values.ValueKind != JsonValueKind.Array) return;
+
+        var safeValues = new JsonArray();
+        foreach (var item in values.EnumerateArray())
+        {
+            if (isSafe(item)) safeValues.Add(JsonNode.Parse(item.GetRawText()));
+        }
+        result[section] = safeValues;
     }
 
     private static bool IsSafeScalarSeries(JsonElement group) =>
@@ -646,11 +683,19 @@ public sealed partial class PtkRunService : IDisposable
     };
 
     private static bool IsSafeTextValue(JsonElement value) => value.ValueKind == JsonValueKind.Null ||
-        value.ValueKind == JsonValueKind.String && !HasControlCharacter(value.GetString()!);
+        IsSafeTextValue(value, false);
+
+    private static bool IsSafeTextValue(JsonElement value, bool allowEmpty) =>
+        value.ValueKind == JsonValueKind.String &&
+        (allowEmpty || !string.IsNullOrWhiteSpace(value.GetString())) &&
+        IsSafeText(value.GetString()!);
 
     private static bool IsSafeTextProperty(JsonElement value, string property, bool allowEmpty) =>
-        value.TryGetProperty(property, out var text) && text.ValueKind == JsonValueKind.String &&
-        (allowEmpty || !string.IsNullOrWhiteSpace(text.GetString())) && !HasControlCharacter(text.GetString()!);
+        value.TryGetProperty(property, out var text) && IsSafeTextValue(text, allowEmpty);
+
+    private static bool IsSafeText(string value) => !HasControlCharacter(value) &&
+        !DrivePath.IsMatch(value) && !UncPath.IsMatch(value) && !UnixPath.IsMatch(value) &&
+        !FileUri.IsMatch(value) && !LocalPipe.IsMatch(value) && !SensitiveText.IsMatch(value);
 
     private static bool HasExactlyProperties(JsonElement value, params string[] names) =>
         value.EnumerateObject().Select(property => property.Name).OrderBy(name => name).SequenceEqual(names.OrderBy(name => name), StringComparer.Ordinal);

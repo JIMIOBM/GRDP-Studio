@@ -216,6 +216,32 @@ class PtkNetworkContractTests(unittest.TestCase):
         )
         json.dumps(envelope, allow_nan=False)
 
+    def test_partial_network_result_omits_raw_simulator_diagnostics(self):
+        model = FakeNetworkModel()
+        model.network_task.results.system["SystemOutletPressure"]["Line-1"] = "100"
+        model.network_task.results.summary = {
+            "Info": [r"Run17 loaded C:\\PIPESIM\\private-model.pips"],
+            "Warning": ["Service net.pipe://localhost/pipe/run17-private-id timed out"],
+            "Error": ["Run17 solver diagnostic"],
+        }
+        model.network_task.results.messages = [
+            r"Run17 raw simulator message from C:\\PIPESIM\\private-model.pips",
+            "Run17 net.pipe://localhost/pipe/run17-private-id",
+        ]
+
+        envelope, _ = self.execute(model)
+
+        self.assertEqual("partial", envelope["status"])
+        self.assertEqual("VALID_PARTIAL", envelope["result"]["resultContract"])
+        self.assertEqual({"info": [], "warnings": [], "errors": []}, envelope["result"]["summary"])
+        self.assertEqual([], envelope["result"]["messages"])
+        self.assertEqual([], envelope["result"]["quality"])
+        serialized = json.dumps(envelope, allow_nan=False)
+        self.assertNotIn("Run17", serialized)
+        self.assertNotIn("private-model.pips", serialized)
+        self.assertNotIn("run17-private-id", serialized)
+        self.assertEqual(["NETWORK_RESULT_LIMITED"], [warning["code"] for warning in envelope["warnings"]])
+
     def test_completed_strict_invalid_network_result_drops_empty_numeric_containers_from_partial(self):
         for value in ({}, []):
             with self.subTest(value=value):

@@ -1,4 +1,5 @@
 using Grdp.SoftwareIntegration.Worker.Execution;
+using System.Text.Json;
 
 namespace Grdp.SoftwareIntegration.Worker.Tests;
 
@@ -30,6 +31,19 @@ public sealed class EclipseParsingTests
         Assert.True(EclipseParsers.TryParseEclEnd("Comments = 0 Warnings = 1 Problems = 0 Errors = 0 Bugs = 0", out var counts));
         Assert.Equal(0, counts!.Errors);
         Assert.False(EclipseParsers.TryParseEclEnd("Errors = 0 Problems = 0 Bugs = 0", out _));
+    }
+
+    [Fact]
+    public void ResultEnvelopeUsesExactLowerCamelEclEndFieldNamesRegardlessOfSerializerOptions()
+    {
+        var envelope = EclipseRunService.CreateResultEnvelope("CASE.DATA", new(1, 2, 0, 0, 0), null, []);
+        var result = JsonSerializer.SerializeToElement(envelope, new JsonSerializerOptions { PropertyNamingPolicy = null });
+        var eclEnd = result.GetProperty("eclEnd");
+
+        Assert.Equal(["bugs", "comments", "errors", "problems", "warnings"], eclEnd.EnumerateObject().Select(property => property.Name).Order());
+        Assert.False(eclEnd.TryGetProperty("Comments", out _));
+        Assert.Equal(1, eclEnd.GetProperty("comments").GetInt32());
+        Assert.Equal(2, eclEnd.GetProperty("warnings").GetInt32());
     }
 
     [Fact]
@@ -141,6 +155,39 @@ public sealed class EclipseParsingTests
         Assert.False(EclipseRunRules.IsSupportedVersion("2024.10"));
         Assert.True(EclipseRunRules.HasLicenseDiagnostic("LICENSE checkout failed"));
         Assert.True(EclipseRunRules.HasFatalDiagnostic("fatal error"));
+    }
+
+    [Theory]
+    [InlineData("models/CASE.TXT", false)]
+    [InlineData("models/CASE.DATA2", false)]
+    [InlineData("models/CASE", false)]
+    [InlineData("models/case.data", true)]
+    public void DataStorageKeyRequiresExactCaseInsensitiveDataExtension(string storageKey, bool expected)
+    {
+        Assert.Equal(expected, EclipseRunRules.IsDataStorageKey(storageKey));
+    }
+
+    [Theory]
+    [InlineData("The license plate is recorded in this benign prose.")]
+    [InlineData("The license details are recorded in this benign prose.")]
+    [InlineData("A nonfatal note is included in this benign prose.")]
+    [InlineData("A fatalistic interpretation appears in ordinary documentation.")]
+    public void DiagnosticClassifiersDoNotMatchBenignProse(string diagnostics)
+    {
+        Assert.False(EclipseRunRules.HasLicenseDiagnostic(diagnostics));
+        Assert.False(EclipseRunRules.HasFatalDiagnostic(diagnostics));
+    }
+
+    [Theory]
+    [InlineData("LICENSE FAILURE")]
+    [InlineData("LICENSE ERROR")]
+    [InlineData("license unavailable")]
+    [InlineData("FLEXnet error")]
+    [InlineData("terminating with error")]
+    [InlineData("ABORTED")]
+    public void DiagnosticClassifiersMatchAvaloniaTargetedPatterns(string diagnostics)
+    {
+        Assert.True(EclipseRunRules.HasLicenseDiagnostic(diagnostics) || EclipseRunRules.HasFatalDiagnostic(diagnostics));
     }
 
     [Theory]

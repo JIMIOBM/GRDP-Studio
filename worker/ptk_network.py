@@ -474,7 +474,6 @@ def build_safe_partial_network_result(result):
     system = _safe_scalar_series(result.get("system"))
     node = _safe_scalar_series(result.get("node"))
     profiles = _safe_profiles(result.get("profiles"))
-    summary = result.get("summary") if isinstance(result.get("summary"), Mapping) else {}
     return {
         "schemaVersion": "pipesim-network-result/1",
         "model_kind": "network",
@@ -487,11 +486,11 @@ def build_safe_partial_network_result(result):
         "node": node,
         "profiles": profiles,
         "summary": {
-            "info": _messages(summary.get("info", [])),
-            "warnings": _messages(summary.get("warnings", [])),
-            "errors": _messages(summary.get("errors", [])),
+            "info": [],
+            "warnings": [],
+            "errors": [],
         },
-        "messages": _messages(result.get("messages", [])),
+        "messages": [],
         "quality": [],
     }
 

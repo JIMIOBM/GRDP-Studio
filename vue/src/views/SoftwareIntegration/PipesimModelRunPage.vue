@@ -160,6 +160,21 @@ const safeNetworkTopology = topology => {
     counts: { ...counts }
   }
 }
+const copyPartialNetworkSections = (result, selectedStudy) => {
+  const sections = {}
+  if (isSafeTopologyText(result.study) && result.study === selectedStudy) sections.study = result.study
+
+  for (const [field, copy] of [
+    ['system', copyNetworkTableVariable],
+    ['node', copyNetworkTableVariable],
+    ['profiles', copyNetworkProfile]
+  ]) {
+    if (!Array.isArray(result[field])) continue
+    const entries = result[field].map(copy)
+    if (!entries.some(entry => !entry)) sections[field] = entries
+  }
+  return sections
+}
 const validNetworkResult = computed(() => {
   if (!isNetworkModel.value) return null
   const result = selectedRun.value?.result
@@ -167,22 +182,22 @@ const validNetworkResult = computed(() => {
   if (!result || result.schemaVersion !== 'pipesim-network-result/1' || result.model_kind !== 'network' ||
     result.runTask !== 'network' || !['VALID_FULL', 'VALID_PARTIAL'].includes(result.resultContract) ||
     result.simulationState !== 'Completed') return null
-  if (selectedRun.value?.runType !== 'network' || result.resultContract !== selectedRun.value?.resultContract ||
-    !isSafeTopologyText(result.study) || result.study !== selectedRun.value?.study) return null
+  if (selectedRun.value?.runType !== 'network' || result.resultContract !== selectedRun.value?.resultContract) return null
   const safeTopology = safeNetworkTopology(topology)
   if (!safeTopology) return null
   if (result.resultContract === 'VALID_PARTIAL' && selectedRun.value?.status === 'PARTIAL_SUCCEEDED') {
-    // Partial contracts guarantee only topology; do not pass optional raw fields to the renderer.
     return {
       schemaVersion: 'pipesim-network-result/1',
       model_kind: 'network',
       runTask: 'network',
       resultContract: 'VALID_PARTIAL',
       simulationState: 'Completed',
-      topology: safeTopology
+      topology: safeTopology,
+      ...copyPartialNetworkSections(result, selectedRun.value?.study)
     }
   }
   if (result.resultContract !== 'VALID_FULL') return null
+  if (!isSafeTopologyText(result.study) || result.study !== selectedRun.value?.study) return null
   if (!Array.isArray(result.system) || !Array.isArray(result.node) || !Array.isArray(result.profiles)) return null
   const system = result.system.map(copyNetworkTableVariable)
   const node = result.node.map(copyNetworkTableVariable)
@@ -330,6 +345,7 @@ const eclipseErrorCodes = new Set([
   'ECLIPSE_VERSION_MISMATCH',
   'ECLIPSE_INCLUDE_UNSUPPORTED',
   'ECLIPSE_CLEANUP_FAILED',
+  'PROCESS_TREE_EXIT_UNCONFIRMED',
   'ECLIPSE_RUN_FAILED',
   'ECLIPSE_SOLVER_FAILED'
 ])

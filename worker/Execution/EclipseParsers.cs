@@ -1,9 +1,15 @@
 using System.Globalization;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
 namespace Grdp.SoftwareIntegration.Worker.Execution;
 
-public sealed record EclipseEndCounts(int Comments, int Warnings, int Problems, int Errors, int Bugs);
+public sealed record EclipseEndCounts(
+    [property: JsonPropertyName("comments")] int Comments,
+    [property: JsonPropertyName("warnings")] int Warnings,
+    [property: JsonPropertyName("problems")] int Problems,
+    [property: JsonPropertyName("errors")] int Errors,
+    [property: JsonPropertyName("bugs")] int Bugs);
 public sealed record EclipseSummaryPoint(double TimeDays, double Value);
 public sealed record EclipseSummarySeries(string Keyword, string? ObjectName, string? Unit, IReadOnlyList<EclipseSummaryPoint> Points);
 

@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Grdp.SoftwareIntegration.Worker.Contracts;
 using Grdp.SoftwareIntegration.Worker.Execution;
 using Grdp.SoftwareIntegration.Worker.Inspection;
@@ -103,6 +104,39 @@ public sealed class EclipseDataInspectionTests : IDisposable
         Assert.Equal(2, inspection.ScheduleTimeline!.Count);
         Assert.Equal(new EclipseScheduleDate("31", "FEB", "0000"), Assert.Single(inspection.ScheduleTimeline[0].Records!));
         Assert.Equal(["01", "2"], inspection.ScheduleTimeline[1].Steps);
+    }
+
+    [Fact]
+    public void ScheduleTimelineSerializationUsesOnlyTheAllowedFieldsForEachEventKind()
+    {
+        var inspection = Inspect("SCHEDULE\nDATES\n1 JAN 2025 /\n/\nTSTEP\n1 0.5 /\n/\n");
+        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+
+        using var document = JsonDocument.Parse(JsonSerializer.Serialize(inspection, options));
+        var timeline = document.RootElement.GetProperty("scheduleTimeline");
+        var dates = timeline[0];
+        var tstep = timeline[1];
+
+        Assert.Equal(["kind", "records"], dates.EnumerateObject().Select(property => property.Name));
+        Assert.Equal("DATES", dates.GetProperty("kind").GetString());
+        Assert.True(dates.TryGetProperty("records", out var records));
+        Assert.Equal(JsonValueKind.Array, records.ValueKind);
+        Assert.False(dates.TryGetProperty("steps", out _));
+        Assert.Equal(["kind", "steps"], tstep.EnumerateObject().Select(property => property.Name));
+        Assert.Equal("TSTEP", tstep.GetProperty("kind").GetString());
+        Assert.True(tstep.TryGetProperty("steps", out var steps));
+        Assert.Equal(JsonValueKind.Array, steps.ValueKind);
+        Assert.False(tstep.TryGetProperty("records", out _));
+
+        using var emptyDocument = JsonDocument.Parse(JsonSerializer.Serialize(new[]
+        {
+            new EclipseScheduleEvent("DATES", Array.Empty<EclipseScheduleDate>()),
+            new EclipseScheduleEvent("TSTEP", Steps: Array.Empty<string>())
+        }, options));
+        Assert.Equal(JsonValueKind.Array, emptyDocument.RootElement[0].GetProperty("records").ValueKind);
+        Assert.Equal(0, emptyDocument.RootElement[0].GetProperty("records").GetArrayLength());
+        Assert.Equal(JsonValueKind.Array, emptyDocument.RootElement[1].GetProperty("steps").ValueKind);
+        Assert.Equal(0, emptyDocument.RootElement[1].GetProperty("steps").GetArrayLength());
     }
 
     [Fact]

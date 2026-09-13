@@ -72,7 +72,7 @@ public sealed partial class EclipseRunService : IDisposable
             var rsmSeries = await ReadRsmAsync(rsm);
             object? summary = CreateSummary(rsmSeries);
             var outputFiles = await artifacts.DescribeEclipseOutputsAsync(fresh, CancellationToken.None);
-            result = JsonSerializer.SerializeToElement(new { schemaVersion = "eclipse-summary-result/1", modelKind = "eclipse_100", runTask = "eclipse", resultContract = "VALID_FULL", caseName = deck, eclEnd = counts, summary, outputFiles = outputFiles.Select(file => new { name = file.Filename, sizeBytes = file.SizeBytes, sha256 = file.Sha256 }) });
+            result = JsonSerializer.SerializeToElement(CreateResultEnvelope(deck, counts, summary, outputFiles));
             descriptors.Add(await artifacts.WriteJsonElementAsync(dirs.Output, "normalized-result.json", result.Value));
             state = "SUCCEEDED"; message = "ECLIPSE 100 completed successfully.";
         }
@@ -91,7 +91,7 @@ public sealed partial class EclipseRunService : IDisposable
         }
     }
 
-    private WorkerError? Validate(RunExecuteRequest request) => request.RunId <= 0 ? WorkerApiError.Request("INVALID_RUN_ID", "runId must be positive.") : string.IsNullOrWhiteSpace(request.ModelStorageKey) ? WorkerApiError.Request("MODEL_STORAGE_KEY_REQUIRED", "modelStorageKey is required.") : string.IsNullOrWhiteSpace(request.ExpectedModelSha256) || request.ExpectedModelSha256.Length != 64 || request.ExpectedModelSha256.Any(value => value is not (>= '0' and <= '9' or >= 'a' and <= 'f')) ? WorkerApiError.Request("INVALID_EXPECTED_SHA256", "expectedModelSha256 must be lowercase SHA-256.") : request.RunTask != "eclipse" ? WorkerApiError.Request("INVALID_RUN_TASK", "runTask must be eclipse.") : request.Study is not null ? WorkerApiError.Request("INVALID_STUDY", "study must be null for ECLIPSE.") : request.Parameters.ValueKind != JsonValueKind.Null ? WorkerApiError.Request("PARAMETERS_NOT_NULL", "parameters must be explicitly null.") : request.TimeoutSeconds is <= 0 || request.TimeoutSeconds > options.EclipseMaxRunTimeoutSeconds ? WorkerApiError.Request("INVALID_TIMEOUT", "timeoutSeconds exceeds the ECLIPSE limit.") : null;
+    private WorkerError? Validate(RunExecuteRequest request) => request.RunId <= 0 ? WorkerApiError.Request("INVALID_RUN_ID", "runId must be positive.") : !EclipseRunRules.IsDataStorageKey(request.ModelStorageKey) ? WorkerApiError.Request("INVALID_ECLIPSE_DATA_FILE", "modelStorageKey must reference a .DATA file.") : string.IsNullOrWhiteSpace(request.ExpectedModelSha256) || request.ExpectedModelSha256.Length != 64 || request.ExpectedModelSha256.Any(value => value is not (>= '0' and <= '9' or >= 'a' and <= 'f')) ? WorkerApiError.Request("INVALID_EXPECTED_SHA256", "expectedModelSha256 must be lowercase SHA-256.") : request.RunTask != "eclipse" ? WorkerApiError.Request("INVALID_RUN_TASK", "runTask must be eclipse.") : request.Study is not null ? WorkerApiError.Request("INVALID_STUDY", "study must be null for ECLIPSE.") : request.Parameters.ValueKind != JsonValueKind.Null ? WorkerApiError.Request("PARAMETERS_NOT_NULL", "parameters must be explicitly null.") : request.TimeoutSeconds is <= 0 || request.TimeoutSeconds > options.EclipseMaxRunTimeoutSeconds ? WorkerApiError.Request("INVALID_TIMEOUT", "timeoutSeconds exceeds the ECLIPSE limit.") : null;
     private static Dictionary<string, (long Size, DateTime LastWrite)> Snapshot(string root) => Directory.EnumerateFiles(root).ToDictionary(path => path, path => (new FileInfo(path).Length, File.GetLastWriteTimeUtc(path)), StringComparer.OrdinalIgnoreCase);
     private static IEnumerable<string> Fresh(string root, Dictionary<string, (long Size, DateTime LastWrite)> before) => Directory.EnumerateFiles(root).Where(path => Output().IsMatch(Path.GetFileName(path)) && EclipseRunRules.IsFresh(before.TryGetValue(path, out var prior) ? prior : null, new FileInfo(path).Length, File.GetLastWriteTimeUtc(path)));
     internal static async Task<IReadOnlyList<EclipseSummarySeries>?> ReadRsmAsync(string? path, Func<string, IReadOnlyList<EclipseSummarySeries>>? parser = null)
@@ -102,6 +102,8 @@ public sealed partial class EclipseRunService : IDisposable
     }
     internal static object? CreateSummary(IReadOnlyList<EclipseSummarySeries>? series) =>
         EclipseParsers.IsPublishableSummary(series) ? new { series } : null;
+    internal static object CreateResultEnvelope(string deck, EclipseEndCounts counts, object? summary, IEnumerable<EclipseOutputMetadata> outputFiles) =>
+        new { schemaVersion = "eclipse-summary-result/1", modelKind = "eclipse_100", runTask = "eclipse", resultContract = "VALID_FULL", caseName = deck, eclEnd = counts, summary, outputFiles = outputFiles.Select(file => new { name = file.Filename, sizeBytes = file.SizeBytes, sha256 = file.Sha256 }) };
     internal static RunCleanup CreateCleanup(bool treeConfirmed, bool inputDeleted, bool workDirectoryDeleted, bool killUsed, bool cleanupFailed) =>
         new(treeConfirmed, inputDeleted, workDirectoryDeleted, killUsed,
             !treeConfirmed ? "ECLIPSE process-tree exit is unconfirmed."

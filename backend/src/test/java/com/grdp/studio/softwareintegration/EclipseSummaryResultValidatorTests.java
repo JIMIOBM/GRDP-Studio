@@ -53,6 +53,16 @@ class EclipseSummaryResultValidatorTests {
     }
 
     @Test
+    void rejectsEclEndFieldsThatDoNotUseTheWorkerLowerCamelContract() {
+        ObjectNode invalid = (ObjectNode) result("0", "0", "null");
+        ObjectNode eclEnd = (ObjectNode) invalid.path("eclEnd");
+        eclEnd.set("Comments", eclEnd.get("comments"));
+        eclEnd.remove("comments");
+
+        assertInvalid(invalid);
+    }
+
+    @Test
     void rejectsNonFiniteNumbersAndOutOfOrderTime() {
         ObjectNode nan = (ObjectNode) result("0", "0", series());
         ((ObjectNode) nan.path("summary").path("series").get(0).path("points").get(0)).put("value", Double.NaN);

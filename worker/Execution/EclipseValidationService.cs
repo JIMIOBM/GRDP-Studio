@@ -10,8 +10,8 @@ public sealed class EclipseValidationService
     public EclipseValidationService(StorageResolver storage, EclipseLauncher launcher, IOptions<WorkerOptions> options) => (this.storage, this.launcher, this.options) = (storage, launcher, options.Value);
     public async Task<ApiOutcome> ValidateAsync(ModelValidationRequest request, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(request.ModelStorageKey) || string.IsNullOrWhiteSpace(request.ExpectedSha256) || request.ExpectedSha256.Length != 64 || request.ExpectedSha256.Any(value => value is not (>= '0' and <= '9' or >= 'a' and <= 'f')))
-            return new(400, WorkerApiError.Request("INVALID_ECLIPSE_REQUEST", "modelStorageKey and a lowercase SHA-256 are required."));
+        if (!EclipseRunRules.IsDataStorageKey(request.ModelStorageKey) || string.IsNullOrWhiteSpace(request.ExpectedSha256) || request.ExpectedSha256.Length != 64 || request.ExpectedSha256.Any(value => value is not (>= '0' and <= '9' or >= 'a' and <= 'f')))
+            return new(400, WorkerApiError.Request("INVALID_ECLIPSE_REQUEST", "modelStorageKey must reference a .DATA file and a lowercase SHA-256 is required."));
         try
         {
             var source = storage.ResolveExistingData(request.ModelStorageKey);

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Grdp.SoftwareIntegration.Worker.Contracts;
 
@@ -27,7 +28,9 @@ public sealed record EclipseDimensions(int Nx, int Ny, int Nz);
 
 public sealed record EclipseScheduleEvent(
     string Kind,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     IReadOnlyList<EclipseScheduleDate>? Records = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     IReadOnlyList<string>? Steps = null);
 
 public sealed record EclipseScheduleDate(string Day, string Month, string Year, string? Time = null);
