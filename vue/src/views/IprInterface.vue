@@ -42,6 +42,8 @@ import { NODETYPE } from '@/constants/nodeType'
 import { analyticMethodApi, dataManagementApi, dynamicBalanceApi, materialBalanceApi, nodeApi, notifyApi, parametersApi, projectApi, typicalCurveApi, waterInvasionApi, wellApi } from '@/api/docker'
 import { pvtStorageApi } from '@/api/pvtStorage'
 import { diagnosticCurveApi } from '@/api/diagnosticCurve'
+import { productivityCoefficientApi } from '@/api/productivityCoefficient'
+import { COEFFICIENT_GROUP, COEFFICIENT_METHOD, COEFFICIENT_RECORD, ensureCoefficientTree, applyCoefficientRecords, coefficientLocation } from '@/utils/productivityCoefficientTree'
 import { isPvtRecord, samePvtRecord, deletePvtTreeRecord } from '@/utils/pvtRecordActions'
 import { wellboreLossApi } from '@/api/wellboreLoss'
 import { surfaceLossApi } from '@/api/surfaceLoss'
@@ -4289,6 +4291,11 @@ const handleDeleteContextNode = async () => {
 const handleSelect = async (node) => { // 点击左侧树节点
   closeTreeContextMenu()
   if (!node || node.disabled) return
+  if ([COEFFICIENT_GROUP, COEFFICIENT_METHOD].includes(node.type)) return
+  if (node.type === COEFFICIENT_RECORD) {
+    await router.push(coefficientLocation({ ...node, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID }))
+    return
+  }
   const scope = selectWorkspaceNodeScope(node)
   if (scope === 'reservoir') {
     activeNodeId.value = node.id
@@ -4801,6 +4808,12 @@ const handleNodeExpand = async node => {
   if (!wellName) return
 
   try {
+    if ([COEFFICIENT_GROUP, COEFFICIENT_METHOD].includes(node.type)) {
+      const scope = { projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName }
+      const response = await productivityCoefficientApi.list(scope)
+      applyCoefficientRecords(treeData.value, scope, response?.data ?? response ?? [])
+      return
+    }
     // 展开模块目录时只读取该井、该模块的记录；刷新页面不会批量请求。
     if (node.type === THEORETICAL_CALCULATION_NODE_TYPE) {
       await Promise.all([
@@ -4951,6 +4964,7 @@ onMounted(async () => {
     ])
     // 产能试井加载器同样会修改“单井产能”分支，因此最后恢复稳定流记录。
     await loadAllStableProductivityTreeNodes()
+    ensureCoefficientTree(treeData.value)
   } catch (error) {
     console.error('工作台目录初始化失败', error)
   }
@@ -5063,7 +5077,7 @@ onBeforeUnmount(() => {
         <AGContent v-if="currentView === 'Agarwal-Gardner'" :node="currentViewNode" :project-id="PROJECT_ID"
           :gas-reservoir-id="GAS_RESERVOIR_ID" @recalculate="runAGForSelectedWell" />
         <DiagnosticCurveContent v-if="currentView === 'diagnostic-curve'" :node="currentViewNode"
-          :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" @recalculate="runDiagnosticCurveForSelectedWell"
+          :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID"
           @saved="handleDiagnosticSaved" />
       </main>
     </div>

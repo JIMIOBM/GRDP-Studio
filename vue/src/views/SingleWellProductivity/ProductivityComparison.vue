@@ -100,7 +100,7 @@ const loadRecords = async () => {
   } finally { if (version === recordVersion) loadingRecords.value = false }
 }
 const paramsCollapsed = ref(false)
-const panelWidth = ref(300)
+const panelWidth = ref(238)
 const resultTitle = computed(() => [props.wellName, '产能对比', props.methodType, '分析结果'].filter(Boolean).join('-'))
 const workspaceEl = ref(null)
 const chartEl = ref(null)
@@ -143,8 +143,8 @@ const renderChart = () => {
 }
 let dragStartX = 0
 let dragStartWidth = 0
-const maxPanelWidth = () => Math.max(280, Math.min(480, (workspaceEl.value?.clientWidth || 780) - 260))
-const setPanelWidth = width => { panelWidth.value = Math.max(280, Math.min(maxPanelWidth(), width)) }
+const maxPanelWidth = () => Math.max(238, Math.min(520, (workspaceEl.value?.clientWidth || 780) - 260))
+const setPanelWidth = width => { panelWidth.value = Math.max(238, Math.min(maxPanelWidth(), width)) }
 function startResize(event) {
   if (event.button !== 0) return
   event.preventDefault()
@@ -163,7 +163,7 @@ function stopResize() {
 function resizeWithKeyboard(event) {
   if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
   event.preventDefault()
-  setPanelWidth(event.key === 'Home' ? 280 : event.key === 'End' ? maxPanelWidth() : panelWidth.value + (event.key === 'ArrowRight' ? 20 : -20))
+  setPanelWidth(event.key === 'Home' ? 238 : event.key === 'End' ? maxPanelWidth() : panelWidth.value + (event.key === 'ArrowRight' ? 20 : -20))
 }
 watch(() => props.methodType, async () => { await nextTick(); renderChart() })
 watch(() => [props.projectId, props.gasReservoirId, props.wellName, props.methodType], () => {
@@ -247,7 +247,7 @@ const handleCalculate = async () => {
 
 <template>
   <div ref="workspaceEl" class="comparison-workspace">
-    <aside class="params-panel" :class="{ collapsed: paramsCollapsed }"
+    <aside class="params-panel water-parameter-theme" :class="{ collapsed: paramsCollapsed }"
       :style="paramsCollapsed ? undefined : { width: panelWidth + 'px', minWidth: panelWidth + 'px', flexBasis: panelWidth + 'px' }">
       <button v-if="paramsCollapsed" class="panel-collapsed-tab" type="button" aria-label="展开参数设置" @click="paramsCollapsed = false">参数设置</button>
       <template v-else>
@@ -329,7 +329,7 @@ const handleCalculate = async () => {
           <div class="form-actions"><button type="button" class="calculate-button" :disabled="isComparisonEnabled && (calculating || loadingRecords)" @click="handleCalculate">{{ isComparisonEnabled && calculating ? '计算中…' : '计算' }}</button></div>
         </div>
         <div class="params-resizer" role="separator" tabindex="0" aria-label="调整参数栏宽度" aria-orientation="vertical"
-          :aria-valuenow="panelWidth" :aria-valuemin="280" :aria-valuemax="maxPanelWidth()" @pointerdown="startResize" @keydown="resizeWithKeyboard" />
+          :aria-valuenow="panelWidth" :aria-valuemin="238" :aria-valuemax="maxPanelWidth()" @pointerdown="startResize" @keydown="resizeWithKeyboard" />
       </template>
     </aside>
     <main class="result-area">

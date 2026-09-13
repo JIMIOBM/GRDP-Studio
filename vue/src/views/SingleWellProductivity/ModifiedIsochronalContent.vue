@@ -1056,7 +1056,7 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resizeChart); chart
 
 <template>
   <section v-loading="loading" class="modified-workspace">
-    <aside class="params-panel" :class="{ collapsed: paramsCollapsed }">
+    <aside v-resizable-parameter-panel="paramsCollapsed" class="params-panel water-parameter-theme" :class="{ collapsed: paramsCollapsed }">
       <button v-if="paramsCollapsed" type="button" class="parameter-collapsed-tab" title="展开参数设置" @click="toggleParamsPanel">参数设置</button>
       <div v-show="!paramsCollapsed" class="panel-head"><span>参数设置</span>
         <button type="button" class="parameter-toggle" title="收起参数设置" aria-label="收起参数设置" @click="toggleParamsPanel">

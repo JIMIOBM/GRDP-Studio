@@ -464,7 +464,7 @@ onBeforeUnmount(() => {
     <div class="layout">
       <aside
         ref="panel"
-        class="params-panel"
+        class="params-panel water-parameter-theme"
         :class="{ collapsed: paramsCollapsed }"
         :style="{ width: paramsCollapsed ? '22px' : panelWidth + 'px', minWidth: paramsCollapsed ? '22px' : panelWidth + 'px' }"
       >

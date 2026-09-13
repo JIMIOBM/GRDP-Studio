@@ -13,7 +13,7 @@ const props = defineProps({
     gasReservoirId: [Number, String]
 })
 
-const emit = defineEmits(['recalculate', 'saved'])
+const emit = defineEmits(['saved'])
 
 const unwrap = response => {
     const first =
@@ -1236,10 +1236,8 @@ const handleRecalculate = async () => {
             data
         )
 
-        emit(
-            'recalculate',
-            data
-        )
+        // 计算和结果展示由本组件完成，不能再触发父页面的“新建诊断曲线”入口。
+        // 否则已打开记录的 diagnosticId 会丢失，watch 会重新初始化并清空参数。
 
         ElMessage.success(
             '计算完成'
@@ -1968,7 +1966,7 @@ onBeforeUnmount(() => {
 <template>
     <section class="diagnostic-workspace">
 
-        <aside class="params-panel">
+        <aside v-resizable-parameter-panel class="params-panel water-parameter-theme">
 
             <div class="panel-head">
                 参数设置
@@ -2115,14 +2113,14 @@ onBeforeUnmount(() => {
 
             <div class="bottom-tabs">
 
-                <button :class="{
+                <button type="button" class="bottom-chart-tab" :class="{
                     active:
                         activePanel === 'input'
                 }" @click="switchPanel('input')">
                     数据列表
                 </button>
 
-                <button :class="{
+                <button type="button" class="bottom-chart-tab" :class="{
                     active:
                         activePanel === 'analysis'
                 }" @click="switchPanel('analysis')">
@@ -2304,25 +2302,37 @@ onBeforeUnmount(() => {
 }
 
 .bottom-tabs {
-    height: 31px;
+    height: 30px;
     display: flex;
+    align-items: flex-end;
     flex-shrink: 0;
-    border-top: 1px solid #ddd;
+    border-top: 1px solid #e4e7ed;
+    background: #fff;
 }
 
 .bottom-tabs button {
-    min-width: 110px;
+    height: 30px;
+    min-width: 82px;
+    padding: 0 14px;
     border: 0;
-    border-right: 1px solid #ddd;
-    background: #fff2f4;
-    color: #999;
+    border-right: 1px solid #e4e7ed;
+    border-radius: 0;
+    background: #fff;
+    color: #333;
+    font-family: inherit;
+    font-size: 13px;
     cursor: pointer;
 }
 
+.bottom-tabs button:hover {
+    background: var(--theme-accent-soft, #fff8d9);
+    color: var(--theme-ink, #222);
+}
+
 .bottom-tabs button.active {
-    color: #222;
-    box-shadow:
-        inset 0 -2px #2b171a;
+    background: #fff;
+    color: var(--theme-ink, #222);
+    box-shadow: inset 0 3px 0 var(--theme-accent, #f4d000);
     font-weight: 600;
 }
 </style>

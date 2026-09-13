@@ -44,3 +44,4 @@ docs/
 !/backend/sql/README-pipeline.md
 !/backend/sql/gas-properties-methods.md
 !/backend/sql/hydrate-method.md
+!/backend/src/test/java/com/grdp/studio/coefficient/

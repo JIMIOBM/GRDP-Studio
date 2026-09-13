@@ -2812,7 +2812,7 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="page-body">
-      <section v-if="!embedded" class="parameter-panel">
+      <section v-if="!embedded" v-resizable-parameter-panel class="parameter-panel water-parameter-theme">
         <div class="panel-title">参数设置</div>
         <el-form label-position="top" size="small" class="parameter-form">
           <el-form-item label="选择PVT表">

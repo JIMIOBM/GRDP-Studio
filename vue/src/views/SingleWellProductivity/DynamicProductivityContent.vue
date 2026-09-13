@@ -37,7 +37,7 @@ const props = defineProps({
 const emit = defineEmits(['saved', 'record-missing', 'initial-calculated'])
 const DEFAULT_PVT_TABLE_VALUE = '__default_pvt__'
 
-const panelWidth = ref(300)
+const panelWidth = ref(238)
 const paramsCollapsed = ref(false)
 const activeDirection = ref('production')
 const activePanelTab = ref('input')
@@ -1004,7 +1004,7 @@ function startResize(event) {
   window.addEventListener('pointerup', stopResize, { once: true })
 }
 function resizePanel(event) {
-  panelWidth.value = Math.min(480, Math.max(280, dragStartWidth + event.clientX - dragStartX))
+  panelWidth.value = Math.min(520, Math.max(238, dragStartWidth + event.clientX - dragStartX))
   scheduleChartResize()
 }
 function stopResize() { window.removeEventListener('pointermove', resizePanel) }
@@ -1100,7 +1100,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="dynamic-stable-productivity-wrap">
-    <aside class="params-panel" :class="{ collapsed: paramsCollapsed }" :style="paramsCollapsed ? undefined : { width: `${panelWidth}px`, minWidth: `${panelWidth}px`, flexBasis: `${panelWidth}px` }">
+    <aside class="params-panel water-parameter-theme" :class="{ collapsed: paramsCollapsed }" :style="paramsCollapsed ? undefined : { width: `${panelWidth}px`, minWidth: `${panelWidth}px`, flexBasis: `${panelWidth}px` }">
       <button v-if="paramsCollapsed" class="panel-collapsed-tab" type="button" @click="paramsCollapsed = false">参数设置</button>
 
       <template v-else>

@@ -719,7 +719,7 @@ onBeforeUnmount(() => {
   <div v-loading="loading" class="db-wrap">
     <div
         ref="paramsPanelEl"
-        class="params-panel"
+        class="params-panel water-parameter-theme"
         :class="{
           collapsed: panelCollapsed,
           resizing: resizingParamsPanel,

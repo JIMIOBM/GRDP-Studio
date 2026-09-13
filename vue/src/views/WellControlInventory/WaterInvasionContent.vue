@@ -733,7 +733,7 @@ onBeforeUnmount(() => {
     <!-- 左侧参数面板 -->
     <div
         ref="paramsPanelEl"
-        class="params-panel"
+        class="params-panel water-parameter-theme"
         :class="{ collapsed: paramsCollapsed, narrow: !paramsCollapsed && paramsPanelWidth < 380 }"
         :style="{ width: paramsCollapsed ? '22px' : `${paramsPanelWidth}px`, minWidth: paramsCollapsed ? '22px' : `${paramsPanelWidth}px` }"
     >

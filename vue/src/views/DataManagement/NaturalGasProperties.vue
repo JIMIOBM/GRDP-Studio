@@ -796,7 +796,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="gas-properties-view">
     <div v-if="activeResultTab === '数据列表'" class="gas-workspace">
-      <aside class="gas-parameter-panel">
+      <aside v-resizable-parameter-panel class="gas-parameter-panel water-parameter-theme">
         <div class="gas-parameter-section">
           <div class="gas-section-heading">
             <span>计算方法</span>

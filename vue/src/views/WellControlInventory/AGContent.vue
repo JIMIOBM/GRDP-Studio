@@ -686,7 +686,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="ag-wrap">
-    <aside ref="paramsPanelEl" class="params-panel" :class="{ collapsed: paramsCollapsed }"
+    <aside ref="paramsPanelEl" class="params-panel water-parameter-theme" :class="{ collapsed: paramsCollapsed }"
       :style="{ width: paramsCollapsed ? '22px' : `${paramsPanelWidth}px`, minWidth: paramsCollapsed ? '22px' : `${paramsPanelWidth}px` }">
       <div v-if="paramsCollapsed" class="panel-collapsed-tab" @click="toggleParamsPanel">
         参数设置

@@ -365,7 +365,7 @@ onBeforeUnmount(()=>{active=false;gasRequest++;propertyRequest++;recordRequest++
     <div v-if="!ready" class="empty">{{ busy ? '正在加载当前井管段…' : '请完善已保存的管网拓扑后重新加载。' }}</div>
 
     <div v-else class="thermal-workspace">
-      <aside class="parameter-panel manual-controls" :class="{ collapsed: paramsCollapsed }">
+      <aside v-resizable-parameter-panel="paramsCollapsed" class="parameter-panel manual-controls" :class="{ collapsed: paramsCollapsed }">
         <button v-if="paramsCollapsed" class="parameter-collapsed-tab" type="button" title="展开参数设置" aria-label="展开参数设置" :aria-expanded="false" @click="paramsCollapsed = false">参数设置</button>
         <template v-else>
         <div class="panel-heading"><span>参数设置</span><button class="parameter-toggle" type="button" title="收起参数设置" aria-label="收起参数设置" :aria-expanded="true" @click="paramsCollapsed = true"><svg width="14" height="14" viewBox="0 0 24 24" fill="#777" aria-hidden="true"><path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z" /></svg></button></div>

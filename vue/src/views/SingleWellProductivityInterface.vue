@@ -13,6 +13,8 @@
  * 该页面与 IprInterface.vue 相互独立；其他菜单板块仍返回 IprInterface.vue。
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { productivityCoefficientApi } from '@/api/productivityCoefficient'
+import { COEFFICIENT_GROUP, COEFFICIENT_METHOD, COEFFICIENT_RECORD, ensureCoefficientTree, applyCoefficientRecords, coefficientLocation } from '@/utils/productivityCoefficientTree'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import RibbonMenu from '@/components/RibbonMenu.vue'
@@ -166,6 +168,9 @@ const routeMethod = props.embeddedNode ? '等时试井' : String(route.query.met
 const activeModule = ref(routeConfig?.name || '')
 const activeMethod = ref(routeConfig?.methods.includes(routeMethod) ? routeMethod : '')
 const routeTestId = Number(props.embeddedNode?.testId ?? route.query.testId)
+const activeCoefficientId = ref(Number(route.query.coefficientId) || null)
+const coefficientWorkspaceKey = ref(0)
+const coefficientReady = ref(false)
 const routeEvaluationId = Number(props.embeddedNode?.evaluationId ?? route.query.evaluationId)
 const routeStableId = Number(props.embeddedNode?.stableId ?? route.query.stableId)
 const activeProductivityTestId = ref(Number.isFinite(routeTestId) && routeTestId > 0 ? routeTestId : null)
@@ -179,6 +184,8 @@ const maximumFormationPressure = ref('56.34')
 const formationTemperature = ref('120')
 const onePointAlpha = ref('0.25')
 // 产能系数
+const coefficientFormationPressure = ref('')
+const coefficientFormationTemperature = ref('')
 const productivityCoefficientC = ref('')
 const productivityExponentN = ref('')
 const correctedCoefficientC = ref('')
@@ -275,6 +282,50 @@ watch(operationType, value => {
 })
 
 const unwrapData = response => response?.data ?? response ?? {}
+const loadCoefficientNodes = async (wellName, expand = false) => {
+  const scope = { projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName }
+  const records = unwrapData(await productivityCoefficientApi.list(scope))
+  applyCoefficientRecords(workspaceTreeData.value, scope, records, expand)
+}
+const resetCoefficientWorkspace = () => {
+  activeCoefficientId.value = null
+  coefficientFormationPressure.value = ''
+  coefficientFormationTemperature.value = ''
+  productivityCoefficientC.value = ''
+  productivityExponentN.value = ''
+  correctedCoefficientC.value = ''
+  correctedExponentN.value = ''
+  fittedFormationPressure.value = ''
+  fittedFlowRate.value = ''
+  openFlowRate.value = ''
+  operationType.value = 'production'
+  // 同方法重新新建也要重建子组件，清空A/B、压力方法及待返回的记录请求。
+  coefficientWorkspaceKey.value += 1
+}
+const restoreCoefficient = record => {
+  const p = record.parameters
+  coefficientFormationPressure.value = p.pressure ?? ''
+  coefficientFormationTemperature.value = p.temperature ?? ''
+  productivityCoefficientC.value = p.c ?? ''
+  productivityExponentN.value = p.n ?? ''
+  correctedCoefficientC.value = p.correctedC ?? ''
+  correctedExponentN.value = p.correctedN ?? ''
+  fittedFormationPressure.value = p.pointPressure ?? ''
+  fittedFlowRate.value = p.pointRate ?? ''
+  operationType.value = record.operation
+  ++pvtDetailRequest
+  selectedPvtDetail.value = { ...record.pvtSnapshot, pvtId: record.pvtId ?? null }
+  if (record.pvtId && !databasePvtRecords.value.some(p => Number(p.pvtId) === Number(record.pvtId))) {
+    databasePvtRecords.value.push({ pvtId: record.pvtId, pvtName: record.pvtSnapshot?.pvtName || '已保存PVT快照' })
+  }
+  selectedPvtTable.value = record.pvtId ? String(record.pvtId) : ''
+}
+const coefficientSaved = async record => {
+  activeCoefficientId.value = Number(record.id)
+  await router.replace(coefficientLocation({ ...record, coefficientId: record.id, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID }))
+  try { await loadCoefficientNodes(record.wellName, true) }
+  catch (error) { ElMessage.warning('记录已保存，但目录刷新失败，请重新展开产能系数目录') }
+}
 const parseSettings = value => {
   if (!value) return {}
   if (typeof value === 'object') return value
@@ -430,6 +481,11 @@ const selectModule = (moduleName, method = '') => {
   if (!config) return
   activeModule.value = config.name
   activeMethod.value = config.methods.includes(method) ? method : config.methods[0]
+  if (moduleName === '产能系数') {
+    resetCoefficientWorkspace()
+    // 新方案使用当前井的PVT来源，不沿用上一条记录的历史快照。
+    void loadPvtOptions()
+  }
   activeContentTab.value = 'chart'
   if (['理论计算', '动态产能'].includes(activeModule.value)) activeStableId.value = null
   if (isOwnedPressureMethod.value) {
@@ -570,6 +626,10 @@ const reloadStableBranch = async (node, expand = true) => {
 /** 展开哪个计算方法，就只加载该方法在当前井下的历史记录。 */
 const handleSidebarExpand = async node => {
   try {
+    if ([COEFFICIENT_GROUP, COEFFICIENT_METHOD].includes(node.type)) {
+      await loadCoefficientNodes(node.wellName)
+      return
+    }
     if (node.type === THEORETICAL_CALCULATION_NODE_TYPE) {
       await Promise.all([
         loadTheoreticalStableNodes(node.wellName),
@@ -827,6 +887,7 @@ const selectWell = async wellName => {
   const targetWellName = String(wellName || '').trim()
   if (!targetWellName || targetWellName === selectedWellName.value) return
 
+  if (activeModule.value === '产能系数') resetCoefficientWorkspace()
   selectedWellName.value = targetWellName
   selectedPvtTable.value = ''
   selectedDataTable.value = activeMethod.value === '等时试井'
@@ -863,11 +924,24 @@ const selectWell = async wellName => {
   delete query.evaluationId
   delete query.stableId
   delete query.initialCalc
+  delete query.coefficientId
+  activeCoefficientId.value = null
   await router.replace({ name: 'SingleWellProductivity', query })
 }
 
 const handleSidebarSelect = async node => {
   if (!node || node.disabled) return
+  if ([COEFFICIENT_GROUP, COEFFICIENT_METHOD].includes(node.type)) return
+  if (node.type === COEFFICIENT_RECORD) {
+    if (node.wellName !== selectedWellName.value) await selectWell(node.wellName)
+    activeModule.value = '产能系数'
+    resetCoefficientWorkspace()
+    activeMethod.value = node.method
+    activeCoefficientId.value = Number(node.coefficientId)
+    workspaceActiveNodeId.value = node.id
+    await router.replace(coefficientLocation({ ...node, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID }))
+    return
+  }
   if (selectWorkspaceNodeScope(node) === 'reservoir') {
     workspaceActiveNodeId.value = node.id
     if (node.command) {
@@ -1387,6 +1461,7 @@ onMounted(async () => {
   await loadWells()
   if (isOwnedPressureMethod.value) selectedDataTable.value = pressureTestType.value
   if (selectedWellName.value) await loadPvtOptions()
+  coefficientReady.value = true
   if (route.query.method === '等时试井' || props.embeddedNode) selectedDataTable.value = 'local-import'
   await Promise.allSettled([
     loadAllModifiedIsochronalNodes(),
@@ -1399,6 +1474,7 @@ onMounted(async () => {
   }
   try {
     await loadAllStableNodes()
+    ensureCoefficientTree(workspaceTreeData.value)
   } catch (error) {
     console.warn('理论计算/动态产能目录加载失败', error)
   }
@@ -1449,7 +1525,7 @@ onBeforeUnmount(() => window.removeEventListener('click', closeStableContextMenu
             :test-id="activeProductivityTestId" :evaluation-id="activeEvaluationId" @saved="handleProductivitySaved" />
 
           <section v-else class="test-workspace">
-            <aside class="parameter-panel" :class="{ collapsed: paramsCollapsed }">
+            <aside v-resizable-parameter-panel="paramsCollapsed" class="parameter-panel water-parameter-theme" :class="{ collapsed: paramsCollapsed }">
               <button v-if="paramsCollapsed" class="parameter-collapsed-tab" type="button" title="展开参数设置"
                 @click="toggleParamsPanel">
                 参数设置
@@ -1606,12 +1682,16 @@ onBeforeUnmount(() => window.removeEventListener('click', closeStableContextMenu
           </section>
         </template>
         <template v-else-if="activeModule === '产能系数'">
-          <ExponentialContent :pvt-table-options="pvtTableOptions" :selected-pvt-table="selectedPvtTable"
+          <ExponentialContent v-if="coefficientReady && !loadingWells && !pvtOptionsLoading" :key="`${selectedWellName}-${activeMethod}-${coefficientWorkspaceKey}`"
+            :record-id="activeCoefficientId" @restore="restoreCoefficient" @saved="coefficientSaved"
+            :pvt-table-options="pvtTableOptions" :selected-pvt-table="selectedPvtTable"
             :pvt-loading="pvtOptionsLoading" @select-pvt="selectedPvtTable = $event; changeSelectedPvt()"
             :operation-type="operationType" :well-name="selectedWellName"
-            :maximum-formation-pressure="maximumFormationPressure"
-            @update:maximum-formation-pressure="maximumFormationPressure = $event"
-            :formation-temperature="formationTemperature" :productivity-coefficient-c="productivityCoefficientC"
+            :maximum-formation-pressure="coefficientFormationPressure"
+            @update:maximum-formation-pressure="coefficientFormationPressure = $event"
+            :formation-temperature="coefficientFormationTemperature"
+            @update:formation-temperature="coefficientFormationTemperature = $event"
+            :productivity-coefficient-c="productivityCoefficientC"
             :productivity-exponent-n="productivityExponentN" :corrected-coefficient-c="correctedCoefficientC"
             :corrected-exponent-n="correctedExponentN" :fitted-formation-pressure="fittedFormationPressure"
             :fitted-flow-rate="fittedFlowRate" :open-flow-rate="openFlowRate" :pvt-record="selectedPvtRecord"

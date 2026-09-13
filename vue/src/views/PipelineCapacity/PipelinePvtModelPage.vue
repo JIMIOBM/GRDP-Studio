@@ -53,7 +53,7 @@ defineExpose({dirty})
   <div v-if="error" class="error-strip" role="alert">{{error}}<button v-if="!busy" @click="reload">重新加载</button></div>
   <p v-if="!ready" class="empty">{{busy?'正在加载气体组成及组分常数…':'模型未加载'}}</p>
   <div v-else class="workspace-body">
-   <aside class="parameter-panel" :class="{collapsed}">
+   <aside v-resizable-parameter-panel="collapsed" class="parameter-panel" :class="{collapsed}">
     <button v-if="collapsed" class="collapsed-tab" aria-label="展开参数设置" @click="collapsed=false">参数设置</button>
     <template v-else><div class="panel-heading">参数设置<button class="collapse-button" aria-label="收起参数设置" @click="collapsed=true"><svg width="14" height="14" viewBox="0 0 24 24" fill="#777" aria-hidden="true"><path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z" /></svg></button></div>
     <div class="parameter-form">

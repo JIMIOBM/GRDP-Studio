@@ -605,7 +605,7 @@ onBeforeUnmount(() => {
   <div v-loading="loading" class="analytic-wrap">
     <aside
         ref="paramsPanelEl"
-        class="params-panel"
+        class="params-panel water-parameter-theme"
         :class="{ collapsed: paramsCollapsed, narrow: !paramsCollapsed && paramsPanelWidth < 380 }"
         :style="{ width: paramsCollapsed ? '22px' : `${paramsPanelWidth}px`, minWidth: paramsCollapsed ? '22px' : `${paramsPanelWidth}px` }"
     >

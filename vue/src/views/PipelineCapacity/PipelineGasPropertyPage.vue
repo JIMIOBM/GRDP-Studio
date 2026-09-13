@@ -215,7 +215,7 @@ defineExpose({ dirty })
     <div v-if="stale && panel === 'result'" class="notice">PVT、计算方法、气体组成或温压已变化，以下为上次计算结果，请重新计算。</div>
     <div v-if="!ready" class="empty-state"><span>{{ busy ? '正在加载当前井物性配置…' : '物性配置未加载。' }}</span><button v-if="!busy" @click="load()">重新加载</button></div>
     <div v-else class="workspace-body">
-      <aside class="parameter-panel" :class="{ collapsed: paramsCollapsed }">
+      <aside v-resizable-parameter-panel="paramsCollapsed" class="parameter-panel" :class="{ collapsed: paramsCollapsed }">
         <button v-if="paramsCollapsed" class="parameter-collapsed-tab" type="button" title="展开参数设置" aria-label="展开参数设置" :aria-expanded="false" @click="paramsCollapsed = false">参数设置</button>
         <template v-else>
           <div class="panel-heading"><span>参数设置</span><button class="parameter-toggle" type="button" title="收起参数设置" aria-label="收起参数设置" :aria-expanded="true" @click="paramsCollapsed = true"><svg width="14" height="14" viewBox="0 0 24 24" fill="#777" aria-hidden="true"><path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z" /></svg></button></div>

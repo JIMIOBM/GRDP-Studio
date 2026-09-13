@@ -156,11 +156,11 @@ test('采气IPR图按修正系数生成十个地层压力级别的曲线组', ()
   assert.equal(family.length, 10)
   assert.deepEqual(
     family.map(item => Number(item.reservoirPressure.toFixed(3))),
-    [56.34, 50.706, 45.072, 39.438, 33.804, 28.17, 22.536, 16.902, 11.268, 5.634]
+    [5.634, 11.268, 16.902, 22.536, 28.17, 33.804, 39.438, 45.072, 50.706, 56.34]
   )
   assert.ok(family.every(item => item.curve.points[0].flowRate === 0))
   assert.ok(family.every(item => item.curve.points[0].flowingPressure === item.reservoirPressure))
-  assert.ok(family.every((item, index) => index === 0 || item.curve.limitRate < family[index - 1].curve.limitRate))
+  assert.ok(family.every((item, index) => index === 0 || item.curve.limitRate > family[index - 1].curve.limitRate))
 })
 
 test('注气IPR曲线组从各级地层压力上升到同一个最大井底注入压力', () => {

@@ -119,9 +119,9 @@ export const normalizeCoefficientFitPoint = ({
   return { flowRate: normalizedFlowRate, flowingPressure: normalizedPressure }
 }
 
-const injectionLimit = (reservoirPressure, maximumFlowingPressure, method, pvtCurve) => {
+const injectionLimit = (reservoirPressure, maximumFlowingPressure, method, pvtCurve, allowZeroRange = false) => {
   const maximum = numberFrom(maximumFlowingPressure)
-  if (!Number.isFinite(maximum) || maximum <= reservoirPressure) {
+  if (!Number.isFinite(maximum) || (allowZeroRange ? maximum < reservoirPressure : maximum <= reservoirPressure)) {
     throw new Error(`最大井底注入压力必须大于地层压力 ${reservoirPressure} MPa`)
   }
   // 同时校验拟压力法所选 PVT 表能够覆盖用户指定的注入压力。
@@ -196,6 +196,7 @@ export const calculateBinomialCoefficientCurve = ({
 
 
   fittedFlowingPressure = null,
+  maximumFlowingPressure = null,
 
   pvtResultRows = [],
   steps = 240
@@ -284,6 +285,12 @@ export const calculateBinomialCoefficientCurve = ({
   ) {
     endPressure =
       BINOMIAL_OPEN_FLOW_PRESSURE_MPA
+  } else if (maximumFlowingPressure !== null) {
+    const upperPressure = numberFrom(maximumFlowingPressure)
+    if (!Number.isFinite(upperPressure) || upperPressure < pressure) {
+      throw new Error('二项式井底注气压力上限不能低于该曲线地层压力')
+    }
+    endPressure = upperPressure
   } else {
     const parameterPressure =
       numberFrom(
@@ -400,8 +407,8 @@ export const calculateBinomialCoefficientCurve = ({
          * 采气：
          * Pr -> 0.1
          *
-         * 注气：
-         * Pr -> 参数点 Pwf
+         * 注气：Pr -> endPressure。
+         * 终点为指定井底压力上限，未指定时沿用参数点 Pwf。
          */
         const flowingPressure =
           pressure +
@@ -482,14 +489,43 @@ export const calculateBinomialCoefficientCurve = ({
      * Pwf = 0.1 对应无阻流量。
      *
      * 注气：
-     * 当前参数点 Pwf 下，
-     * A/B 对应的理论注气量。
+     * endPressure 下 A/B 对应的理论注气量。
      */
     limitRate:
       points.at(-1).flowRate,
 
     points
   }
+}
+
+export const calculateBinomialCoefficientIprFamily = ({
+  reservoirPressure,
+  levels = 10,
+  ...curveOptions
+}) => {
+  const maximumPressure = Number(reservoirPressure)
+  const levelCount = Math.max(1, Math.floor(Number(levels)) || 10)
+
+  if (!Number.isFinite(maximumPressure) || maximumPressure <= BINOMIAL_OPEN_FLOW_PRESSURE_MPA) {
+    throw new Error(
+      `计算IPR曲线的最大地层压力必须大于 ${BINOMIAL_OPEN_FLOW_PRESSURE_MPA} MPa`
+    )
+  }
+
+  return Array.from({ length: levelCount }, (_, index) => ({
+    level: index + 1,
+    // 最高一级直接取输入值，避免乘除舍入使起点略高于共同注气上限。
+    reservoirPressure: index === levelCount - 1
+      ? maximumPressure : maximumPressure * (index + 1) / levelCount
+  }))
+    .filter(item => item.reservoirPressure > BINOMIAL_OPEN_FLOW_PRESSURE_MPA)
+    .map(item => ({
+      ...item,
+      curve: calculateBinomialCoefficientCurve({
+        ...curveOptions,
+        reservoirPressure: item.reservoirPressure
+      })
+    }))
 }
 
 
@@ -501,6 +537,7 @@ export const calculateExponentialCoefficientCurve = ({
   calculationMethod,
   operationType = 'production',
   maximumFlowingPressure = null,
+  allowZeroInjectionRange = false,
   pvtResultRows = [],
   steps = 240
 }) => {
@@ -522,7 +559,7 @@ export const calculateExponentialCoefficientCurve = ({
   const pvtCurve = normalizeCoefficientPvtCurve(pvtResultRows)
   const minimumPressure = Math.min(pressure, ATMOSPHERIC_PRESSURE_MPA)
   const maximumPressure = direction === 'injection'
-    ? injectionLimit(pressure, maximumFlowingPressure, method, pvtCurve)
+    ? injectionLimit(pressure, maximumFlowingPressure, method, pvtCurve, allowZeroInjectionRange)
     : pressure
   const pointCount = Math.max(2, Math.floor(Number(steps)) || 240)
   const reservoirPotential = coefficientPressurePotential(pressure, method, pvtCurve)
@@ -552,6 +589,13 @@ export const calculateExponentialCoefficientCurve = ({
   }
 }
 
+// 无阻流量独立于注气绘图范围，使用完整地层压力至大气压的采气压差。
+export const calculateExponentialCoefficientOpenFlow = options =>
+  calculateExponentialCoefficientCurve({
+    ...options,
+    operationType: 'production'
+  }).limitRate
+
 export const calculateExponentialCoefficientIprFamily = ({
   reservoirPressure,
   levels = 10,
@@ -565,13 +609,16 @@ export const calculateExponentialCoefficientIprFamily = ({
 
   return Array.from({ length: levelCount }, (_, index) => ({
     level: index + 1,
-    reservoirPressure: maximumPressure * (levelCount - index) / levelCount
+    reservoirPressure: index === levelCount - 1
+      ? maximumPressure : maximumPressure * (index + 1) / levelCount
   }))
     .filter(item => item.reservoirPressure > ATMOSPHERIC_PRESSURE_MPA)
     .map(item => ({
       ...item,
       curve: calculateExponentialCoefficientCurve({
         ...curveOptions,
+        // 与二项式一致：最高压力级别等于共同上限时，保留零气量退化曲线。
+        allowZeroInjectionRange: true,
         reservoirPressure: item.reservoirPressure
       })
     }))

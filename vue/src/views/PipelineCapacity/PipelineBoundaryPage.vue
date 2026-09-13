@@ -64,7 +64,7 @@ async function acceptImport({ cases: imported, fileName }) {
 
 <template>
   <div class="workspace-body boundary-body">
-    <aside class="parameter-panel" :class="{ collapsed }">
+    <aside v-resizable-parameter-panel="collapsed" class="parameter-panel" :class="{ collapsed }">
       <button v-if="collapsed" class="collapsed-tab" type="button" aria-label="展开参数设置" :aria-expanded="false" @click="collapsed = false">参数设置</button>
       <template v-else>
         <div class="panel-heading"><span>参数设置</span><button class="collapse-button" type="button" title="收起参数设置" aria-label="收起参数设置" :aria-expanded="true" @click="collapsed = true"><svg width="14" height="14" viewBox="0 0 24 24" fill="#777" aria-hidden="true"><path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z" /></svg></button></div>

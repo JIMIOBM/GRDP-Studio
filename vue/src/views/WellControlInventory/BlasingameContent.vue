@@ -707,7 +707,7 @@ onBeforeUnmount(() => {
   <div class="blasingame-wrap">
     <aside
         ref="paramsPanelEl"
-        class="params-panel"
+        class="params-panel water-parameter-theme"
         :class="{ collapsed: paramsCollapsed }"
         :style="{ width: paramsCollapsed ? '22px' : `${paramsPanelWidth}px`, minWidth: paramsCollapsed ? '22px' : `${paramsPanelWidth}px` }"
     >
