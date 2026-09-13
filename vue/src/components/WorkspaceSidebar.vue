@@ -28,9 +28,9 @@ const emit = defineEmits([
 watch(() => props.nodes, nodes => ensurePipelineNavigation(nodes), { deep: true, immediate: true })
 
 const panelEl = ref(null)
-const panelWidth = ref(230)
+const minWidth = 262
+const panelWidth = ref(minWidth)
 const dragging = ref(false)
-const minWidth = 180
 const maxWidth = ref(520)
 const panelStyle = computed(() => {
   const width = props.collapsed ? 22 : panelWidth.value
@@ -38,7 +38,7 @@ const panelStyle = computed(() => {
 })
 let parentObserver
 let startX = 0
-let startWidth = 230
+let startWidth = minWidth
 let previousCursor = ''
 let previousSelect = ''
 const setWidth = value => { panelWidth.value = Math.max(minWidth, Math.min(maxWidth.value, value)) }
@@ -147,8 +147,8 @@ onBeforeUnmount(() => {
 
 <style lang="scss" scoped>
 .workspace-side-panel {
-  width: 230px;
-  min-width: 230px;
+  width: 262px;
+  min-width: 262px;
   display: flex;
   flex-direction: column;
   border-right: 1px solid #e0e0e0;

@@ -4580,9 +4580,13 @@ const handleCommand = async ({ group, name, parent, wellName: commandWellName })
     return // 库的物质平衡/图版法等同名菜单，不能落入下方单井计算分支。
   }
   if (route.query.scope === 'reservoir') await router.replace({ name: 'IprInterface' })
+  // 点击目录只更新左侧高亮；执行顶部命令时才同步目标井，避免使用右侧旧记录的井名。
+  // 跨工作台传入的井名优先，其次读取共享目录高亮（含不带 wellName 的子目录）。
+  const targetWellName = (typeof commandWellName === 'string' && commandWellName.trim()) ||
+    resolveWorkspaceTargetWellName(activeNode.value?.wellName || selectedWellName.value)
+  if (targetWellName) selectedWellName.value = targetWellName
   if (group === '管束能力') {
-    const wellName = (typeof commandWellName === 'string' && commandWellName.trim()) ||
-      resolveWorkspaceTargetWellName(activeNode.value?.wellName || selectedWellName.value)
+    const wellName = targetWellName
     if (!wellName) {
       ElMessage.warning('请先在左侧选择一口井')
       return
@@ -4593,9 +4597,7 @@ const handleCommand = async ({ group, name, parent, wellName: commandWellName })
   }
   // 顶部菜单栏“单井产能”板块：跳转到独立的单井产能工作台。
   if (group === '单井产能') {
-    const activeWellName = activeNode.value?.wellName || (
-      activeNode.value?.type === NODETYPE.NodeType_Well ? activeNode.value.label : ''
-    ) || selectedWellName.value
+    const activeWellName = targetWellName
     if (!activeWellName) {
       ElMessage.warning('请先在左侧选择一口井')
       return
@@ -4634,10 +4636,7 @@ const handleCommand = async ({ group, name, parent, wellName: commandWellName })
   const dataType = dataViewByName[name]
 
   if (dataType) {
-    const activeWellName =
-      selectedWellName.value ||
-      activeNode.value?.wellName ||
-      (activeNode.value?.type === NODETYPE.NodeType_Well ? activeNode.value.label : '')
+    const activeWellName = targetWellName
     const supportsProjectScope = ['deliverability', 'staticPressure', 'wellcompletion', 'otherdata', 'productiondata'].includes(dataType)
 
     if (!supportsProjectScope && !activeWellName) {
@@ -4654,9 +4653,7 @@ const handleCommand = async ({ group, name, parent, wellName: commandWellName })
   }
 
   if (group === '井筒能力' && ['井身结构', '温度模型', '折算方法', '井筒积液', '水合物'].includes(name)) {
-    const activeWellName = selectedWellName.value || activeNode.value?.wellName || (
-      activeNode.value?.type === NODETYPE.NodeType_Well ? activeNode.value.label : ''
-    )
+    const activeWellName = targetWellName
     if (!activeWellName) {
       ElMessage.warning('请先在左侧选择一口井')
       return
@@ -4671,9 +4668,7 @@ const handleCommand = async ({ group, name, parent, wellName: commandWellName })
   }
 
   if (name === 'PVT性质' || name === 'PVT模型') {
-    const activeWellName = selectedWellName.value || activeNode.value?.wellName || (
-      activeNode.value?.type === NODETYPE.NodeType_Well ? activeNode.value.label : ''
-    )
+    const activeWellName = targetWellName
     if (!activeWellName) {
       ElMessage.warning('请先选择一口井')
       return
@@ -4774,7 +4769,7 @@ const handleCommand = async ({ group, name, parent, wellName: commandWellName })
       runFlowBalanceForSelectedWell()
       break
     case '诊断曲线':
-      runDiagnosticCurveForSelectedWell(commandWellName)
+      runDiagnosticCurveForSelectedWell(targetWellName)
       break
     case 'Blasingame':
       runBlasingameForSelectedWell()
