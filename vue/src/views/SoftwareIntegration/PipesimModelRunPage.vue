@@ -8,6 +8,7 @@ import PipesimNodalResult from './PipesimNodalResult.vue'
 import PipesimProfileResult from './PipesimProfileResult.vue'
 import PipesimRunHistory from './PipesimRunHistory.vue'
 import EclipseRunResult from './EclipseRunResult.vue'
+import EclipseDataInspectionOverview from './EclipseDataInspectionOverview.vue'
 
 const props = defineProps({
   eclipsePresentation: { type: Boolean, default: true }
@@ -33,7 +34,11 @@ const {
   loadingHistory,
   submittingRun,
   cancellingRun,
-  runPollingUnavailable
+  runPollingUnavailable,
+  capabilities,
+  activeSimulatorCapability,
+  workerBusy,
+  canCreateRunByCapability
 } = storeToRefs(store)
 
 const activeTab = ref('nodal')
@@ -239,7 +244,24 @@ const networkTopologyUnavailable = computed(() => isNetworkModel.value &&
 const canRun = computed(() => activeVersion.value?.status === 'READY' &&
   (isNetworkModel.value || isWellModel.value || isEclipseModel.value) &&
   (isEclipseModel.value ? eclipsePresentationAvailable.value : persistedStudies.value.includes(selectedStudy.value)) &&
-  !hasActiveRun.value && !submittingRun.value)
+  !hasActiveRun.value && !submittingRun.value && canCreateRunByCapability.value)
+const capabilityReasonLabels = Object.freeze({
+  WORKER_UNREACHABLE: 'Worker 无法连接',
+  WORKER_BUSY: 'Worker 正在执行其他任务',
+  PIPESIM_UNAVAILABLE: 'PIPESIM 执行环境不可用',
+  PIPESIM_VERSION_MISMATCH: 'PIPESIM 版本不匹配',
+  ECLIPSE_UNAVAILABLE: 'ECLIPSE 执行环境不可用',
+  ECLIPSE_VERSION_MISMATCH: 'ECLIPSE 版本不匹配'
+})
+const runCapabilityMessage = computed(() => {
+  if (!capabilities.value) return '正在检测执行环境；检测完成前不能创建新运行。'
+  if (capabilities.value.worker?.status !== 'AVAILABLE') return capabilityReasonLabels.WORKER_UNREACHABLE
+  if (workerBusy.value) return capabilityReasonLabels.WORKER_BUSY
+  if (activeSimulatorCapability.value?.status !== 'AVAILABLE') {
+    return capabilityReasonLabels[activeSimulatorCapability.value?.reasonCode] || '当前模拟器执行环境不可用'
+  }
+  return ''
+})
 const modelTypeLabel = computed(() => {
   if (isNetworkModel.value) return 'PIPESIM 管网模型'
   if (isEclipseModel.value) return 'ECLIPSE 100 模型'
@@ -309,13 +331,6 @@ const safeRunError = computed(() => selectedError.value ? {
   code: safeCode(selectedError.value.code) || 'RUN_NOT_ACCEPTED',
   retryable: selectedError.value.retryable === true
 } : null)
-const readyVersionCount = computed(() => versions.value.filter(version => version.status === 'READY').length)
-const selectedModelGuidance = computed(() => {
-  if (activeVersion.value?.status !== 'READY') return '等待此版本完成验证，或选择一个 READY 版本后再运行。'
-  if (isEclipseModel.value) return '该版本使用固定 ECLIPSE 执行契约，不选择 Study，也不覆盖参数。'
-  if (!persistedStudies.value.length) return '此 READY 版本未返回可运行的 Study，请重新验证模型。'
-  return '选择模型已有 Study 和兼容运行类型后，可创建真实运行任务。'
-})
 const terminalRunGuidance = computed(() => {
   if (!displayRun.value || !['FAILED', 'CANCELLED', 'TIMED_OUT', 'WORKER_LOST'].includes(displayRun.value.status)) return ''
   if (displayRun.value.status === 'CANCELLED') return '任务已取消。确认 Study 后可重新提交运行。'
@@ -446,16 +461,7 @@ watch([isNetworkModel, isWellModel, isEclipseModel], ([networkModel, wellModel, 
   if (activeTab.value === 'network') activeTab.value = selectedRun.value?.runType === 'profile' ? 'profile' : 'nodal'
 }, { immediate: true })
 
-const reloadEclipseRunHistory = async () => {
-  if (!eclipsePresentationAvailable.value || !activeVersionId.value) return []
-  return store.loadRunHistory(activeVersionId.value)
-}
-
-watch([isEclipseRunPresentation, eclipsePresentationAvailable, activeVersionId], ([eclipsePresentation, available]) => {
-  if (eclipsePresentation && available) reloadEclipseRunHistory()
-}, { immediate: true })
-
-defineExpose({ eclipseRunRequest, reloadEclipseRunHistory })
+defineExpose({ eclipseRunRequest })
 </script>
 
 <template>
@@ -473,12 +479,6 @@ defineExpose({ eclipseRunRequest, reloadEclipseRunHistory })
         <span>已用时间 {{ formatElapsed(activeElapsedMillis) }}</span>
       </div>
     </header>
-
-    <section class="model-readiness" aria-label="模型就绪状态">
-      <div><span>版本</span><strong>{{ versions.length }}</strong></div>
-      <div><span>READY</span><strong>{{ readyVersionCount }}</strong></div>
-      <p>{{ selectedModelGuidance }}</p>
-    </section>
 
       <div class="run-controls" :class="{ 'eclipse-run-controls': isEclipseRunPresentation }">
         <label>
@@ -499,46 +499,32 @@ defineExpose({ eclipseRunRequest, reloadEclipseRunHistory })
           <el-radio-button v-for="option in runTypeOptions" :key="option.value" :value="option.value">{{ option.label }}</el-radio-button>
         </el-radio-group>
       </div>
+
         <div v-if="!isEclipseRunPresentation || eclipsePresentationAvailable" class="control-actions">
           <el-button type="primary" :loading="submittingRun" :disabled="!canRun" @click="submitRun">运行</el-button>
           <el-button type="danger" plain :loading="cancellingRun" :disabled="!activeRun?.cancellable" @click="cancelRun">取消</el-button>
         </div>
       </div>
 
-      <el-alert
+      <p v-if="runCapabilityMessage" class="inline-notice warning" :title="`${runCapabilityMessage}；历史运行与已有结果仍可查看。`">
+        新运行不可用：{{ runCapabilityMessage }}
+      </p>
+
+      <p
         v-if="isEclipseRunPresentation && !eclipsePresentationAvailable"
-        class="eclipse-unavailable"
-        title="ECLIPSE 运行不可用"
-        :description="activeVersion?.status !== 'READY' ? '请等待模型版本验证为 READY。' : '当前 READY 版本缺少 DATA 检查信息，不能展示或创建 ECLIPSE 运行。'"
-        type="warning"
-        :closable="false"
-        show-icon
-      />
+        class="inline-notice warning"
+        :title="activeVersion?.status !== 'READY' ? '请等待模型版本验证为 READY。' : '当前 READY 版本缺少 DATA 检查信息。'"
+      >ECLIPSE 运行不可用：{{ activeVersion?.status !== 'READY' ? '模型尚未 READY' : '缺少有效 DATA 检查' }}</p>
       <div v-else-if="isEclipseRunPresentation" class="eclipse-request-summary">
         <span>运行类型：ECLIPSE</span><span>Study：不适用</span><span>参数：不覆盖</span>
       </div>
 
-    <el-alert
-      v-if="runPollingUnavailable"
-      class="run-state-alert"
-      title="运行状态暂时无法刷新"
-      description="已停止自动刷新，避免持续加载。可手动读取一次持久状态，或稍后在运行记录中重新选择该运行。"
-      type="warning"
-      :closable="false"
-      show-icon
-    ><template #default><el-button link type="primary" :loading="manualRefreshing" @click="refreshRunManually">手动刷新</el-button></template></el-alert>
-    <section v-if="displayRun" class="run-provenance" aria-label="真实运行来源">
-      <span>模型：{{ displayRun.modelName || activeModel.name }}</span><span>版本：v{{ displayRun.versionNo || activeVersion?.versionNo || '-' }}</span><span>Study：{{ displayRun.study || '不适用' }}</span><span>运行 ID：{{ displayRun.id }}</span><span>创建：{{ displayRun.createdAt || '-' }}</span><span>用时：{{ formatElapsed(displayRun.elapsedMillis) }}</span>
-    </section>
-    <el-alert
-      v-if="terminalRunGuidance"
-      class="run-state-alert"
-      :title="statusMeta[displayRun.status]?.[0] || displayRun.status"
-      :description="terminalRunGuidance"
-      type="warning"
-      :closable="false"
-      show-icon
-    />
+    <p v-if="runPollingUnavailable" class="inline-notice warning" title="自动刷新已停止，可手动读取一次持久状态。">
+      运行状态暂时无法刷新 <el-button link type="primary" :loading="manualRefreshing" @click="refreshRunManually">手动刷新</el-button>
+    </p>
+    <p v-if="terminalRunGuidance" class="inline-notice warning" :title="terminalRunGuidance">
+      {{ statusMeta[displayRun.status]?.[0] || displayRun.status }}：{{ terminalRunGuidance }}
+    </p>
 
     <div v-if="(!isEclipseRunPresentation || eclipsePresentationAvailable) && displayRun && hasActiveRun" class="stage-strip" aria-label="真实运行阶段">
       <div v-for="(stage, index) in stages" :key="stage.status" class="stage" :class="{ active: currentStageIndex === index, done: currentStageIndex > index }">
@@ -548,32 +534,9 @@ defineExpose({ eclipseRunRequest, reloadEclipseRunHistory })
       <span v-if="currentStageIndex < 0" class="queue-stage">{{ statusMeta[displayRun.status]?.[0] || displayRun.status }}</span>
     </div>
 
-    <el-alert
-      v-if="isPartial"
-      class="partial-alert"
-      title="组合运行部分成功：节点分析结果可用，PT 剖面失败。"
-      type="warning"
-      :closable="false"
-      show-icon
-    />
-    <el-alert
-      v-if="isNetworkPartial"
-      class="network-partial-alert"
-      title="部分真实计算结果"
-      description="计算已完成，但完整展示校验未通过。仅展示实际返回的数据；未返回的拓扑、表格、图表或剖面字段会标记为不可用。"
-      type="warning"
-      :closable="false"
-      show-icon
-    />
-    <el-alert
-      v-if="networkTopologyUnavailable"
-      class="network-partial-alert"
-      title="管网结果不可用"
-      description="返回的管网拓扑或统计信息未通过安全展示校验。为避免展示错误结果，已隐藏管网图表和结果数据。"
-      type="warning"
-      :closable="false"
-      show-icon
-    />
+    <p v-if="isPartial" class="inline-notice warning">组合运行部分成功：节点分析结果可用，PT 剖面失败。</p>
+    <p v-if="isNetworkPartial" class="inline-notice warning" title="仅展示实际返回并通过安全校验的数据。">部分真实计算结果：部分管网结果不可用。</p>
+    <p v-if="networkTopologyUnavailable" class="inline-notice danger" title="返回的拓扑或统计信息未通过安全展示校验。">管网结果不可用：已隐藏未通过校验的数据。</p>
 
     <div v-if="safeRunError && !isEclipseModel" class="structured-error">
       <dl>
@@ -583,19 +546,11 @@ defineExpose({ eclipseRunRequest, reloadEclipseRunHistory })
         <div><dt>可重试</dt><dd>{{ safeRunError.retryable ? '是' : '否' }}</dd></div>
       </dl>
     </div>
-    <el-alert
-      v-if="networkContractRejected"
-      class="run-state-alert"
-      title="模拟器已返回数据，但结果未通过展示契约"
-      description="该数据未被当作已计算结果展示，因此不会绘制图表或结果表。请查看运行记录，或选择一条历史成功运行。"
-      type="warning"
-      :closable="false"
-      show-icon
-    >
-      <template #default><el-button link type="primary" @click="selectHistoricalSuccessfulNetworkRun">{{ historicalSuccessfulNetworkRun ? '选择历史成功运行' : '查看运行记录' }}</el-button></template>
-    </el-alert>
+    <p v-if="networkContractRejected" class="inline-notice warning" title="返回数据未通过展示契约，未绘制图表或结果表。">
+      结果未通过展示契约 <el-button link type="primary" @click="selectHistoricalSuccessfulNetworkRun">{{ historicalSuccessfulNetworkRun ? '选择历史成功运行' : '查看运行记录' }}</el-button>
+    </p>
 
-    <el-tabs v-if="!isEclipseRunPresentation || eclipsePresentationAvailable" v-model="activeTab" class="result-tabs">
+    <el-tabs v-model="activeTab" class="result-tabs">
        <el-tab-pane v-if="isWellModel" label="节点分析" name="nodal">
         <PipesimNodalResult :result="validWellResult" />
       </el-tab-pane>
@@ -607,6 +562,9 @@ defineExpose({ eclipseRunRequest, reloadEclipseRunHistory })
       </el-tab-pane>
       <el-tab-pane v-if="isEclipseModel" label="ECLIPSE 结果" name="eclipse">
         <EclipseRunResult :run="selectedRun" />
+      </el-tab-pane>
+      <el-tab-pane v-if="isEclipseModel" label="DATA 检查" name="inspection">
+        <EclipseDataInspectionOverview :embedded="true" />
       </el-tab-pane>
       <el-tab-pane label="运行记录" name="history">
         <PipesimRunHistory
@@ -623,6 +581,14 @@ defineExpose({ eclipseRunRequest, reloadEclipseRunHistory })
         <span class="execution-count">事件 {{ executionEvents.length }} · Artifact {{ executionArtifacts.length }}</span>
       </summary>
       <div class="execution-panel-content">
+        <dl class="execution-provenance">
+          <div><dt>模型</dt><dd>{{ displayRun.modelName || activeModel.name }}</dd></div>
+          <div><dt>版本</dt><dd>v{{ displayRun.versionNo || activeVersion?.versionNo || '-' }}</dd></div>
+          <div><dt>Study</dt><dd>{{ displayRun.study || '不适用' }}</dd></div>
+          <div><dt>运行 ID</dt><dd>{{ displayRun.id }}</dd></div>
+          <div><dt>创建时间</dt><dd>{{ displayRun.createdAt || '-' }}</dd></div>
+          <div><dt>用时</dt><dd>{{ formatElapsed(displayRun.elapsedMillis) }}</dd></div>
+        </dl>
         <div class="execution-section">
           <h3>事件 <span>{{ executionEvents.length }}</span></h3>
           <div v-if="executionEvents.length" class="technical-table-scroll">
@@ -658,21 +624,22 @@ defineExpose({ eclipseRunRequest, reloadEclipseRunHistory })
 </template>
 
 <style lang="scss" scoped>
-.model-run-page { min-width: 0; min-height: 0; padding: 20px 24px 28px; color: #303133; overflow: auto; background: #fafafa; }
-.model-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 0 0 14px; border-bottom: 1px solid #dcdfe6; }
+.model-run-page { min-width: 0; min-height: 0; padding: 14px 18px 22px; color: #303133; overflow: auto; background: #fff; }
+.model-header { min-height: 38px; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 0 0 8px; border-bottom: 1px solid #dcdfe6; }
 .title-line { display: flex; align-items: center; gap: 10px; }
 h1 { margin: 0; font-size: 19px; font-weight: 600; }
-.model-header p { margin: 5px 0 0; color: #909399; font-size: 12px; }
+.model-header p { margin: 2px 0 0; color: #909399; font-size: 12px; }
 .run-summary { display: flex; align-items: center; gap: 12px; color: #606266; font-size: 13px; }
-.model-readiness, .run-provenance { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; margin-top: 12px; padding: 9px 12px; border: 1px solid #e1e3e6; background: #f5f5f4; color: #606266; font-size: 12px; }.model-readiness div { display: flex; align-items: baseline; gap: 5px; }.model-readiness strong { color: #303133; font-size: 15px; }.model-readiness p { flex: 1 1 300px; margin: 0; }.run-provenance span { overflow-wrap: anywhere; }.run-state-alert { margin-bottom: 12px; }
 .execution-panel { min-width: 0; margin-top: 14px; border: 1px solid #dcdfe6; background: #fff; }.execution-panel summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 12px; cursor: pointer; list-style: none; color: #303133; font-size: 13px; }.execution-panel summary::-webkit-details-marker { display: none; }.execution-panel summary::before { content: '+'; margin-right: 8px; color: #606266; font-weight: 600; }.execution-panel[open] summary { border-bottom: 1px solid #e4e7ed; background: #f5f5f4; }.execution-panel[open] summary::before { content: '-'; }.execution-panel summary > span:first-of-type { display: flex; align-items: baseline; gap: 9px; min-width: 0; }.execution-panel summary small, .execution-count { color: #909399; font-size: 12px; font-weight: 400; }.execution-count { white-space: nowrap; }.execution-panel-content { padding: 12px; }.execution-section + .execution-section { margin-top: 14px; }.execution-section h3 { margin: 0 0 7px; color: #303133; font-size: 13px; }.execution-section h3 span { color: #909399; font-weight: 400; }.technical-table-scroll { overflow-x: auto; }.technical-table { min-width: 680px; }.execution-empty { margin: 0; padding: 8px 10px; color: #909399; font-size: 12px; background: #f5f5f4; }.cleanup-grid { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 0; padding: 9px 10px; background: #f5f5f4; font-size: 12px; }.cleanup-grid div { display: flex; gap: 6px; }.cleanup-grid dt { color: #737a84; }.cleanup-grid dd { margin: 0; color: #303133; }
-.run-controls { display: grid; grid-template-columns: minmax(150px, 210px) minmax(170px, 240px) auto auto; align-items: end; gap: 14px; padding: 18px 0; }
+.execution-provenance { display: flex; flex-wrap: wrap; gap: 6px 20px; margin: 0 0 12px; padding: 0 0 10px; border-bottom: 1px solid #e4e7ed; font-size: 12px; }.execution-provenance div { display: flex; gap: 5px; }.execution-provenance dt { color: #909399; }.execution-provenance dd { margin: 0; overflow-wrap: anywhere; }
+.run-controls { display: grid; grid-template-columns: minmax(150px, 210px) minmax(170px, 240px) auto auto; align-items: end; gap: 8px 12px; margin: 8px 0; padding: 7px 10px; border-bottom: 1px solid #deded9; background: #f3f3f0; }
 .run-controls.eclipse-run-controls { grid-template-columns: minmax(150px, 210px) auto; }
 .run-controls label, .run-type-control { min-width: 0; }
 .run-controls label > span, .run-type-control > span { display: block; margin-bottom: 6px; color: #606266; font-size: 12px; }
 .run-controls .el-select { width: 100%; }
 .control-actions { display: flex; gap: 8px; }
-.eclipse-unavailable { margin-bottom: 14px; }.eclipse-request-summary { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 0 0 14px; padding: 11px 14px; border: 1px solid #e4e9f0; background: #f8fafc; color: #606266; font-size: 12px; }
+.eclipse-request-summary { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 0 0 8px; padding: 4px 8px; color: #606266; font-size: 12px; }
+.inline-notice { min-height: 26px; display: flex; align-items: center; gap: 6px; margin: 0 0 6px; padding: 0 8px; overflow: hidden; border-left: 2px solid #c99b00; background: #fff9dd; color: #695600; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }.inline-notice.danger { border-left-color: #c45656; background: #fff2f2; color: #8b3030; }.inline-notice .el-button { flex: 0 0 auto; }
 .stage-strip { display: flex; align-items: center; gap: 0; min-height: 44px; margin-bottom: 12px; padding: 0 14px; border: 1px solid #dcdfe6; background: #f5f5f4; }
 .stage { position: relative; min-width: 120px; display: flex; align-items: center; gap: 7px; color: #909399; font-size: 12px; }
 .stage:not(:last-of-type)::after { content: ''; width: 48px; height: 1px; margin: 0 10px; background: #d7dee8; }
@@ -680,11 +647,10 @@ h1 { margin: 0; font-size: 19px; font-weight: 600; }
 .stage.active { color: #303133; font-weight: 600; }.stage.active i { border-color: #d9a300; background: #f4d000; box-shadow: 0 0 0 3px #fff3bf; }
 .stage.done { color: #606266; }.stage.done i { border-color: #606266; background: #606266; }
 .queue-stage { margin-left: auto; color: #606266; }
-.partial-alert, .network-partial-alert { margin-bottom: 14px; }.network-partial-alert { border: 2px solid #d97706; background: #fff7e6; }.network-partial-alert :deep(.el-alert__title) { color: #9a4d00; font-size: 16px; font-weight: 700; }.network-partial-alert :deep(.el-alert__description) { color: #7a430a; font-weight: 600; }
 .structured-error { margin-bottom: 14px; padding: 12px 14px; border-left: 3px solid #d94b4b; background: #fff3f3; color: #8b2525; }
 .structured-error dl { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 0; font-size: 12px; }
 .structured-error dl div { display: flex; gap: 5px; }.structured-error dt { color: #a85b5b; }.structured-error dd { margin: 0; }
-.result-tabs { min-height: 0; margin-top: 4px; padding: 0 12px 12px; border: 1px solid #dcdfe6; background: #fff; }.result-tabs :deep(.el-tabs__header) { margin: 0 -12px 12px; padding: 0 12px; border-bottom: 1px solid #e4e7ed; background: #f5f5f4; }.result-tabs :deep(.el-tabs__nav-wrap::after) { background: transparent; }.result-tabs :deep(.el-tabs__active-bar) { height: 3px; background: #f4d000; }.result-tabs :deep(.el-tabs__item) { height: 40px; color: #606266; font-size: 13px; }.result-tabs :deep(.el-tabs__item.is-active) { color: #303133; font-weight: 600; }
+.result-tabs { min-height: 0; margin-top: 2px; }.result-tabs :deep(.el-tabs__header) { margin: 0 0 8px; border-bottom: 1px solid #dcdfe6; }.result-tabs :deep(.el-tabs__nav-wrap::after) { height: 1px; background: #dcdfe6; }.result-tabs :deep(.el-tabs__active-bar) { height: 2px; background: #f4d000; }.result-tabs :deep(.el-tabs__item) { height: 34px; color: #606266; font-size: 13px; }.result-tabs :deep(.el-tabs__item.is-active) { color: #303133; font-weight: 600; }
 @media (max-width: 1120px) {
   .run-controls { grid-template-columns: 1fr 1fr; }
   .control-actions { align-self: end; }
@@ -694,6 +660,6 @@ h1 { margin: 0; font-size: 19px; font-weight: 600; }
   .model-header { align-items: flex-start; flex-direction: column; }
   .run-controls { grid-template-columns: 1fr; }
   .stage-strip { overflow-x: auto; }
-  .execution-panel summary { align-items: flex-start; }.execution-panel summary > span:first-of-type { flex-direction: column; gap: 2px; }.execution-count { display: none; }.execution-panel-content { padding: 10px; }.result-tabs { padding: 0 10px 10px; }.result-tabs :deep(.el-tabs__header) { margin-right: -10px; margin-left: -10px; padding: 0 10px; overflow-x: auto; }
+  .inline-notice { overflow-x: auto; text-overflow: clip; }.execution-panel summary { align-items: flex-start; }.execution-panel summary > span:first-of-type { flex-direction: column; gap: 2px; }.execution-count { display: none; }.execution-panel-content { padding: 10px; }.result-tabs :deep(.el-tabs__header) { overflow-x: auto; }
 }
 </style>

@@ -343,6 +343,67 @@ public sealed class PtkRunEnvelopeTests
         Assert.DoesNotContain("private", result?.GetRawText());
     }
 
+    [Fact]
+    public void FullNetworkAcceptsPlainLocalPipePlaceholderAndRun36NullQualityShape()
+    {
+        using var document = NetworkEnvelope("ok", """
+            "system": [{ "variable": "Pressure", "unit": "psi", "values": [{ "name": "Network", "value": null }] }],
+            "node": [],
+            "profiles": [{ "branch": "Branch 1", "pointCount": 1, "variables": [{ "variable": "TotalDistance", "unit": "ft", "values": [0] }, { "variable": "Pressure", "unit": "psi", "values": [null] }] }],
+            "summary": { "info": ["Service endpoint [local pipe]"], "warnings": [], "errors": [] },
+            "messages": ["Network simulation completed via [local pipe]"],
+            "quality": [{ "path": "system.Pressure.Network", "code": "UNAVAILABLE" }, { "path": "profiles.Branch 1.Pressure[0]", "code": "NON_FINITE" }]
+            """);
+
+        Assert.True(PtkRunService.TryReadEnvelope(document.RootElement, "network", out _, out var result, out _, out _));
+        Assert.Equal("VALID_FULL", result?.GetProperty("resultContract").GetString());
+        Assert.Contains("[local pipe]", result?.GetRawText());
+    }
+
+    [Theory]
+    [InlineData("summary", "net.pipe://localhost/pipe/[redacted]")]
+    [InlineData("summary", "C:\\\\private\\result.log")]
+    [InlineData("messages", "net.pipe://localhost/pipe/private-id")]
+    public void FullNetworkRejectsUnsafeSummaryOrMessages(string section, string unsafeText)
+    {
+        var summary = section == "summary"
+            ? $"{{ \"info\": [{JsonSerializer.Serialize(unsafeText)}], \"warnings\": [], \"errors\": [] }}"
+            : "{ \"info\": [], \"warnings\": [], \"errors\": [] }";
+        var messages = section == "messages" ? $"[{JsonSerializer.Serialize(unsafeText)}]" : "[]";
+        using var document = NetworkEnvelope("ok", $$"""
+            "system": [], "node": [], "profiles": {{DefaultProfiles}},
+            "summary": {{summary}}, "messages": {{messages}}, "quality": []
+            """);
+
+        Assert.False(PtkRunService.TryReadEnvelope(document.RootElement, "network", out _, out _, out _, out _));
+    }
+
+    [Theory]
+    [InlineData("{ \"path\": \"profiles.Branch 1.Pressure[0]\", \"code\": \"UNKNOWN\" }")]
+    [InlineData("{ \"path\": \"net.pipe://localhost/pipe/private-quality\", \"code\": \"UNAVAILABLE\" }")]
+    [InlineData("{ \"path\": \"profiles.Branch 1.Pressure[0]\", \"code\": \"UNAVAILABLE\", \"message\": \"extra\" }")]
+    public void FullNetworkRejectsInvalidQualityItems(string item)
+    {
+        using var document = NetworkEnvelope("ok", $$"""
+            "system": [], "node": [], "profiles": {{DefaultProfiles}},
+            "summary": { "info": [], "warnings": [], "errors": [] }, "messages": [], "quality": [{{item}}]
+            """);
+
+        Assert.False(PtkRunService.TryReadEnvelope(document.RootElement, "network", out _, out _, out _, out _));
+    }
+
+    [Fact]
+    public void FullNetworkRejectsDuplicateQualityPaths()
+    {
+        using var document = NetworkEnvelope("ok", $$"""
+            "system": [], "node": [], "profiles": {{DefaultProfiles}},
+            "summary": { "info": [], "warnings": [], "errors": [] }, "messages": [],
+            "quality": [{ "path": "profiles.Branch 1.Pressure[0]", "code": "UNAVAILABLE" }, { "path": "profiles.Branch 1.Pressure[0]", "code": "NON_FINITE" }]
+            """);
+
+        Assert.False(PtkRunService.TryReadEnvelope(document.RootElement, "network", out _, out _, out _, out _));
+    }
+
     private const string DefaultProfiles = "[{ \"branch\": \"Branch 1\", \"pointCount\": 1, \"variables\": [{ \"variable\": \"TotalDistance\", \"unit\": \"ft\", \"values\": [1] }, { \"variable\": \"Pressure\", \"unit\": \"psi\", \"values\": [2] }] }]";
     private const string DefaultTopology = "{ \"nodes\": [{ \"id\": \"Source 1\", \"componentType\": \"SOURCE\" }, { \"id\": \"Sink 1\", \"componentType\": \"SINK\" }], \"edges\": [{ \"source\": \"Source 1\", \"destination\": \"Sink 1\", \"sourcePort\": \"OUTLET\" }], \"counts\": { \"nodes\": 2, \"edges\": 1, \"sources\": 1, \"sinks\": 1, \"flowlines\": 0 } }";
 
@@ -350,7 +411,7 @@ public sealed class PtkRunEnvelopeTests
         "system": {{system}},
         "node": [],
         "profiles": {{profiles ?? DefaultProfiles}},
-        "summary": {}, "messages": [], "quality": []
+        "summary": { "info": [], "warnings": [], "errors": [] }, "messages": [], "quality": []
         """;
 
     private static JsonDocument NetworkEnvelope(string status, string payload, string? topology = null)

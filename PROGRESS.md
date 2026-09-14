@@ -1,15 +1,14 @@
 # GRDP-Studio Software Integration Progress
 
-Last verified: 2026-09-12
+Last verified: 2026-09-14
 
 ## Repository State
 
 - Branch: `violet/feature/software-integration-ui`
 - Stage 0 baseline protection is committed and pushed.
-- The Stage 2 model-management foundation, Demo-01 well run, PIPESIM Network vertical slice, and the paused ECLIPSE migration checkpoint are included in the current handoff.
+- The Stage 2 model-management foundation, Demo-01 well run, PIPESIM Network vertical slice, and ECLIPSE demonstration workflow are included in the current branch.
 - Existing unrelated worktree changes must not be reverted.
 - Authoritative requirements: `docs/software-integration/requirements.md`
-- Multi-Agent workflow: `.opencode/README.md`
 
 ## Current Milestone
 
@@ -25,7 +24,9 @@ create software project and upload a well or network .pips model
 -> display well curves/profiles or network topology/branch profiles, diagnostics and history
 ```
 
-The Worker has completed real CSW_101 nodal runs that exactly match Golden. The complete six-run CSW_101/CSW_102 sequence was explicitly deferred by user instruction and must not be represented as passed.
+The formal real B/S PIPESIM acceptance sequence completed on 2026-09-13. CSW_101 nodal/profile/combined and CSW_102 nodal/profile/combined ran strictly serially through Spring Boot and the loopback Worker; all six persisted `SUCCEEDED / VALID_FULL` and exactly matched the frozen Golden results.
+
+The three simulator pages now restore persisted Run history through the same model-version path. Re-entering a retained PIPESIM Well, PIPESIM Network or ECLIPSE 100 version reloads the latest terminal result or resumes polling an active Run without duplicating activation requests or allowing stale navigation responses to cross models.
 
 ## Verified Complete
 
@@ -69,7 +70,20 @@ CLAIMED -> PREPARING -> RUNNING_NODAL -> COLLECTING -> SUCCEEDED
 Golden exact match; source SHA unchanged; process tree exited; Worker returned idle
 ```
 
-An earlier Spring Run successfully completed PIPESIM but exposed MySQL JSON numeric normalization (`110.84152977856141` became `110.8415297785614`). Migration `007_software_integration_demo01_result_precision.sql` and the current initializer change `result_json` to `LONGTEXT` so the frozen JSON double representation can be retained. The updated backend was rebuilt and restarted, but a post-deployment six-run comparison was deferred by user instruction.
+Formal post-deployment six-run acceptance on 2026-09-13:
+
+```text
+CSW_101 nodal    -> Run 27,  79.746 s, 30 IPR / 30 VLP /  0 profile, 5 Artifacts
+CSW_101 profile  -> Run 28,  12.757 s,  0 IPR /  0 VLP / 25 profile, 5 Artifacts
+CSW_101 combined -> Run 29,  70.885 s, 30 IPR / 30 VLP / 25 profile, 5 Artifacts
+CSW_102 nodal    -> Run 30, 113.035 s, 30 IPR / 30 VLP /  0 profile, 5 Artifacts
+CSW_102 profile  -> Run 31,  11.403 s,  0 IPR /  0 VLP / 16 profile, 5 Artifacts
+CSW_102 combined -> Run 32, 113.145 s, 30 IPR / 30 VLP / 16 profile, 5 Artifacts
+```
+
+For every Run, the persisted result matched the corresponding frozen Golden Schema, model kind, run task, result contract, units, array order, lengths and every double value. Each Run confirmed `cleanup.processTreeExitConfirmed=true`, published five validated Artifact records, returned the Worker to `idle=true`, and left the official source-model SHA-256 unchanged. The sequence stopped between Runs until those gates passed; no PIPESIM tasks ran in parallel.
+
+An earlier Spring Run successfully completed PIPESIM but exposed MySQL JSON numeric normalization (`110.84152977856141` became `110.8415297785614`). Migration `007_software_integration_demo01_result_precision.sql` and the current initializer change `result_json` to `LONGTEXT` so the frozen JSON double representation can be retained. The post-deployment Runs 27-32 now verify that all six persisted results retain exact Golden double values after this conversion.
 
 ### PIPESIM Network Vertical Slice
 
@@ -99,6 +113,18 @@ five Artifacts with matching manifest/API SHA-256; source SHA unchanged; Worker 
 Run 8 repeated the same VALID_FULL topology/variable/profile/quality dimensions in 23.366 seconds,
 published five Artifacts, confirmed process-tree exit, and returned the Worker to idle.
 ```
+
+Fresh final-contract Network acceptance on 2026-09-13:
+
+```text
+CSN_302_Gas Transmission Network, Project 5 / Model 6 / Version 6 / Run 37
+CREATED -> QUEUED -> CLAIMED -> PREPARING -> RUNNING_NETWORK -> COLLECTING -> SUCCEEDED
+VALID_FULL in 23.195 seconds; 12 nodes, 12 edges, six profiles, seven quality entries
+five Artifacts; process-tree exit confirmed; Worker returned idle
+no private net.pipe URI in the persisted browser API result
+```
+
+Run 36 is retained as audit evidence of a fixed cross-layer redaction-contract defect: the Worker had completed a valid full CSN_302 result, but its redacted message still used the URI-shaped placeholder `net.pipe://localhost/pipe/[redacted]`, which the strict Spring sanitizer correctly rejected. The Worker now emits the idempotent plain placeholder `[local pipe]` and validates full-result summary, messages and quality fields before publishing success. Spring's strict validator was not relaxed.
 
 Latest Demo-first verification on 2026-09-12:
 
@@ -130,11 +156,12 @@ Run 20 repeated the same real partial-result path after the Worker root-whitelis
 
 ### ECLIPSE Migration Checkpoint
 
-- Verified real ECLIPSE success on 2026-09-13: `BRILLIG.DATA`, Software Project 7 / Model 11 / Version 13 / Run 25 completed as `SUCCEEDED / VALID_FULL` in 6.794 seconds through the browser -> Spring Boot -> Worker -> `eclrun -v 2024.1 eclipse` path. The fresh ECLEND reported `Problems=0`, `Errors=0`, and `Bugs=0`; the persisted result contains controlled ECLEND counts, output-file hashes, cleanup confirmation, and Artifact metadata. No usable RSM Summary was returned, and Vue explicitly reports that absence without inventing a curve.
-- Run 24 is retained as audit evidence of the fixed Worker/Backend ECLEND JSON casing mismatch: ECLIPSE had completed with zero ECLEND errors, but Backend rejected PascalCase count keys. The Worker now publishes the contract-required `comments`, `warnings`, `problems`, `errors`, and `bugs` keys, with regression coverage.
+- Verified real ECLIPSE success on 2026-09-14 using the official `C:\ecl\2024.1\eclipse\data\BRILLIG.DATA`: Software Project 6 / Model 12 / Version 14 / Run 49 completed as `SUCCEEDED / VALID_FULL` in 11.788 seconds through the browser -> Spring Boot -> Worker -> `eclrun -v 2024.1 eclipse` path. The immutable uploaded deck has SHA-256 `1ad7e36b6b2928c88b1661180f9e5cedcde729b62afe58d03ba9baec2b65215b`, size 512,869 bytes, dimensions 20 x 15 x 8, and oil/water/gas phases. Fresh ECLEND counts were Comments=3, Warnings=23, Problems=0, Errors=0 and Bugs=0; cleanup was confirmed, eight ECLIPSE output files and three validated Artifacts were recorded.
+- Run 49 returned 571 real RSM Summary series. For example, FOPR contains 417 points covering simulation day 0 through day 2920; the Vue result page displays the selected returned series without deriving or fabricating values.
+- Run 47 is retained as audit evidence of the fixed Worker/Backend RSM JSON casing mismatch: ECLIPSE completed and returned Summary data, but Backend rejected PascalCase series/point keys. The Worker now publishes contract-required lower-camel fields with regression coverage; the Backend display validator was not relaxed.
 - ECLIPSE v2 DATA inspection now omits only null `DATES`/`TSTEP` sibling fields, so a valid `TSTEP` schedule record is accepted by the strict Backend inspection contract. `BRILLIG.DATA` revalidation moved from `INVALID` to `READY` after this compatibility fix.
 
-- ECLIPSE 100 MVP implementation is committed in `79d7a9dc`: Spring Boot and migration support, Worker `eclrun` execution/cleanup/parsing, and Vue model/run/result UI are present. It is not yet deployed.
+- ECLIPSE 100 MVP implementation is deployed: Spring Boot and migration support, Worker `eclrun` execution/cleanup/parsing, and Vue model/run/result UI are present. Official-example Run 49 is the current real B/S success evidence.
 - A separate C# probe project built successfully and launched the trusted local ECLIPSE 2024.1 installation. The process created current-run PRT, EGRID and INIT outputs and exited without leaving an ECLIPSE process behind.
 - The probe's sample deck did not complete a valid simulation: its PRT contained four errors, 101 reported problems, repeated `CONVERGENCE ERROR = NaN`, and a terminal `RUN STOPPED` condition. Process exit code zero and output-file existence therefore must not be treated as simulation success.
 - The official launcher is discoverable from the controlled local environment; `eclrun.exe --report-versions eclipse` returned `2024.1`. The Worker must use this launcher, not the probe's direct `eclipse.exe` invocation.
@@ -143,12 +170,12 @@ Run 20 repeated the same real partial-result path after the Worker root-whitelis
 - The Worker accepts one isolated `.DATA`, rejects lexical `INCLUDE`, invokes `eclrun -v 2024.1 eclipse`, requires a fresh zero-error `.ECLEND`, treats RSM as optional, and publishes only controlled artifacts plus metadata-only ECLIPSE output inventory. The Backend persists `RUNNING_ECLIPSE` and nullable ECLIPSE Study state; Vue hides Study, preserves version selection, and shows ECLEND, optional Summary, cleanup and separate output/Artifact inventories.
 - ECLIPSE DATA inspection v1 is committed in `a390d1dc`: the Worker streams one `.DATA` without invoking ECLIPSE and returns safe sections, unit system, phases and dimensions; Backend persists validated `inspection_json`; Vue displays the read-only overview.
 - ECLIPSE DATA inspection v2 is committed in `ecf8140c`: it adds source-order WELSPECS well names and lexical `DATES`/`TSTEP` schedule records to the overview. It preserves inspection v1 compatibility, has no derived dates, durations, well states or engineering values, and retains no-run/no-deck-modification boundaries. User manual testing completed without reported issues.
-- The uncommitted Demo-first adaptation makes PIPESIM Well, PIPESIM Network and ECLIPSE 100 direct Ribbon entry points. A Ribbon click opens the type-filtered native picker, then hands the selected file to the software workspace; failed uploads and project-loading paths release their loading state. READY inspected ECLIPSE versions compose the safe DATA overview with the fixed ECLIPSE run/history/result path, while non-ready versions remain inspection-only. Browser diagnostics are restricted to safe generic text and allowlisted codes.
+- The Demo-first adaptation makes PIPESIM Well, PIPESIM Network and ECLIPSE 100 direct Ribbon entry points. A Ribbon click opens the type-filtered native picker, then hands the selected file to the software workspace; failed uploads and project-loading paths release their loading state. READY inspected ECLIPSE versions compose the safe DATA overview with the ECLIPSE run/history/result path, while non-ready versions remain inspection-only. Browser diagnostics are restricted to safe generic text and allowlisted codes.
 - The browser multipart client no longer overrides `Content-Type`, so the browser supplies the required multipart boundary. Current running services have not been restarted; real CSN_309 upload/validation must be repeated after deployment. The user selected code commit only and deferred service restart/live validation.
-- Demo-first is the current highest-priority requirement: each simulator must expose a real upload/run/status/result path when the environment permits it; Network contract rejection is rendered as a safe non-displayable simulator result, and ECLIPSE has no real calculation result until an approved deck passes the ECLEND success gates.
-- The uncommitted PIPESIM Network demo fix preserves real `Completed` Network output as `PARTIAL_SUCCEEDED / VALID_PARTIAL` only after Worker, Backend and Vue validate a safe topology and finite display-data subset. The UI labels it `部分真实计算结果`; it never claims `VALID_FULL` or invents missing data. Existing deployed Worker behavior still returns `INVALID_NETWORK_RESULT_CONTRACT` until services are restarted.
+- Demo-first is the current highest-priority requirement: each simulator exposes a real upload/run/status/result path when the environment permits it; Network contract rejection remains safely non-displayable, and ECLIPSE success is shown only after an approved deck passes the ECLEND success gates.
+- The PIPESIM Network demo path preserves real `Completed` Network output as `PARTIAL_SUCCEEDED / VALID_PARTIAL` only after Worker, Backend and Vue validate a safe topology and finite display-data subset. The UI labels it `部分真实计算结果`; it never claims `VALID_FULL` or invents missing data.
 - Verified on 2026-09-11: Backend Maven test suite passed 74 tests; Worker Release build passed with 0 warnings/errors and Worker xUnit passed 61 tests; Vue `npm run build` passed. Vue emits existing Rollup pure-comment, Sass legacy API and bundle-size warnings.
-- No user-approved serialized real standalone `.DATA` success run has been performed. A real acceptance run must capture fresh zero-count `.ECLEND`, cleanup evidence, output metadata hashes and, when available, RSM dimensions before deployment.
+- Run 49 provides a serialized real standalone `.DATA` success with fresh zero-error `.ECLEND`, cleanup evidence, output metadata hashes and 571 returned RSM Summary series.
 - The external probe is evidence for executable invocation only. Its permissive success check, formula-generated fallback values, hard-coded license-path handling and license-environment logging must not be migrated.
 - The contract preserves Avalonia-compatible RSM/ECLEND parsing, output freshness, License/Fatal classification, immutable isolated-run behavior, cancellation cleanup and result semantics.
 
@@ -204,17 +231,21 @@ The browser upload path was also verified with CSW_101 through multipart upload 
 - Validation status, message tooltip, Study list, and revalidation action are displayed.
 - Validation polling runs only while a model is `UPLOADED` or `VALIDATING` and is cleared on component unmount.
 - Ribbon new-project and model-import commands are connected for software-integration mode.
+- PIPESIM Well, PIPESIM Network and ECLIPSE 100 all reload persisted Run history on model activation and retained-workspace remount. Active Runs resume polling; terminal Runs restore the latest persisted detail. Mounted-state, navigation-generation and retained-ID checks prevent duplicate requests, post-unmount polling and cross-model stale responses.
+- The workspace now reads one safe Spring capability contract for Worker, PIPESIM Well, PIPESIM Network and ECLIPSE 100 readiness. Worker busy blocks only new submissions, a simulator-specific unavailable state blocks only that simulator, and persisted history/results remain browseable in both cases. Browser-visible capability data is allowlisted and excludes local paths, license text, Worker IDs, generation IDs and active Run IDs.
+- The software-integration model page now follows the parsing/fusion information hierarchy more closely: a compact light-gray top control/readiness area, white result-first canvas, yellow active tabs and bottom history/audit content. ECLIPSE uses one model header and one version selector, with calculation results and DATA inspection in the same tabbed content region.
 
 ### Build Verification
 
 - Backend package completed successfully after loading the software-integration code.
-- Worker `dotnet build` completed with zero errors.
+- Worker Release `dotnet build` completed with zero warnings and zero errors.
 - Vue `npm run build` completed successfully; existing Sass deprecation and bundle-size warnings remain.
-- Worker xUnit completed with 26 passing tests after adding Network state, capability and sanitized-Artifact coverage.
-- `python -m unittest discover -s worker/tests/PythonNormalization -p "test_*.py"` completed with 39 tests and no failures.
-- Backend Maven tests completed with 52 passing tests, including requested-Study binding, numeric/path uniqueness, version isolation, migration backfill and diagnostic redaction.
+- Worker xUnit completed with 175 passing tests, including Network result, ECLIPSE RSM serialization, capability and sanitized-Artifact coverage.
+- `python -m unittest discover -s worker/tests/PythonNormalization -p "test_*.py"` completed with 42 tests and no failures. The Windows console emitted non-fatal GBK decoding warnings from subprocess reader threads.
+- Backend Maven tests completed with 114 passing tests, including requested-Study binding, numeric/path uniqueness, version isolation, migration backfill, diagnostic redaction and safe three-simulator capability normalization.
 - `pwsh -File .\worker\tests\Golden\Verify-Golden.ps1 -VerifyLocalSources` verified all six real results and metadata sidecars against the current models and Avalonia adapter.
 - The final Vue build completed successfully after adding the explicit calculation entry.
+- Vue `npm run build` completed successfully after unifying Run-history restoration; independent review concluded `PASS`. Existing Sass legacy API, Rollup pure-comment and bundle-size warnings remain.
 - AHKs, original GRDP, Studio backend, Vue, Worker health and Worker capabilities returned HTTP 200 after deployment.
 
 ## Known Gaps And Risks
@@ -223,8 +254,8 @@ These items are not complete and must not be represented as finished:
 
 ### Demo-01 Acceptance
 
-- Migration 007 has been deployed by rebuilding and restarting the backend, but no new Spring Run has yet demonstrated exact Golden equality after the column conversion.
-- The formal CSW_101 nodal/profile/combined then CSW_102 nodal/profile/combined serial acceptance sequence is not complete.
+- Migration 007 is deployed, and Runs 27-32 demonstrate exact Golden equality after `result_json` conversion to `LONGTEXT`.
+- The formal CSW_101 nodal/profile/combined then CSW_102 nodal/profile/combined serial acceptance sequence is complete.
 - A failed historical Run remains as audit evidence of the removed Python stdin monitor deadlock. It must not be presented as a current Worker failure.
 - Real PIPESIM cancellation and timeout are protected by Job Object integration tests but have not been intentionally triggered against the acceptance models.
 
@@ -239,7 +270,7 @@ These items are not complete and must not be represented as finished:
 - Schema initialization and migration SQL both create the same tables; long-term migration ownership is unresolved.
 - Project recovery from the 30-day recycle bin and physical cleanup are not implemented.
 - Model deletion is not implemented; explicit old-version selection and version-bound history are implemented.
-- Browser-level automation for model activation and Run controls is not implemented.
+- Focused mocked-browser automation covers software-project/model activation, exact PIPESIM/ECLIPSE Run payloads, cancellation, terminal polling, stale-response isolation and retained ECLIPSE Run-history restoration. Real-backend browser acceptance remains separate.
 
 ### Deferred Production Features
 
@@ -249,11 +280,13 @@ These items are not complete and must not be represented as finished:
 
 ### UI And Regression
 
-- Browser behavior has not been automated with Playwright.
+- The software-integration workspace has been visually flattened to match the parsing/fusion module: the persistent execution-environment strip, workflow guide, READY summary card, top-level run provenance strip and full-width run alerts were removed. Capability checks remain a background create-Run gate; compact local status text is used at the run controls/result pane, while safe run provenance, errors, events, cleanup and Artifact metadata remain available in the collapsed execution details.
+- Playwright Chromium regression is configured under `vue/tests/e2e`. Seven focused tests passed with all software-integration APIs mocked: stale PIPESIM history cannot cross into ECLIPSE after rapid navigation; PIPESIM/ECLIPSE create payloads and cancellation remain exact; retained ECLIPSE active Runs resume a genuine follow-up poll, reach the persisted terminal state and stop polling; per-simulator unavailability and Worker busy state gate only new Runs while preserving history; unsafe capability fields never enter the DOM; ECLIPSE keeps one model header/version control with result and DATA-inspection tabs; and the Network schematic preserves returned node/edge counts, equipment legend and result navigation.
+- The UI-slimming regression additionally asserts that `/capabilities` is still requested, capability-disabled reasons remain compact and safe, and the removed readiness/workflow/provenance/full-width alert elements do not return. `npm run build` and `npm run test:e2e` completed successfully (7/7); final review returned `PASS`.
 - Shared Shell changes have built successfully but do not yet have an automated parsing/fusion regression test.
-- Mobile behavior and long-running polling/error transitions need browser-level verification.
+- Real-backend browser acceptance, mobile behavior and longer-running environment/error transitions still need browser-level verification.
 - The final reviewed build is deployed. Runs 9 and 10 returned retryable `LICENSE_UNAVAILABLE` during earlier post-hardening attempts and completed process-tree cleanup; the user subsequently confirmed the license environment is available and explicitly requested no further live verification in this handoff. These runs remain environment observations, not code failures.
-- A fresh CSN_302 run against the final deployed build is intentionally deferred until the user decides to continue; Runs 7 and 8 remain the verified real Network success evidence.
+- Fresh CSN_302 Run 37 passed the final deployed full-result and redaction contracts. Run 36 remains failed audit evidence of the fixed URI-shaped redaction mismatch.
 
 ## Frozen PIPESIM Well Run Contract
 
@@ -285,26 +318,27 @@ Expected normalized result payload:
 
 Nodal and combined runs require non-empty IPR/VLP. Profile-only runs require a non-empty profile. Avalonia accepts a combined run with valid nodal curves and an empty profile as a partial result; detailed architecture must preserve and explicitly represent that behavior.
 
-## Next Bounded Goal
+## Next Milestone
 
-Keep the reviewed PIPESIM implementation and frozen Golden unchanged while implementing the approved ECLIPSE MVP:
+Keep the reviewed simulator implementation and frozen Golden unchanged while completing the next demo-hardening package:
 
 ```text
-Architect reviews the prepared ECLIPSE MVP contract and freezes any implementation-level ambiguity
--> Executors complete migration/schema and Worker contract work before parallel Worker and Vue work packages
--> Reviewer verifies the complete diff before any real ECLIPSE B/S acceptance run
+perform a deployed real-backend browser smoke pass for project/model activation, Runs 27-32 and Run 37 history restoration and result display
+-> visually inspect the flattened software-integration workspace at 1440x900 and 1280x720 against the parsing/fusion module using deployed real data
+-> add parsing/fusion shared-Shell regression protection without changing existing business behavior
+-> separately plan the remaining real cancellation/timeout acceptance
 ```
 
-The separately deferred fresh CSN_302 run and six-run CSW_101/CSW_102 comparison remain explicit PIPESIM acceptance gaps; they must not be run or represented as passed without a new user decision.
+The six-run CSW_101/CSW_102 comparison and fresh CSN_302 Run 37 are complete. Real cancellation/timeout remains outstanding and must continue to respect global PIPESIM serialization and the recorded stop conditions.
 
-## Handoff Rule
+## Progress Maintenance
 
-At the end of every bounded milestone, update this file with:
+After each verified milestone, update this file with:
 
 - behavior actually completed;
 - exact commands and acceptance models executed;
 - failures classified as code, environment, license, or unverified;
 - new known gaps;
-- one next bounded goal.
+- one next milestone.
 
 Do not append conversational history. Replace stale status so this document remains the concise source of current truth.

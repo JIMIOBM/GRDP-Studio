@@ -60,6 +60,7 @@ const formatElapsed = value => {
 </template>
 
 <style lang="scss" scoped>
-.history-table { width: 100%; cursor: pointer; border-top: 3px solid #f4d000; }
-:deep(.selected-run-row > td.el-table__cell) { background: #eef5ff !important; }
+.history-table { width: 100%; cursor: pointer; border: 1px solid #e1e3e6; }
+:deep(.history-table th.el-table__cell) { background: #f5f5f2; }
+:deep(.selected-run-row > td.el-table__cell) { background: #fff7bf !important; }
 </style>

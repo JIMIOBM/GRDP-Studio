@@ -4,6 +4,7 @@ import { storeToRefs } from 'pinia'
 import { ElMessage } from 'element-plus'
 import { useSoftwareIntegrationStore } from '@/stores/softwareIntegration'
 
+const props = defineProps({ embedded: { type: Boolean, default: false } })
 const store = useSoftwareIntegrationStore()
 const { activeModel, activeVersion, activeVersionId, versions } = storeToRefs(store)
 const inspection = computed(() => activeVersion.value?.inspection || null)
@@ -116,7 +117,7 @@ const changeVersion = async versionId => {
 
 <template>
   <section v-if="activeModel" class="eclipse-inspection-overview">
-    <header class="model-header">
+    <header v-if="!props.embedded" class="model-header">
       <div>
         <div class="title-line">
           <h1>{{ activeModel.name }}</h1>
@@ -126,7 +127,7 @@ const changeVersion = async versionId => {
       </div>
     </header>
 
-    <div class="version-control">
+    <div v-if="!props.embedded" class="version-control">
       <span>模型版本</span>
       <el-select :model-value="activeVersionId" @change="changeVersion">
         <el-option v-for="version in versions" :key="version.id" :value="version.id" :label="`v${version.versionNo} · ${version.status}`" />
@@ -210,15 +211,15 @@ const changeVersion = async versionId => {
 </template>
 
 <style lang="scss" scoped>
-.eclipse-inspection-overview { min-width: 0; min-height: 0; padding: 22px 28px 30px; color: #303133; }
+.eclipse-inspection-overview { min-width: 0; min-height: 0; padding: 0; color: #303133; }
 .model-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding-bottom: 16px; border-bottom: 1px solid #e4e7ed; }
 .title-line { display: flex; align-items: center; gap: 10px; }
 h1 { margin: 0; font-size: 19px; font-weight: 600; }.model-header p { margin: 5px 0 0; color: #909399; font-size: 12px; }
 .version-control { display: flex; align-items: center; gap: 12px; padding: 18px 0; }.version-control > span { color: #606266; font-size: 12px; }.version-control .el-select { width: 210px; }
-.overview-section { margin-top: 16px; border: 1px solid #e4e7ed; }.overview-section h2 { margin: 0; padding: 12px 16px; border-bottom: 1px solid #e4e7ed; font-size: 14px; font-weight: 600; }
-.metadata-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; margin: 0; }.metadata-grid > div { min-width: 0; padding: 13px 16px; border-bottom: 1px solid #ebeef5; }.metadata-grid > div:nth-last-child(-n + 3) { border-bottom: 0; }.metadata-grid .wide { grid-column: span 3; }
+.overview-section { margin-top: 8px; border-bottom: 1px solid #e4e7ed; }.overview-section h2 { margin: 0; padding: 7px 10px; border-top: 1px solid #e4e7ed; border-bottom: 1px solid #e4e7ed; background: #f5f5f2; font-size: 13px; font-weight: 600; }
+.metadata-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; margin: 0; }.metadata-grid > div { min-width: 0; padding: 9px 10px; border-bottom: 1px solid #f0f1f2; }.metadata-grid > div:nth-last-child(-n + 3) { border-bottom: 0; }.metadata-grid .wide { grid-column: span 3; }
 dt { margin-bottom: 5px; color: #909399; font-size: 12px; } dd { min-width: 0; margin: 0; overflow-wrap: anywhere; color: #303133; font-size: 13px; }.monospace { font-family: Consolas, monospace; }.value-tag { margin-right: 6px; }
-.inspection-content { padding: 16px; }.well-tags { display: flex; flex-wrap: wrap; gap: 6px; }.well-tags .value-tag { margin: 0; }.empty-copy { margin: 0; color: #909399; font-size: 13px; }.schedule-sections { padding: 16px; }.schedule-section + .schedule-section { margin-top: 20px; }.schedule-section h3 { margin: 0 0 10px; color: #606266; font-size: 13px; font-weight: 600; }
-.inspection-unavailable { margin: 0; padding: 16px; color: #909399; font-size: 13px; }.execution-slot { display: flex; align-items: center; gap: 10px; padding: 16px; color: #606266; font-size: 13px; }
+.inspection-content { padding: 10px; }.well-tags { display: flex; flex-wrap: wrap; gap: 6px; }.well-tags .value-tag { margin: 0; }.empty-copy { margin: 0; color: #909399; font-size: 13px; }.schedule-sections { padding: 10px; }.schedule-section + .schedule-section { margin-top: 12px; }.schedule-section h3 { margin: 0 0 7px; color: #606266; font-size: 13px; font-weight: 600; }
+.inspection-unavailable { margin: 0; padding: 10px; color: #909399; font-size: 13px; }.execution-slot { display: flex; align-items: center; gap: 10px; padding: 9px 10px; color: #606266; font-size: 13px; }
 @media (max-width: 760px) { .eclipse-inspection-overview { padding: 16px; }.metadata-grid { grid-template-columns: 1fr; }.metadata-grid .wide { grid-column: auto; }.metadata-grid > div { border-bottom: 1px solid #ebeef5; }.metadata-grid > div:last-child { border-bottom: 0; } }
 </style>

@@ -28,6 +28,7 @@ runRequest.interceptors.response.use(
 )
 
 export const softwareIntegrationApi = {
+  getCapabilities: () => request.get('/software-integration/capabilities'),
   listProjects: () => request.get('/software-integration/projects'),
   getProject: (projectId) => request.get(`/software-integration/projects/${projectId}`),
   createProject: (data) => request.post('/software-integration/projects', data),

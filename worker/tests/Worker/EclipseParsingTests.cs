@@ -34,16 +34,37 @@ public sealed class EclipseParsingTests
     }
 
     [Fact]
-    public void ResultEnvelopeUsesExactLowerCamelEclEndFieldNamesRegardlessOfSerializerOptions()
+    public void ResultEnvelopeUsesExactLowerCamelNamesRegardlessOfSerializerOptions()
     {
-        var envelope = EclipseRunService.CreateResultEnvelope("CASE.DATA", new(1, 2, 0, 0, 0), null, []);
+        var summary = EclipseRunService.CreateSummary([
+            new EclipseSummarySeries("FOPR", null, null, [new(0, 12.5), new(1.5, 11.25)])
+        ]);
+        var envelope = EclipseRunService.CreateResultEnvelope("CASE.DATA", new(1, 2, 0, 0, 0), summary, []);
         var result = JsonSerializer.SerializeToElement(envelope, new JsonSerializerOptions { PropertyNamingPolicy = null });
         var eclEnd = result.GetProperty("eclEnd");
+        var series = Assert.Single(result.GetProperty("summary").GetProperty("series").EnumerateArray());
+        var points = series.GetProperty("points").EnumerateArray().ToArray();
 
         Assert.Equal(["bugs", "comments", "errors", "problems", "warnings"], eclEnd.EnumerateObject().Select(property => property.Name).Order());
         Assert.False(eclEnd.TryGetProperty("Comments", out _));
         Assert.Equal(1, eclEnd.GetProperty("comments").GetInt32());
         Assert.Equal(2, eclEnd.GetProperty("warnings").GetInt32());
+        Assert.Equal(["keyword", "objectName", "points", "unit"], series.EnumerateObject().Select(property => property.Name).Order());
+        Assert.False(series.TryGetProperty("Keyword", out _));
+        Assert.Equal("FOPR", series.GetProperty("keyword").GetString());
+        Assert.Equal(JsonValueKind.Null, series.GetProperty("objectName").ValueKind);
+        Assert.Equal(JsonValueKind.Null, series.GetProperty("unit").ValueKind);
+        Assert.Equal(2, points.Length);
+        Assert.All(points, point =>
+        {
+            Assert.Equal(["timeDays", "value"], point.EnumerateObject().Select(property => property.Name).Order());
+            Assert.False(point.TryGetProperty("TimeDays", out _));
+            Assert.False(point.TryGetProperty("Value", out _));
+        });
+        Assert.Equal(0, points[0].GetProperty("timeDays").GetDouble());
+        Assert.Equal(12.5, points[0].GetProperty("value").GetDouble());
+        Assert.Equal(1.5, points[1].GetProperty("timeDays").GetDouble());
+        Assert.Equal(11.25, points[1].GetProperty("value").GetDouble());
     }
 
     [Fact]

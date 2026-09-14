@@ -30,7 +30,7 @@ NETWORK_COMPONENT_TYPES = (
 
 _PIPESIM_UNAVAILABLE_SENTINELS = (1.2345e25, -1.0e31)
 _LOCAL_PATH = re.compile(r"(?im)(?<![a-z0-9])[a-z]:[\\/].*$")
-_LOCAL_PIPE = re.compile(r"(?i)net\.pipe://localhost/pipe/[^\s'\"]+")
+_LOCAL_PIPE = re.compile(r"(?i)net\.pipe://[^\s/'\"]+(?:/pipe)?/[^\s'\"]+")
 
 
 def inspect_network(model):
@@ -259,7 +259,7 @@ def _normalize_profiles(profiles, profile_units, quality):
 
 
 def sanitize_message(value):
-    message = _LOCAL_PIPE.sub("net.pipe://localhost/pipe/[redacted]", str(value))
+    message = _LOCAL_PIPE.sub("[local pipe]", str(value))
     return _LOCAL_PATH.sub("[local path]", message)
 
 

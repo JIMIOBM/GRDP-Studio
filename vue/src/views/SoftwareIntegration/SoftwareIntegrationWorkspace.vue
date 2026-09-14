@@ -2,10 +2,9 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRoute } from 'vue-router'
-import { CircleCheck, Document, DocumentAdd, Folder, UploadFilled } from '@element-plus/icons-vue'
+import { Document, DocumentAdd, Folder, UploadFilled } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useSoftwareIntegrationStore } from '@/stores/softwareIntegration'
-import EclipseDataInspectionOverview from './EclipseDataInspectionOverview.vue'
 import PipesimModelRunPage from './PipesimModelRunPage.vue'
 
 const store = useSoftwareIntegrationStore()
@@ -17,7 +16,6 @@ const {
   activeProjectDetail,
   activeProjectId,
   activeModel,
-  activeVersion,
   loadingProjects
 } = storeToRefs(store)
 const creating = ref(false)
@@ -57,80 +55,12 @@ const importActionLabel = computed(() => importIntent.value?.action || '导入�
 const importGuidance = computed(() => importIntent.value?.guidance || 'PIPESIM .pips 可验证并运行；ZIP 可上传保存，但当前版本不能验证或运行。ECLIPSE 仅支持单个 .DATA 文件。')
 const fileAccept = computed(() => importIntent.value?.accept || '.pips,.PIPS,.data,.DATA,.zip,.ZIP')
 
-const eclipseInspectionSchemas = new Set(['eclipse-data-inspection/1', 'eclipse-data-inspection/2'])
-const eclipseSectionOrder = ['RUNSPEC', 'GRID', 'EDIT', 'PROPS', 'REGIONS', 'SOLUTION', 'SUMMARY', 'SCHEDULE']
-const eclipsePhaseOrder = ['OIL', 'WATER', 'GAS']
-const eclipseUnitSystems = new Set(['METRIC', 'FIELD', 'LAB', 'PVT-M'])
-const hasOrderedValues = (value, allowed) => Array.isArray(value) && value.every((item, index) =>
-  typeof item === 'string' && allowed.includes(item) && (index === 0 || allowed.indexOf(value[index - 1]) < allowed.indexOf(item)))
-const isSafeEclipseInspection = value => {
-  if (!value || typeof value !== 'object' || !eclipseInspectionSchemas.has(value.schemaVersion)) return false
-  const expectedFields = value.schemaVersion === 'eclipse-data-inspection/2'
-    ? ['schemaVersion', 'caseName', 'sections', 'unitSystem', 'phases', 'dimensions', 'wellNames', 'scheduleTimeline']
-    : ['schemaVersion', 'caseName', 'sections', 'unitSystem', 'phases', 'dimensions']
-  if (Object.keys(value).length !== expectedFields.length || !expectedFields.every(key => Object.hasOwn(value, key)) ||
-    typeof value.caseName !== 'string' || !value.caseName || value.caseName.length > 255 || /[\\/]/.test(value.caseName) ||
-    !hasOrderedValues(value.sections, eclipseSectionOrder) || !hasOrderedValues(value.phases, eclipsePhaseOrder) ||
-    !(value.unitSystem === null || eclipseUnitSystems.has(value.unitSystem))) return false
-  if (value.dimensions !== null && (!value.dimensions || typeof value.dimensions !== 'object' || Object.keys(value.dimensions).length !== 3 ||
-    !['nx', 'ny', 'nz'].every(key => Number.isInteger(value.dimensions[key]) && value.dimensions[key] > 0 && value.dimensions[key] <= 1000000))) return false
-  if (value.schemaVersion === 'eclipse-data-inspection/1') return true
-  if (!Array.isArray(value.wellNames) || value.wellNames.length > 1000 || !Array.isArray(value.scheduleTimeline) || value.scheduleTimeline.length > 1000 ||
-    !value.wellNames.every(name => typeof name === 'string' && name.length > 0 && name.length <= 1024 && !/[\\/:]/.test(name) && !name.includes('..') && !/[\u0000-\u001f\u007f]/.test(name))) return false
-  let dateCount = 0
-  let tstepCount = 0
-  return value.scheduleTimeline.every(event => {
-    if (!event || typeof event !== 'object') return false
-    if (event.kind === 'DATES' && Array.isArray(event.records)) {
-      if (Object.keys(event).length !== 2 || (dateCount += event.records.length) > 4000) return false
-      return event.records.every(record => record && typeof record === 'object' && Object.keys(record).length === 4 &&
-        typeof record.day === 'string' && /^(?:[1-9]|[12][0-9]|3[01])$/.test(record.day) &&
-        typeof record.month === 'string' && /^(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)$/.test(record.month) &&
-        typeof record.year === 'string' && /^\d{4}$/.test(record.year) &&
-        (record.time == null || (typeof record.time === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/.test(record.time))))
-    }
-    if (event.kind === 'TSTEP' && Array.isArray(event.steps)) {
-      if (Object.keys(event).length !== 2 || (tstepCount += event.steps.length) > 8000) return false
-      return event.steps.every(step => typeof step === 'string' && /^\+?\d+(?:\.\d+)?(?:[Ee][+-]?\d+)?$/.test(step) && Number.isFinite(Number(step)) && Number(step) >= 0)
-    }
-    return false
-  })
-}
-const eclipseRunAvailable = computed(() => activeVersion.value?.status === 'READY' && activeVersion.value?.modelKind === 'eclipse_100' &&
-  isSafeEclipseInspection(activeVersion.value?.inspection))
-
 const activeModels = computed(() => activeProjectDetail.value?.models || [])
 const latestVersion = model => [...(model?.versions || [])]
   .sort((left, right) => Number(right.versionNo || 0) - Number(left.versionNo || 0))[0]
 const readyVersion = model => [...(model?.versions || [])]
   .sort((left, right) => Number(right.versionNo || 0) - Number(left.versionNo || 0))
   .find(version => version.status === 'READY')
-const readyVersions = computed(() => activeModels.value.map(readyVersion).filter(Boolean))
-const readyModelCount = computed(() => readyVersions.value.length)
-const historicalReadyModelCount = computed(() => activeModels.value.filter(model => {
-  const ready = readyVersion(model)
-  return ready && ready.id !== latestVersion(model)?.id
-}).length)
-const latestVersions = computed(() => activeModels.value.map(latestVersion).filter(Boolean))
-const pendingValidationCount = computed(() => latestVersions.value.filter(version =>
-  version.status === 'UPLOADED' || version.status === 'VALIDATING').length)
-const workflowNextStep = computed(() => {
-  if (!activeProject.value) return 0
-  if (!activeModels.value.length) return 1
-  if (!readyModelCount.value) return 2
-  return 3
-})
-const workflowSteps = computed(() => [
-  { label: '项目', detail: activeProject.value ? '已选择项目' : '新建或选择项目' },
-  { label: '导入', detail: activeModels.value.length ? `已导入 ${activeModels.value.length} 个模型` : '上传 .pips 或 .DATA' },
-  {
-    label: '验证',
-    detail: readyModelCount.value ? `${readyModelCount.value} 个模型有 READY 版本可计算${historicalReadyModelCount.value ? `（含 ${historicalReadyModelCount.value} 个历史 READY 版本）` : ''}` :
-      (pendingValidationCount.value ? `${pendingValidationCount.value} 个版本等待验证` : '等待可计算版本')
-  },
-  { label: '计算', detail: readyModelCount.value ? '选择模型后进入计算' : '验证通过后可用' },
-  { label: '结果', detail: '在模型页查看真实结果' }
-])
 const wellModelKinds = new Set(['black_oil_liquid', 'basic_gas', 'legacy_well'])
 const latestKnownModelKind = model => model?.versions?.find(version => version.status === 'READY' && version.modelKind)?.modelKind ||
   model?.versions?.find(version => version.modelKind)?.modelKind || ''
@@ -183,14 +113,19 @@ const resourceTree = computed(() => projects.value
 const defaultExpandedTreeIds = computed(() => resourceTree.value.flatMap(project => [project.id, ...project.children.map(category => category.id)]))
 
 const loadProjects = async () => {
+  const retainedModelId = store.activeModelId
+  const retainedVersionId = store.activeVersionId
   try {
-    await store.loadProjects()
+    const details = await store.loadProjects()
+    if (details === null || !workspaceMounted) return
     if (activeProjectId.value) {
       activeTreeId.value = `project-${activeProjectId.value}`
       selectedTreeProjectId.value = activeProjectId.value
     }
-    if (workspaceMounted && store.activeModelId && store.activeVersionId && !store.isEclipseModel) {
-      await store.loadRunHistory(store.activeVersionId)
+    if (retainedModelId && retainedVersionId &&
+      store.activeModelId === retainedModelId && store.activeVersionId === retainedVersionId &&
+      store.activeModel && store.activeVersion) {
+      await store.loadRunHistory(retainedVersionId)
     }
   } catch (error) {
     ElMessage.error(safeRequestMessage('软件项目加载失败，请稍后重试'))
@@ -340,6 +275,7 @@ const flushPendingExternalImport = async () => {
 
 onMounted(() => {
   workspaceMounted = true
+  store.loadCapabilities().catch(() => {})
   loadProjects()
 })
 onBeforeUnmount(() => {
@@ -386,11 +322,7 @@ defineExpose({ openCreateDialog, openImportModel, importExternalFile })
       </template>
     </aside>
     <main class="software-content">
-    <template v-if="activeModel && store.isEclipseModel">
-      <EclipseDataInspectionOverview />
-      <PipesimModelRunPage v-if="eclipseRunAvailable" />
-    </template>
-    <PipesimModelRunPage v-else-if="activeModel" />
+    <PipesimModelRunPage v-if="activeModel" />
      <template v-else>
      <header class="workspace-header">
        <div>
@@ -401,19 +333,6 @@ defineExpose({ openCreateDialog, openImportModel, importExternalFile })
         <el-button :disabled="!activeProject" type="danger" plain @click="removeProject">删除项目</el-button>
       </div>
      </header>
-
-     <section class="workflow-guide" aria-label="软件集成工作流程">
-       <div class="workflow-guide-title">
-         <strong>工作流程</strong>
-         <span>下一步：{{ workflowSteps[workflowNextStep].detail }}</span>
-       </div>
-       <ol class="workflow-steps">
-         <li v-for="(step, index) in workflowSteps" :key="step.label" :class="{ complete: index < workflowNextStep, current: index === workflowNextStep }">
-           <span class="workflow-index"><el-icon v-if="index < workflowNextStep"><CircleCheck /></el-icon><template v-else>{{ index + 1 }}</template></span>
-           <span><b>{{ step.label }}</b><small>{{ step.detail }}</small></span>
-         </li>
-       </ol>
-     </section>
 
       <div v-if="!activeProject" class="empty-state">
         <el-icon><Folder /></el-icon>
@@ -474,16 +393,15 @@ defineExpose({ openCreateDialog, openImportModel, importExternalFile })
 .resource-tree-wrap :deep(.el-tree-node__content) { height: 27px; font-size: 13px; }.resource-tree-wrap :deep(.el-tree-node__content:hover) { background: #f5f5f1; }.resource-tree-wrap :deep(.el-tree-node.is-current > .el-tree-node__content) { background: #fff3a6; color: #342c00; }
 .software-tree-node { min-width: 0; width: 100%; display: flex; align-items: center; gap: 5px; }.software-tree-node .el-icon { flex: 0 0 auto; color: #b58b00; }.software-tree-node > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.tree-model-action { display: none; margin-left: auto; padding: 2px 5px; border: 1px solid #d7ad00; border-radius: 2px; background: #fff; color: #695400; cursor: pointer; font-size: 11px; line-height: 16px; white-space: nowrap; }.tree-model-action:hover { background: #f4d000; color: #1f1a00; }.resource-tree-wrap :deep(.el-tree-node.is-current) .tree-model-action { display: block; }
 .tree-empty { padding: 18px 8px; color: #909399; text-align: center; font-size: 12px; }
-.software-content { flex: 1; min-width: 0; min-height: 0; overflow: auto; background: #f6f6f4; }
-.software-content > .workspace-header, .software-content > .workflow-guide, .software-content > .workspace-toolbar, .software-content > .empty-state, .software-content > .empty-models, .software-content > .models-table { margin-left: 28px; margin-right: 28px; }
+.software-content { flex: 1; min-width: 0; min-height: 0; overflow: auto; background: #fff; }
+.software-content > .workspace-header, .software-content > .workspace-toolbar, .software-content > .empty-state, .software-content > .empty-models, .software-content > .models-table { margin-left: 20px; margin-right: 20px; }
 .workspace-header, .workspace-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
 .workspace-header { padding-top: 20px; padding-bottom: 14px; }
 h1 { margin: 0; font-size: 19px; font-weight: 650; letter-spacing: -.2px; }.description { margin: 5px 0 0; color: #777; font-size: 12px; }
 .header-actions { display: flex; gap: 10px; }
-.workflow-guide { border: 1px solid #deded9; border-top: 3px solid #f4d000; background: #fff; }.workflow-guide-title { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid #ecece8; font-size: 12px; }.workflow-guide-title strong { font-size: 13px; }.workflow-guide-title span { color: #756000; }.workflow-steps { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); margin: 0; padding: 0; list-style: none; }.workflow-steps li { min-width: 0; display: flex; align-items: center; gap: 7px; padding: 10px 11px; border-right: 1px solid #ecece8; color: #8a8a85; }.workflow-steps li:last-child { border-right: 0; }.workflow-steps li.current { background: #fff7bf; color: #2c2600; }.workflow-steps li.complete { color: #52623c; }.workflow-index { width: 21px; height: 21px; flex: 0 0 21px; display: grid; place-items: center; border: 1px solid #cacac3; border-radius: 50%; font-size: 11px; }.complete .workflow-index { border-color: #8fa668; background: #edf4df; }.current .workflow-index { border-color: #b79500; background: #f4d000; }.workflow-steps b, .workflow-steps small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.workflow-steps b { font-size: 12px; }.workflow-steps small { margin-top: 2px; font-size: 11px; color: #8a8a85; }.current small { color: #6b5900; }
 .workspace-toolbar { margin-top: 16px; margin-bottom: 10px; padding: 10px 12px; border: 1px solid #deded9; background: #fff; }.workspace-toolbar span { margin-left: 12px; color: #777; font-size: 12px; }.hidden-input { display: none; }
 .empty-state, .empty-models { min-height: 300px; display: flex; flex-direction: column; align-items: center; justify-content: center; border: 1px dashed #d6d6ce; background: #fff; text-align: center; color: #777; }.empty-state > .el-icon, .empty-models .el-icon { color: #b58b00; font-size: 38px; }.empty-state p { margin: 10px 0 6px; color: #363630; font-size: 15px; font-weight: 600; }.empty-state span, .empty-models p { max-width: 520px; margin: 0; font-size: 12px; line-height: 1.65; }.empty-state .el-button, .empty-models .el-button { margin-top: 14px; }.models-table { border: 1px solid #deded9; border-top: 3px solid #f4d000; background: #fff; } small { display: block; margin-top: 4px; color: #888; }.muted { color: #909399; }
 :deep(.models-table th.el-table__cell) { background: #f5f5f1; color: #555; font-size: 12px; font-weight: 600; }:deep(.models-table .el-table__cell) { padding-top: 9px; padding-bottom: 9px; }:deep(.selected-model-row > td.el-table__cell) { background: #fff9cc !important; }
-@media (max-width: 900px) { .software-resource-panel { width: 205px; min-width: 205px; }.software-content > .workspace-header, .software-content > .workflow-guide, .software-content > .workspace-toolbar, .software-content > .empty-state, .software-content > .empty-models, .software-content > .models-table { margin-left: 16px; margin-right: 16px; }.workspace-header, .workspace-toolbar { align-items: flex-start; flex-direction: column; }.workflow-steps { grid-template-columns: 1fr; }.workflow-steps li { border-right: 0; border-bottom: 1px solid #ecece8; }.workflow-steps li:last-child { border-bottom: 0; }.header-actions { width: 100%; } }
-@media (max-width: 640px) { .software-integration-workspace { display: block; }.software-resource-panel { width: 100%; min-width: 0; max-height: 178px; border-right: 0; border-bottom: 1px solid #deded9; }.software-resource-panel.collapsed { width: 100%; min-width: 0; height: 28px; min-height: 28px; }.collapsed-tab { width: 100%; height: 28px; writing-mode: horizontal-tb; }.resource-tree-wrap { padding-bottom: 4px; }.workspace-header { padding-top: 14px; }.workflow-guide-title { align-items: flex-start; gap: 5px; flex-direction: column; }.workspace-toolbar .el-button { width: 100%; }.tree-model-action { font-size: 10px; } }
+@media (max-width: 900px) { .software-resource-panel { width: 205px; min-width: 205px; }.software-content > .workspace-header, .software-content > .workspace-toolbar, .software-content > .empty-state, .software-content > .empty-models, .software-content > .models-table { margin-left: 16px; margin-right: 16px; }.workspace-header, .workspace-toolbar { align-items: flex-start; flex-direction: column; }.header-actions { width: 100%; } }
+@media (max-width: 640px) { .software-integration-workspace { display: block; }.software-resource-panel { width: 100%; min-width: 0; max-height: 178px; border-right: 0; border-bottom: 1px solid #deded9; }.software-resource-panel.collapsed { width: 100%; min-width: 0; height: 28px; min-height: 28px; }.collapsed-tab { width: 100%; height: 28px; writing-mode: horizontal-tb; }.resource-tree-wrap { padding-bottom: 4px; }.workspace-header { padding-top: 14px; }.workspace-toolbar .el-button { width: 100%; }.tree-model-action { font-size: 10px; } }
 </style>

@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from worker import ptk_run
-from worker.ptk_network import format_validation_issues, inspect_network, validate_network_result
+from worker.ptk_network import format_validation_issues, inspect_network, sanitize_message, validate_network_result
 
 
 class Named:
@@ -179,7 +179,22 @@ class PtkNetworkContractTests(unittest.TestCase):
         self.assertEqual("UNAVAILABLE", result["quality"][0]["code"])
         self.assertNotIn("C:\\", result["messages"][0])
         self.assertIn("[local path]", result["messages"][0])
-        self.assertIn("[redacted]", result["messages"][1])
+        self.assertEqual("Service listening at '[local pipe]'", result["messages"][1])
+        self.assertNotIn("net.pipe", result["messages"][1])
+        self.assertNotIn("localhost", result["messages"][1])
+        self.assertNotIn("private-id", result["messages"][1])
+        self.assertEqual(result["messages"][1], sanitize_message(result["messages"][1]))
+
+    def test_sanitize_message_replaces_local_pipe_uri_without_retaining_host_or_id(self):
+        for value in (
+            "net.pipe://localhost/pipe/private-id",
+            "net.pipe://localhost/PIPESIM-private",
+            "net.pipe://worker-host/pipe/run-36-private",
+        ):
+            with self.subTest(value=value):
+                sanitized = sanitize_message(value)
+                self.assertEqual("[local pipe]", sanitized)
+                self.assertEqual(sanitized, sanitize_message(sanitized))
 
     def test_network_run_marks_native_numeric_missing_values_unavailable(self):
         model = FakeNetworkModel()
@@ -268,7 +283,7 @@ class PtkNetworkContractTests(unittest.TestCase):
         self.assertNotIn("C:\\", diagnostic)
         self.assertNotIn("private-id", diagnostic)
         self.assertIn("[local path]", diagnostic)
-        self.assertIn("[redacted]", diagnostic)
+        self.assertIn("[local pipe]", diagnostic)
 
     def test_failed_simulation_is_an_execution_error_with_sanitized_diagnostic(self):
         model = FakeNetworkModel()

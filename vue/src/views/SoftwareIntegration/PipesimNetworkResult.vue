@@ -15,14 +15,18 @@ const PROFILE_VARIABLES = [
   { variable: 'DensityFluidInSitu', label: '原位流体密度', color: '#477A5B' },
   { variable: 'ZFactorGasInSitu', label: '原位气体 Z 因子', color: '#7C4D9E' }
 ]
-const TOPOLOGY_FAMILIES = [
-  { key: 'upstream', name: '上游 / 井', color: '#216B93' },
-  { key: 'transport', name: '输送', color: '#3F6178' },
-  { key: 'control', name: '控制', color: '#B7791F' },
-  { key: 'rotating', name: '旋转设备', color: '#76539B' },
-  { key: 'process', name: '工艺设备', color: '#4D7E67' },
-  { key: 'terminal', name: '出口', color: '#A94F4A' },
-  { key: 'quiet', name: '连接 / 其他', color: '#8995A3' }
+const DEVICE_TYPES = [
+  { key: 'well', name: '井 / 源点', color: '#27617a', path: 'M50 4 L70 36 L60 36 L60 78 L76 78 L76 94 L24 94 L24 78 L40 78 L40 36 L30 36 Z', size: 28 },
+  { key: 'sink', name: '汇点', color: '#8d4540', path: 'M15 14 H85 V72 H62 V92 H38 V72 H15 Z', size: 27 },
+  { key: 'junction', name: '汇管 / 连接点', color: '#65717a', path: 'M38 6 H62 V38 H94 V62 H62 V94 H38 V62 H6 V38 H38 Z', size: 20 },
+  { key: 'control', name: '阀 / 节流 / 控制', color: '#9b6a16', path: 'M6 18 L50 50 L6 82 Z M94 18 L50 50 L94 82 Z', size: 25 },
+  { key: 'pump', name: '泵', color: '#56669a', path: 'M50 5 A45 45 0 1 1 49.9 5 M28 26 L78 50 L28 74 Z', size: 27 },
+  { key: 'compressor', name: '压缩机 / 透平', color: '#704f8c', path: 'M9 19 L91 7 L91 93 L9 81 Z M37 28 L75 50 L37 72 Z', size: 28 },
+  { key: 'separator', name: '分离器', color: '#39705a', path: 'M34 5 H66 Q80 5 80 19 V81 Q80 95 66 95 H34 Q20 95 20 81 V19 Q20 5 34 5 M20 50 H80', size: 28 },
+  { key: 'thermal', name: '加热 / 换热', color: '#a35d32', path: 'M8 8 H92 V92 H8 Z M20 20 L80 80 M80 20 L20 80', size: 25 },
+  { key: 'process', name: '储罐 / 工艺设备', color: '#4f7467', path: 'M14 22 Q50 2 86 22 V78 Q50 98 14 78 Z M14 22 Q50 42 86 22', size: 28 },
+  { key: 'pipe', name: '管线', color: '#353b40', path: 'M4 36 H78 V22 L98 50 L78 78 V64 H4 Z', size: 22 },
+  { key: 'unknown', name: '其他', color: '#7b858d', path: 'M25 7 H75 L95 50 L75 93 H25 L5 50 Z M30 30 L70 70 M70 30 L30 70', size: 20 }
 ]
 
 const topologyElement = ref(null)
@@ -102,31 +106,21 @@ const detailText = value => {
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
 })[character])
-const topologyFamily = componentType => {
+const deviceType = componentType => {
   const type = String(componentType || '').toLowerCase()
-  if (type.includes('source') || type.includes('well')) return 'upstream'
-  if (type.includes('sink')) return 'terminal'
-  if (type.includes('flowline') || type.includes('pipeline') || type.includes('pipe')) return 'transport'
-  if (type.includes('junction') || type.includes('manifold') || type.includes('tee')) return 'quiet'
+  if (type.includes('source') || type.includes('well')) return 'well'
+  if (type.includes('sink')) return 'sink'
+  if (type.includes('junction') || type.includes('manifold') || type.includes('tee')) return 'junction'
   if (type.includes('valve') || type.includes('choke') || type.includes('control') || type.includes('regulator')) return 'control'
-  if (type.includes('pump') || type.includes('compressor') || type.includes('turbine') || type.includes('rotat')) return 'rotating'
-  if (type.includes('separator') || type.includes('heater') || type.includes('cooler') || type.includes('exchanger') || type.includes('tank') || type.includes('process')) return 'process'
-  return 'quiet'
+  if (type.includes('pump')) return 'pump'
+  if (type.includes('compressor') || type.includes('turbine') || type.includes('rotat')) return 'compressor'
+  if (type.includes('separator')) return 'separator'
+  if (type.includes('heater') || type.includes('cooler') || type.includes('exchanger')) return 'thermal'
+  if (type.includes('tank') || type.includes('process')) return 'process'
+  if (type.includes('flowline') || type.includes('pipeline') || type.includes('pipe')) return 'pipe'
+  return 'unknown'
 }
-const topologyFamilyMeta = componentType =>
-  TOPOLOGY_FAMILIES.find(family => family.key === topologyFamily(componentType)) || TOPOLOGY_FAMILIES.at(-1)
-const componentSymbol = componentType => {
-  const type = String(componentType || '').toLowerCase()
-  if (type.includes('well')) return 'circle'
-  if (type.includes('source')) return 'triangle'
-  if (type.includes('sink')) return 'rect'
-  if (type.includes('flowline') || type.includes('pipeline') || type.includes('pipe')) return 'roundRect'
-  if (type.includes('junction') || type.includes('manifold') || type.includes('tee')) return 'circle'
-  if (type.includes('valve') || type.includes('choke') || type.includes('control') || type.includes('regulator')) return 'diamond'
-  if (type.includes('pump') || type.includes('compressor') || type.includes('turbine') || type.includes('rotat')) return 'pin'
-  if (type.includes('separator') || type.includes('heater') || type.includes('cooler') || type.includes('exchanger') || type.includes('tank') || type.includes('process')) return 'rect'
-  return 'circle'
-}
+const deviceMeta = componentType => DEVICE_TYPES.find(item => item.key === deviceType(componentType)) || DEVICE_TYPES.at(-1)
 const shortTopologyLabel = value => {
   const text = String(value ?? '')
   return text.length > 18 ? `${text.slice(0, 17)}…` : text
@@ -174,25 +168,24 @@ const graphData = () => {
     if (!columns.has(level)) columns.set(level, [])
     columns.get(level).push(id)
   })
-  const categories = TOPOLOGY_FAMILIES.map(family => ({ name: family.name, itemStyle: { color: family.color } }))
+  const categories = DEVICE_TYPES.map(item => ({ name: item.name, itemStyle: { color: item.color } }))
   const data = nodes.map(node => {
     const id = String(node.id)
     const level = levels.get(id) || 0
     const column = columns.get(level)
     const row = column.indexOf(id)
-    const family = topologyFamilyMeta(node.componentType)
-    const quiet = family.key === 'quiet'
+    const device = deviceMeta(node.componentType)
     return {
       id,
       name: id,
       shortLabel: shortTopologyLabel(id),
       componentType: node.componentType,
-      category: TOPOLOGY_FAMILIES.findIndex(category => category.key === family.key),
+      category: DEVICE_TYPES.findIndex(item => item.key === device.key),
       x: level * 178,
       y: (row - (column.length - 1) / 2) * 72,
-      symbol: componentSymbol(node.componentType),
-      symbolSize: quiet ? 14 : 26,
-      itemStyle: { color: family.color, borderColor: quiet ? '#D4DCE5' : '#FFFFFF', borderWidth: quiet ? 1 : 1.5, opacity: quiet ? 0.72 : 1 }
+      symbol: `path://${device.path}`,
+      symbolSize: device.size,
+      itemStyle: { color: device.color, borderColor: '#fff', borderWidth: 1.2 }
     }
   })
   const links = edges.map((edge, index) => ({
@@ -223,10 +216,10 @@ const renderTopologyChart = async () => {
       trigger: 'item',
       formatter: params => {
         if (params.dataType === 'edge') {
-          const port = params.data.sourcePort ? `<br/>源端口：${escapeHtml(params.data.sourcePort)}` : ''
-          return `返回的连接方向<br/><strong>${escapeHtml(params.data.source)} → ${escapeHtml(params.data.target)}</strong>${port}`
+          const port = params.data.sourcePort === null || params.data.sourcePort === undefined || params.data.sourcePort === '' ? '-' : params.data.sourcePort
+          return `返回的连接方向<br/><strong>${escapeHtml(params.data.source)} → ${escapeHtml(params.data.target)}</strong><br/>源端口：${escapeHtml(port)}`
         }
-        return `<strong>${escapeHtml(params.data.name)}</strong><br/>组件类型：${escapeHtml(params.data.componentType)}<br/>功能分类：${escapeHtml(TOPOLOGY_FAMILIES[params.data.category]?.name || '连接 / 其他')}`
+        return `<strong>${escapeHtml(params.data.name)}</strong><br/>组件类型：${escapeHtml(params.data.componentType)}<br/>符号分类：${escapeHtml(DEVICE_TYPES[params.data.category]?.name || '其他')}`
       }
     },
     series: [{
@@ -237,16 +230,16 @@ const renderTopologyChart = async () => {
       top: 16,
       bottom: 26,
       roam: true,
-      draggable: false,
+      draggable: true,
       data,
       links,
       categories,
       edgeSymbol: ['none', 'arrow'],
-      edgeSymbolSize: [0, 8],
+      edgeSymbolSize: [0, 6],
       label: { show: true, position: 'right', distance: 5, color: '#344254', fontSize: 10, formatter: params => params.data.shortLabel, overflow: 'truncate', width: 120, hideOverlap: true },
       labelLayout: { hideOverlap: true },
-      lineStyle: { color: '#7D91A5', width: 1.25, opacity: 0.78, curveness: 0.06 },
-      emphasis: { focus: 'adjacency', lineStyle: { width: 2.2, opacity: 1 } }
+      lineStyle: { color: '#25292d', width: 1.15, opacity: 0.88, curveness: 0 },
+      emphasis: { focus: 'adjacency', lineStyle: { width: 2, opacity: 1 } }
     }]
   }, true)
   topologyChart.resize()
@@ -312,8 +305,7 @@ const resizeCharts = () => {
   profileChart?.resize()
 }
 const resetTopologyView = () => {
-  topologyChart?.dispatchAction({ type: 'restore' })
-  topologyChart?.resize()
+  renderTopologyChart()
 }
 const observeChartElements = async () => {
   await nextTick()
@@ -331,8 +323,15 @@ watch(availableProfileVariables, value => {
     selectedProfileVariable.value = value.find(item => item.variable === 'Pressure')?.variable || value[0]?.variable || ''
   }
 }, { immediate: true })
-watch(() => props.result, () => {
+const topologySignature = computed(() => JSON.stringify({
+  nodes: topologyNodes.value.map(node => [node.id, node.componentType]),
+  edges: topologyEdges.value.map(edge => [edge.source, edge.destination, edge.sourcePort ?? null])
+}))
+watch(topologySignature, () => {
   renderTopologyChart()
+  observeChartElements()
+})
+watch(() => props.result, () => {
   renderProfileChart()
   observeChartElements()
 })
@@ -375,21 +374,29 @@ onBeforeUnmount(() => {
 
     <section class="result-panel topology-panel">
       <div class="panel-heading">
-        <div><h3>有向拓扑</h3><p>箭头表示 PIPESIM 返回的连接方向，不推断实际流向；可拖动画布并缩放查看。</p></div>
+        <div><h3>管网组态</h3><p>拖动节点调整当前视图；拖动空白处平移，滚轮缩放。箭头仅表示返回的连接方向，不代表实际流向。</p></div>
         <div class="topology-heading-actions">
           <span>{{ topologyNodes.length }} 个节点 / {{ topologyEdges.length }} 条连接</span>
-          <button type="button" class="topology-fit-button" @click="resetTopologyView">适应视图</button>
+          <button type="button" class="topology-fit-button" data-testid="network-topology-fit" aria-label="重新应用确定性布局并适应视图" @click="resetTopologyView">适应视图</button>
         </div>
       </div>
-      <div class="topology-legend" aria-label="拓扑功能分类图例">
+      <details class="topology-legend">
+        <summary>设备符号</summary>
         <ul>
-          <li v-for="family in TOPOLOGY_FAMILIES" :key="family.key">
-            <span class="topology-legend-swatch" :style="{ backgroundColor: family.color }" aria-hidden="true" />
-            <span>{{ family.name }}</span>
+          <li v-for="device in DEVICE_TYPES" :key="device.key" :data-device-type="device.key">
+            <svg class="topology-legend-symbol" viewBox="0 0 100 100" aria-hidden="true"><path :d="device.path" :fill="device.color" /></svg>
+            <span>{{ device.name }}</span>
           </li>
         </ul>
-      </div>
-      <div v-if="topologyNodes.length" ref="topologyElement" class="topology-chart" />
+      </details>
+      <div
+        v-if="topologyNodes.length"
+        ref="topologyElement"
+        class="topology-chart"
+        role="application"
+        aria-label="PIPESIM 返回的管网组态，可拖动节点、平移和滚轮缩放"
+        data-testid="network-topology-canvas"
+      />
       <el-empty v-else :description="partial ? '当前部分结果未提供可展示的拓扑' : '当前结果没有拓扑节点'" :image-size="72" />
     </section>
 
@@ -482,11 +489,11 @@ onBeforeUnmount(() => {
 .topology-fit-button { padding: 4px 8px; border: 1px solid #cbd6e2; border-radius: 2px; color: #42566b; background: #fff; font: inherit; cursor: pointer; }
 .topology-fit-button:hover { border-color: #2b6cb3; color: #1f5f96; }
 .topology-fit-button:focus-visible { outline: 2px solid #8fc0e8; outline-offset: 2px; }
-.topology-legend { margin: -2px 0 10px; overflow-x: auto; scrollbar-width: thin; }
-.topology-legend ul { display: flex; width: max-content; min-width: 100%; justify-content: center; gap: 14px; margin: 0; padding: 0; list-style: none; }
+.topology-legend { margin: -2px 0 8px; color: #606266; font-size: 11px; }.topology-legend summary { width: max-content; cursor: pointer; user-select: none; }.topology-legend[open] summary { margin-bottom: 7px; }
+.topology-legend ul { display: flex; width: max-content; min-width: 100%; flex-wrap: wrap; gap: 7px 14px; margin: 0; padding: 0; list-style: none; }
 .topology-legend li { display: flex; align-items: center; gap: 5px; flex: 0 0 auto; color: #606266; font-size: 11px; line-height: 16px; white-space: nowrap; }
-.topology-legend-swatch { width: 12px; height: 8px; border-radius: 1px; }
-.topology-chart { width: 100%; height: 400px; min-height: 300px; border: 1px solid #e5eaf1; background: #fbfcfe; }
+.topology-legend-symbol { width: 17px; height: 17px; overflow: visible; }
+.topology-chart { width: 100%; height: 400px; min-height: 300px; border: 1px solid #d9dddf; background-color: #f8f9f8; background-image: linear-gradient(#dfe3e2 1px, transparent 1px), linear-gradient(90deg, #dfe3e2 1px, transparent 1px), linear-gradient(#cbd1cf 1px, transparent 1px), linear-gradient(90deg, #cbd1cf 1px, transparent 1px); background-size: 16px 16px, 16px 16px, 80px 80px, 80px 80px; }
 .profile-controls { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr); gap: 14px; margin-bottom: 12px; }
 .profile-controls label > span { display: block; margin-bottom: 6px; color: #606266; font-size: 12px; }
 .profile-controls .el-select { width: 100%; }
@@ -507,7 +514,6 @@ onBeforeUnmount(() => {
 @media (max-width: 760px) {
   .network-result-header, .panel-heading { align-items: flex-start; flex-direction: column; }
   .topology-heading-actions { width: 100%; justify-content: space-between; white-space: normal; }
-  .topology-legend ul { justify-content: flex-start; }
   .count-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .count-item { border-bottom: 1px solid #e8edf3; }
   .count-item:nth-child(2n) { border-right: 0; }

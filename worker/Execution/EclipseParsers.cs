@@ -10,8 +10,14 @@ public sealed record EclipseEndCounts(
     [property: JsonPropertyName("problems")] int Problems,
     [property: JsonPropertyName("errors")] int Errors,
     [property: JsonPropertyName("bugs")] int Bugs);
-public sealed record EclipseSummaryPoint(double TimeDays, double Value);
-public sealed record EclipseSummarySeries(string Keyword, string? ObjectName, string? Unit, IReadOnlyList<EclipseSummaryPoint> Points);
+public sealed record EclipseSummaryPoint(
+    [property: JsonPropertyName("timeDays")] double TimeDays,
+    [property: JsonPropertyName("value")] double Value);
+public sealed record EclipseSummarySeries(
+    [property: JsonPropertyName("keyword")] string Keyword,
+    [property: JsonPropertyName("objectName")] string? ObjectName,
+    [property: JsonPropertyName("unit")] string? Unit,
+    [property: JsonPropertyName("points")] IReadOnlyList<EclipseSummaryPoint> Points);
 
 public static partial class EclipseParsers
 {

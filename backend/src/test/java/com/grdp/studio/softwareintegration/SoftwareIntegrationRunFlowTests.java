@@ -262,6 +262,10 @@ class SoftwareIntegrationRunFlowTests {
 
         projectMvc.perform(get("/software-integration/capabilities"))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.worker.status").value("AVAILABLE"))
+                .andExpect(jsonPath("$.data.worker.idle").value(true))
+                .andExpect(jsonPath("$.data.pipesimWell.status").value("AVAILABLE"))
+                .andExpect(jsonPath("$.data.pipesimNetwork.status").value("AVAILABLE"))
                 .andExpect(jsonPath("$.data.eclipse100.version").value("2024.1"))
                 .andExpect(jsonPath("$.data.eclipse100.status").value("AVAILABLE"))
                 .andExpect(jsonPath("$.data.eclipse100.runTasks[0]").value("eclipse"))
@@ -279,6 +283,9 @@ class SoftwareIntegrationRunFlowTests {
         fakeWorker.capabilityError = new WorkerClientException("unreachable");
         projectMvc.perform(get("/software-integration/capabilities"))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.worker.status").value("UNAVAILABLE"))
+                .andExpect(jsonPath("$.data.pipesimWell.reasonCode").value("WORKER_UNREACHABLE"))
+                .andExpect(jsonPath("$.data.pipesimNetwork.reasonCode").value("WORKER_UNREACHABLE"))
                 .andExpect(jsonPath("$.data.eclipse100.reasonCode").value("WORKER_UNREACHABLE"));
     }
 
@@ -1383,6 +1390,7 @@ class SoftwareIntegrationRunFlowTests {
         WorkerRunSnapshot snapshot;
         WorkerRunExecuteRequest lastExecuteRequest;
         WorkerEclipseCapability eclipseCapability;
+        boolean workerIdle;
         WorkerClientException capabilityError;
 
         void reset() {
@@ -1396,6 +1404,7 @@ class SoftwareIntegrationRunFlowTests {
             lastExecuteRequest = null;
             eclipseCapability = new WorkerEclipseCapability(
                     "2024.1", "AVAILABLE", null, List.of("eclipse"), 1800);
+            workerIdle = true;
             capabilityError = null;
             snapshot = new WorkerRunSnapshot(-1, "PREPARING", 0, "worker-1", "generation-1",
                     List.of(), null, null, List.of(), null);
@@ -1405,6 +1414,21 @@ class SoftwareIntegrationRunFlowTests {
         public WorkerAvailability availability() {
             observeTransaction();
             return new WorkerAvailability(true, "generation-1");
+        }
+
+        @Override
+        public com.grdp.studio.softwareintegration.client.WorkerCapabilities capabilities() {
+            observeTransaction();
+            if (capabilityError != null) throw capabilityError;
+            var well = new com.grdp.studio.softwareintegration.client.WorkerSimulatorCapability(
+                    "2022.1", "AVAILABLE", null, List.of("nodal", "profile", "combined"), 600);
+            var network = new com.grdp.studio.softwareintegration.client.WorkerSimulatorCapability(
+                    "2022.1", "AVAILABLE", null, List.of("network"), 600);
+            var eclipse = new com.grdp.studio.softwareintegration.client.WorkerSimulatorCapability(
+                    eclipseCapability.version(), eclipseCapability.status(), eclipseCapability.reasonCode(),
+                    eclipseCapability.runTasks(), eclipseCapability.maxTimeoutSeconds());
+            return new com.grdp.studio.softwareintegration.client.WorkerCapabilities(
+                    workerIdle, well, network, eclipse);
         }
 
         @Override

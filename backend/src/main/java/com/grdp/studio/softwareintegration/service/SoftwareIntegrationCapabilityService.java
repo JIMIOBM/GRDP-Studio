@@ -2,7 +2,9 @@ package com.grdp.studio.softwareintegration.service;
 
 import com.grdp.studio.softwareintegration.client.HttpWorkerRunClient.WorkerClientException;
 import com.grdp.studio.softwareintegration.client.WorkerEclipseCapability;
+import com.grdp.studio.softwareintegration.client.WorkerCapabilities;
 import com.grdp.studio.softwareintegration.client.WorkerRunClient;
+import com.grdp.studio.softwareintegration.client.WorkerSimulatorCapability;
 import com.grdp.studio.softwareintegration.dto.SoftwareIntegrationCapabilitiesResponse;
 import org.springframework.stereotype.Service;
 
@@ -11,7 +13,7 @@ import java.util.Set;
 
 @Service
 public class SoftwareIntegrationCapabilityService {
-    private static final Set<String> REASON_CODES = Set.of(
+    private static final Set<String> ECLIPSE_REASON_CODES = Set.of(
             "WORKER_UNREACHABLE", "ECLIPSE_UNAVAILABLE", "ECLIPSE_VERSION_MISMATCH");
     private final WorkerRunClient workerClient;
 
@@ -21,9 +23,20 @@ public class SoftwareIntegrationCapabilityService {
 
     public SoftwareIntegrationCapabilitiesResponse get() {
         try {
-            return response(normalize(workerClient.eclipseCapability()));
+            WorkerCapabilities capabilities = workerClient.capabilities();
+            boolean idle = Boolean.TRUE.equals(capabilities.idle());
+            return response("AVAILABLE", idle, idle ? null : "WORKER_BUSY",
+                    normalize(capabilities.pipesimWell(), "2022.1", List.of("nodal", "profile", "combined"),
+                            "PIPESIM_UNAVAILABLE", "PIPESIM_VERSION_MISMATCH"),
+                    normalize(capabilities.pipesimNetwork(), "2022.1", List.of("network"),
+                            "PIPESIM_UNAVAILABLE", "PIPESIM_VERSION_MISMATCH"),
+                    normalize(capabilities.eclipse100(), "2024.1", List.of("eclipse"),
+                            "ECLIPSE_UNAVAILABLE", "ECLIPSE_VERSION_MISMATCH"));
         } catch (WorkerClientException exception) {
-            return response(unavailable("WORKER_UNREACHABLE"));
+            return response("UNAVAILABLE", false, "WORKER_UNREACHABLE",
+                    unavailable("WORKER_UNREACHABLE", 600),
+                    unavailable("WORKER_UNREACHABLE", 600),
+                    unavailable("WORKER_UNREACHABLE", 1800));
         }
     }
 
@@ -38,7 +51,7 @@ public class SoftwareIntegrationCapabilityService {
     private static WorkerEclipseCapability normalize(WorkerEclipseCapability capability) {
         if (capability == null) return unavailable("ECLIPSE_UNAVAILABLE");
         if (!"AVAILABLE".equals(capability.status())) {
-            String reason = REASON_CODES.contains(capability.reasonCode())
+            String reason = ECLIPSE_REASON_CODES.contains(capability.reasonCode())
                     ? capability.reasonCode() : "ECLIPSE_UNAVAILABLE";
             return unavailable(reason);
         }
@@ -47,14 +60,39 @@ public class SoftwareIntegrationCapabilityService {
         return new WorkerEclipseCapability("2024.1", "AVAILABLE", null, List.of("eclipse"), 1800);
     }
 
+    private static WorkerSimulatorCapability normalize(WorkerSimulatorCapability capability, String version,
+                                                       List<String> tasks, String unavailableReason,
+                                                       String versionReason) {
+        int fallbackTimeout = "2024.1".equals(version) ? 1800 : 600;
+        if (capability == null) return unavailable(unavailableReason, fallbackTimeout);
+        if (!"AVAILABLE".equals(capability.status())) return unavailable(unavailableReason, fallbackTimeout);
+        if (!version.equals(capability.version())) return unavailable(versionReason, fallbackTimeout);
+        if (capability.runTasks() == null || !capability.runTasks().containsAll(tasks)
+                || capability.maxTimeoutSeconds() == null || capability.maxTimeoutSeconds() <= 0) {
+            return unavailable(unavailableReason, fallbackTimeout);
+        }
+        return new WorkerSimulatorCapability(version, "AVAILABLE", null, tasks, capability.maxTimeoutSeconds());
+    }
+
+    private static WorkerSimulatorCapability unavailable(String reasonCode, int timeout) {
+        return new WorkerSimulatorCapability(null, "UNAVAILABLE", reasonCode, List.of(), timeout);
+    }
+
     private static WorkerEclipseCapability unavailable(String reasonCode) {
         return new WorkerEclipseCapability(null, "UNAVAILABLE", reasonCode, List.of(), 1800);
     }
 
-    private static SoftwareIntegrationCapabilitiesResponse response(WorkerEclipseCapability capability) {
+    private static SoftwareIntegrationCapabilitiesResponse response(String workerStatus, boolean idle, String workerReason,
+                                                                    WorkerSimulatorCapability well,
+                                                                    WorkerSimulatorCapability network,
+                                                                    WorkerSimulatorCapability eclipse) {
         return new SoftwareIntegrationCapabilitiesResponse(
-                new SoftwareIntegrationCapabilitiesResponse.Eclipse100Capability(
-                        capability.version(), capability.status(), capability.reasonCode(),
-                        capability.runTasks(), capability.maxTimeoutSeconds()));
+                new SoftwareIntegrationCapabilitiesResponse.WorkerCapability(workerStatus, idle, workerReason),
+                response(well), response(network), response(eclipse));
+    }
+
+    private static SoftwareIntegrationCapabilitiesResponse.SimulatorCapability response(WorkerSimulatorCapability capability) {
+        return new SoftwareIntegrationCapabilitiesResponse.SimulatorCapability(capability.version(), capability.status(),
+                capability.reasonCode(), capability.runTasks(), capability.maxTimeoutSeconds());
     }
 }

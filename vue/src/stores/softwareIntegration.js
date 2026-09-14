@@ -18,6 +18,36 @@ export const isTerminalRunStatus = status => terminalStatuses.has(status)
 const isValidationPending = status => status === 'UPLOADED' || status === 'VALIDATING'
 const unwrap = response => response?.data ?? response
 const byNewestVersion = (left, right) => Number(right.versionNo || 0) - Number(left.versionNo || 0)
+const capabilityReasonCodes = new Set([
+  'WORKER_UNREACHABLE', 'WORKER_BUSY', 'PIPESIM_UNAVAILABLE', 'PIPESIM_VERSION_MISMATCH',
+  'ECLIPSE_UNAVAILABLE', 'ECLIPSE_VERSION_MISMATCH'
+])
+const capabilityTasks = new Set(['nodal', 'profile', 'combined', 'network', 'eclipse'])
+const unavailableCapability = reasonCode => ({
+  version: null,
+  status: 'UNAVAILABLE',
+  reasonCode,
+  runTasks: [],
+  maxTimeoutSeconds: null
+})
+const normalizeSimulatorCapability = (value, fallbackReason) => {
+  if (!value || typeof value !== 'object' || !['AVAILABLE', 'UNAVAILABLE'].includes(value.status)) {
+    return unavailableCapability(fallbackReason)
+  }
+  return {
+    version: typeof value.version === 'string' && value.version.length <= 32 ? value.version : null,
+    status: value.status,
+    reasonCode: capabilityReasonCodes.has(value.reasonCode) ? value.reasonCode : (value.status === 'AVAILABLE' ? null : fallbackReason),
+    runTasks: Array.isArray(value.runTasks) ? value.runTasks.filter(task => capabilityTasks.has(task)) : [],
+    maxTimeoutSeconds: Number.isInteger(value.maxTimeoutSeconds) && value.maxTimeoutSeconds > 0 ? value.maxTimeoutSeconds : null
+  }
+}
+const unavailableCapabilities = () => ({
+  worker: { status: 'UNAVAILABLE', idle: false, reasonCode: 'WORKER_UNREACHABLE' },
+  pipesimWell: unavailableCapability('WORKER_UNREACHABLE'),
+  pipesimNetwork: unavailableCapability('WORKER_UNREACHABLE'),
+  eclipse100: unavailableCapability('WORKER_UNREACHABLE')
+})
 
 export const useSoftwareIntegrationStore = defineStore('software-integration', () => {
   const projects = ref([])
@@ -35,6 +65,9 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
   const submittingRun = ref(false)
   const cancellingRun = ref(false)
   const runPollingUnavailable = ref(false)
+  const capabilities = ref(null)
+  const loadingCapabilities = ref(false)
+  const capabilitiesUnavailable = ref(false)
   const elapsedClock = ref(Date.now())
 
   let validationPollTimer
@@ -49,6 +82,7 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
   let validationPollingEnabled = false
   let elapsedBase = 0
   let elapsedSyncedAt = Date.now()
+  let capabilityGeneration = 0
 
   const activeProjectDetail = computed(() => projectDetails.value[activeProjectId.value] || null)
   const activeProject = computed(() => activeProjectDetail.value?.project ||
@@ -65,6 +99,16 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
     ? activeVersion.value.studies
     : [])
   const hasActiveRun = computed(() => Boolean(activeRun.value && !isTerminalRunStatus(activeRun.value.status)))
+  const workerBusy = computed(() => capabilities.value?.worker?.status === 'AVAILABLE' && !capabilities.value.worker.idle)
+  const activeSimulatorCapability = computed(() => {
+    if (isNetworkModel.value) return capabilities.value?.pipesimNetwork || null
+    if (isEclipseModel.value) return capabilities.value?.eclipse100 || null
+    if (isWellModel.value) return capabilities.value?.pipesimWell || null
+    return null
+  })
+  const activeSimulatorAvailable = computed(() => activeSimulatorCapability.value?.status === 'AVAILABLE')
+  const canCreateRunByCapability = computed(() => Boolean(capabilities.value) && !capabilitiesUnavailable.value &&
+    capabilities.value.worker?.status === 'AVAILABLE' && !workerBusy.value && activeSimulatorAvailable.value)
   const activeElapsedMillis = computed(() => {
     if (hasActiveRun.value) {
       return Math.max(0, elapsedBase + elapsedClock.value - elapsedSyncedAt)
@@ -182,6 +226,36 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
     }
   }
 
+  const loadCapabilities = async () => {
+    const generation = ++capabilityGeneration
+    loadingCapabilities.value = true
+    capabilitiesUnavailable.value = false
+    capabilities.value = null
+    try {
+      const value = unwrap(await softwareIntegrationApi.getCapabilities())
+      if (generation !== capabilityGeneration) return null
+      const workerStatus = value?.worker?.status === 'AVAILABLE' ? 'AVAILABLE' : 'UNAVAILABLE'
+      capabilities.value = {
+        worker: {
+          status: workerStatus,
+          idle: workerStatus === 'AVAILABLE' && value?.worker?.idle === true,
+          reasonCode: capabilityReasonCodes.has(value?.worker?.reasonCode) ? value.worker.reasonCode : (workerStatus === 'AVAILABLE' ? null : 'WORKER_UNREACHABLE')
+        },
+        pipesimWell: normalizeSimulatorCapability(value?.pipesimWell, 'PIPESIM_UNAVAILABLE'),
+        pipesimNetwork: normalizeSimulatorCapability(value?.pipesimNetwork, 'PIPESIM_UNAVAILABLE'),
+        eclipse100: normalizeSimulatorCapability(value?.eclipse100, 'ECLIPSE_UNAVAILABLE')
+      }
+      return capabilities.value
+    } catch (error) {
+      if (generation !== capabilityGeneration) return null
+      capabilities.value = unavailableCapabilities()
+      capabilitiesUnavailable.value = true
+      throw error
+    } finally {
+      if (generation === capabilityGeneration) loadingCapabilities.value = false
+    }
+  }
+
   const selectProject = async projectId => {
     const generation = beginNavigation()
     activeRun.value = null
@@ -277,6 +351,7 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
           stopRunPolling()
           if (matchesRunContext(expectedNavigation, expectedVersionId)) {
             await loadRunHistory(detail.modelVersionId, false, expectedNavigation)
+            loadCapabilities().catch(() => {})
           }
           return
         }
@@ -373,7 +448,7 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
     syncRunTypeForModel()
     const studies = persistedStudies.value
     selectedStudy.value = isEclipseModel.value ? '' : (studies.includes(selectedStudy.value) ? selectedStudy.value : (studies[0] || ''))
-    if (!isEclipseModel.value) await loadRunHistory(versionId, true, generation)
+    await loadRunHistory(versionId, true, generation)
     if (!matchesRunContext(generation, versionId)) return null
     return activeVersion.value
   }
@@ -393,6 +468,7 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
   }
 
   const createRun = async () => {
+    if (!canCreateRunByCapability.value) throw new Error('当前模拟器执行能力不可用')
     const version = activeVersion.value
     if (!version || version.status !== 'READY' || (!isEclipseModel.value && !persistedStudies.value.includes(selectedStudy.value))) {
       throw new Error('请选择 READY 模型版本及其已有 Study')
@@ -420,6 +496,7 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
         detail?.id !== summary.id || detail?.modelVersionId !== expectedVersionId) return null
       activeRun.value = detail
       selectedRun.value = detail
+      if (capabilities.value?.worker?.status === 'AVAILABLE') capabilities.value.worker.idle = false
       startRunPolling(detail.id)
       syncElapsed(detail)
       return detail
@@ -448,6 +525,7 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
       if (isTerminalRunStatus(detail.status)) {
         stopRunPolling()
         syncElapsed(detail)
+        loadCapabilities().catch(() => {})
       } else {
         startRunPolling(detail.id)
         syncElapsed(detail)
@@ -466,6 +544,7 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
   }
 
   const cleanup = () => {
+    capabilityGeneration += 1
     projectsLoadGeneration += 1
     navigationGeneration += 1
     historyGeneration += 1
@@ -491,6 +570,9 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
     submittingRun,
     cancellingRun,
     runPollingUnavailable,
+    capabilities,
+    loadingCapabilities,
+    capabilitiesUnavailable,
     activeProjectDetail,
     activeProject,
     activeModel,
@@ -503,8 +585,13 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
     activeVersion,
     persistedStudies,
     hasActiveRun,
+    workerBusy,
+    activeSimulatorCapability,
+    activeSimulatorAvailable,
+    canCreateRunByCapability,
     activeElapsedMillis,
     loadProjects,
+    loadCapabilities,
     loadProjectDetail,
     selectProject,
     createProject,

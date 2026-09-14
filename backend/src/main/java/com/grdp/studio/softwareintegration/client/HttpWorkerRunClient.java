@@ -42,28 +42,39 @@ public class HttpWorkerRunClient implements WorkerRunClient {
     }
 
     @Override
-    public WorkerEclipseCapability eclipseCapability() {
+    public WorkerCapabilities capabilities() {
         JsonNode body = send(HttpRequest.newBuilder(uri("/api/capabilities"))
                 .timeout(properties.getWorkerReadTimeout()).GET().build(), 200);
-        JsonNode eclipse = body.get("eclipse100");
-        if (eclipse == null || !eclipse.isObject()) {
-            throw new WorkerClientException("Worker ECLIPSE capability is missing");
+        if (!body.has("idle") || !body.get("idle").isBoolean()) {
+            throw new WorkerClientException("Worker idle capability is invalid");
         }
+        Boolean idle = body.get("idle").booleanValue();
+        return new WorkerCapabilities(idle, capability(body.get("pipesimWell")),
+                capability(body.get("pipesimNetwork")), capability(body.get("eclipse100")));
+    }
+
+    @Override
+    public WorkerEclipseCapability eclipseCapability() {
+        WorkerSimulatorCapability eclipse = capabilities().eclipse100();
+        if (eclipse == null) throw new WorkerClientException("Worker ECLIPSE capability is missing");
+        return new WorkerEclipseCapability(eclipse.version(), eclipse.status(), eclipse.reasonCode(),
+                eclipse.runTasks(), eclipse.maxTimeoutSeconds() == null ? 0 : eclipse.maxTimeoutSeconds());
+    }
+
+    private static WorkerSimulatorCapability capability(JsonNode node) {
+        if (node == null || !node.isObject()) return null;
         List<String> runTasks = new ArrayList<>();
-        JsonNode tasks = eclipse.get("runTasks");
-        if (tasks == null || !tasks.isArray()) {
-            throw new WorkerClientException("Worker ECLIPSE runTasks are invalid");
+        JsonNode tasks = node.get("runTasks");
+        if (tasks != null && tasks.isArray()) {
+            for (JsonNode task : tasks) {
+                if (task.isTextual() && !task.asText().isBlank()) runTasks.add(task.asText());
+            }
         }
-        for (JsonNode task : tasks) {
-            if (!task.isTextual()) throw new WorkerClientException("Worker ECLIPSE runTask is invalid");
-            runTasks.add(task.asText());
-        }
-        JsonNode timeout = eclipse.get("maxTimeoutSeconds");
-        if (timeout == null || !timeout.isIntegralNumber() || !timeout.canConvertToInt()) {
-            throw new WorkerClientException("Worker ECLIPSE timeout capability is invalid");
-        }
-        return new WorkerEclipseCapability(text(eclipse, "version"), text(eclipse, "status"),
-                text(eclipse, "reasonCode"), List.copyOf(runTasks), timeout.intValue());
+        JsonNode timeout = node.get("maxTimeoutSeconds");
+        Integer maxTimeoutSeconds = timeout != null && timeout.isIntegralNumber() && timeout.canConvertToInt()
+                ? timeout.intValue() : null;
+        return new WorkerSimulatorCapability(text(node, "version"), text(node, "status"),
+                text(node, "reasonCode"), List.copyOf(runTasks), maxTimeoutSeconds);
     }
 
     @Override

@@ -608,8 +608,39 @@ public sealed partial class PtkRunService : IDisposable
             if (result.TryGetProperty(section, out var groups) &&
                 (groups.ValueKind != JsonValueKind.Array || !groups.EnumerateArray().All(IsSafeScalarSeries))) return false;
         }
-        return !result.TryGetProperty("profiles", out var profiles) ||
-               profiles.ValueKind == JsonValueKind.Array && profiles.EnumerateArray().All(IsSafeProfile);
+        if (result.TryGetProperty("profiles", out var profiles) &&
+            (profiles.ValueKind != JsonValueKind.Array || !profiles.EnumerateArray().All(IsSafeProfile))) return false;
+        return result.TryGetProperty("summary", out var summary) && IsSafeNetworkSummary(summary) &&
+               result.TryGetProperty("messages", out var messages) && IsSafeTextArray(messages) &&
+               result.TryGetProperty("quality", out var quality) && IsSafeNetworkQuality(quality);
+    }
+
+    private static bool IsSafeNetworkSummary(JsonElement summary) =>
+        summary.ValueKind == JsonValueKind.Object &&
+        HasExactlyProperties(summary, "info", "warnings", "errors") &&
+        summary.TryGetProperty("info", out var info) && IsSafeTextArray(info) &&
+        summary.TryGetProperty("warnings", out var warnings) && IsSafeTextArray(warnings) &&
+        summary.TryGetProperty("errors", out var errors) && IsSafeTextArray(errors);
+
+    private static bool IsSafeTextArray(JsonElement values) =>
+        values.ValueKind == JsonValueKind.Array && values.EnumerateArray().All(value => IsSafeTextValue(value, true));
+
+    private static bool IsSafeNetworkQuality(JsonElement quality)
+    {
+        if (quality.ValueKind != JsonValueKind.Array) return false;
+        var paths = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var item in quality.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object || !HasExactlyProperties(item, "path", "code") ||
+                !IsSafeTextProperty(item, "path", false) ||
+                !item.TryGetProperty("code", out var code) || code.ValueKind != JsonValueKind.String ||
+                code.GetString() is not ("NON_FINITE" or "UNAVAILABLE") ||
+                !paths.Add(item.GetProperty("path").GetString()!))
+            {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static void AddSanitizedPartialArray(

@@ -35,7 +35,7 @@ class HttpWorkerRunClientTests {
         server.createContext("/api/health", exchange -> respond(exchange, 200,
                 "{\"status\":\"UP\",\"generationId\":\"generation-1\",\"activeRunId\":null,\"idle\":true}"));
         server.createContext("/api/capabilities", exchange -> respond(exchange, 200,
-                "{\"eclipse100\":{\"version\":\"2024.1\",\"launcherFound\":true,\"status\":\"AVAILABLE\","
+                "{\"idle\":true,\"eclipse100\":{\"version\":\"2024.1\",\"launcherFound\":true,\"status\":\"AVAILABLE\","
                         + "\"reasonCode\":null,\"runTasks\":[\"eclipse\"],\"maxTimeoutSeconds\":1800}}"));
         server.createContext("/api/runs/execute", exchange -> {
             executeBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
