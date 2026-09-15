@@ -30,15 +30,17 @@ public class SurfaceLossStorageService {
         this.transaction = new TransactionTemplate(transactionManager);
     }
 
-    public List<RecordSummary> list(long projectId, long gasReservoirId) {
+    public List<RecordSummary> list(long projectId, long gasReservoirId, long storageId) {
+        StorageCatalogService.requireScope(jdbc, projectId, gasReservoirId, storageId);
         return jdbc.query("""
                 SELECT id,record_no,record_name,updated_at
                 FROM project_reservoir_surface_loss
-                WHERE project_id=? AND gas_reservoir_id=? ORDER BY record_no
-                """, (rs, row) -> summary(rs), projectId, gasReservoirId);
+                WHERE project_id=? AND gas_reservoir_id=? AND storage_id=? ORDER BY record_no
+                """, (rs, row) -> summary(rs), projectId, gasReservoirId, storageId);
     }
 
-    public Detail detail(long id, long projectId, long gasReservoirId) {
+    public Detail detail(long id, long projectId, long gasReservoirId, long storageId) {
+        StorageCatalogService.requireScope(jdbc, projectId, gasReservoirId, storageId);
         try {
             return jdbc.queryForObject("""
                     SELECT id,record_no,record_name,updated_at,calculation_mode,input_loss_volume,
@@ -48,8 +50,8 @@ public class SurfaceLossStorageService {
                       deviation_factor_toolbox_id,deviation_factor_before,deviation_factor_after,
                       vent_loss_volume,condensate_volume,gas_oil_ratio,condensate_loss_volume,input_condensate_loss_volume
                     FROM project_reservoir_surface_loss
-                    WHERE id=? AND project_id=? AND gas_reservoir_id=?
-                    """, (rs, row) -> mapDetail(rs, loadSegments(id)), id, projectId, gasReservoirId);
+                    WHERE id=? AND project_id=? AND gas_reservoir_id=? AND storage_id=?
+                    """, (rs, row) -> mapDetail(rs, loadSegments(id)), id, projectId, gasReservoirId, storageId);
         } catch (EmptyResultDataAccessException e) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "当前储气库下不存在该地面损耗记录");
         }
@@ -57,7 +59,7 @@ public class SurfaceLossStorageService {
 
     public synchronized RecordSummary save(SaveRequest request) {
         SaveRequest normalized = new SaveRequest(request.recordId(), request.projectId(),
-                request.gasReservoirId(), request.input().normalized(), request.calculation());
+                request.gasReservoirId(), request.storageId(), request.input().normalized(), request.calculation());
         validateCalculation(normalized.input(), normalized.calculation());
         // 事务提交完成后才释放本实例锁；多实例争用编号时由唯一索引兜底并重试。
         for (int attempt = 0; ; attempt++) {
@@ -70,32 +72,36 @@ public class SurfaceLossStorageService {
     }
 
     private RecordSummary saveInTransaction(SaveRequest request) {
+        // 两项地面损耗结果及放空段作为一套快照提交，明细写入失败时主表也回滚。
+        StorageCatalogService.lockScope(jdbc, request.projectId(), request.gasReservoirId(), request.storageId());
         if (request.recordId() != null) {
-            detail(request.recordId(), request.projectId(), request.gasReservoirId());
+            detail(request.recordId(), request.projectId(), request.gasReservoirId(), request.storageId());
             updateMain(request.recordId(), request.input(), request.calculation());
             replaceSegments(request.recordId(), request.input());
-            return detail(request.recordId(), request.projectId(), request.gasReservoirId()).summary();
+            return detail(request.recordId(), request.projectId(), request.gasReservoirId(), request.storageId()).summary();
         }
 
-        int no = allocateNumber(request.projectId(), request.gasReservoirId());
+        int no = allocateNumber(request.projectId(), request.gasReservoirId(), request.storageId());
         long id = insertMain(request, no);
         replaceSegments(id, request.input());
-        return detail(id, request.projectId(), request.gasReservoirId()).summary();
+        return detail(id, request.projectId(), request.gasReservoirId(), request.storageId()).summary();
     }
 
-    public RecordSummary rename(long id, long projectId, long gasReservoirId, String name) {
-        int changed = jdbc.update("UPDATE project_reservoir_surface_loss SET record_name=? WHERE id=? AND project_id=? AND gas_reservoir_id=?",
-                name.trim(), id, projectId, gasReservoirId);
+    public RecordSummary rename(long id, long projectId, long gasReservoirId, long storageId, String name) {
+        StorageCatalogService.requireScope(jdbc, projectId, gasReservoirId, storageId);
+        int changed = jdbc.update("UPDATE project_reservoir_surface_loss SET record_name=? WHERE id=? AND project_id=? AND gas_reservoir_id=? AND storage_id=?",
+                name.trim(), id, projectId, gasReservoirId, storageId);
         if (changed == 0) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "地面损耗记录不存在");
         return jdbc.queryForObject("SELECT id,record_no,record_name,updated_at FROM project_reservoir_surface_loss WHERE id=?",
                 (rs, row) -> summary(rs), id);
     }
 
-    public void delete(long id, long projectId, long gasReservoirId) {
+    public void delete(long id, long projectId, long gasReservoirId, long storageId) {
+        StorageCatalogService.requireScope(jdbc, projectId, gasReservoirId, storageId);
         int changed = jdbc.update("""
                 DELETE FROM project_reservoir_surface_loss
-                WHERE id=? AND project_id=? AND gas_reservoir_id=?
-                """, id, projectId, gasReservoirId);
+                WHERE id=? AND project_id=? AND gas_reservoir_id=? AND storage_id=?
+                """, id, projectId, gasReservoirId, storageId);
         if (changed == 0) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "地面损耗记录不存在");
         // 放空段明细由数据库外键 ON DELETE CASCADE 自动清理。
     }
@@ -124,14 +130,14 @@ public class SurfaceLossStorageService {
         Calculation c = request.calculation();
         return insertAndReturnKey("""
                 INSERT INTO project_reservoir_surface_loss
-                (project_id,gas_reservoir_id,record_no,record_name,calculation_mode,input_loss_volume,
+                (project_id,gas_reservoir_id,storage_id,record_no,record_name,calculation_mode,input_loss_volume,
                  average_temperature_k,pressure_before,pressure_after,total_segment_volume,gas_type,
                  specific_gravity,h2s_mole_fraction,co2_mole_fraction,n2_mole_fraction,
                  modification_method,deviation_factor_method,viscosity_method,imported_file_name,
                  deviation_factor_toolbox_id,deviation_factor_before,deviation_factor_after,vent_loss_volume,
                  condensate_volume,gas_oil_ratio,condensate_loss_volume,input_condensate_loss_volume)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                """, request.projectId(), request.gasReservoirId(), no, "地面损耗" + no,
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """, request.projectId(), request.gasReservoirId(), request.storageId(), no, "地面损耗" + no,
                 modeNumber(i.calculationMode()), i.inputLossVolume(), i.averageTemperatureK(),
                 i.pressureBefore(), i.pressureAfter(), c.totalSegmentVolume(), i.gasType(), i.specificGravity(),
                 i.h2SMoleFraction(), i.co2MoleFraction(), i.n2MoleFraction(), i.modificationMethod(),
@@ -157,6 +163,7 @@ public class SurfaceLossStorageService {
     }
 
     private void replaceSegments(long recordId, SurfaceInput input) {
+        // 以本次输入整体替换；直接输入模式不保留之前公式模式的放空段。
         jdbc.update("DELETE FROM project_reservoir_surface_loss_segment WHERE surface_loss_id=?", recordId);
         if (!FORMULA_MODE.equals(input.calculationMode())) return;
         for (int index = 0; index < input.segments().size(); index++) {
@@ -167,11 +174,12 @@ public class SurfaceLossStorageService {
         }
     }
 
-    private int allocateNumber(long projectId, long gasReservoirId) {
+    private int allocateNumber(long projectId, long gasReservoirId, long storageId) {
+        // 调用方已锁定父库行；MAX+1不是永久递增计数器，删除最大编号后可能复用。
         Integer number = jdbc.queryForObject("""
                 SELECT COALESCE(MAX(record_no),0)+1 FROM project_reservoir_surface_loss
-                WHERE project_id=? AND gas_reservoir_id=?
-                """, Integer.class, projectId, gasReservoirId);
+                WHERE project_id=? AND gas_reservoir_id=? AND storage_id=?
+                """, Integer.class, projectId, gasReservoirId, storageId);
         return number == null ? 1 : number;
     }
 

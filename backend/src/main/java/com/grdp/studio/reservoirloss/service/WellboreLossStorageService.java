@@ -30,15 +30,17 @@ public class WellboreLossStorageService {
         this.transaction = new TransactionTemplate(transactionManager);
     }
 
-    public List<RecordSummary> list(long projectId, long gasReservoirId) {
+    public List<RecordSummary> list(long projectId, long gasReservoirId, long storageId) {
+        StorageCatalogService.requireScope(jdbc, projectId, gasReservoirId, storageId);
         return jdbc.query("""
                 SELECT id,record_no,record_name,updated_at
                 FROM project_reservoir_wellbore_loss
-                WHERE project_id=? AND gas_reservoir_id=? ORDER BY record_no
-                """, (rs, row) -> summary(rs), projectId, gasReservoirId);
+                WHERE project_id=? AND gas_reservoir_id=? AND storage_id=? ORDER BY record_no
+                """, (rs, row) -> summary(rs), projectId, gasReservoirId, storageId);
     }
 
-    public Detail detail(long id, long projectId, long gasReservoirId) {
+    public Detail detail(long id, long projectId, long gasReservoirId, long storageId) {
+        StorageCatalogService.requireScope(jdbc, projectId, gasReservoirId, storageId);
         try {
             return jdbc.queryForObject("""
                     SELECT id,record_no,record_name,updated_at,calculation_mode,input_loss_volume,
@@ -48,8 +50,8 @@ public class WellboreLossStorageService {
                       deviation_factor_toolbox_id,deviation_factor_before,deviation_factor_after,
                       wellbore_loss_volume
                     FROM project_reservoir_wellbore_loss
-                    WHERE id=? AND project_id=? AND gas_reservoir_id=?
-                    """, (rs, row) -> mapDetail(rs, loadSegments(id)), id, projectId, gasReservoirId);
+                    WHERE id=? AND project_id=? AND gas_reservoir_id=? AND storage_id=?
+                    """, (rs, row) -> mapDetail(rs, loadSegments(id)), id, projectId, gasReservoirId, storageId);
         } catch (EmptyResultDataAccessException e) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "当前储气库下不存在该井筒损耗记录");
         }
@@ -68,32 +70,37 @@ public class WellboreLossStorageService {
     }
 
     private RecordSummary saveInTransaction(SaveRequest request) {
+        // 库级井筒损耗不绑定具体单井；主记录和放空段必须在同一事务内成功或一起回滚。
+        StorageCatalogService.lockScope(jdbc, request.projectId(), request.gasReservoirId(), request.storageId());
         if (request.recordId() != null) {
-            detail(request.recordId(), request.projectId(), request.gasReservoirId());
+            // 先验证旧记录属于请求的库，再按主键覆盖；保留原显示编号和名称。
+            detail(request.recordId(), request.projectId(), request.gasReservoirId(), request.storageId());
             updateMain(request.recordId(), request.input(), request.calculation());
             replaceSegments(request.recordId(), request.input());
-            return detail(request.recordId(), request.projectId(), request.gasReservoirId()).summary();
+            return detail(request.recordId(), request.projectId(), request.gasReservoirId(), request.storageId()).summary();
         }
 
-        int no = allocateNumber(request.projectId(), request.gasReservoirId());
+        int no = allocateNumber(request.projectId(), request.gasReservoirId(), request.storageId());
         long id = insertMain(request, no);
         replaceSegments(id, request.input());
-        return detail(id, request.projectId(), request.gasReservoirId()).summary();
+        return detail(id, request.projectId(), request.gasReservoirId(), request.storageId()).summary();
     }
 
-    public RecordSummary rename(long id, long projectId, long gasReservoirId, String name) {
-        int changed = jdbc.update("UPDATE project_reservoir_wellbore_loss SET record_name=? WHERE id=? AND project_id=? AND gas_reservoir_id=?",
-                name.trim(), id, projectId, gasReservoirId);
+    public RecordSummary rename(long id, long projectId, long gasReservoirId, long storageId, String name) {
+        StorageCatalogService.requireScope(jdbc, projectId, gasReservoirId, storageId);
+        int changed = jdbc.update("UPDATE project_reservoir_wellbore_loss SET record_name=? WHERE id=? AND project_id=? AND gas_reservoir_id=? AND storage_id=?",
+                name.trim(), id, projectId, gasReservoirId, storageId);
         if (changed == 0) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "井筒损耗记录不存在");
         return jdbc.queryForObject("SELECT id,record_no,record_name,updated_at FROM project_reservoir_wellbore_loss WHERE id=?",
                 (rs, row) -> summary(rs), id);
     }
 
-    public void delete(long id, long projectId, long gasReservoirId) {
+    public void delete(long id, long projectId, long gasReservoirId, long storageId) {
+        StorageCatalogService.requireScope(jdbc, projectId, gasReservoirId, storageId);
         int changed = jdbc.update("""
                 DELETE FROM project_reservoir_wellbore_loss
-                WHERE id=? AND project_id=? AND gas_reservoir_id=?
-                """, id, projectId, gasReservoirId);
+                WHERE id=? AND project_id=? AND gas_reservoir_id=? AND storage_id=?
+                """, id, projectId, gasReservoirId, storageId);
         if (changed == 0) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "井筒损耗记录不存在");
         // 放空井段明细由数据库外键 ON DELETE CASCADE 自动清理。
     }
@@ -121,13 +128,13 @@ public class WellboreLossStorageService {
         Calculation c = request.calculation();
         return insertAndReturnKey("""
                 INSERT INTO project_reservoir_wellbore_loss
-                (project_id,gas_reservoir_id,record_no,record_name,calculation_mode,input_loss_volume,
+                (project_id,gas_reservoir_id,storage_id,record_no,record_name,calculation_mode,input_loss_volume,
                  average_temperature_k,pressure_before,pressure_after,total_segment_volume,gas_type,
                  specific_gravity,h2s_mole_fraction,co2_mole_fraction,n2_mole_fraction,
                  modification_method,deviation_factor_method,viscosity_method,imported_file_name,
                  deviation_factor_toolbox_id,deviation_factor_before,deviation_factor_after,wellbore_loss_volume)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                """, request.projectId(), request.gasReservoirId(), no, "井筒损耗" + no,
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """, request.projectId(), request.gasReservoirId(), request.storageId(), no, "井筒损耗" + no,
                 modeNumber(i.calculationMode()), i.inputLossVolume(), i.averageTemperatureK(),
                 i.pressureBefore(), i.pressureAfter(), c.totalSegmentVolume(), i.gasType(), i.specificGravity(),
                 i.h2SMoleFraction(), i.co2MoleFraction(), i.n2MoleFraction(), i.modificationMethod(),
@@ -153,6 +160,7 @@ public class WellboreLossStorageService {
     }
 
     private void replaceSegments(long recordId, WellboreInput input) {
+        // 明细是当前输入的完整快照，不是增量；切回直接输入也要先清掉旧公式段。
         jdbc.update("DELETE FROM project_reservoir_wellbore_loss_segment WHERE wellbore_loss_id=?", recordId);
         if (!FORMULA_MODE.equals(input.calculationMode())) return;
         for (int index = 0; index < input.segments().size(); index++) {
@@ -163,11 +171,12 @@ public class WellboreLossStorageService {
         }
     }
 
-    private int allocateNumber(long projectId, long gasReservoirId) {
+    private int allocateNumber(long projectId, long gasReservoirId, long storageId) {
+        // 调用方已锁定父库行；显示编号按库独立，删除当前最大编号后可能再次使用该编号。
         Integer number = jdbc.queryForObject("""
                 SELECT COALESCE(MAX(record_no),0)+1 FROM project_reservoir_wellbore_loss
-                WHERE project_id=? AND gas_reservoir_id=?
-                """, Integer.class, projectId, gasReservoirId);
+                WHERE project_id=? AND gas_reservoir_id=? AND storage_id=?
+                """, Integer.class, projectId, gasReservoirId, storageId);
         return number == null ? 1 : number;
     }
 
@@ -195,6 +204,7 @@ public class WellboreLossStorageService {
         if (!sameNumber(total, calculation.totalSegmentVolume())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "放空井段容积汇总不一致");
         }
+        // 段容积为m³，温度为K、压力为MPa；293.15K/0.101325MPa为此处基准，1e-4转为万m³。
         double expected = 1e-4 * total * 293.15 / (0.101325 * input.averageTemperatureK())
                 * (input.pressureBefore() / calculation.deviationFactorBefore()
                 - input.pressureAfter() / calculation.deviationFactorAfter());
@@ -218,6 +228,7 @@ public class WellboreLossStorageService {
     }
 
     private static Double nullableDouble(ResultSet rs, int index) throws SQLException {
+        // JDBC会把SQL NULL读成数值0；必须检查wasNull，避免未填写参数回显为真实零值。
         double value = rs.getDouble(index);
         return rs.wasNull() ? null : value;
     }

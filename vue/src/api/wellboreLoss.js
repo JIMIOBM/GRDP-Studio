@@ -6,18 +6,18 @@ export const wellboreLossApi = {
     timeout: 120000,
     headers: { 'Process-Env': 'prod' }
   }),
-  list: (projectId, gasReservoirId) => request.get('/reservoir-loss/wellbore/records', {
-    params: { projectId, gasReservoirId }
+  list: (projectId, gasReservoirId, storageId) => request.get('/reservoir-loss/wellbore/records', {
+    params: { projectId, gasReservoirId, storageId }
   }),
-  get: (id, projectId, gasReservoirId) => request.get(`/reservoir-loss/wellbore/${id}`, {
-    params: { projectId, gasReservoirId }
+  get: (id, projectId, gasReservoirId, storageId) => request.get(`/reservoir-loss/wellbore/${id}`, {
+    params: { projectId, gasReservoirId, storageId }
   }),
   save: data => request.post('/reservoir-loss/wellbore/save', data, {
     timeout: 120000, headers: { 'Process-Env': 'prod' }
   }),
-  rename: (id, name, projectId, gasReservoirId) => request.patch(`/reservoir-loss/wellbore/${id}/name`,
-    { name }, { params: { projectId, gasReservoirId } }),
-  delete: (id, projectId, gasReservoirId) => request.delete(`/reservoir-loss/wellbore/${id}`, {
-    params: { projectId, gasReservoirId }
+  rename: (id, name, projectId, gasReservoirId, storageId) => request.patch(`/reservoir-loss/wellbore/${id}/name`,
+    { name }, { params: { projectId, gasReservoirId, storageId } }),
+  delete: (id, projectId, gasReservoirId, storageId) => request.delete(`/reservoir-loss/wellbore/${id}`, {
+    params: { projectId, gasReservoirId, storageId }
   })
 }

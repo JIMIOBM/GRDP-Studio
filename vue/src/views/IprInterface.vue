@@ -228,7 +228,7 @@ const currentView = ref(null)  // currentView.value = 'water-invasion'，即确�
 const currentViewNode = ref(null)  // 传给右侧内容组件的节点对象
 
 // 库功能用可刷新/可回退的完整地址定位；目录选择本身不改变右侧页面。
-watch(() => route.query, query => {
+watch([() => route.query, treeData], ([query]) => {
   const target = resolveReservoirLocation(query)
   if (!target) {
     if (currentView.value === 'reservoir-feature') {
@@ -1361,22 +1361,7 @@ const collectWellsFromProject = (payload, allowedWellNames = null) => {
 }
 
 const rebuildProjectTree = (payload, allowedWellNames = null) => {
-  // 从已有项目详情取当前库名称，不为顶部菜单额外遍历或请求所有井。
-  const findReservoir = value => {
-    if (!value || typeof value !== 'object') return null
-    if (Number(value.nodeType) === NODETYPE.NodeType_GasReservoir
-      && Number(value.nodeId ?? value.id) === GAS_RESERVOIR_ID) return value
-    for (const child of Object.values(value)) {
-      const found = findReservoir(child)
-      if (found) return found
-    }
-    return null
-  }
-  const reservoir = findReservoir(payload)
-  if (reservoir) ensureWorkspaceReservoir({
-    projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID,
-    label: reservoir.nodeTitle || reservoir.name || reservoir.label
-  })
+  // 项目接口仅重建井目录；储气库名称和ID来自独立储气库档案接口。
   const wells = collectWellsFromProject(payload, allowedWellNames)
   const wellGroup = getWellGroup()
   if (!wellGroup) return
@@ -4012,7 +3997,7 @@ const handleRenameVentLoss = async () => {
       inputValue: node.label,
       inputValidator: value => !!value?.trim() && value.trim().length <= 100 || '名称需为1～100个字符'
     })
-    const response = await getVentLossApi(node).rename(node.lossRecordId, value.trim(), node.projectId, node.gasReservoirId)
+    const response = await getVentLossApi(node).rename(node.lossRecordId, value.trim(), node.projectId, node.gasReservoirId, node.storageId)
     node.label = (response?.data ?? response).recordName
     ElMessage.success('名称已修改')
   } catch (error) {
@@ -4530,7 +4515,7 @@ const handleCommand = async ({ group, name, parent, wellName: commandWellName })
   if (workspaceRibbonScope.value === 'reservoir') {
     const location = getReservoirCommandLocation({ group, name, parent })
     if (location) await router.push(location)
-    else ElMessage.info('此公共功能暂未接入库工作区')
+    else ElMessage.warning('请先在左侧选择一个储气库')
     return // 库的物质平衡/图版法等同名菜单，不能落入下方单井计算分支。
   }
   if (route.query.scope === 'reservoir') await router.replace({ name: 'IprInterface' })

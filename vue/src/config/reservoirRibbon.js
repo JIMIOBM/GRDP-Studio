@@ -89,9 +89,9 @@ export function resolveReservoirCommand(input = {}) {
 }
 
 /** 为一个库生成目录。只设置目录层级，不自动选中、展开或调用计算接口。 */
-export function buildReservoirTreeNodes({ id, label, projectId, gasReservoirId }) {
-  const rootId = id ?? `reservoir:${projectId}:${gasReservoirId}`
-  const metadata = { scope: 'reservoir', reservoirName: label, projectId, gasReservoirId }
+export function buildReservoirTreeNodes({ id, label, projectId, gasReservoirId, storageId }) {
+  const rootId = id ?? `storage:${storageId}`
+  const metadata = { scope: 'reservoir', reservoirName: label, projectId, gasReservoirId, storageId }
   const nodeId = path => `${rootId}/${path.map(part => encodeURIComponent(part)).join('/')}`
 
   const makeLeaf = (group, item, parent = '') => {

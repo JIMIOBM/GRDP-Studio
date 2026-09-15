@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import NaturalGasImportDialog from '@/views/DataManagement/NaturalGasImportDialog.vue'
@@ -14,6 +14,7 @@ const isMicroscopic = computed(() => props.command?.name === '微观损耗')
 const title = computed(() => isMicroscopic.value ? '微观损耗' : '逸散性损耗')
 const projectId = computed(() => Number(props.reservoir?.projectId ?? route.query.projectId))
 const gasReservoirId = computed(() => Number(props.reservoir?.gasReservoirId ?? route.query.gasReservoirId))
+const storageId = computed(() => Number(props.reservoir?.storageId ?? route.query.storageId))
 const recordId = computed(() => route.query.lossRecordId ? Number(route.query.lossRecordId) : null)
 const importDialogVisible = ref(false)
 const calculating = ref(false)
@@ -21,6 +22,11 @@ const saving = ref(false)
 const importedFileName = ref('')
 const microscopicCalculation = ref(null)
 const escapeCalculation = ref(null)
+// active拦截卸载后的响应；loadVersion区分详情请求；revision标记表单编辑和计算结果是否仍匹配。
+let active = true
+let loadVersion = 0
+let revision = 0
+onBeforeUnmount(() => { active = false; loadVersion++; revision++ })
 
 const microscopicForm = reactive({
   poreVolume: '', previousResidualSaturation: '', currentResidualSaturation: '', lowerLimitPressure: '',
@@ -41,6 +47,7 @@ const resetMicroscopic = () => {
 const resetEscape = () => { Object.keys(escapeForm).forEach(key => { escapeForm[key] = '' }); escapeCalculation.value = null }
 // “重置”仅撤销本次计算结果，保留用户已经填写或导入的全部参数。
 const resetCalculationResult = () => {
+  revision++
   if (isMicroscopic.value) microscopicCalculation.value = null
   else escapeCalculation.value = null
 }
@@ -48,6 +55,8 @@ const microscopicInput = () => ({ ...numericObject(microscopicForm), importedFil
 const validateNumbers = values => Object.values(values).every(value => value === null || Number.isFinite(value))
 
 const calculate = async () => {
+  if (calculating.value || saving.value) return
+  if (!(storageId.value > 0)) { ElMessage.warning('请先选择具体储气库'); return }
   const rawForm = isMicroscopic.value ? microscopicForm : escapeForm
   if (Object.values(rawForm).some(value => value === '' || value === null || value === undefined)) {
     ElMessage.warning('请完整填写计算参数')
@@ -60,12 +69,15 @@ const calculate = async () => {
   )
   if (!validateNumbers(calculationValues)) { ElMessage.warning('请完整填写计算参数'); return }
   calculating.value = true
+  const startedRevision = revision
   try {
     if (isMicroscopic.value) {
-      const response = await geologicalLossApi.calculateMicroscopic({ projectId: projectId.value, gasReservoirId: gasReservoirId.value, input })
+      const response = await geologicalLossApi.calculateMicroscopic({ projectId: projectId.value, gasReservoirId: gasReservoirId.value, storageId: storageId.value, input })
+      if (!active || revision !== startedRevision) return
       microscopicCalculation.value = responseData(response)
     } else {
-      const response = await geologicalLossApi.calculateEscape({ projectId: projectId.value, gasReservoirId: gasReservoirId.value, input })
+      const response = await geologicalLossApi.calculateEscape({ projectId: projectId.value, gasReservoirId: gasReservoirId.value, storageId: storageId.value, input })
+      if (!active || revision !== startedRevision) return
       escapeCalculation.value = responseData(response)
     }
     ElMessage.success('计算完成')
@@ -73,16 +85,22 @@ const calculate = async () => {
 }
 
 const save = async () => {
+  if (calculating.value || saving.value) return
+  if (!(storageId.value > 0)) { ElMessage.warning('请先选择具体储气库'); return }
   const calculation = isMicroscopic.value ? microscopicCalculation.value : escapeCalculation.value
   if (!calculation) { ElMessage.warning('请先完成计算再保存'); return }
   saving.value = true
+  const startedRevision = revision
+  const savedType = isMicroscopic.value ? 'microscopic' : 'escape'
   try {
     // 记录直接归属于当前项目和储气库，不再创建额外的“库1”中间层。
-    const payload = { recordId: recordId.value, projectId: projectId.value, gasReservoirId: gasReservoirId.value, input: isMicroscopic.value ? microscopicInput() : numericObject(escapeForm), calculation }
+    const payload = { recordId: recordId.value, projectId: projectId.value, gasReservoirId: gasReservoirId.value, storageId: storageId.value, input: isMicroscopic.value ? microscopicInput() : numericObject(escapeForm), calculation }
     const response = isMicroscopic.value ? await geologicalLossApi.saveMicroscopic(payload) : await geologicalLossApi.saveEscape(payload)
     const saved = responseData(response)
-    upsertReservoirLossRecordNode({ treeData: workspaceTreeData, projectId: projectId.value,
-      gasReservoirId: gasReservoirId.value, lossType: isMicroscopic.value ? 'microscopic' : 'escape', record: saved })
+    // 保存成功就按请求时的归属更新目录；若用户已离开或改参数，不再改当前页面路由。
+    upsertReservoirLossRecordNode({ treeData: workspaceTreeData, projectId: payload.projectId,
+      gasReservoirId: payload.gasReservoirId, storageId: payload.storageId, lossType: savedType, record: saved })
+    if (!active || revision !== startedRevision) return
     const query = { ...route.query, lossRecordId: saved.id }
     delete query.lossLibraryId
     await router.replace({ query })
@@ -90,11 +108,18 @@ const save = async () => {
   } finally { saving.value = false }
 }
 const loadDetail = async () => {
+  const version = ++loadVersion
   if (!recordId.value) return
-  const response = isMicroscopic.value ? await geologicalLossApi.getMicroscopic(recordId.value, projectId.value, gasReservoirId.value) : await geologicalLossApi.getEscape(recordId.value, projectId.value, gasReservoirId.value)
+  const response = isMicroscopic.value ? await geologicalLossApi.getMicroscopic(recordId.value, projectId.value, gasReservoirId.value, storageId.value) : await geologicalLossApi.getEscape(recordId.value, projectId.value, gasReservoirId.value, storageId.value)
   const detail = responseData(response)
-  if (isMicroscopic.value) { Object.assign(microscopicForm, detail.input); importedFileName.value = detail.input.importedFileName || ''; microscopicCalculation.value = detail.calculation }
-  else { Object.assign(escapeForm, detail.input); escapeCalculation.value = detail.calculation }
+  if (!active || version !== loadVersion) return
+  if (isMicroscopic.value) { Object.assign(microscopicForm, detail.input); importedFileName.value = detail.input.importedFileName || '' }
+  else Object.assign(escapeForm, detail.input)
+  // 回填输入会触发表单监听并清空结果，待其完成后再恢复数据库中的结果快照。
+  await nextTick()
+  if (!active || version !== loadVersion) return
+  if (isMicroscopic.value) microscopicCalculation.value = detail.calculation
+  else escapeCalculation.value = detail.calculation
 }
 
 const handleGasImport = async ({ file, options }) => {
@@ -119,9 +144,10 @@ const handleGasImport = async ({ file, options }) => {
   } catch (error) { ElMessage.error(error?.message || 'PVT数据导入失败') }
 }
 
-watch(() => [props.command?.name, recordId.value], async () => { isMicroscopic.value ? resetMicroscopic() : resetEscape(); await loadDetail() })
-watch(microscopicForm, () => { microscopicCalculation.value = null }, { deep: true })
-watch(escapeForm, () => { escapeCalculation.value = null }, { deep: true })
+watch(() => [props.command?.name, recordId.value, storageId.value], async () => { revision++; isMicroscopic.value ? resetMicroscopic() : resetEscape(); await loadDetail() })
+// 参数一变就同步使旧结果失效，避免下一次点击保存时带上修改前的计算值。
+watch(microscopicForm, () => { revision++; microscopicCalculation.value = null }, { deep: true, flush: 'sync' })
+watch(escapeForm, () => { revision++; escapeCalculation.value = null }, { deep: true, flush: 'sync' })
 onMounted(loadDetail)
 </script>
 

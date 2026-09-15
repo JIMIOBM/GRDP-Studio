@@ -20,7 +20,7 @@ public class SurfaceLossCalculationService {
         double condensateLoss = calculateCondensate(input);
         try {
             var vent = ventCalculation.calculate(new WellboreLossDtos.CalculateRequest(
-                    request.projectId(), request.gasReservoirId(), input.toVentInput()), token, cookie, processEnv);
+                    request.projectId(), request.gasReservoirId(), request.storageId(), input.toVentInput()), token, cookie, processEnv);
             return new Calculation(vent.deviationFactorToolboxId(), vent.deviationFactorBefore(),
                     vent.deviationFactorAfter(), vent.totalSegmentVolume(), vent.wellboreLossVolume(), condensateLoss);
         } catch (BusinessException error) {

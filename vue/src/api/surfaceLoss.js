@@ -6,8 +6,8 @@ const calculationOptions = { timeout: 120000, headers: { 'Process-Env': 'prod' }
 export const surfaceLossApi = {
   calculate: data => request.post(`${base}/calculate`, data, calculationOptions),
   save: data => request.post(`${base}/save`, data, calculationOptions),
-  list: (projectId, gasReservoirId) => request.get(`${base}/records`, { params: { projectId, gasReservoirId } }),
-  get: (id, projectId, gasReservoirId) => request.get(`${base}/${id}`, { params: { projectId, gasReservoirId } }),
-  rename: (id, name, projectId, gasReservoirId) => request.patch(`${base}/${id}/name`, { name }, { params: { projectId, gasReservoirId } }),
-  delete: (id, projectId, gasReservoirId) => request.delete(`${base}/${id}`, { params: { projectId, gasReservoirId } })
+  list: (projectId, gasReservoirId, storageId) => request.get(`${base}/records`, { params: { projectId, gasReservoirId, storageId } }),
+  get: (id, projectId, gasReservoirId, storageId) => request.get(`${base}/${id}`, { params: { projectId, gasReservoirId, storageId } }),
+  rename: (id, name, projectId, gasReservoirId, storageId) => request.patch(`${base}/${id}/name`, { name }, { params: { projectId, gasReservoirId, storageId } }),
+  delete: (id, projectId, gasReservoirId, storageId) => request.delete(`${base}/${id}`, { params: { projectId, gasReservoirId, storageId } })
 }

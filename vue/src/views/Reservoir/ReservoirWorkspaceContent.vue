@@ -27,17 +27,19 @@ const isVentLoss = computed(() =>
 )
 
 // 库级功能有独立的数据范围；入口页不复用单井接口，也不触发计算或保存。
+// 下方组件key同时包含库ID和方法，切库或切方法时重建表单，避免沿用上一库的参数及计算结果。
 </script>
 
 <template>
   <GeologicalLossContent
     v-if="isGeologicalLoss"
+    :key="`${reservoir?.storageId}-${command.name}`"
     :reservoir="reservoir"
     :command="command"
   />
   <WellboreLossContent
     v-else-if="isVentLoss"
-    :key="command.name"
+    :key="`${reservoir?.storageId}-${command.name}`"
     :loss-kind="command.name === '地面损耗' ? 'surface' : 'wellbore'"
     :reservoir="reservoir"
   />

@@ -24,6 +24,7 @@ const route = useRoute()
 const router = useRouter()
 const projectId = computed(() => Number(props.reservoir?.projectId ?? route.query.projectId))
 const gasReservoirId = computed(() => Number(props.reservoir?.gasReservoirId ?? route.query.gasReservoirId))
+const storageId = computed(() => Number(props.reservoir?.storageId ?? route.query.storageId))
 const recordId = computed(() => route.query.lossRecordId ? Number(route.query.lossRecordId) : null)
 const mode = ref('formula')
 const importDialogVisible = ref(false)
@@ -32,6 +33,7 @@ const calculation = ref(null)
 const calculating = ref(false)
 const saving = ref(false)
 let nextVolumeId = 2
+// revision跟踪输入版本，loadVersion区分详情请求，active阻止卸载后的响应回写表单。
 let revision = 0
 let loadVersion = 0
 let active = true
@@ -57,6 +59,7 @@ const removeVolume = index => {
 }
 const setMode = value => { mode.value = value; resetResult() }
 
+// 只提交当前方式用到的输入；直接输入不携带隐藏的公式参数，也不要求填写PVT。
 const buildVentInput = () => mode.value === 'direct'
   ? { calculationMode: 'direct', inputLossVolume: Number(directForm.lossVolume) }
   : {
@@ -96,6 +99,7 @@ const validatePageInput = () => {
 }
 
 const calculate = async () => {
+  if (!(storageId.value > 0)) { ElMessage.warning('请先选择具体储气库'); return }
   if (calculating.value || saving.value) return
   if (!validatePageInput()) { ElMessage.warning('请完整填写计算参数'); return }
   // 两种方式均交给服务端校验；直接方式只传两项最终气量，服务端不会调用PVT。
@@ -103,7 +107,7 @@ const calculate = async () => {
   const startedRevision = revision
   try {
     const response = await lossApi.value.calculate({ projectId: projectId.value,
-      gasReservoirId: gasReservoirId.value, input: buildInput() })
+      gasReservoirId: gasReservoirId.value, storageId: storageId.value, input: buildInput() })
     // 请求期间编辑参数、切换记录或重置时，丢弃已过期的计算响应。
     if (!active || startedRevision !== revision) return
     calculation.value = responseData(response)
@@ -114,17 +118,19 @@ const calculate = async () => {
 // “重置”只清除计算结果，不清空已经填写或导入的参数。
 const resetResult = () => { revision++; calculation.value = null }
 const save = async () => {
+  if (!(storageId.value > 0)) { ElMessage.warning('请先选择具体储气库'); return }
   if (saving.value || calculating.value) return
   if (!calculation.value) { ElMessage.warning('请先完成计算再保存'); return }
   saving.value = true
-  const scope = { recordId: recordId.value, projectId: projectId.value, gasReservoirId: gasReservoirId.value }
+  const scope = { recordId: recordId.value, projectId: projectId.value, gasReservoirId: gasReservoirId.value, storageId: storageId.value }
   const savedLossKind = props.lossKind
   const startedRevision = revision
   try {
     const response = await lossApi.value.save({ ...scope, input: buildInput(), calculation: calculation.value })
     const saved = responseData(response)
+    // 落库结果更新到请求时的库目录；只有页面仍是同一版本，才回写其记录ID。
     upsertReservoirLossRecordNode({ treeData: workspaceTreeData, projectId: scope.projectId,
-      gasReservoirId: scope.gasReservoirId, lossType: savedLossKind, record: saved })
+      gasReservoirId: scope.gasReservoirId, storageId: scope.storageId, lossType: savedLossKind, record: saved })
     if (active && startedRevision === revision) {
       await router.replace({ query: { ...route.query, lossRecordId: saved.id } })
     }
@@ -135,7 +141,7 @@ const save = async () => {
 const loadDetail = async () => {
   const version = ++loadVersion
   if (!recordId.value) return
-  const detail = responseData(await lossApi.value.get(recordId.value, projectId.value, gasReservoirId.value))
+  const detail = responseData(await lossApi.value.get(recordId.value, projectId.value, gasReservoirId.value, storageId.value))
   if (!active || version !== loadVersion) return
   condensateForm.volume = detail.input.condensateVolume ?? ''
   condensateForm.gasOilRatio = detail.input.gasOilRatio ?? ''
@@ -193,8 +199,9 @@ const handleGasImport = async ({ file, options }) => {
   } catch (error) { ElMessage.error(error?.message || 'PVT数据导入失败') }
 }
 
+// 同步使计算结果失效，防止编辑参数后立即保存旧结果；详情回填在nextTick后单独恢复结果。
 watch([directForm, formulaForm, volumes, condensateForm], resetResult, { deep: true, flush: 'sync' })
-watch([recordId, projectId, gasReservoirId, () => props.lossKind], async () => {
+watch([recordId, projectId, gasReservoirId, storageId, () => props.lossKind], async () => {
   loadVersion++; resetResult(); clearNewRecord()
   await loadDetail()
 }, { immediate: true })

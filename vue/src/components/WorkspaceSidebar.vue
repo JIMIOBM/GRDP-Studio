@@ -10,6 +10,34 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import TreeNode from '@/views/TreeNode.vue'
 import { ensurePipelineNavigation } from '@/utils/pipelineNavigation'
 import { ensureWellboreNavigation } from '@/utils/wellboreNavigation'
+import { ElMessage } from 'element-plus'
+import StorageCreateDialog from './StorageCreateDialog.vue'
+import { workspaceTreeData, refreshWorkspaceStorages } from '@/utils/workspaceTreeState'
+
+const storageDialog = ref(null)
+const storageScope = computed(() => {
+  const root = workspaceTreeData.value.find(node => node.id === 'g-reservoir')
+  return root ? { projectId: root.projectId, gasReservoirId: root.gasReservoirId } : null
+})
+const createStorage = () => {
+  closeStorageMenu()
+  if (!storageScope.value?.projectId || !storageScope.value?.gasReservoirId) {
+    ElMessage.warning('请先加载项目后再创建储气库')
+    return
+  }
+  storageDialog.value?.open()
+}
+const storageCreated = async (storage, scope) => {
+  ElMessage.success(`储气库“${storage.name}”已建立`)
+  const root = workspaceTreeData.value.find(node => node.id === 'g-reservoir')
+  if (Number(root?.projectId) !== scope.projectId || Number(root?.gasReservoirId) !== scope.gasReservoirId) return
+  try {
+    await refreshWorkspaceStorages()
+    if (Number(root.projectId) === scope.projectId && Number(root.gasReservoirId) === scope.gasReservoirId) root.expanded = true
+  } catch {
+    ElMessage.warning('储气库已保存，但目录刷新失败，请刷新页面查看，不要重复创建')
+  }
+}
 
 const props = defineProps({
   nodes: { type: Array, default: () => [] },
@@ -26,6 +54,23 @@ const emit = defineEmits([
   'expand',
   'node-contextmenu'
 ])
+const storageMenu = ref({ visible: false, x: 0, y: 0 })
+const closeStorageMenu = () => { storageMenu.value.visible = false }
+const handleNodeContextMenu = (node, event) => {
+  closeStorageMenu()
+  // 保留原有记录的右键操作，也让父页面关闭之前打开的菜单。
+  emit('node-contextmenu', node, event)
+  if (node.id !== 'g-reservoir') return
+  storageMenu.value = {
+    visible: true,
+    x: Math.max(8, Math.min(event.clientX, window.innerWidth - 198)),
+    y: Math.max(8, Math.min(event.clientY, window.innerHeight - 54))
+  }
+}
+const handleMenuKeydown = event => {
+  if (event.key === 'Escape') closeStorageMenu()
+}
+watch(() => props.collapsed, closeStorageMenu)
 watch(() => props.nodes, nodes => {
   ensurePipelineNavigation(nodes)
   ensureWellboreNavigation(nodes)
@@ -83,11 +128,20 @@ function startResize (event) {
 }
 watch(() => props.collapsed, stopResize)
 onMounted(() => {
+  window.addEventListener('pointerdown', closeStorageMenu)
+  window.addEventListener('keydown', handleMenuKeydown)
+  window.addEventListener('resize', closeStorageMenu)
+  window.addEventListener('scroll', closeStorageMenu, true)
+  refreshWorkspaceStorages().catch(() => ElMessage.warning('储气库目录加载失败，请确认已执行储气库建表迁移'))
   updateWidthLimit()
   parentObserver = new ResizeObserver(updateWidthLimit)
   if (panelEl.value?.parentElement) parentObserver.observe(panelEl.value.parentElement)
 })
 onBeforeUnmount(() => {
+  window.removeEventListener('pointerdown', closeStorageMenu)
+  window.removeEventListener('keydown', handleMenuKeydown)
+  window.removeEventListener('resize', closeStorageMenu)
+  window.removeEventListener('scroll', closeStorageMenu, true)
   stopResize()
   parentObserver?.disconnect()
 })
@@ -133,7 +187,7 @@ onBeforeUnmount(() => {
         :active-id="activeId"
         @select="emit('select', $event)"
         @expand="emit('expand', $event)"
-        @node-contextmenu="(node, event) => emit('node-contextmenu', node, event)"
+        @node-contextmenu="handleNodeContextMenu"
       />
     </div>
     <div v-if="!collapsed" class="workspace-side-resizer" role="separator" tabindex="0"
@@ -147,9 +201,43 @@ onBeforeUnmount(() => {
       @keydown.end.prevent="setWidth(maxWidth)"
     />
   </aside>
+  <Teleport to="body">
+    <div v-if="storageMenu.visible" class="storage-context-menu" role="menu" aria-label="库目录操作"
+      :style="{ left: `${storageMenu.x}px`, top: `${storageMenu.y}px` }"
+      @pointerdown.stop @click.stop @contextmenu.prevent.stop>
+      <button type="button" role="menuitem" @click="createStorage">新建储气库</button>
+    </div>
+  </Teleport>
+  <StorageCreateDialog ref="storageDialog" :scope="storageScope" @created="storageCreated" />
 </template>
 
 <style lang="scss" scoped>
+.storage-context-menu {
+  position: fixed;
+  z-index: 4000;
+  width: 190px;
+  box-sizing: border-box;
+  padding: 6px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.18);
+
+  button {
+    width: 100%;
+    height: 32px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: #333;
+    text-align: left;
+    font-size: 13px;
+    cursor: pointer;
+    &:hover, &:focus-visible { background: #f5f7fa; }
+  }
+}
+
 .workspace-side-panel {
   width: 262px;
   min-width: 262px;

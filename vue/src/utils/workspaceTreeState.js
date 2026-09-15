@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { storageCatalogApi } from '../api/storageCatalog.js'
 import { buildReservoirTreeNodes, resolveReservoirCommand } from '../config/reservoirRibbon.js'
 
 // 两个解析融合工作台共用的目录数据与选择状态。
@@ -45,29 +46,36 @@ export const workspaceTreeHydrated = ref(false)
 export const workspaceRibbonScope = ref('well')
 export const workspaceSelectedReservoir = ref(null)
 
-export function ensureWorkspaceReservoir({ projectId, gasReservoirId, label }) {
+// 这里只登记原系统项目范围，不再把 gasReservoirId 伪造成储气库ID。
+export function ensureWorkspaceReservoir({ projectId, gasReservoirId }) {
   const root = workspaceTreeData.value.find(node => node.id === 'g-reservoir')
-  if (!root || !projectId || !gasReservoirId) return null
-  let reservoir = root.children.find(node =>
-    Number(node.projectId) === Number(projectId) && Number(node.gasReservoirId) === Number(gasReservoirId))
-  if (!reservoir) {
-    reservoir = buildReservoirTreeNodes({
-      id: `reservoir-${projectId}-${gasReservoirId}`,
-      label: label || `当前库（${gasReservoirId}）`, projectId, gasReservoirId
+  if (!root) return
+  if (Number(root.projectId) !== Number(projectId) || Number(root.gasReservoirId) !== Number(gasReservoirId)) {
+    root.children = []
+    workspaceSelectedReservoir.value = null
+  }
+  Object.assign(root, { projectId, gasReservoirId })
+}
+export async function refreshWorkspaceStorages() {
+  const root = workspaceTreeData.value.find(node => node.id === 'g-reservoir')
+  if (!root?.projectId || !root?.gasReservoirId) return
+  const { projectId, gasReservoirId } = root
+  const response = await storageCatalogApi.list(projectId, gasReservoirId)
+  // 请求返回前若已切换项目范围，不用旧列表覆盖新范围的目录。
+  if (root.projectId !== projectId || root.gasReservoirId !== gasReservoirId) return
+  const records = response?.data ?? response
+  if (!Array.isArray(records)) throw new Error('储气库目录返回格式不正确')
+  root.children = records.map(record => {
+    // 保留已存在的节点对象，延续其展开状态及已加载的损耗记录子目录。
+    const old = root.children.find(node => Number(node.storageId) === Number(record.storageId))
+    return old || buildReservoirTreeNodes({
+      id: `storage-${record.storageId}`, label: record.name,
+      projectId, gasReservoirId, storageId: record.storageId
     })
-    root.children.push(reservoir)
-  }
-  // 不使用单井名或“项目 1”冒充库名；真实名称随现有项目详情返回时补齐。
-  if (label) {
-    reservoir.label = label
-    const rename = node => {
-      node.reservoirName = label
-      node.children?.forEach(rename)
-    }
-    rename(reservoir)
-  }
-  if (!workspaceSelectedReservoir.value) workspaceSelectedReservoir.value = reservoir
-  return reservoir
+  })
+  const selectedId = workspaceSelectedReservoir.value?.storageId
+  workspaceSelectedReservoir.value = root.children.find(node => node.storageId === selectedId) || null
+  workspaceTreeData.value = [...workspaceTreeData.value]
 }
 
 export function setWorkspaceRibbonScope(scope) {
@@ -79,8 +87,8 @@ export function selectWorkspaceNodeScope(node) {
   if (!node || node.disabled) return null
   if (node.scope === 'reservoir' || node.id === 'g-reservoir' || node.type === 'reservoir') {
     const reservoir = workspaceTreeData.value.find(item => item.id === 'g-reservoir')?.children.find(item =>
-      Number(item.projectId) === Number(node.projectId) && Number(item.gasReservoirId) === Number(node.gasReservoirId))
-    if (reservoir) workspaceSelectedReservoir.value = reservoir
+      Number(item.storageId) === Number(node.storageId) && Number(item.projectId) === Number(node.projectId) && Number(item.gasReservoirId) === Number(node.gasReservoirId))
+    workspaceSelectedReservoir.value = reservoir || null
     setWorkspaceRibbonScope('reservoir')
     return 'reservoir'
   }
@@ -99,17 +107,19 @@ export function getReservoirCommandLocation(command) {
   return {
     name: 'IprInterface',
     query: {
-      scope: 'reservoir', projectId: reservoir.projectId, gasReservoirId: reservoir.gasReservoirId,
+      scope: 'reservoir', projectId: reservoir.projectId, gasReservoirId: reservoir.gasReservoirId, storageId: reservoir.storageId,
       group: resolved.group, parent: resolved.parent, feature: resolved.name
     }
   }
 }
 
 export function resolveReservoirLocation(query) {
+  // 只恢复目录中真实存在且范围匹配的库；旧地址缺少storageId时不能默认选第一个库。
   if (query.scope !== 'reservoir') return null
   const command = resolveReservoirCommand({ group: query.group, parent: query.parent, name: query.feature })
   const reservoir = workspaceTreeData.value.find(item => item.id === 'g-reservoir')?.children.find(item =>
-    Number(item.projectId) === Number(query.projectId) && Number(item.gasReservoirId) === Number(query.gasReservoirId))
+    Number(item.projectId) === Number(query.projectId) && Number(item.gasReservoirId) === Number(query.gasReservoirId)
+    && Number(item.storageId) === Number(query.storageId))
   return command && reservoir ? { command, reservoir, lossRecordId: query.lossRecordId ?? null } : null
 }
 

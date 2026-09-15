@@ -44,6 +44,7 @@ public final class WellboreLossDtos {
 
     public record CalculateRequest(@Positive long projectId,
                                    @Positive long gasReservoirId,
+            @Positive long storageId,
                                    @NotNull @Valid WellboreInput input) {}
 
     public record Calculation(Long deviationFactorToolboxId,
@@ -55,6 +56,7 @@ public final class WellboreLossDtos {
     public record SaveRequest(@Positive Long recordId,
                               @Positive long projectId,
                               @Positive long gasReservoirId,
+            @Positive long storageId,
                               @NotNull @Valid WellboreInput input,
                               @NotNull Calculation calculation) {}
 

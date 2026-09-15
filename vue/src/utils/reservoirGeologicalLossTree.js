@@ -11,12 +11,12 @@ const responseData = response => response?.data ?? response
 export async function loadReservoirLossTreeNodes({ treeData, node }) {
   if (!node || node.type !== RESERVOIR_LOSS_METHOD_NODE_TYPE) return
   const recordResponse = node.lossType === 'microscopic'
-    ? await geologicalLossApi.listMicroscopic(node.projectId, node.gasReservoirId)
+    ? await geologicalLossApi.listMicroscopic(node.projectId, node.gasReservoirId, node.storageId)
     : node.lossType === 'escape'
-      ? await geologicalLossApi.listEscape(node.projectId, node.gasReservoirId)
+      ? await geologicalLossApi.listEscape(node.projectId, node.gasReservoirId, node.storageId)
       : node.lossType === 'surface'
-        ? await surfaceLossApi.list(node.projectId, node.gasReservoirId)
-        : await wellboreLossApi.list(node.projectId, node.gasReservoirId)
+        ? await surfaceLossApi.list(node.projectId, node.gasReservoirId, node.storageId)
+        : await wellboreLossApi.list(node.projectId, node.gasReservoirId, node.storageId)
   const records = responseData(recordResponse) || []
   // 储气库本身就是数据归属层级，计算记录直接挂在方法目录下，不再增加“库1”中间层。
   node.children = records.map(item => ({
@@ -35,11 +35,12 @@ export async function loadReservoirLossTreeNodes({ treeData, node }) {
   if (treeData?.value) treeData.value = [...treeData.value]
 }
 
-export function upsertReservoirLossRecordNode({ treeData, projectId, gasReservoirId, lossType, record }) {
+export function upsertReservoirLossRecordNode({ treeData, projectId, gasReservoirId, storageId, lossType, record }) {
+  // 不同库、不同损耗表可以出现同号记录，必须先定位完整归属和类型，再在该目录内更新主键。
   const visit = nodes => {
     for (const node of nodes || []) {
       if (node.type === RESERVOIR_LOSS_METHOD_NODE_TYPE && node.projectId === projectId
-          && node.gasReservoirId === gasReservoirId && node.lossType === lossType) {
+          && Number(node.storageId) === Number(storageId) && node.gasReservoirId === gasReservoirId && node.lossType === lossType) {
         const id = `${node.id}/record:${record.id}`
         const next = { ...node, id, label: record.recordName, type: RESERVOIR_LOSS_RECORD_NODE_TYPE,
           lazy: false, children: [], lossType, lossRecordId: record.id, command: { ...node.command } }

@@ -70,6 +70,7 @@ public final class SurfaceLossDtos {
 
     public record CalculateRequest(@Positive long projectId,
                                    @Positive long gasReservoirId,
+            @Positive long storageId,
                                    @NotNull @Valid SurfaceInput input) {}
 
     public record Calculation(Long deviationFactorToolboxId,
@@ -81,6 +82,7 @@ public final class SurfaceLossDtos {
     public record SaveRequest(@Positive Long recordId,
                               @Positive long projectId,
                               @Positive long gasReservoirId,
+            @Positive long storageId,
                               @NotNull @Valid SurfaceInput input,
                               @NotNull Calculation calculation) {}
 

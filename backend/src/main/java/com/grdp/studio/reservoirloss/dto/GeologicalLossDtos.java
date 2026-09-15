@@ -38,6 +38,7 @@ public final class GeologicalLossDtos {
 
     public record MicroscopicCalculateRequest(@Positive long projectId,
                                               @Positive long gasReservoirId,
+            @Positive long storageId,
                                               @NotNull MicroscopicInput input) {}
 
     public record MicroscopicCalculation(long volumeFactorToolboxId,
@@ -47,6 +48,7 @@ public final class GeologicalLossDtos {
     public record MicroscopicSaveRequest(Long recordId,
                                          @Positive long projectId,
                                          @Positive long gasReservoirId,
+            @Positive long storageId,
                                          @NotNull MicroscopicInput input,
                                          @NotNull MicroscopicCalculation calculation) {}
 
@@ -63,6 +65,7 @@ public final class GeologicalLossDtos {
 
     public record EscapeCalculateRequest(@Positive long projectId,
                                          @Positive long gasReservoirId,
+            @Positive long storageId,
                                          @NotNull EscapeInput input) {}
 
     public record EscapeCalculation(double actualChangeRate, double escapeLossVolume) {}
@@ -70,6 +73,7 @@ public final class GeologicalLossDtos {
     public record EscapeSaveRequest(Long recordId,
                                     @Positive long projectId,
                                     @Positive long gasReservoirId,
+            @Positive long storageId,
                                     @NotNull EscapeInput input,
                                     @NotNull EscapeCalculation calculation) {}
 
