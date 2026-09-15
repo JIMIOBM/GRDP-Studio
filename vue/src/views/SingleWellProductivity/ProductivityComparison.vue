@@ -4,13 +4,41 @@ import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
 import { productivityComparisonApi } from '@/api/productivityComparison'
 import { buildComparisonChart, buildPeriodComparisonChart, buildDirectionComparisonChart, comparisonMethods, pressureForms } from '@/utils/productivityComparisonChart'
+import { storageCatalogApi } from '@/api/storageCatalog'
+import { storageProductivityComparisonApi } from '@/api/storageProductivityComparison'
+import { buildStoragePeriodChart } from '@/utils/storageProductivityComparisonChart'
+import { buildStorageMethodChart } from '@/utils/storageMethodComparisonChart'
+import { buildStorageDirectionChart } from '@/utils/storageDirectionComparisonChart'
 
 const props = defineProps({
+  comparisonScope: { type: String, default: 'well' },
+  storageId: { type: [Number, String], default: null },
+  storageName: { type: String, default: '' },
   wellName: { type: String, default: '' },
   projectId: { type: [Number, String], required: true },
   gasReservoirId: { type: [Number, String], required: true },
   methodType: { type: String, default: '多周期', validator: value => ['多周期', '多方法', '注采对比'].includes(value) }
 })
+// 库的三种对比复用表单与布局且都划分周期；不改变单井多方法和注采对比的原有流程。
+const isStorage = computed(() => props.comparisonScope === 'storage')
+const storageWells = ref([])
+const selectedWellIds = ref([])
+const wellKeyword = ref('')
+const wellError = ref('')
+const loadingWells = ref(false)
+const filteredWells = computed(() => storageWells.value.filter(well =>
+  well.wellName.toLowerCase().includes(wellKeyword.value.trim().toLowerCase())))
+const allWellsSelected = computed(() => filteredWells.value.length > 0
+  && filteredWells.value.every(well => selectedWellIds.value.includes(well.id)))
+const someWellsSelected = computed(() => !allWellsSelected.value
+  && filteredWells.value.some(well => selectedWellIds.value.includes(well.id)))
+const toggleAllWells = event => {
+  const selected = new Set(selectedWellIds.value)
+  filteredWells.value.forEach(well => event.target.checked ? selected.add(well.id) : selected.delete(well.id))
+  selectedWellIds.value = [...selected]
+}
+const storageRecordStats = computed(() => new Map((comparisonResult.value?.wells || []).map(well => [String(well.wellId), well])))
+let wellVersion = 0
 // 三种对比共用已保存的二项式结果；不改动各来源模块的计算和保存逻辑。
 const testBackPressure = ref(false)
 const testIsochronal = ref(false)
@@ -72,6 +100,23 @@ const clearResult = () => {
   comparisonResult.value = null
   if (isComparisonEnabled.value) renderChart()
 }
+const loadStorageWells = async () => {
+  const version = ++wellVersion
+  storageWells.value = []; selectedWellIds.value = []; wellError.value = ''; clearResult()
+  if (!isStorage.value) return
+  if (![props.projectId, props.gasReservoirId, props.storageId].every(id => Number(id) > 0)) {
+    wellError.value = '请先选择具体储气库'; loadingWells.value = false; return
+  }
+  loadingWells.value = true
+  try {
+    const data = unwrap(await storageCatalogApi.wells(props.storageId, props.projectId, props.gasReservoirId))
+    if (version !== wellVersion) return
+    if (!Array.isArray(data)) throw new Error('单井列表格式不正确')
+    storageWells.value = data.map(well => ({ id: Number(well.id), wellName: String(well.wellName || '') }))
+    selectedWellIds.value = storageWells.value.map(well => well.id)
+  } catch (error) { if (version === wellVersion) wellError.value = errorText(error) }
+  finally { if (version === wellVersion) loadingWells.value = false }
+}
 const loadRecords = async () => {
   const version = ++recordVersion
   const previousKeys = selectedRecordKeys.value.slice()
@@ -101,24 +146,58 @@ const loadRecords = async () => {
 }
 const paramsCollapsed = ref(false)
 const panelWidth = ref(238)
-const resultTitle = computed(() => [props.wellName, '产能对比', props.methodType, '分析结果'].filter(Boolean).join('-'))
+const resultTitle = computed(() => [isStorage.value ? props.storageName : props.wellName, '产能对比', props.methodType, '分析结果'].filter(Boolean).join('-'))
 const workspaceEl = ref(null)
 const chartEl = ref(null)
 let chart = null
 let resizeObserver = null
 let resizeFrame = 0
+let lastChartWidth = 0
 const scheduleResize = () => {
   if (resizeFrame) cancelAnimationFrame(resizeFrame)
-  resizeFrame = requestAnimationFrame(() => { resizeFrame = 0; chart?.resize() })
+  resizeFrame = requestAnimationFrame(() => {
+    resizeFrame = 0
+    if (isStorage.value && chartEl.value?.clientWidth !== lastChartWidth) renderChart(true)
+    chart?.resize()
+  })
 }
-const renderChart = () => {
+const renderChart = (preserveView = false) => {
   if (!chartEl.value) return
-  chart ||= echarts.init(chartEl.value)
+  if (!chart) {
+    chart = echarts.init(chartEl.value)
+    // 隐藏/恢复图例后重排实际柱位，保留筛选和滚动状态，不重新请求计算。
+    chart.on('legendselectchanged', () => {
+      if (isStorage.value || isMultiPeriod.value) renderChart(true)
+    })
+  }
+  if (isStorage.value) {
+    lastChartWidth = chartEl.value.clientWidth
+    const previous = preserveView ? chart.getOption() : null
+    const builder = isDirectionComparison.value ? buildStorageDirectionChart : isMultiMethod.value ? buildStorageMethodChart : buildStoragePeriodChart
+    const option = builder(comparisonResult.value, pressureMethod.value,
+      calculating.value ? '正在计算…' : '请选择井并计算', lastChartWidth, previous?.legend?.[0]?.selected || {})
+    if (previous?.legend?.[0]?.selected) option.legend.selected = previous.legend[0].selected
+    if (previous?.dataZoom?.[0] && option.dataZoom.length) {
+      const span = option.dataZoom[0].maxValueSpan
+      const start = Math.max(0, Math.min(Number(previous.dataZoom[0].startValue) || 0, option.xAxis.data.length - span - 1))
+      option.dataZoom.forEach(zoom => { zoom.startValue = start; zoom.endValue = start + span })
+    }
+    chart.setOption(option, true)
+    scheduleResize()
+    return
+  }
   if (isComparisonEnabled.value) {
+    const previous = preserveView && isMultiPeriod.value ? chart.getOption() : null
     const builder = isDirectionComparison.value ? buildDirectionComparisonChart
       : isMultiPeriod.value ? buildPeriodComparisonChart : buildComparisonChart
-    chart.setOption(builder(comparisonResult.value, pressureMethod.value,
-      calculating.value ? '正在计算…' : '请选择记录并计算'), true)
+    const option = builder(comparisonResult.value, pressureMethod.value,
+      calculating.value ? '正在计算…' : '请选择记录并计算', previous?.legend?.[0]?.selected || {})
+    if (previous?.dataZoom?.[0] && option.dataZoom.length) {
+      const zoom = previous.dataZoom[0]
+      option.dataZoom[0].startValue = Math.min(zoom.startValue || 0, option.xAxis.data.length - 1)
+      option.dataZoom[0].endValue = Math.min(zoom.endValue ?? option.xAxis.data.length - 1, option.xAxis.data.length - 1)
+    }
+    chart.setOption(option, true)
     scheduleResize()
     return
   }
@@ -171,11 +250,22 @@ watch(() => [props.projectId, props.gasReservoirId, props.wellName, props.method
 })
 watch(() => [props.projectId, props.gasReservoirId, props.wellName, props.methodType,
   pressureMethod.value, startDate.value, endDate.value, productionEnabled.value, injectionEnabled.value, ...selectedMethods.value], () => {
+  if (isStorage.value) return
   // Invalidate immediately, including the debounce interval, so a late response cannot restore another well's records.
   recordVersion++; clearResult(); clearTimeout(loadTimer)
   records.value = []; loadingRecords.value = isComparisonEnabled.value && selectedMethods.value.length > 0
   loadTimer = setTimeout(loadRecords, 150)
 }, { immediate: true })
+watch(() => [props.comparisonScope, props.projectId, props.gasReservoirId, props.storageId], () => {
+  if (isStorage.value) {
+    formationPressure.value = ''; injectionPressure.value = ''; wellKeyword.value = ''
+    loadStorageWells()
+  } else { wellVersion++; loadingWells.value = false }
+}, { immediate: true })
+// 修改条件立即作废旧请求；返回较晚的结果不能覆盖新库、新选井或新参数。
+watch(() => [periodMethod.value, pressureMethod.value, startDate.value, endDate.value,
+  periodMonths.value, selectedOperation.value, formationPressure.value, injectionPressure.value, ...selectedWellIds.value, ...selectedMethods.value],
+() => { if (isStorage.value) clearResult() }, { flush: 'sync' })
 watch([formationPressure, injectionPressure, selectedRecordKeys], clearResult, { deep: true })
 watch(periodMonths, clearResult)
 watch(selectedOperation, () => {
@@ -196,6 +286,7 @@ onMounted(async () => {
   window.addEventListener('resize', scheduleResize)
 })
 onBeforeUnmount(() => {
+  wellVersion++
   recordVersion++; calculationVersion++; clearTimeout(loadTimer)
   stopResize()
   resizeObserver?.disconnect()
@@ -204,7 +295,44 @@ onBeforeUnmount(() => {
   chart?.dispose()
   chart = null
 })
+const handleStorageCalculate = async () => {
+  if (loadingWells.value || calculating.value) return
+  if (!selectedWellIds.value.length) return ElMessage.warning('请选择参与对比的井')
+  if (!selectedMethods.value.length) return ElMessage.warning('请选择参与对比的方法')
+  if (startDate.value && endDate.value && startDate.value > endDate.value) return ElMessage.warning('开始日期不能晚于结束日期')
+  if (!Number.isInteger(Number(periodMonths.value)) || Number(periodMonths.value) < 1 || Number(periodMonths.value) > 1200)
+    return ElMessage.warning('周期时长必须为1至1200的整数（月）')
+  // 注采对比同时校验两个输入；其余库对比仍仅使用所选方向的压力。
+  const hasProduction = productionEnabled.value, hasInjection = injectionEnabled.value
+  const pr = Number(formationPressure.value), pwf = Number(injectionPressure.value)
+  if (hasProduction && (!Number.isFinite(pr) || pr <= .1)) return ElMessage.warning('计算地层压力必须大于0.1 MPa')
+  if (hasInjection && (!Number.isFinite(pwf) || pwf <= .1)) return ElMessage.warning('计算注气压力必须大于0.1 MPa')
+  if (pressureMethod.value === 'pseudo-pressure' && (hasProduction && pr > 200 || hasInjection && pwf > 200))
+    return ElMessage.warning('拟压力接口的计算压力不能超过200 MPa')
+  const version = ++calculationVersion
+  calculating.value = true; comparisonResult.value = null; renderChart()
+  try {
+    const calculate = isDirectionComparison.value ? storageProductivityComparisonApi.compareDirections
+      : isMultiMethod.value ? storageProductivityComparisonApi.calculateMethods : storageProductivityComparisonApi.calculate
+    const result = unwrap(await calculate({ projectId: Number(props.projectId),
+      gasReservoirId: Number(props.gasReservoirId), storageId: Number(props.storageId), wellIds: [...selectedWellIds.value],
+      ...(isMultiMethod.value ? { methods: [...selectedMethods.value] } : { method: singleMethod.value }),
+      ...(!isDirectionComparison.value ? { operationType: selectedOperation.value } : {}), pressureMethod: pressureMethod.value,
+      ...(hasProduction ? { formationPressure: pr } : {}), ...(hasInjection ? { injectionPressure: pwf } : {}),
+      period: { ...(startDate.value ? { startDate: startDate.value } : {}),
+        ...(endDate.value ? { endDate: endDate.value } : {}), months: Number(periodMonths.value) } }))
+    if (version !== calculationVersion) return
+    if (!Array.isArray(result?.periods) || !Array.isArray(result?.wells) || isMultiMethod.value && !Array.isArray(result?.methods))
+      throw new Error('库产能对比接口尚未更新，请重启后端服务后重试')
+    if (isDirectionComparison.value && result.periods.some(period => !Array.isArray(period.wells)
+      || period.wells.some(well => !Array.isArray(well.directions))))
+      throw new Error('库注采对比接口返回格式不正确，请更新后端服务')
+    comparisonResult.value = result
+  } catch (error) { if (version === calculationVersion) ElMessage.error(errorText(error)) }
+  finally { if (version === calculationVersion) { calculating.value = false; renderChart() } }
+}
 const handleCalculate = async () => {
+  if (isStorage.value) return handleStorageCalculate()
   if (!isComparisonEnabled.value) return
   if (!scopeValid()) return ElMessage.warning('请先选择当前项目、气藏和井')
   if (isMultiPeriod.value) {
@@ -298,13 +426,35 @@ const handleCalculate = async () => {
           <div class="field-grid">
             <label class="field"><span>开始日期</span><input v-model="startDate" type="date" /></label>
             <label class="field"><span>结束日期</span><input v-model="endDate" type="date" /></label>
-            <label v-if="isMultiPeriod" class="field"><span>周期时长（月）</span><input v-model="periodMonths" type="number" min="1" max="1200" step="1" /></label>
+            <label v-if="isMultiPeriod || isStorage" class="field"><span>周期时长（月）</span><input v-model="periodMonths" type="number" min="1" max="1200" step="1" /></label>
             <label v-if="!isComparisonEnabled || productionEnabled" class="field pressure-field"><span>计算无阻流量的地层压力{{ isComparisonEnabled ? '（MPa）' : '' }}</span><input v-model="formationPressure" type="text" inputmode="decimal" autocomplete="off" />
             </label>
             <label v-if="isComparisonEnabled && injectionEnabled" class="field pressure-field"><span>计算无阻流量的注气压力（MPa）</span><input v-model="injectionPressure" type="text" inputmode="decimal" autocomplete="off" />
             </label>
           </div>
-          <fieldset v-if="isComparisonEnabled" class="field-section records-section">
+          <fieldset v-if="isStorage" class="field-section records-section storage-wells-section">
+            <legend class="sec-label">参与对比的井（{{ selectedWellIds.length }}）
+              <label class="select-all-records"><input type="checkbox" :checked="allWellsSelected" :indeterminate="someWellsSelected"
+              :disabled="loadingWells || !filteredWells.length" @change="toggleAllWells" />{{ wellKeyword.trim() ? '全选搜索结果' : '全选' }}</label>
+            </legend>
+            <label class="field"><input v-model="wellKeyword" type="search" placeholder="搜索井名" aria-label="搜索参与对比的井" /></label>
+            <div v-if="loadingWells" class="record-status" role="status">正在读取单井…</div>
+            <div v-else-if="wellError" class="record-status record-error" role="alert">{{ wellError }} <button type="button" @click="loadStorageWells">重试</button></div>
+            <div v-else-if="!storageWells.length" class="record-status">当前储气库暂无单井</div>
+            <div v-else-if="!filteredWells.length" class="record-status">没有匹配的井</div>
+            <div v-else class="record-list storage-well-list">
+              <label v-for="well in filteredWells" :key="well.id" class="record-row">
+                <input v-model="selectedWellIds" type="checkbox" :value="well.id" :aria-label="well.wellName" />
+                <span class="record-info"><span class="record-name" :title="well.wellName">{{ well.wellName }}</span>
+                  <span v-if="storageRecordStats.has(String(well.id))" class="record-meta">
+                    有效 {{ storageRecordStats.get(String(well.id)).recordCount }} 条
+                    <template v-if="storageRecordStats.get(String(well.id)).excludedCount"> · 排除 {{ storageRecordStats.get(String(well.id)).excludedCount }} 条</template>
+                  </span>
+                </span>
+              </label>
+            </div>
+          </fieldset>
+          <fieldset v-else-if="isComparisonEnabled" class="field-section records-section">
             <legend class="sec-label">参与对比记录（{{ selectedRecordKeys.length }}）
               <label class="select-all-records">
                 <input type="checkbox" :checked="allRecordsSelected" :indeterminate="someRecordsSelected"
@@ -326,7 +476,7 @@ const handleCalculate = async () => {
               </label>
             </div>
           </fieldset>
-          <div class="form-actions"><button type="button" class="calculate-button" :disabled="isComparisonEnabled && (calculating || loadingRecords)" @click="handleCalculate">{{ isComparisonEnabled && calculating ? '计算中…' : '计算' }}</button></div>
+          <div class="form-actions"><button type="button" class="calculate-button" :disabled="isComparisonEnabled && (calculating || (isStorage ? loadingWells : loadingRecords))" @click="handleCalculate">{{ isComparisonEnabled && calculating ? '计算中…' : '计算' }}</button></div>
         </div>
         <div class="params-resizer" role="separator" tabindex="0" aria-label="调整参数栏宽度" aria-orientation="vertical"
           :aria-valuenow="panelWidth" :aria-valuemin="238" :aria-valuemax="maxPanelWidth()" @pointerdown="startResize" @keydown="resizeWithKeyboard" />
@@ -361,6 +511,7 @@ const handleCalculate = async () => {
 .pressure-options { flex-wrap: wrap; row-gap: 8px; }
 .result-form-label { margin-top: 6px; color: #666; font-size: 12px; }
 .record-list { border: 1px solid #ddd; }
+.storage-well-list { max-height: 240px; overflow-y: auto; margin-top: 6px; }
 .select-all-records { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; font-weight: 400; cursor: pointer; }
 .select-all-records input { width: 13px; height: 13px; margin: 0; accent-color: #333; cursor: pointer; }
 .select-all-records:has(input:disabled) { color: #999; cursor: default; }

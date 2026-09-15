@@ -15,6 +15,19 @@ const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&a
 const number = value => Number.isFinite(value) ? Number(value).toLocaleString('en-US', { maximumFractionDigits: 4 }) : '—'
 const operationOf = record => record.operationType || 'production'
 
+// 组内柱子按实际数量居中；只负责绘制，不改变后端返回的流量。
+export function comparisonPeriodBar(api, x, step, value, caption) {
+  const top = api.coord([api.value(0), value])[1], bottom = api.coord([api.value(0), 0])[1]
+  const width = Math.min(44, step * .65)
+  return { type: 'group', children: [
+    { type: 'rect', shape: { x: x - width / 2, y: Math.min(top, bottom), width, height: Math.abs(bottom - top) },
+      style: { fill: api.visual('color') }, emphasis: { style: { opacity: .85 } } },
+    { type: 'text', silent: true, style: { x, y: top - 6, text: `${number(value)}\n${caption}`,
+      align: 'center', verticalAlign: 'bottom', fill: '#444', font: '12px "Microsoft YaHei", sans-serif',
+      lineHeight: 18, width: Math.max(20, step - 6), overflow: 'truncate' } }
+  ] }
+}
+
 // ECharts' built-in overlap handling does not reliably stagger labels across separate bar series.
 // Share one placement pass between directions, and reset it after each synchronous chart layout (also on resize/zoom).
 function visibleBarLabels() {
@@ -85,21 +98,24 @@ export function buildDirectionComparisonChart(response, pressureMethod, emptyTex
 
 // Period boundaries and membership come from the backend's saved calculation dates.
 // Each slot is an independent record, never a sum or average for its period.
-export function buildPeriodComparisonChart(response, pressureMethod, emptyText = '请选择记录并计算') {
+export function buildPeriodComparisonChart(response, pressureMethod, emptyText = '请选择记录并计算', selected = {}) {
   const option = buildComparisonChart(response, pressureMethod, emptyText)
   const periods = response?.periods || []
   const results = response?.results || []
   const form = pressureForms.find(item => item.value === pressureMethod)?.label || ''
   option.title.text = `多周期无阻流量对比图（${form}）`
-  const slots = Math.max(0, ...periods.map(period => period.results.length))
+  const visibleRows = periods.map(period => period.results.filter(row => Number.isFinite(row.openFlowCapacity)
+    && selected[row.record.methodName] !== false))
+  const slots = Math.max(0, ...visibleRows.map(rows => rows.length))
+  option.legend.selected = selected
   const visiblePeriods = Math.max(1, Math.min(4, Math.floor(16 / Math.max(1, slots))))
   const many = periods.length > visiblePeriods
   option.grid.bottom = many ? 155 : 125
   option.xAxis.data = periods.map(period => String(period.index))
   option.xAxis.name = '周期 / 计算日期范围'
   option.xAxis.nameGap = 92
-  option.xAxis.axisLabel.formatter = (_, index) => {
-    const period = periods[index]
+  option.xAxis.axisLabel.formatter = value => {
+    const period = periods.find(item => String(item.index) === String(value))
     return period ? `第${period.index}周期${period.results.length ? '' : '（无记录）'}\n${period.startDate}\n至 ${period.endDate}` : ''
   }
   option.dataZoom = many ? [{ type: 'slider', xAxisIndex: 0, bottom: 12, height: 20,
@@ -109,23 +125,25 @@ export function buildPeriodComparisonChart(response, pressureMethod, emptyText =
   option.tooltip.formatter = point => {
     const row = point.data?.row
     if (!row) return ''
-    const period = periods[point.dataIndex]
+    const period = point.data.period
     return `第${period.index}周期：${escape(period.startDate)} 至 ${escape(period.endDate)}<br/>`
       + tooltip({ dataIndex: resultIndexes.get(row.record.key) })
   }
-  option.series = Array.from({ length: slots }, (_, slot) => ({
-    name: results[0]?.record.methodName || '', type: 'bar', barMaxWidth: 44,
-    // No stack: records in a period stand side by side, with a wider category gap.
-    barGap: '25%', barCategoryGap: '40%',
-    label: { show: true, position: 'top', color: '#444', fontSize: 12, lineHeight: 18,
-      width: 90, overflow: 'truncate', formatter: point => point.data?.row
-        ? `${number(point.value)}\n${point.data.row.record.recordName}` : '' },
-    data: periods.map(period => {
-      const row = period.results[slot]
+  option.series = [...new Set(results.map(row => row.record.methodName))].map(name => ({
+    name, type: 'custom', clip: false, encode: { x: 0, y: 1 },
+    itemStyle: { color: comparisonMethods.find(method => method.value === results.find(row => row.record.methodName === name)?.record.method)?.color || '#5879c4' },
+    renderItem: (params, api) => {
+      const rows = visibleRows[Number(api.value(0))], row = rows?.[Number(api.value(2))]
       if (!row) return null
+      const band = api.size([1, 0])[0], step = Math.min(80, band * .8 / rows.length)
+      const x = api.coord([api.value(0), 0])[0] + (api.value(2) - (rows.length - 1) / 2) * step
+      return comparisonPeriodBar(api, x, step, row.openFlowCapacity, row.record.recordName)
+    },
+    data: periods.flatMap((period, index) => visibleRows[index].flatMap((row, order) => {
+      if (row.record.methodName !== name) return []
       const method = comparisonMethods.find(item => item.value === row.record.method)
-      return { value: row.openFlowCapacity, row, itemStyle: { color: method?.color || '#5879c4' } }
-    })
+      return [{ value: [index, row.openFlowCapacity, order], row, period, itemStyle: { color: method?.color || '#5879c4' } }]
+    }))
   }))
   return option
 }

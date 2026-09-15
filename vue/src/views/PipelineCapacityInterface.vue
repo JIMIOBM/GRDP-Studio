@@ -27,7 +27,7 @@ async function command(cmd) {
   if (workspaceRibbonScope.value === 'reservoir') {
     const location = getReservoirCommandLocation(cmd)
     if (location) await router.push(location)
-    else ElMessage.info('此公共功能暂未接入库工作区')
+    else ElMessage.warning('请先在左侧选择一个储气库')
     return
   }
   if (cmd.group === '管束能力') { await navigate(pipelinePageForCommand(cmd.name)); return }

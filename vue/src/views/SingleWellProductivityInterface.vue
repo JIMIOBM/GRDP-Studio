@@ -800,7 +800,7 @@ const handleCommand = async ({ group, name, parent }) => {
   if (workspaceRibbonScope.value === 'reservoir') {
     const location = getReservoirCommandLocation({ group, name, parent })
     if (location) await router.push(location)
-    else ElMessage.info('此公共功能暂未接入库工作区')
+    else ElMessage.warning('请先在左侧选择一个储气库')
     return
   }
   // 顶部菜单栏“单井产能”板块：留在当前独立页面并切换功能模块/计算方法。
