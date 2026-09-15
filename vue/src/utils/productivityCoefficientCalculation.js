@@ -12,15 +12,17 @@ export const normalizeCoefficientPressureMethod = value => ({
   '压力法': 'pressure'
 }[value] || value)
 
-const numberFrom = value => {
-  if (value === null || value === undefined || value === '') return null
+export const coefficientInputNumber = value => {
+  if (typeof value !== 'string' && typeof value !== 'number') return null
+  if (typeof value === 'string' && !/^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(value.trim())) return null
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : null
 }
+const numberFrom = coefficientInputNumber
 
 const readField = (record, names) => {
   for (const name of names) {
-    if (record?.[name] !== null && record?.[name] !== undefined && record?.[name] !== '') {
+    if (record?.[name] !== null && record?.[name] !== undefined && String(record[name]).trim() !== '') {
       return record[name]
     }
   }
@@ -45,6 +47,17 @@ export const normalizeCoefficientPvtCurve = rows => {
   })
   if (!byPressure.has(0)) byPressure.set(0, { pressure: 0, pseudoPressure: 0 })
   return [...byPressure.values()].sort((left, right) => left.pressure - right.pressure)
+}
+
+const validateCoefficientPseudoPressureCurve = points => {
+  points.forEach((point, index) => {
+    if (point.pseudoPressure < 0) {
+      throw new Error('PVT气体拟压力不能为负数')
+    }
+    if (index > 0 && point.pseudoPressure <= points[index - 1].pseudoPressure) {
+      throw new Error('PVT气体拟压力必须随压力严格递增')
+    }
+  })
 }
 
 const interpolate = (value, points, xField, yField, rangeName) => {
@@ -82,7 +95,8 @@ export const normalizeCoefficientFitPoint = ({
   operationType = 'production',
   flowRate,
   flowingPressure,
-  curve
+  curve,
+  enforceFlowRange = false
 }) => {
   const direction = operationType === 'injection' ? 'injection' : 'production'
   const operationLabel = direction === 'injection' ? '注气' : '采气'
@@ -90,18 +104,30 @@ export const normalizeCoefficientFitPoint = ({
   const flowText = String(flowRate ?? '').trim()
   const pressureText = String(flowingPressure ?? '').trim()
 
-  if (!flowText && !pressureText) return null
   if (!flowText || !pressureText) {
     throw new Error(`请同时填写${operationLabel}拟合点的${operationLabel}量和${pressureLabel}`)
   }
 
-  const normalizedFlowRate = Number(flowText)
-  const normalizedPressure = Number(pressureText)
+  const normalizedFlowRate = numberFrom(flowText)
+  const normalizedPressure = numberFrom(pressureText)
   if (!Number.isFinite(normalizedFlowRate) || normalizedFlowRate < 0) {
     throw new Error(`${operationLabel}拟合点${operationLabel}量必须是大于或等于 0 的有效数值`)
   }
-  if (!Number.isFinite(normalizedPressure)) {
+  if (!Number.isFinite(normalizedPressure) || normalizedPressure < 0) {
     throw new Error(`${operationLabel}拟合点${pressureLabel}必须是有效数值`)
+  }
+
+  const reservoirPressure = Number(curve?.reservoirPressure)
+  if (Number.isFinite(reservoirPressure)) {
+    if (normalizedFlowRate === 0 && Math.abs(normalizedPressure - reservoirPressure) > 1e-9) {
+      throw new Error(`当${operationLabel}量为 0 时，拟合点${pressureLabel}必须等于地层压力 ${reservoirPressure} MPa`)
+    }
+    if (normalizedFlowRate > 0 && direction === 'production' && normalizedPressure >= reservoirPressure) {
+      throw new Error(`采气拟合点井底流压必须小于地层压力 ${reservoirPressure} MPa`)
+    }
+    if (normalizedFlowRate > 0 && direction === 'injection' && normalizedPressure <= reservoirPressure) {
+      throw new Error(`注气拟合点井底压力必须大于地层压力 ${reservoirPressure} MPa`)
+    }
   }
 
   const pressureValues = curve?.points?.map(point => Number(point.flowingPressure))
@@ -112,6 +138,18 @@ export const normalizeCoefficientFitPoint = ({
     if (normalizedPressure < minimumPressure || normalizedPressure > maximumPressure) {
       throw new Error(
         `${operationLabel}拟合点${pressureLabel}应在 ${minimumPressure.toFixed(4)}～${maximumPressure.toFixed(4)} MPa 之间`
+      )
+    }
+  }
+
+  const flowValues = curve?.points?.map(point => Number(point.flowRate))
+    .filter(Number.isFinite) || []
+  if (enforceFlowRange && flowValues.length) {
+    const maximumFlowRate = Math.max(...flowValues)
+    const tolerance = 1e-9 * Math.abs(maximumFlowRate)
+    if (normalizedFlowRate > maximumFlowRate + tolerance) {
+      throw new Error(
+        `${operationLabel}拟合点${operationLabel}量不能超过拟合曲线范围 ${maximumFlowRate.toFixed(4)} 10⁴m³/d`
       )
     }
   }
@@ -541,9 +579,9 @@ export const calculateExponentialCoefficientCurve = ({
   pvtResultRows = [],
   steps = 240
 }) => {
-  const pressure = Number(reservoirPressure)
-  const c = Number(coefficient)
-  const n = Number(exponent)
+  const pressure = numberFrom(reservoirPressure)
+  const c = numberFrom(coefficient)
+  const n = numberFrom(exponent)
   const direction = operationType === 'injection' ? 'injection' : 'production'
   const coefficientLabel = direction === 'injection' ? '注气能力系数 C' : '产能系数 C'
   const exponentLabel = direction === 'injection' ? '注气指数 n' : '产能指数 n'
@@ -558,6 +596,7 @@ export const calculateExponentialCoefficientCurve = ({
   const method = normalizeCoefficientPressureMethod(calculationMethod)
   const pvtCurve = normalizeCoefficientPvtCurve(pvtResultRows)
   const minimumPressure = Math.min(pressure, ATMOSPHERIC_PRESSURE_MPA)
+  if (method === 'pseudo-pressure') validateCoefficientPseudoPressureCurve(pvtCurve)
   const maximumPressure = direction === 'injection'
     ? injectionLimit(pressure, maximumFlowingPressure, method, pvtCurve, allowZeroInjectionRange)
     : pressure
@@ -565,7 +604,8 @@ export const calculateExponentialCoefficientCurve = ({
   const reservoirPotential = coefficientPressurePotential(pressure, method, pvtCurve)
   const points = Array.from({ length: pointCount + 1 }, (_, index) => {
     const ratio = index / pointCount
-    const flowingPressure = direction === 'injection'
+    const flowingPressure = index === 0 ? pressure : index === pointCount
+      ? (direction === 'injection' ? maximumPressure : minimumPressure) : direction === 'injection'
       ? pressure + (maximumPressure - pressure) * ratio
       : pressure - (pressure - minimumPressure) * ratio
     const flowingPotential = coefficientPressurePotential(flowingPressure, method, pvtCurve)
@@ -575,7 +615,7 @@ export const calculateExponentialCoefficientCurve = ({
       direction
     )
     const flowRate = difference <= 0 ? 0 : c * difference ** n
-    if (!Number.isFinite(flowRate)) throw new Error('当前参数无法生成有效的IPR曲线')
+    if (!Number.isFinite(flowRate) || (difference > 0 && flowRate === 0)) throw new Error('当前参数超出数值计算范围，无法生成有效的IPR曲线')
     return { flowRate, flowingPressure, potentialDifference: Math.max(0, difference) }
   })
 
@@ -606,13 +646,15 @@ export const calculateExponentialCoefficientIprFamily = ({
   if (!Number.isFinite(maximumPressure) || maximumPressure <= ATMOSPHERIC_PRESSURE_MPA) {
     throw new Error('计算IPR曲线的最大地层压力必须大于大气压')
   }
+  if (maximumPressure / levelCount <= ATMOSPHERIC_PRESSURE_MPA) {
+    throw new Error(`生成 ${levelCount} 条IPR曲线时，最大地层压力必须大于 ${(ATMOSPHERIC_PRESSURE_MPA * levelCount).toFixed(6)} MPa`)
+  }
 
   return Array.from({ length: levelCount }, (_, index) => ({
     level: index + 1,
     reservoirPressure: index === levelCount - 1
       ? maximumPressure : maximumPressure * (index + 1) / levelCount
   }))
-    .filter(item => item.reservoirPressure > ATMOSPHERIC_PRESSURE_MPA)
     .map(item => ({
       ...item,
       curve: calculateExponentialCoefficientCurve({
@@ -622,4 +664,49 @@ export const calculateExponentialCoefficientIprFamily = ({
         reservoirPressure: item.reservoirPressure
       })
     }))
+}
+
+// 仅用于核对输入点，不反算或覆盖用户填写的系数和实测气量。
+export const exponentialCoefficientFitReference = ({
+  curve,
+  coefficient,
+  exponent,
+  flowingPressure,
+  pvtResultRows = []
+}) => {
+  const pvtCurve = normalizeCoefficientPvtCurve(pvtResultRows)
+  const method = curve.calculationMethod
+  const difference = backPressurePotentialDifference(
+    coefficientPressurePotential(curve.reservoirPressure, method, pvtCurve),
+    coefficientPressurePotential(Number(flowingPressure), method, pvtCurve),
+    curve.operationType
+  )
+  const flowRate = Number(coefficient) * Math.max(0, difference) ** Number(exponent)
+  if (!Number.isFinite(flowRate)) throw new Error('当前参数无法计算拟合点参考气量')
+  return flowRate
+}
+
+export const exponentialCoefficientPvtIssue = ({
+  selectedPvtTable,
+  pvtResultRows = [],
+  maximumFormationPressure,
+  pvtLoading = false,
+  allowSnapshot = false
+}) => {
+  if (pvtLoading) return '正在读取当前井的PVT数据，请稍候'
+  if (!allowSnapshot && (!Number.isSafeInteger(Number(selectedPvtTable)) || Number(selectedPvtTable) <= 0)) {
+    return '当前井未选择已保存的PVT性质'
+  }
+  const curve = normalizeCoefficientPvtCurve(pvtResultRows)
+  if (curve.length < 2) return '当前PVT性质没有可用的气体拟压力结果，请先完成天然气PVT计算并保存'
+  try {
+    validateCoefficientPseudoPressureCurve(curve)
+    const maximum = Number(maximumFormationPressure)
+    if (Number.isFinite(maximum) && maximum > ATMOSPHERIC_PRESSURE_MPA) {
+      coefficientPressurePotential(maximum, 'pseudo-pressure', curve)
+    }
+    return ''
+  } catch (error) {
+    return error.message
+  }
 }

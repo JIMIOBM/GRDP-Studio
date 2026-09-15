@@ -6,6 +6,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import tools.jackson.databind.json.JsonMapper;
 import java.util.Map;
+import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 class CoefficientStorageTests {
@@ -25,42 +26,19 @@ class CoefficientStorageTests {
         jdbc.execute("CREATE TABLE project_well_pvt(id BIGINT PRIMARY KEY,well_id BIGINT)");
         jdbc.update("INSERT INTO project_well_pvt VALUES(8,1),(9,2)");
         storage = new CoefficientStorage(jdbc, JsonMapper.builder().build());
-        // 独立内存测试表；正式建表文本单独交付，不依赖开发者本地SQL文件。
-        // 此处验证存储契约与外键行为，不代替MySQL部署脚本验收。
-        jdbc.execute("""
-            CREATE TABLE project_well_productivity_coefficient (
-              id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-              project_id BIGINT NOT NULL, gas_reservoir_id BIGINT NOT NULL,
-              well_id BIGINT NOT NULL, record_no INT NOT NULL,
-              record_name VARCHAR(100) NOT NULL, method_type VARCHAR(20) NOT NULL,
-              operation_type VARCHAR(20) NOT NULL, pressure_method VARCHAR(30) NOT NULL,
-              pvt_id BIGINT NULL, parameters_json LONGTEXT NOT NULL,
-              pvt_snapshot_json LONGTEXT NOT NULL, result_value DOUBLE NOT NULL,
-              result_type VARCHAR(30) NOT NULL, calculation_version VARCHAR(30) NOT NULL,
-              units VARCHAR(100) NOT NULL,
-              created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-              updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-              UNIQUE (project_id,gas_reservoir_id,well_id,method_type,record_no),
-              FOREIGN KEY (project_id) REFERENCES project_summaries(id) ON DELETE RESTRICT,
-              FOREIGN KEY (gas_reservoir_id) REFERENCES project_gas_reservoir(id) ON DELETE RESTRICT,
-              FOREIGN KEY (well_id) REFERENCES project_well_heads(id) ON DELETE RESTRICT,
-              FOREIGN KEY (pvt_id) REFERENCES project_well_pvt(id) ON DELETE SET NULL,
-              CHECK (record_no > 0), CHECK (CHAR_LENGTH(TRIM(record_name)) > 0),
-              CHECK (method_type IN ('二项式','指数式')),
-              CHECK (operation_type IN ('production','injection')),
-              CHECK (pressure_method IN ('拟压力','压力平方法','压力法')),
-              CHECK (result_value >= 0),
-              CHECK ((method_type='二项式' AND operation_type='injection' AND result_type='injection-limit')
-                OR ((method_type='指数式' OR operation_type='production') AND result_type='open-flow'))
-            )
-            """);
+        // 使用交付脚本建隔离测试表，只移除 H2 不需要的 MySQL 引擎选项。
+        String sql = java.nio.file.Files.readString(java.nio.file.Path.of("sql/productivity_coefficient.sql"))
+            .replaceAll("(?m)^--.*$", "").replace("ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", "");
+        jdbc.execute(sql);
+        jdbc.execute(sql); // 重复部署不能删除数据或报表已存在。
     }
     @AfterEach void cleanup() { dataSource.destroy(); }
     CoefficientStorage.Save request(Long id, String method, long pvt) {
         var p = method.equals("指数式")
             ? new CoefficientStorage.Parameters(56d,120d,null,null,null,null,24d,.6,26d,.6,24d,9d)
             : new CoefficientStorage.Parameters(56d,120d,24d,24d,28d,28d,null,null,null,null,24d,9d);
-        return new CoefficientStorage.Save(id,7,4,"A1-3",null,method,"production","压力法",pvt,p,Map.of("pvtName","PVT性质1"),100d);
+        double result = method.equals("指数式") ? 26 * Math.pow(56 - 0.101325, .6) : 100d;
+        return new CoefficientStorage.Save(id,7,4,"A1-3",null,method,"production","压力法",pvt,p,Map.of("pvtName","PVT性质1"),result);
     }
     @Test void saveAndRestoreBothMethodsWithoutCurvePoints() {
         var exp = storage.save(request(null,"指数式",8));
@@ -107,5 +85,77 @@ class CoefficientStorageTests {
             null,7,4,"A1-3",null,"指数式","production","拟压力",8L,
             valid.parameters(),valid.pvtSnapshot(),100d)));
         assertTrue(storage.list(7,4,"A1-3").isEmpty());
+    }
+
+    CoefficientStorage.Save exponential(String well, String operation, String method, CoefficientStorage.Parameters parameters, Map<String,Object> snapshot, Double result) {
+        return new CoefficientStorage.Save(null,7,4,well,null,"指数式",operation,method,null,parameters,snapshot,result);
+    }
+    double expected(String method) {
+        double difference = switch (method) {
+            case "压力平方法" -> 56 * 56 - 0.101325 * 0.101325;
+            case "拟压力" -> 60 * (56 - 0.101325);
+            default -> 56 - 0.101325;
+        };
+        return 26 * Math.pow(difference,.6);
+    }
+    Map<String,Object> snapshot() {
+        return Map.of("gasResultRows",List.of(List.of(0,0,0,0),List.of(60,0,0,3600)));
+    }
+    @Test void allFiveWellsSaveBothOperationsAndThreeMethodsWithoutCrossWellRecords() {
+        var p = request(null,"指数式",8).parameters();
+        for (int i = 1; i <= 5; i++) {
+            String name = "X-" + i;
+            jdbc.update("INSERT INTO project_well_heads VALUES(?,7,4,?)",100 + i,name);
+            for (String operation : List.of("production","injection")) {
+                for (String method : List.of("压力法","压力平方法","拟压力")) {
+                    var saved = storage.save(exponential(name,operation,method,p,snapshot(),expected(method)));
+                    assertEquals(expected(method),saved.result(),1e-10);
+                    assertEquals(p,storage.detail(saved.id(),7,4,name).parameters());
+                    assertThrows(BusinessException.class,() -> storage.detail(saved.id(),7,4,"A1-3"));
+                }
+            }
+            assertEquals(6,storage.list(7,4,name).size());
+        }
+        assertTrue(storage.list(7,4,"A1-3").isEmpty());
+    }
+    @Test void rejectsInvalidExponentialPointAndExtremeParametersBeforeSaving() {
+        var p = request(null,"指数式",8).parameters();
+        var invalid = List.of(
+            new CoefficientStorage.Parameters(56d,null,null,null,null,null,24d,.6,26d,.6,24d,9d),
+            new CoefficientStorage.Parameters(56d,-273.15,null,null,null,null,24d,.6,26d,.6,24d,9d),
+            new CoefficientStorage.Parameters(1d,120d,null,null,null,null,24d,.6,26d,.6,.5,9d),
+            new CoefficientStorage.Parameters(56d,120d,null,null,null,null,24d,24d,26d,.6,24d,9d),
+            new CoefficientStorage.Parameters(56d,120d,null,null,null,null,24d,.6,26d,.6,24d,null),
+            new CoefficientStorage.Parameters(56d,120d,null,null,null,null,24d,.6,26d,.6,null,9d),
+            new CoefficientStorage.Parameters(56d,120d,null,null,null,null,24d,.6,26d,.6,24d,0d),
+            new CoefficientStorage.Parameters(56d,120d,null,null,null,null,24d,.6,26d,.6,56d,9d),
+            new CoefficientStorage.Parameters(56d,120d,null,null,null,null,24d,.6,26d,.6,0d,9d),
+            new CoefficientStorage.Parameters(56d,120d,null,null,null,null,24d,.6,26d,.6,24d,1e100),
+            new CoefficientStorage.Parameters(56d,120d,null,null,null,null,Double.MAX_VALUE,.6,26d,.6,24d,9d));
+        for (var input : invalid)
+            assertThrows(BusinessException.class,() -> storage.save(exponential("A1-3","production","压力法",input,snapshot(),expected("压力法"))));
+        assertThrows(BusinessException.class,() -> storage.save(exponential("A1-3","production","压力法",p,snapshot(),100d)));
+        assertTrue(storage.list(7,4,"A1-3").isEmpty());
+    }
+    @Test void zeroRateIsOnlyAllowedAtStartingPressureAndInjectionPointMustBeAboveIt() {
+        for (String operation : List.of("production","injection")) {
+            double start = operation.equals("injection") ? 5.6 : 56;
+            var p = new CoefficientStorage.Parameters(56d,120d,null,null,null,null,24d,.6,26d,.6,start,0d);
+            assertNotNull(storage.save(exponential("A1-3",operation,"压力法",p,snapshot(),expected("压力法"))));
+        }
+        var p = new CoefficientStorage.Parameters(56d,120d,null,null,null,null,24d,.6,26d,.6,5.6,9d);
+        assertThrows(BusinessException.class,() -> storage.save(exponential("A1-3","injection","压力法",p,snapshot(),expected("压力法"))));
+    }
+    @Test void validatesPseudoSnapshotMonotonicityCoverageAndNumericRows() {
+        var p = request(null,"指数式",8).parameters();
+        for (var rows : List.of(
+            List.of(List.of(0,0,0,0),List.of(60,0,0,0)),
+            List.of(List.of(0,0,0,0),List.of(60,0,0,-1)),
+            List.of(List.of(0,0,0,0),List.of(10,0,0,100)),
+            List.of(List.of(" ",0,0," "),List.of("0x3c",0,0,3600)))) {
+            assertThrows(BusinessException.class,() -> storage.save(exponential("A1-3","production","拟压力",p,Map.of("gasResultRows",rows),expected("拟压力"))));
+        }
+        var rows = List.of(Map.of("pressure","6e1","pseudoPressure","3.6e3"));
+        assertNotNull(storage.save(exponential("A1-3","production","拟压力",p,Map.of("gasResultRows",rows),expected("拟压力"))));
     }
 }

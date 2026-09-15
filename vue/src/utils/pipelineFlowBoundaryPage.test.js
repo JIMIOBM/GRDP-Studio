@@ -6,6 +6,7 @@ import * as serverRenderer from 'vue/server-renderer'
 import { parse, compileScript } from '@vue/compiler-sfc'
 import { compile } from '@vue/compiler-ssr'
 import { pipelinePageTitles } from './pipelineNavigation.js'
+import resizableParameterPanel from '../directives/resizableParameterPanel.js'
 
 const readPage = name => parse(fs.readFileSync(new URL(`../views/PipelineCapacity/${name}.vue`, import.meta.url), 'utf8')).descriptor
 const descriptor = readPage('PipelineFlowPage'), content = readPage('PipelineCapacityContent'), timeChart = readPage('PipelineTimeChart')
@@ -33,7 +34,7 @@ const TableStub = { props: ['data'], setup(props, { slots }) { return () => {
     Vue.h('tbody', (props.data || []).map((row, index) => Vue.h('tr', columns.map(column => Vue.h('td', column.children?.default
       ? column.children.default({ row, $index: index }) : row[column.props.prop] ?? '—')))))])
 } } }
-const render = (ssrRender, scope) => serverRenderer.renderToString(Vue.createSSRApp({ ssrRender, setup: () => Vue.proxyRefs(scope), components: {
+const render = (ssrRender, scope) => serverRenderer.renderToString(Vue.createSSRApp({ ssrRender, setup: () => Vue.proxyRefs(scope), directives: { resizableParameterPanel }, components: {
   PipelineNumber: { props: ['label', 'modelValue'], render() { return Vue.h('label', [this.label, Vue.h('input', { type: 'number', value: this.modelValue })]) } },
   ElTable: TableStub, ElTableColumn: { render: () => null },
   PipelineTimeChart: { props: ['title', 'series', 'unit', 'emptyText'], render() { return Vue.h('section', { class: 'chart-stub', 'data-title': this.title }, this.series.length ? this.unit : this.emptyText) } }

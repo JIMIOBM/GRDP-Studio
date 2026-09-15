@@ -9,6 +9,10 @@ import {
   calculateExponentialCoefficientCurve,
   calculateExponentialCoefficientOpenFlow,
   calculateExponentialCoefficientIprFamily,
+  exponentialCoefficientFitReference,
+  exponentialCoefficientPvtIssue,
+  coefficientInputNumber,
+  normalizeCoefficientPressureMethod,
   normalizeCoefficientFitPoint
 } from '@/utils/productivityCoefficientCalculation'
 
@@ -73,8 +77,19 @@ const saving = ref(false)
 const loadingRecord = ref(false)
 const storedId = ref(null)
 const storedName = ref('')
+const scopeKey = computed(() => JSON.stringify([Number(props.projectId), Number(props.gasReservoirId), props.wellName]))
+const pvtIssue = computed(() => props.methodType === '指数式' ? exponentialCoefficientPvtIssue({
+  selectedPvtTable: props.pvtRecord?.pvtId ?? props.selectedPvtTable,
+  pvtResultRows: props.pvtRecord?.gasResultRows || [],
+  maximumFormationPressure: props.maximumFormationPressure,
+  pvtLoading: props.pvtLoading,
+  // 原PVT删除后仍允许用已保存记录的快照恢复，不能把有效快照误判为空数据。
+  allowSnapshot: Boolean(props.recordId && storedId.value === Number(props.recordId))
+}) : '')
+const calculationBlocker = computed(() => props.methodType === '指数式' &&
+  (props.pvtLoading || normalizeCoefficientPressureMethod(calculationMethod.value) === 'pseudo-pressure') ? pvtIssue.value : '')
 let recordLoadSequence = 0
-const numberOrNull = value => value === '' || value == null ? null : Number(value)
+const numberOrNull = coefficientInputNumber
 const collectInput = () => ({
   projectId: Number(props.projectId), gasReservoirId: Number(props.gasReservoirId), wellName: props.wellName,
   method: props.methodType, operation: props.operationType, pressureMethod: calculationMethod.value,
@@ -93,24 +108,33 @@ const collectInput = () => ({
   },
   pvtSnapshot: { pvtId: props.pvtRecord?.pvtId ?? null, pvtName: props.pvtRecord?.pvtName || '', gasResultRows: props.pvtRecord?.gasResultRows || [] }
 })
-const canSave = computed(() => !loadingRecord.value && !saving.value && !!calculatedRequest.value &&
+const canSave = computed(() => !loadingRecord.value && !saving.value && !calculationBlocker.value && !!calculatedRequest.value &&
+  !!props.wellName?.trim() && Number.isSafeInteger(Number(props.projectId)) && Number(props.projectId) > 0 &&
+  Number.isSafeInteger(Number(props.gasReservoirId)) && Number(props.gasReservoirId) > 0 &&
   (!props.recordId || storedId.value === Number(props.recordId)) &&
   !!inputSnapshot.value && JSON.stringify(collectInput()) === JSON.stringify(inputSnapshot.value))
 const saveRecord = async () => {
   if (!canSave.value) return
   const input = inputSnapshot.value
+  const request = calculatedRequest.value
   const sequence = recordLoadSequence
   saving.value = true
   try {
     const response = await productivityCoefficientApi.save({ ...input, id: storedId.value,
-      name: storedName.value || null, result: Number(props.openFlowRate) })
+      name: storedName.value || null, result: request.outputRate })
     const saved = response?.data ?? response
     if (sequence !== recordLoadSequence) return
+    if (!Number.isSafeInteger(Number(saved?.id)) || Number(saved.id) <= 0) throw new Error('保存接口未返回有效记录编号')
+    if (calculatedRequest.value !== request || inputSnapshot.value !== input ||
+        JSON.stringify(collectInput()) !== JSON.stringify(input)) {
+      ElMessage.success(`${input.wellName}的结果已保存；参数已变化，请重新计算`)
+      return
+    }
     storedId.value = saved.id
     storedName.value = saved.name
     emit('saved', { ...saved, wellName: input.wellName })
-    ElMessage.success('保存成功')
-  } catch (error) { ElMessage.error(error.response?.data?.msg || error.message || '保存失败') }
+    ElMessage.success(`${input.wellName}：保存成功`)
+  } catch (error) { ElMessage.error(`${input.wellName}：${error.response?.data?.msg || error.message || '保存失败'}`) }
   finally { saving.value = false }
 }
 
@@ -122,6 +146,14 @@ let chart = null
 
 const isInjection = computed(() => props.operationType === 'injection')
 const operationLabel = computed(() => isInjection.value ? '注气' : '采气')
+const formatRate = value => value !== 0 && Math.abs(value) < 0.0001 ? value.toExponential(4) : value.toFixed(4)
+const fitPointHint = computed(() => {
+  const reference = calculatedRequest.value?.fitReference
+  if (!reference) return ''
+  const actual = calculatedRequest.value.fitPoint.flowRate
+  const deviation = reference.original === 0 ? '0.00' : ((actual - reference.original) / reference.original * 100).toFixed(2)
+  return `同一井底压力下，原系数参考气量 ${formatRate(reference.original)}，修正系数参考气量 ${formatRate(reference.corrected)}（10⁴m³/d）；输入点相对原曲线偏差 ${deviation}%。拟合点保留输入值，不自动调整系数。`
+})
 
 const calculateCurve = (coefficient, exponent) => calculateExponentialCoefficientCurve({
   reservoirPressure: isInjection.value ? Number(props.maximumFormationPressure) / 10 : props.maximumFormationPressure,
@@ -162,8 +194,10 @@ const curveToChartData = curve =>
 const formatPressure = value =>
   Number(Number(value).toFixed(3)).toString()
 
+const isZeroFlowIprPoint = item => item.curve?.points?.length > 0 &&
+  item.curve.points.every(point => point.flowRate === 0 && point.flowingPressure === item.curve.points[0].flowingPressure)
 const iprSeriesName = item =>
-  `Pᵣ${item.level}=${formatPressure(item.reservoirPressure)} MPa`
+  `Pᵣ${item.level}=${formatPressure(item.reservoirPressure)} MPa${isZeroFlowIprPoint(item) ? '（零流量）' : ''}`
 
 
 const generateFitPoint = () => {
@@ -193,7 +227,7 @@ const updateChart = () => {
   // 图表只读取最近一次计算快照，编辑表单或切换图形不会混入未计算的参数。
   const snapshot = calculatedRequest.value
   const exponential = (snapshot?.methodType || props.methodType) === '指数式'
-  const isInjection = { value: snapshot?.operationType === 'injection' }
+  const isInjection = { value: (snapshot?.operationType || props.operationType) === 'injection' }
   const operationLabel = { value: isInjection.value ? '注气' : '采气' }
   const iprMode = chartType.value === 'ipr-curve'
   const flowAxisName =
@@ -221,11 +255,15 @@ const updateChart = () => {
   const exponentialSeries = iprMode
     ? iprFamily.map((item, index) => ({
       name: iprSeriesName(item),
-      type: 'line',
-      data: curveToChartData(item.curve),
+      type: isZeroFlowIprPoint(item) ? 'scatter' : 'line',
+      data: isZeroFlowIprPoint(item) ? curveToChartData(item.curve).slice(0, 1) : curveToChartData(item.curve),
       smooth: !isInjection.value,
-      showSymbol: false,
-      symbol: 'none',
+      showSymbol: isZeroFlowIprPoint(item),
+      symbol: isZeroFlowIprPoint(item) ? 'circle' : 'none',
+      symbolSize: 10,
+      clip: !isZeroFlowIprPoint(item),
+      z: isZeroFlowIprPoint(item) ? 5 : 2,
+      label: { show: isZeroFlowIprPoint(item), position: 'right', formatter: '零流量（地层压力等于上限）' },
       lineStyle: {
         color: familyColors[index % familyColors.length],
         width: 2
@@ -500,7 +538,7 @@ const updateChart = () => {
         const items = Array.isArray(params) ? params : [params]
         return items
           .filter(p => Number.isFinite(p.data[0]) && Number.isFinite(p.data[1]))
-          .map(p => `<b>${p.seriesName}</b><br/>${operationLabel.value}量 q: ${p.data[0].toFixed(4)} 10⁴m³/d<br/>井底压力 Pwf: ${p.data[1].toFixed(4)} MPa`)
+          .map(p => `<b>${p.seriesName}</b><br/>${operationLabel.value}量 q: ${formatRate(p.data[0])} 10⁴m³/d<br/>井底压力 Pwf: ${p.data[1].toFixed(4)} MPa`)
           .join('<br/><br/>')
       }
     },
@@ -645,12 +683,15 @@ const validateBinomialFitPoint = () => {
 
 
 
-const handleCalculate = () => {
+const handleCalculate = ({ restoring = false } = {}) => {
+  if (saving.value || (loadingRecord.value && !restoring)) return
   try {
+    if (calculationBlocker.value) throw new Error(calculationBlocker.value)
     let fittedCurve
     let iprCurve
     let iprFamily = []
     let fitPoint = null
+    let fitReference = null
 
     /*
      * =====================
@@ -658,6 +699,8 @@ const handleCalculate = () => {
      * =====================
      */
     if (props.methodType === '指数式') {
+      const temperature = numberOrNull(props.formationTemperature)
+      if (temperature == null || !Number.isFinite(temperature) || temperature <= -273.15) throw new Error('请填写有效地层温度（大于 -273.15℃）')
       fittedCurve =
         calculateCurve(
           props.productivityCoefficientC,
@@ -723,7 +766,8 @@ const handleCalculate = () => {
           flowingPressure:
             props.fittedFormationPressure,
           curve:
-            fittedCurve
+            fittedCurve,
+          enforceFlowRange: true
         })
     }
 
@@ -812,6 +856,16 @@ const handleCalculate = () => {
       })
       : iprCurve.limitRate
 
+    if (props.methodType === '指数式') {
+      fitReference = {
+        original: exponentialCoefficientFitReference({ curve: fittedCurve,
+          coefficient: props.productivityCoefficientC, exponent: props.productivityExponentN,
+          flowingPressure: fitPoint.flowingPressure, pvtResultRows: props.pvtRecord?.gasResultRows || [] }),
+        corrected: exponentialCoefficientFitReference({ curve: iprCurve,
+          coefficient: props.correctedCoefficientC, exponent: props.correctedExponentN,
+          flowingPressure: fitPoint.flowingPressure, pvtResultRows: props.pvtRecord?.gasResultRows || [] })
+      }
+    }
     inputSnapshot.value = JSON.parse(JSON.stringify(collectInput()))
     calculatedRequest.value = {
       methodType: props.methodType,
@@ -820,12 +874,14 @@ const handleCalculate = () => {
       fittedCurve,
       iprCurve,
       iprFamily,
-      fitPoint
+      fitPoint,
+      fitReference,
+      outputRate
     }
 
     emit(
       'update:open-flow-rate',
-      Number(
+      outputRate !== 0 && outputRate < 0.0001 ? outputRate.toExponential(4) : Number(
         outputRate.toFixed(4)
       ).toString()
     )
@@ -833,6 +889,7 @@ const handleCalculate = () => {
     updateChart()
   } catch (error) {
     calculatedRequest.value = null
+    inputSnapshot.value = null
 
     emit(
       'update:open-flow-rate',
@@ -880,13 +937,10 @@ const handleFittedFlowRateChange = e => {
 }
 
 
-watch([
-  () => props.methodType,
-  () => props.wellName,
-  () => props.projectId,
-  () => props.gasReservoirId
-], () => {
+watch(() => JSON.stringify(collectInput()), () => {
+  if (loadingRecord.value) return
   calculatedRequest.value = null
+  inputSnapshot.value = null
 
   emit(
     'update:open-flow-rate',
@@ -894,14 +948,15 @@ watch([
   )
 
   nextTick(updateChart)
-})
+}, { flush: 'sync' })
 
 
 watch(chartType, () => nextTick(updateChart))
 
-watch([() => props.recordId, () => props.wellName, () => props.methodType], async () => {
+watch([() => props.recordId, scopeKey, () => props.methodType], async () => {
   const sequence = ++recordLoadSequence
-  if (Number(props.recordId) === storedId.value && storedId.value && inputSnapshot.value?.wellName === props.wellName && inputSnapshot.value?.method === props.methodType) return
+  if (Number(props.recordId) === storedId.value && storedId.value && inputSnapshot.value?.wellName === props.wellName && inputSnapshot.value?.method === props.methodType &&
+      inputSnapshot.value?.projectId === Number(props.projectId) && inputSnapshot.value?.gasReservoirId === Number(props.gasReservoirId)) return
   storedId.value = null
   storedName.value = ''
   inputSnapshot.value = null
@@ -926,11 +981,11 @@ watch([() => props.recordId, () => props.wellName, () => props.methodType], asyn
     calculationMethod.value = record.pressureMethod
     emit('restore', record)
     await nextTick()
-    if (sequence === recordLoadSequence) handleCalculate()
+    if (sequence === recordLoadSequence) handleCalculate({ restoring: true })
   } catch (error) {
     if (sequence === recordLoadSequence) ElMessage.error(error.response?.data?.msg || error.message || '产能系数记录读取失败')
   } finally { if (sequence === recordLoadSequence) loadingRecord.value = false }
-}, { immediate: true })
+}, { immediate: true, flush: 'sync' })
 
 onMounted(() => {
   nextTick(() => initChart())
@@ -966,6 +1021,10 @@ const handleResize = () => {
       </div>
       
       <div v-show="!paramsCollapsed" class="parameter-form">
+        <div v-if="methodType === '指数式'" class="field-group" role="status">
+          <span>当前计算/保存井：{{ wellName || '未选择' }}</span>
+          <small>项目 {{ projectId }} / 气藏 {{ gasReservoirId }}</small>
+        </div>
         <label class="field-group">
           <span>选择PVT表</span>
           <select :value="selectedPvtTable" :disabled="pvtLoading || !pvtTableOptions.length"
@@ -977,6 +1036,9 @@ const handleResize = () => {
           </select>
         </label>
 
+        <div v-if="pvtIssue" class="field-group" role="status">
+          <small>{{ pvtIssue }}。{{ pvtLoading ? '' : '拟压力法暂不可用；压力法和压力平方法可使用手工参数。' }}</small>
+        </div>
         <div class="section-heading">
           <span>其他数据</span>
           <i></i>
@@ -1071,7 +1133,7 @@ const handleResize = () => {
 
         </template>
 
-          <!-- 两种方法共用参数点布局，指数式仍保留参数点可选规则。 -->
+          <!-- 两种方法共用参数点布局，气量与压力均必填。 -->
           <label class="field-group">
             <span>
               {{ isInjection
@@ -1080,7 +1142,7 @@ const handleResize = () => {
               }}
             </span>
 
-            <input :value="fittedFormationPressure" :placeholder="methodType === '指数式' ? '可选' : isInjection
+            <input :value="fittedFormationPressure" required :placeholder="isInjection
                 ? `请输入 Pr/10～Pr 的井底压力`
                 : `请输入小于 Pr=${maximumFormationPressure} MPa 的 Pwf`
               " inputmode="decimal" @input="
@@ -1098,7 +1160,7 @@ const handleResize = () => {
               }}
             </span>
 
-            <input :value="fittedFlowRate" :placeholder="methodType === '指数式' ? '可选' : '请输入参数点 q'" inputmode="decimal"
+            <input :value="fittedFlowRate" required placeholder="请输入参数点 q" inputmode="decimal"
               @input="handleFittedFlowRateChange" />
           </label>
 
@@ -1145,7 +1207,7 @@ const handleResize = () => {
         </fieldset>
 
         <div class="form-actions">
-          <button type="button" class="calculate-button" :disabled="loadingRecord || saving" @click="handleCalculate">
+          <button type="button" class="calculate-button" :disabled="loadingRecord || saving || Boolean(calculationBlocker)" @click="handleCalculate">
             计算
           </button>
           <button type="button" class="calculate-button save-button" :disabled="!canSave" @click="saveRecord">
@@ -1153,6 +1215,10 @@ const handleResize = () => {
           </button>
         </div>
 
+        <div v-if="methodType === '指数式'" class="field-group" role="status">
+          <small>切换注采类型或计算方法后，请核对对应系数和拟合点；不自动换算输入值。</small>
+          <small v-if="fitPointHint">{{ fitPointHint }}</small>
+        </div>
         <label class="field-group">
           <span>
             {{ methodType === '二项式' && isInjection

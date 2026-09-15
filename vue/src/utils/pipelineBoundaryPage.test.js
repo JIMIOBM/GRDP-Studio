@@ -7,6 +7,7 @@ import { parse } from '@vue/compiler-sfc'
 import { compile } from '@vue/compiler-ssr'
 import * as boundary from './pipelineBoundary.js'
 import * as time from './pipelineTime.js'
+import resizableParameterPanel from '../directives/resizableParameterPanel.js'
 
 const file = new URL('../views/PipelineCapacity/PipelineBoundaryPage.vue', import.meta.url)
 const { descriptor } = parse(fs.readFileSync(file, 'utf8'))
@@ -31,7 +32,7 @@ function part(predicate) {
 const table = part(node => attribute(node, 'aria-label', '边界条件工况数据'))
 const sidebar = part(node => node.type === 1 && node.tag === 'aside')
 async function render(ssrRender, scope) {
-  return serverRenderer.renderToString(Vue.createSSRApp({ ssrRender, setup: () => Vue.proxyRefs(scope), components: {
+  return serverRenderer.renderToString(Vue.createSSRApp({ ssrRender, setup: () => Vue.proxyRefs(scope), directives: { resizableParameterPanel }, components: {
     PipelineNumber: { props: ['label', 'modelValue'], render() { return Vue.h('label', this.label) } }
   } }))
 }

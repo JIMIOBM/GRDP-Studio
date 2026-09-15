@@ -26,7 +26,7 @@ public class CoefficientStorage {
     private final ObjectMapper json;
     public CoefficientStorage(JdbcTemplate jdbc, ObjectMapper json) { this.jdbc = jdbc; this.json = json; }
 
-    // 结构由单独交付的产能系数建表文本显式部署；服务启动不改表。
+    // 结构由 sql/productivity_coefficient.sql 显式部署；服务启动不改表。
 
     private long well(long project, long reservoir, String name, boolean lock) {
         if (project <= 0 || reservoir <= 0 || name == null || name.isBlank()) fail("项目、气藏、井名不能为空");
@@ -93,6 +93,9 @@ public class CoefficientStorage {
         if (p.temperature() != null && (!Double.isFinite(p.temperature()) || p.temperature() <= -273.15)) fail("地层温度无效");
         if (s.method().equals("指数式")) {
             positive(p.c()); positive(p.correctedC()); exponent(p.n()); exponent(p.correctedN());
+            if (p.temperature() == null) fail("指数式必须填写地层温度");
+            if (p.pressure() / 10 <= 0.101325) fail("生成10条IPR曲线时，最大地层压力必须大于1.01325 MPa");
+            if (p.pointRate() == null || p.pointPressure() == null) fail("指数式拟合点的气量和井底压力必须同时填写");
             if (p.a() != null || p.b() != null || p.correctedA() != null || p.correctedB() != null) fail("指数式不能保存二项式系数");
         } else {
             nonnegative(p.a()); nonnegative(p.b()); nonnegative(p.correctedA()); nonnegative(p.correctedB());
@@ -103,7 +106,82 @@ public class CoefficientStorage {
         if ((p.pointRate() == null) != (p.pointPressure() == null)) fail("参数点必须同时填写气量和压力");
         if (p.pointRate() != null) { nonnegative(p.pointRate()); nonnegative(p.pointPressure()); }
         if (s.result() == null || !Double.isFinite(s.result()) || s.result() < 0) fail("请先完成有效计算");
-        if (s.pressureMethod().equals("拟压力") && !(s.pvtSnapshot().get("gasResultRows") instanceof List<?> rows && rows.size() >= 2)) fail("拟压力计算必须保存PVT结果快照");
+        if (s.pressureMethod().equals("拟压力") && !(s.pvtSnapshot().get("gasResultRows") instanceof List<?> rows && rows.size() >= (s.method().equals("指数式") ? 1 : 2))) fail("拟压力计算必须保存PVT结果快照");
+        if (s.method().equals("指数式")) validateExponential(s);
+    }
+
+    private void validateExponential(Save s) {
+        var p = s.parameters();
+        boolean injection = s.operation().equals("injection");
+        double start = injection ? p.pressure() / 10 : p.pressure();
+        double minimum = injection ? start : 0.101325;
+        if (p.pointPressure() < minimum || p.pointPressure() > p.pressure()) fail("拟合点井底压力超出当前曲线范围");
+        if (p.pointRate() == 0) {
+            if (Math.abs(p.pointPressure() - start) > 1e-9) fail("零气量点的井底压力必须等于曲线起始地层压力");
+        } else if (injection ? p.pointPressure() <= start : p.pointPressure() >= start) {
+            fail("拟合点井底压力与注采方向不一致");
+        }
+        var points = s.pressureMethod().equals("拟压力") ? pseudoPoints(s) : List.<double[]>of();
+        double maximum = potential(p.pressure(), s.pressureMethod(), points);
+        double startPotential = potential(start, s.pressureMethod(), points);
+        double atmospheric = potential(0.101325, s.pressureMethod(), points);
+        double fittedLimit = p.c() * Math.pow(injection ? maximum - startPotential : maximum - atmospheric, p.n());
+        double expected = p.correctedC() * Math.pow(maximum - atmospheric, p.correctedN());
+        if (!Double.isFinite(fittedLimit) || fittedLimit <= 0 || !Double.isFinite(expected) || expected <= 0) fail("参数无法生成有效的指数式流量");
+        if (p.pointRate() > fittedLimit + 1e-9 * fittedLimit) fail("拟合点气量不能超过拟合曲线范围");
+        // 兼容历史界面四位小数的保存值；新界面传输未舍入的计算结果。
+        if (Math.abs(s.result() - expected) > Math.max(0.00005, Math.abs(expected) * 1e-9)) fail("保存的无阻流量与修正系数计算结果不一致");
+    }
+
+    private List<double[]> pseudoPoints(Save s) {
+        var rows = (List<?>) s.pvtSnapshot().get("gasResultRows");
+        var byPressure = new java.util.TreeMap<Double, Double>();
+        for (Object row : rows) {
+            Object pressure = null, pseudo = null;
+            if (row instanceof List<?> values && values.size() >= 4) {
+                pressure = values.get(0); pseudo = values.get(3);
+            } else if (row instanceof Map<?, ?> values) {
+                pressure = field(values, "pressure", "formationPressure", "reservoirPressure", "压力", "压力(MPa)");
+                pseudo = field(values, "pseudoPressure", "pseudo_pressure", "gasPseudoPressure", "mP", "mp", "气体拟压力", "气体拟压力(MPa²/(mPa·s))");
+            }
+            Double x = numeric(pressure), y = numeric(pseudo);
+            if (x != null && x >= 0 && y != null) byPressure.put(x, y);
+        }
+        byPressure.putIfAbsent(0d, 0d);
+        if (byPressure.size() < 2) fail("PVT快照缺少有效气体拟压力数据");
+        var points = new java.util.ArrayList<double[]>();
+        double previous = -1;
+        for (var entry : byPressure.entrySet()) {
+            if (entry.getValue() < 0 || entry.getValue() <= previous) fail("PVT拟压力必须非负并随压力严格递增");
+            points.add(new double[]{entry.getKey(), entry.getValue()});
+            previous = entry.getValue();
+        }
+        return points;
+    }
+
+    private Object field(Map<?, ?> values, String... names) {
+        for (String name : names) if (values.get(name) != null && !values.get(name).toString().isBlank()) return values.get(name);
+        return null;
+    }
+    private Double numeric(Object value) {
+        if (!(value instanceof Number) && !(value instanceof String)) return null;
+        if (!value.toString().trim().matches("[+-]?(?:\\d+\\.?\\d*|\\.\\d+)(?:[eE][+-]?\\d+)?")) return null;
+        try { double number = Double.parseDouble(value.toString()); return Double.isFinite(number) ? number : null; }
+        catch (NumberFormatException e) { return null; }
+    }
+    private double potential(double pressure, String method, List<double[]> points) {
+        if (method.equals("压力法")) return pressure;
+        if (method.equals("压力平方法")) return pressure * pressure;
+        if (pressure > points.getLast()[0] + 1e-9) fail("PVT快照的压力范围不足以覆盖曲线");
+        for (int i = 0; i < points.size(); i++) {
+            var upper = points.get(i);
+            if (Math.abs(pressure - upper[0]) <= 1e-9) return upper[1];
+            if (upper[0] > pressure && i > 0) {
+                var lower = points.get(i - 1);
+                return lower[1] + (pressure - lower[0]) / (upper[0] - lower[0]) * (upper[1] - lower[1]);
+            }
+        }
+        throw new BusinessException(400, "PVT快照的压力范围不足以覆盖曲线");
     }
     private static void positive(Double v) { if (v == null || !Double.isFinite(v) || v <= 0) fail("系数或压力必须大于0"); }
     private static void nonnegative(Double v) { if (v == null || !Double.isFinite(v) || v < 0) fail("参数必须为非负数"); }
