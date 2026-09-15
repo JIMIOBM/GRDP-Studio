@@ -1,26 +1,32 @@
-// 两个工作台共用井筒目录；只补齐导航，不触发计算或覆盖已加载的记录。
+const wellborePages = [
+  { type: 'wellbore-structure', label: '井身结构' },
+  { type: 'wellbore-pvt-group', label: 'PVT模型' },
+  { type: 'wellbore-temperature', label: '温度模型' },
+  { type: 'wellbore-boundary', label: '边界条件' },
+  { type: 'wellbore-liquid-loading', label: '井筒积液' },
+  { type: 'wellbore-hydrate', label: '水合物' },
+  { type: 'wellbore-pressure-group', label: '压力折算' }
+]
+const pressurePages = [
+  { type: 'wellbore-pressure', label: '折算方法' },
+  { type: 'wellbore-pressure-comparison', label: '结果对比' }
+]
+
 export function createDefaultWellboreNodes(wellName, wellId) {
-  const leaf = (type, label) => ({
-    id: `${type}-${wellName}`, type, label, wellName, children: []
-  })
-  return [
-    leaf('wellbore-structure', '井身结构'),
-    {
-      id: `${wellId || wellName}-wellbore-pvt-group`, type: 'wellbore-pvt-group',
-      label: 'PVT模型', wellName, pvtEntry: 'wellbore-capacity',
-      defaultExpanded: false, children: []
-    },
-    leaf('wellbore-temperature', '温度模型'),
-    leaf('wellbore-boundary', '边界条件'),
-    leaf('wellbore-liquid-loading', '井筒积液'),
-    leaf('wellbore-hydrate', '水合物'),
-    {
-      ...leaf('wellbore-pressure-group', '压力折算'), defaultExpanded: false,
-      children: [leaf('wellbore-pressure', '折算方法'), leaf('wellbore-pressure-comparison', '结果对比')]
-    }
-  ]
+  return wellborePages.map(page => ({
+    ...page,
+    id: page.type === 'wellbore-pvt-group'
+      ? `${wellId || wellName}-${page.type}` : `${page.type}-${wellName}`,
+    wellName,
+    defaultExpanded: false,
+    ...(page.type === 'wellbore-pvt-group' ? { pvtEntry: 'wellbore-capacity' } : {}),
+    children: page.type === 'wellbore-pressure-group'
+      ? pressurePages.map(child => ({ ...child, id: `${child.type}-${wellName}`, wellName, children: [] }))
+      : []
+  }))
 }
 
+// 补齐共享目录，保留已有节点、PVT记录和用户展开状态。
 export function ensureWellboreNavigation(nodes) {
   for (const node of nodes || []) {
     if (node.type !== 'wellbore-capacity') {
@@ -28,31 +34,23 @@ export function ensureWellboreNavigation(nodes) {
       continue
     }
     const existing = node.children || []
-    const wellId = String(node.id || '').replace(/-wellbore-capacity$/, '')
-    const defaults = createDefaultWellboreNodes(node.wellName || '', wellId)
-    const children = defaults.map(definition => {
-      const child = existing.find(item => item.type === definition.type) || definition
-      if (definition.type === 'wellbore-pressure-group') {
-        const oldChildren = child === definition ? [] : (child.children || [])
-        const pressureChildren = definition.children.map(item => {
-          // 旧目录的折算方法可能直接挂在井筒能力下，迁移时保留其ID和状态。
-          const match = oldChildren.find(old => old.type === item.type)
-            || existing.find(old => old.type === item.type) || item
-          if (match.label !== item.label) match.label = item.label
-          return match
-        })
-        pressureChildren.push(...oldChildren.filter(item => !definition.children.some(next => next.type === item.type)))
-        if (oldChildren.length !== pressureChildren.length || pressureChildren.some((item, i) => item !== oldChildren[i])) {
-          child.children = pressureChildren
-        }
-      }
+    const defaults = createDefaultWellboreNodes(node.wellName || '', String(node.id || node.wellName || '').replace(/-wellbore-capacity$/, ''))
+    const children = defaults.map(page => existing.find(child => child.type === page.type) || page)
+    const pressureGroup = children.find(child => child.type === 'wellbore-pressure-group')
+    const pressureChildren = pressurePages.map(page => {
+      const child = existing.find(child => child.type === page.type)
+        || pressureGroup.children?.find(child => child.type === page.type)
+        || defaults.at(-1).children.find(child => child.type === page.type)
+      if (child.label !== page.label) child.label = page.label
       return child
     })
-    // 不丢弃其他模块增加的节点；仅移除已归入压力折算分组的旧平级入口。
-    children.push(...existing.filter(item => !defaults.some(next => next.type === item.type)
-      && !['wellbore-pressure', 'wellbore-pressure-comparison'].includes(item.type)))
-    if (existing.length !== children.length || children.some((item, i) => item !== existing[i])) {
-      node.children = children
+    const extraPressureChildren = (pressureGroup.children || []).filter(child => !pressurePages.some(page => page.type === child.type))
+    const nextPressureChildren = [...pressureChildren, ...extraPressureChildren]
+    if (pressureGroup.children?.length !== nextPressureChildren.length || nextPressureChildren.some((child, i) => pressureGroup.children[i] !== child)) {
+      pressureGroup.children = nextPressureChildren
     }
+    const extras = existing.filter(child => !wellborePages.some(page => page.type === child.type) && !pressurePages.some(page => page.type === child.type))
+    const nextChildren = [...children, ...extras]
+    if (existing.length !== nextChildren.length || nextChildren.some((child, i) => existing[i] !== child)) node.children = nextChildren
   }
 }
