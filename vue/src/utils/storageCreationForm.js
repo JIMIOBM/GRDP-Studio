@@ -17,7 +17,7 @@ export function createStorageForm({ scope, api, onCreated }) {
   const matches = value => value?.projectId === readScope().projectId && value?.gasReservoirId === readScope().gasReservoirId
   const validScope = value => value.projectId > 0 && value.gasReservoirId > 0
   const filtered = computed(() => candidates.value.filter(well =>
-    `${well.wellName} ${well.id}`.toLowerCase().includes(keyword.value.trim().toLowerCase())))
+    String(well.wellName ?? '').toLowerCase().includes(keyword.value.trim().toLowerCase())))
   const allFilteredSelected = computed(() => filtered.value.length > 0
     && filtered.value.every(well => selectedIds.value.includes(well.id)))
   const canSubmit = computed(() => !loading.value && !saving.value && candidates.value.length > 0

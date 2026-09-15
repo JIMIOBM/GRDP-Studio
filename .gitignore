@@ -14,6 +14,8 @@ backend/.env
 backend/*.log
 outputs/
 docs/
+# 本地损耗评价数据库备份包含业务数据，不纳入版本管理。
+/backups/storage-loss-*/
 
 # 默认忽略本地测试与数据库脚本，明确保留下方模块文件。
 /backend/src/test/

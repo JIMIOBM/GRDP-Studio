@@ -1,4 +1,11 @@
 <script setup>
+/**
+ * 库 → 损耗评价 → 地质损耗页面，同一组件承载“微观损耗”和“逸散性损耗”。
+ * 微观损耗：填写孔隙体积、残余气饱和度及温压/PVT 参数；支持导入天然气基础数据。
+ * 逸散性损耗：填写周期垫气量、库存量、注气量和预测变化率，不使用微观损耗表单。
+ * 本页负责输入、结果展示和记录回填；计算及保存通过 api/geologicalLoss 调用后端。
+ * 修改界面时：template 中的 isMicroscopic 分支是微观表单，v-else 分支是逸散性表单。
+ */
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
@@ -12,6 +19,10 @@ const route = useRoute()
 const router = useRouter()
 const isMicroscopic = computed(() => props.command?.name === '微观损耗')
 const title = computed(() => isMicroscopic.value ? '微观损耗' : '逸散性损耗')
+// 标题使用当前库节点的显示名称，不展示数据库ID，也不借用当前选中井的名称。
+const resultTitle = computed(() => `${props.reservoir?.label || '未选择库'}-${title.value}计算结果`)
+// projectId + gasReservoirId 共同限定原系统项目范围；gasReservoirId 不是新建储气库的 ID。
+// storageId 才标识当前储气库；lossRecordId 标识该库下已保存的损耗记录，无值时为新记录。
 const projectId = computed(() => Number(props.reservoir?.projectId ?? route.query.projectId))
 const gasReservoirId = computed(() => Number(props.reservoir?.gasReservoirId ?? route.query.gasReservoirId))
 const storageId = computed(() => Number(props.reservoir?.storageId ?? route.query.storageId))
@@ -28,17 +39,21 @@ let loadVersion = 0
 let revision = 0
 onBeforeUnmount(() => { active = false; loadVersion++; revision++ })
 
+// 两种方法分别保存输入和结果，避免切换方法时混用参数。
+// 微观表单：体积为 10⁴m³，压力为 MPa，温度为 ℃，饱和度及气体组分按百分数填写。
 const microscopicForm = reactive({
   poreVolume: '', previousResidualSaturation: '', currentResidualSaturation: '', lowerLimitPressure: '',
   formationTemperature: '', gasType: 0, specificGravity: '', h2SMoleFraction: '', co2MoleFraction: '',
   n2MoleFraction: '', modificationMethod: 0, deviationFactorMethod: 0, viscosityMethod: 0
 })
+// 逸散性表单：各项气量为 10⁴m³，predictedChangeRate 为百分数，不是已除以 100 的小数。
 const escapeForm = reactive({ previousCushionGasVolume: '', movableCushionGasVolume: '', unusedInventoryVolume: '', injectionVolume: '', predictedChangeRate: '' })
 const outputValue = computed(() => isMicroscopic.value ? microscopicCalculation.value?.microscopicLossVolume : escapeCalculation.value?.escapeLossVolume)
 const formatResult = value => Number.isFinite(Number(value)) ? Number(value).toFixed(4) : ''
 const numericObject = source => Object.fromEntries(Object.entries(source).map(([key, value]) => [key, Number(value)]))
 const responseData = response => response?.data ?? response
 
+// 切换库、方法或记录时清空对应表单；与页面“重置”按钮仅清结果的行为不同。
 const resetMicroscopic = () => {
   Object.assign(microscopicForm, { poreVolume: '', previousResidualSaturation: '', currentResidualSaturation: '', lowerLimitPressure: '', formationTemperature: '', gasType: 0, specificGravity: '', h2SMoleFraction: '', co2MoleFraction: '', n2MoleFraction: '', modificationMethod: 0, deviationFactorMethod: 0, viscosityMethod: 0 })
   importedFileName.value = ''
@@ -54,6 +69,7 @@ const resetCalculationResult = () => {
 const microscopicInput = () => ({ ...numericObject(microscopicForm), importedFileName: importedFileName.value || null })
 const validateNumbers = values => Object.values(values).every(value => value === null || Number.isFinite(value))
 
+// “计算”先检查必填和数值格式，再调用当前方法的后端接口；不会自动保存记录。
 const calculate = async () => {
   if (calculating.value || saving.value) return
   if (!(storageId.value > 0)) { ElMessage.warning('请先选择具体储气库'); return }
@@ -84,6 +100,7 @@ const calculate = async () => {
   } finally { calculating.value = false }
 }
 
+// “保存”要求已有计算结果，提交输入与结果快照，并把返回记录同步到左侧库目录和 URL。
 const save = async () => {
   if (calculating.value || saving.value) return
   if (!(storageId.value > 0)) { ElMessage.warning('请先选择具体储气库'); return }
@@ -93,7 +110,7 @@ const save = async () => {
   const startedRevision = revision
   const savedType = isMicroscopic.value ? 'microscopic' : 'escape'
   try {
-    // 记录直接归属于当前项目和储气库，不再创建额外的“库1”中间层。
+    // 项目范围、实际储气库和损耗记录分别传入，不用记录编号代替 storageId。
     const payload = { recordId: recordId.value, projectId: projectId.value, gasReservoirId: gasReservoirId.value, storageId: storageId.value, input: isMicroscopic.value ? microscopicInput() : numericObject(escapeForm), calculation }
     const response = isMicroscopic.value ? await geologicalLossApi.saveMicroscopic(payload) : await geologicalLossApi.saveEscape(payload)
     const saved = responseData(response)
@@ -107,6 +124,7 @@ const save = async () => {
     ElMessage.success(recordId.value ? '修改已保存' : `${saved.recordName}已保存`)
   } finally { saving.value = false }
 }
+// 点击左侧已有记录或带 lossRecordId 的地址进入时，读取该库下记录并回填输入、结果。
 const loadDetail = async () => {
   const version = ++loadVersion
   if (!recordId.value) return
@@ -122,6 +140,8 @@ const loadDetail = async () => {
   else escapeCalculation.value = detail.calculation
 }
 
+// 只读取首个工作表中表头后的第一条非空数据：气体类型、比重、H₂S、CO₂、N₂。
+// 导入的是天然气基础参数，不是完整 PVT 曲线，也不会自动计算或保存损耗。
 const handleGasImport = async ({ file, options }) => {
   try {
     const extension = file.name.split('.').pop()?.toLowerCase()
@@ -144,6 +164,7 @@ const handleGasImport = async ({ file, options }) => {
   } catch (error) { ElMessage.error(error?.message || 'PVT数据导入失败') }
 }
 
+// 目录切换后先恢复空白表单，再按记录 ID 回填；初次进入由 onMounted 加载详情。
 watch(() => [props.command?.name, recordId.value, storageId.value], async () => { revision++; isMicroscopic.value ? resetMicroscopic() : resetEscape(); await loadDetail() })
 // 参数一变就同步使旧结果失效，避免下一次点击保存时带上修改前的计算值。
 watch(microscopicForm, () => { revision++; microscopicCalculation.value = null }, { deep: true, flush: 'sync' })
@@ -153,8 +174,9 @@ onMounted(loadDetail)
 
 <template>
   <section class="geological-loss">
+    <!-- 顶部功能区：当前方法标题、微观损耗专用的 PVT 导入入口、记录保存。 -->
     <header class="result-tabs">
-      <div class="result-tab">{{ title }}计算结果</div>
+      <div class="result-tab" :title="resultTitle"><span>{{ resultTitle }}</span></div>
       <div class="header-actions">
         <button v-if="isMicroscopic" class="secondary" type="button" @click="importDialogVisible = true">导入PVT</button>
         <button class="primary" type="button" :disabled="saving" @click="save">{{ saving ? '保存中…' : '保存' }}</button>
@@ -163,6 +185,7 @@ onMounted(loadDetail)
     <main class="form-canvas">
       <div class="form-title">请输入计算参数</div>
       <div class="parameter-grid">
+        <!-- 微观损耗参数区：孔隙/饱和度、下限温压与天然气物性计算选项。 -->
         <template v-if="isMicroscopic">
           <!-- 业务界面只展示中文名称和单位，公式符号保留在后端计算及设计文档中。 -->
           <label class="field"><span>气水过渡带孔隙体积（10⁴m³）</span><input v-model="microscopicForm.poreVolume" placeholder="请输入" /></label>
@@ -179,6 +202,7 @@ onMounted(loadDetail)
           <label class="field"><span>天然气偏差系数计算方法</span><select v-model="microscopicForm.deviationFactorMethod"><option :value="0">Dranchuk-Abu-Kassem 方法</option><option :value="1">Dranchuk-Purvis-Robinson 方法</option><option :value="2">Hall-Yarborough 方法</option></select></label>
           <label class="field"><span>天然气黏度计算方法</span><select v-model="microscopicForm.viscosityMethod"><option :value="0">Lee-Gonzalez-Eakin 方法</option><option :value="1">Carr-Kobayashi-Burrows 方法</option><option :value="2">Sutton 方法</option></select></label>
         </template>
+        <!-- 逸散性损耗参数区：周期气量和预测变化率，与上面的微观参数互斥显示。 -->
         <template v-else>
           <label class="field"><span>上一周期储气库垫气量（10⁴m³）</span><input v-model="escapeForm.previousCushionGasVolume" placeholder="请输入" /></label>
           <label class="field"><span>本周期储气库可动垫气量（10⁴m³）</span><input v-model="escapeForm.movableCushionGasVolume" placeholder="请输入" /></label>
@@ -189,6 +213,7 @@ onMounted(loadDetail)
       </div>
       <div v-if="isMicroscopic && importedFileName" class="import-note">已导入：{{ importedFileName }}</div>
       <div class="calculation-actions"><button class="calculate" type="button" :disabled="calculating" @click="calculate">{{ calculating ? '计算中…' : '计 算' }}</button><button class="reset" type="button" @click="resetCalculationResult">重 置</button></div>
+      <!-- 结果区只展示当前方法的后端返回值；尚无结果时显示占位符，不在模板内计算。 -->
       <section class="result-card"><h3>计算结果</h3><div class="result-line"><span>{{ isMicroscopic ? '微观损耗气量（10⁴m³）' : '逸散性损耗气量（10⁴m³）' }}：</span><strong>{{ formatResult(outputValue) || '—' }}</strong></div></section>
     </main>
     <NaturalGasImportDialog v-model="importDialogVisible" import-kind="data" @confirm="handleGasImport" />
@@ -200,6 +225,7 @@ onMounted(loadDetail)
 .geological-loss { height: 100%; min-width: 760px; overflow: auto; background: #fff; color: #202020; font-family: Arial, sans-serif; font-size: 13px; }
 .result-tabs { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; height: 34px; padding: 0 8px 0 0; border-bottom: 1px solid #e4e7ed; background: #fafafa; box-sizing: border-box; }
 .result-tab { display: flex; align-self: stretch; align-items: center; justify-content: center; max-width: 430px; min-width: 190px; padding: 0 12px; overflow: hidden; border: 0; border-right: 1px solid #e4e7ed; background: #f4d000; color: #202020; font: 600 13px Arial, sans-serif; text-align: center; text-overflow: ellipsis; white-space: nowrap; box-sizing: border-box; }
+.result-tab > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .header-actions, .calculation-actions { display: flex; gap: 10px; }
 button { height: 27px; padding: 0 16px; border: 1px solid #c9cdd3; border-radius: 4px; background: #fff; color: #292929; font: inherit; cursor: pointer; }
 button:hover { border-color: #b49a00; }

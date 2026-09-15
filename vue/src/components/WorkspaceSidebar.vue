@@ -12,9 +12,11 @@ import { ensurePipelineNavigation } from '@/utils/pipelineNavigation'
 import { ensureWellboreNavigation } from '@/utils/wellboreNavigation'
 import { ElMessage } from 'element-plus'
 import StorageCreateDialog from './StorageCreateDialog.vue'
+import StorageWellsDialog from './StorageWellsDialog.vue'
 import { workspaceTreeData, refreshWorkspaceStorages } from '@/utils/workspaceTreeState'
 
 const storageDialog = ref(null)
+const storageWellsDialog = ref(null)
 const storageScope = computed(() => {
   const root = workspaceTreeData.value.find(node => node.id === 'g-reservoir')
   return root ? { projectId: root.projectId, gasReservoirId: root.gasReservoirId } : null
@@ -54,15 +56,21 @@ const emit = defineEmits([
   'expand',
   'node-contextmenu'
 ])
-const storageMenu = ref({ visible: false, x: 0, y: 0 })
+const storageMenu = ref({ visible: false, x: 0, y: 0, node: null })
 const closeStorageMenu = () => { storageMenu.value.visible = false }
+const viewStorageWells = () => {
+  const node = storageMenu.value.node
+  closeStorageMenu()
+  if (node?.type === 'reservoir') storageWellsDialog.value?.open(node)
+}
 const handleNodeContextMenu = (node, event) => {
   closeStorageMenu()
   // 保留原有记录的右键操作，也让父页面关闭之前打开的菜单。
   emit('node-contextmenu', node, event)
-  if (node.id !== 'g-reservoir') return
+  if (node.id !== 'g-reservoir' && !(node.type === 'reservoir' && Number(node.storageId) > 0)) return
   storageMenu.value = {
     visible: true,
+    node,
     x: Math.max(8, Math.min(event.clientX, window.innerWidth - 198)),
     y: Math.max(8, Math.min(event.clientY, window.innerHeight - 54))
   }
@@ -205,10 +213,12 @@ onBeforeUnmount(() => {
     <div v-if="storageMenu.visible" class="storage-context-menu" role="menu" aria-label="库目录操作"
       :style="{ left: `${storageMenu.x}px`, top: `${storageMenu.y}px` }"
       @pointerdown.stop @click.stop @contextmenu.prevent.stop>
-      <button type="button" role="menuitem" @click="createStorage">新建储气库</button>
+      <button v-if="storageMenu.node?.id === 'g-reservoir'" type="button" role="menuitem" @click="createStorage">新建储气库</button>
+      <button v-else type="button" role="menuitem" @click="viewStorageWells">查看包含单井</button>
     </div>
   </Teleport>
   <StorageCreateDialog ref="storageDialog" :scope="storageScope" @created="storageCreated" />
+  <StorageWellsDialog ref="storageWellsDialog" :scope="storageScope" />
 </template>
 
 <style lang="scss" scoped>

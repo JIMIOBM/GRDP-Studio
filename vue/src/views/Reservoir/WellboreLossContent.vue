@@ -1,4 +1,11 @@
 <script setup>
+/**
+ * 库 → 损耗评价 → 井筒损耗 / 地面损耗共用页面，不是单井产能页面。
+ * lossKind='wellbore'：井筒放空损耗；lossKind='surface'：地面放空损耗及凝液溶解携带损耗。
+ * 两者都支持直接输入最终气量、填写参数进行公式计算；当前不要求选择某口井。
+ * 本页只组织输入和显示结果，分别调用 api/wellboreLoss、api/surfaceLoss 的后端接口。
+ * 修改界面时：mode 分支控制两种输入方式，isSurface 分支控制地面损耗专用区域。
+ */
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
@@ -12,6 +19,8 @@ const props = defineProps({
   reservoir: { type: Object, default: null },
   lossKind: { type: String, default: 'wellbore' }
 })
+// 名称随传入的储气库节点更新；所属库不以项目范围ID或单井名称代替。
+const resultTitle = computed(() => `${props.reservoir?.label || '未选择库'}-${lossTitle.value}计算结果`)
 // 井筒与地面放空的公式和PVT输入相同，复用表单；各自使用独立记录接口。
 const isSurface = computed(() => props.lossKind === 'surface')
 const lossTitle = computed(() => isSurface.value ? '地面损耗' : '井筒损耗')
@@ -22,6 +31,8 @@ const lossApi = computed(() => isSurface.value ? surfaceLossApi : wellboreLossAp
 const condensateForm = reactive({ volume: '', gasOilRatio: '' })
 const route = useRoute()
 const router = useRouter()
+// projectId + gasReservoirId 是原系统项目范围，不能把 gasReservoirId 当作新建储气库 ID。
+// storageId 标识实际储气库；URL 中 lossRecordId 用于读取该库下已有记录，无值时创建新记录。
 const projectId = computed(() => Number(props.reservoir?.projectId ?? route.query.projectId))
 const gasReservoirId = computed(() => Number(props.reservoir?.gasReservoirId ?? route.query.gasReservoirId))
 const storageId = computed(() => Number(props.reservoir?.storageId ?? route.query.storageId))
@@ -38,25 +49,31 @@ let revision = 0
 let loadVersion = 0
 let active = true
 
+// 直接输入：最终损耗气量均为 10⁴m³；凝液损耗字段只在地面损耗中使用。
 const directForm = reactive({ lossVolume: '', condensateLossVolume: '' })
+// 公式输入：温度按 K 原样提交（不同于地质微观损耗的 ℃），压力为 MPa，气体组分为百分数。
 const formulaForm = reactive({
   averageTemperature: '', pressureBefore: '', pressureAfter: '', gasType: 0, specificGravity: '',
   h2SMoleFraction: '', co2MoleFraction: '', n2MoleFraction: '', modificationMethod: 0,
   deviationFactorMethod: 0, viscosityMethod: 0
 })
+// 多个放空段的容积单位为 m³；id 仅供前端列表稳定渲染，不是单井 ID 或数据库井段 ID。
 const volumes = ref([{ id: 1, value: '' }])
 
 const formatLoss = value => Number.isFinite(value) ? value.toFixed(4) : isSurface.value ? '未计算' : '—'
+// 后端结果字段不同：井筒读取 wellboreLossVolume，地面分别展示 ventLossVolume 和凝液损耗。
 const resultText = computed(() => formatLoss(isSurface.value
   ? calculation.value?.ventLossVolume : calculation.value?.wellboreLossVolume))
 const condensateResultText = computed(() => formatLoss(calculation.value?.condensateLossVolume))
 const formatFactor = value => value != null && Number.isFinite(Number(value)) ? Number(value).toFixed(4) : ''
 const responseData = response => response?.data ?? response
+// 公式法可增删放空段，但至少保留一行；序号仅用于显示，提交时只传各段容积。
 const addVolume = () => volumes.value.push({ id: nextVolumeId++, value: '' })
 const removeVolume = index => {
   if (volumes.value.length === 1) return
   volumes.value.splice(index, 1)
 }
+// 切换输入方式保留已填参数，只使旧结果失效；隐藏表单的数据不会混入当前请求。
 const setMode = value => { mode.value = value; resetResult() }
 
 // 只提交当前方式用到的输入；直接输入不携带隐藏的公式参数，也不要求填写PVT。
@@ -75,6 +92,7 @@ const buildVentInput = () => mode.value === 'direct'
       viscosityMethod: Number(formulaForm.viscosityMethod), importedFileName: importedFileName.value || null
     }
 
+// 地面损耗额外携带凝液参数：直接法传最终气量，公式法传凝析油体积（10⁴m³）和气油比（m³/m³）。
 const buildInput = () => ({
   ...buildVentInput(),
   ...(isSurface.value ? mode.value === 'direct' ? {
@@ -85,6 +103,7 @@ const buildInput = () => ({
   } : {})
 })
 
+// 前端检查当前方式的必填和数值格式；物性及公式适用条件仍由后端校验。
 const validatePageInput = () => {
   const condensateValues = mode.value === 'direct'
     ? [directForm.condensateLossVolume] : [condensateForm.volume, condensateForm.gasOilRatio]
@@ -98,11 +117,12 @@ const validatePageInput = () => {
   return values.every(value => value != null && String(value).trim() !== '' && Number.isFinite(Number(value)))
 }
 
+// “计算”只更新结果，不保存；用输入版本号丢弃等待期间已失效的响应。
 const calculate = async () => {
   if (!(storageId.value > 0)) { ElMessage.warning('请先选择具体储气库'); return }
   if (calculating.value || saving.value) return
   if (!validatePageInput()) { ElMessage.warning('请完整填写计算参数'); return }
-  // 两种方式均交给服务端校验；直接方式只传两项最终气量，服务端不会调用PVT。
+  // 两种方式均交给服务端校验；直接方式传最终气量（井筒一项、地面两项），不使用 PVT 参数。
   calculating.value = true
   const startedRevision = revision
   try {
@@ -117,6 +137,7 @@ const calculate = async () => {
 
 // “重置”只清除计算结果，不清空已经填写或导入的参数。
 const resetResult = () => { revision++; calculation.value = null }
+// “保存”要求当前参数已计算：保存输入、结果和库归属，再更新左侧记录节点及 URL。
 const save = async () => {
   if (!(storageId.value > 0)) { ElMessage.warning('请先选择具体储气库'); return }
   if (saving.value || calculating.value) return
@@ -138,6 +159,7 @@ const save = async () => {
   } finally { saving.value = false }
 }
 
+// 回填已有记录：恢复计算方式、直接/公式参数、多个放空段，以及保存时的结果快照。
 const loadDetail = async () => {
   const version = ++loadVersion
   if (!recordId.value) return
@@ -166,6 +188,7 @@ const loadDetail = async () => {
   if (active && version === loadVersion) calculation.value = detail.calculation
 }
 
+// 切换库、记录或损耗类型时恢复空白表单；页面“重置”按钮不调用这里，避免清空用户输入。
 const clearNewRecord = () => {
   mode.value = 'formula'; directForm.lossVolume = ''; directForm.condensateLossVolume = ''
   condensateForm.volume = ''; condensateForm.gasOilRatio = ''
@@ -176,6 +199,8 @@ const clearNewRecord = () => {
   importedFileName.value = ''; calculation.value = null
 }
 
+// 导入首张工作表中表头后的第一条非空记录，列顺序：气体类型、比重、H₂S、CO₂、N₂。
+// 只填充公式法的天然气基础参数；温压、放空段容积和凝液参数仍需在页面填写。
 const handleGasImport = async ({ file, options }) => {
   try {
     const extension = file.name.split('.').pop()?.toLowerCase()
@@ -201,6 +226,7 @@ const handleGasImport = async ({ file, options }) => {
 
 // 同步使计算结果失效，防止编辑参数后立即保存旧结果；详情回填在nextTick后单独恢复结果。
 watch([directForm, formulaForm, volumes, condensateForm], resetResult, { deep: true, flush: 'sync' })
+// 首次进入及后续切换均走同一路径：清旧状态，有记录 ID 时再加载详情，避免跨库复用。
 watch([recordId, projectId, gasReservoirId, storageId, () => props.lossKind], async () => {
   loadVersion++; resetResult(); clearNewRecord()
   await loadDetail()
@@ -210,14 +236,16 @@ onBeforeUnmount(() => { active = false; revision++; loadVersion++ })
 
 <template>
   <section class="wellbore-loss" :class="{ 'surface-loss': isSurface }">
+    <!-- 顶部功能区：标题随损耗类型变化；PVT 导入只在公式法显示，保存适用于两种方式。 -->
     <header class="result-tabs">
-      <div class="result-tab">{{ lossTitle }}计算结果</div>
+      <div class="result-tab" :title="resultTitle"><span>{{ resultTitle }}</span></div>
       <div class="header-actions">
         <button v-if="mode === 'formula'" class="secondary" type="button" :disabled="saving" @click="importDialogVisible = true">导入PVT</button>
         <button class="primary" type="button" :disabled="saving || calculating" @click="save">{{ saving ? '保存中…' : '保存' }}</button>
       </div>
     </header>
 
+    <!-- 保存期间禁用表单交互，保证正在保存的参数与结果对应。 -->
     <main class="form-canvas" :inert="saving">
       <div v-if="isSurface" class="form-title">{{ mode === 'direct' ? '地面损耗' : '地面系统放空损耗' }}</div>
       <div class="mode-row">
@@ -228,6 +256,7 @@ onBeforeUnmount(() => { active = false; revision++; loadVersion++ })
         </div>
       </div>
 
+      <!-- 直接输入区：井筒填写一项损耗气量，地面还需填写凝液溶解携带损耗气量。 -->
       <template v-if="mode === 'direct'">
         <div class="form-title">{{ isSurface ? '请输入损耗气量' : '请输入井筒损耗气量' }}</div>
         <div class="parameter-grid direct-grid">
@@ -236,6 +265,7 @@ onBeforeUnmount(() => { active = false; revision++; loadVersion++ })
         </div>
       </template>
 
+      <!-- 公式输入区：多个放空段容积、放空前后压力、温度，以及天然气 PVT 基础参数。 -->
       <template v-else>
         <div class="form-title">请输入计算参数</div>
         <section class="volume-section">
@@ -252,6 +282,7 @@ onBeforeUnmount(() => { active = false; revision++; loadVersion++ })
           </div>
         </section>
 
+        <!-- 温压由用户填写；放空前后偏差系数由计算接口返回，只读显示，不手工输入。 -->
         <div class="parameter-grid primary-parameters">
           <label class="field"><span>{{ segmentTitle }}天然气平均温度（K）</span><input v-model="formulaForm.averageTemperature" placeholder="请输入" /></label>
           <label class="field"><span>放空前{{ pressureTitle }}（MPa）</span><input v-model="formulaForm.pressureBefore" placeholder="请输入" /></label>
@@ -283,6 +314,7 @@ onBeforeUnmount(() => { active = false; revision++; loadVersion++ })
         </div>
       </section>
 
+      <!-- 计算与保存分离；“重置”只清结果。地面结果区分别显示放空损耗和凝液损耗。 -->
       <div class="calculation-actions">
         <button class="calculate" type="button" :disabled="calculating" @click="calculate">{{ calculating ? '计算中…' : '计 算' }}</button>
         <button class="reset" type="button" @click="resetResult">重 置</button>
@@ -304,6 +336,8 @@ onBeforeUnmount(() => { active = false; revision++; loadVersion++ })
 .wellbore-loss { height: 100%; min-width: 760px; overflow: auto; background: #fff; color: #202020; font-family: Arial, sans-serif; font-size: 13px; }
 .result-tabs { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; height: 34px; padding-right: 8px; border-bottom: 1px solid #e4e7ed; background: #fafafa; box-sizing: border-box; }
 .result-tab { display: flex; align-self: stretch; align-items: center; justify-content: center; min-width: 190px; padding: 0 12px; border-right: 1px solid #e4e7ed; background: #f4d000; font-weight: 600; box-sizing: border-box; }
+.result-tab { max-width: 430px; overflow: hidden; }
+.result-tab > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .header-actions, .calculation-actions { display: flex; gap: 10px; }
 button { height: 27px; padding: 0 16px; border: 1px solid #c9cdd3; border-radius: 4px; background: #fff; color: #292929; font: inherit; cursor: pointer; }
 button:hover { border-color: #b49a00; }
