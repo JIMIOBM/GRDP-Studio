@@ -3,9 +3,17 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
 import { wellborePressureApi } from '@/api/wellborePressure'
-import { pvtStorageApi } from '@/api/pvtStorage'
+import request from '@/utils/request'
+import { waterProperties } from './pvtSource'
 import { loadTemperatureSources } from '@/api/temperatureSources'
-import { numberOf, productionValues } from '@/utils/temperatureSources'
+import { productionValues } from '@/utils/temperatureSources'
+import {
+  applyWellboreBoundaryDefaults,
+  boundaryValuesForPressure,
+  getWellboreBoundaryState,
+  setWellboreBoundaryValue,
+  wellboreBoundaryLabels
+} from '@/utils/wellboreBoundaryState'
 
 const props = defineProps({
   node: { type: Object, required: true },
@@ -24,9 +32,11 @@ const defaults = {
   angle: 0,
   tWh: 30,
   tGrad: 3,
-  gammaG: 0.65,
-  rhoL: 1000,
-  muL: 0.9,
+  gammaG: null,
+  rhoL: null,
+  muL: null,
+  pvtId: null,
+  pvtSnapshot: null,
   qGas: 2.5,
   qLiq: 2,
   models: ['HB', 'MB']
@@ -35,6 +45,7 @@ const defaults = {
 const form = reactive({ ...defaults, models: [...defaults.models] })
 const result = ref(null)
 const calculatedInput = ref(null)
+const payload = () => ({ ...context(), ...form, ...boundaryValuesForPressure(boundary), models: [...form.models] })
 const error = ref('')
 const sourceLoading = ref(false)
 const busy = ref(false)
@@ -105,6 +116,20 @@ const context = () => ({
   gasReservoirId: Number(props.gasReservoirId),
   wellName: String(props.node?.wellName ?? '').trim()
 })
+const boundary = getWellboreBoundaryState(context())
+const boundaryLabels = computed(() => wellboreBoundaryLabels(boundary.values.boundaryPosition))
+const sharedField = key => ({
+  boundaryPressure: 'pressure',
+  tWh: 'temperature',
+  qGas: 'qGas',
+  qLiq: 'qLiq'
+})[key]
+const fieldValue = key => sharedField(key) ? boundary.values[sharedField(key)] : form[key]
+const setFieldValue = (key, value) => {
+  const field = sharedField(key)
+  if (field) setWellboreBoundaryValue(boundary, field, value)
+  else form[key] = value
+}
 
 const unwrap = value => value?.data ?? value
 
@@ -184,13 +209,13 @@ const parameterGroups = computed(() => [
     fields: [
       [
         'boundaryPressure',
-        form.boundaryPosition === 'wellhead' ? '井口油压 (MPa)' : '井底油压 (MPa)',
+        boundaryLabels.value.pressure,
         0.000001,
         1000
       ],
       [
         'tWh',
-        form.boundaryPosition === 'wellhead' ? '井口温度 (℃)' : '井底温度 (℃)',
+        boundaryLabels.value.temperature,
         -273.14,
         1000
       ],
@@ -226,39 +251,36 @@ async function refresh () {
       'wellhead',
       source.productionFields
     )
+    applyWellboreBoundaryDefaults(boundary, {
+      pressure: production.fWh ?? defaults.boundaryPressure,
+      temperature: production.tWh ?? defaults.tWh,
+      qGas: production.qGas ?? defaults.qGas,
+      qLiq: production.qLiq ?? defaults.qLiq
+    })
     const initial = {
       ...defaults,
       ...source.input,
-      ...production,
-      boundaryPressure: production.fWh ?? defaults.boundaryPressure,
       models: [...defaults.models]
     }
-    delete initial.fWh
 
-    const latestPvt = source.pvtRecords?.at(-1)
-    if (latestPvt?.pvtId) {
-      try {
-        const detail = unwrap(await pvtStorageApi.getDetail(
-          latestPvt.pvtId,
-          currentContext.projectId,
-          currentContext.gasReservoirId,
-          currentContext.wellName
-        ))
-        initial.gammaG = numberOf(detail?.gasInput?.specificGravity) ?? initial.gammaG
-        initial.rhoL = numberOf(detail?.waterResults?.[0]?.density) ?? initial.rhoL
-        initial.muL = numberOf(detail?.waterResults?.[0]?.viscosity) ?? initial.muL
-      } catch (pvtError) {
-        source.errors.push(`PVT物性读取失败：${pvtError?.msg || pvtError?.message || '接口异常'}`)
-      }
+    try {
+      const properties = await waterProperties(request, currentContext, boundary.values.pressure, boundary.values.temperature)
+      if (disposed || sequence !== loadSequence) return
+      Object.assign(initial, properties)
+    } catch (pvtError) {
+      initial.gammaG = initial.rhoL = initial.muL = null
+      source.errors.push(`PVT物性读取失败：${pvtError?.msg || pvtError?.message || '接口异常'}`)
     }
 
     for (const key of Object.keys(defaults)) {
+      if (['gammaG', 'rhoL', 'muL', 'pvtId', 'pvtSnapshot'].includes(key)) continue
       if (key === 'models') continue
       if (initial[key] == null || !Number.isFinite(Number(initial[key]))) {
         initial[key] = defaults[key]
       }
     }
 
+    if (disposed || sequence !== loadSequence) return
     Object.assign(form, initial, { models: [...initial.models] })
 
     try {
@@ -363,12 +385,13 @@ async function calculate () {
 
   busy.value = true
   try {
-    const calculation = {
-      ...context(),
-      ...form,
-      models: [...form.models]
-    }
-    result.value = unwrap(await wellborePressureApi.calculate(calculation))
+    Object.assign(form, await waterProperties(request, context(), boundary.values.pressure, boundary.values.temperature))
+    await nextTick()
+    const calculation = payload()
+    const currentResult = unwrap(await wellborePressureApi.calculate(calculation))
+    await nextTick()
+    if (JSON.stringify(calculation) !== JSON.stringify(payload())) return
+    result.value = currentResult
     calculatedInput.value = calculation
     await draw()
   } catch (calculateError) {
@@ -435,6 +458,7 @@ watch(
   }
 )
 watch(form, () => { calculatedInput.value = null }, { deep: true })
+watch(() => ({ ...boundary.values }), () => { calculatedInput.value = null }, { deep: true })
 
 onMounted(() => {
   refresh()
@@ -495,12 +519,13 @@ onBeforeUnmount(() => {
               <label :for="`pressure-${key}`">{{ label }}</label>
               <el-input-number
                 :id="`pressure-${key}`"
-                v-model="form[key]"
+                :model-value="fieldValue(key)"
                 :min="min"
                 :max="max"
                 :controls="false"
-                :disabled="busy || sourceLoading"
+                :disabled="busy || sourceLoading || ['gammaG', 'rhoL', 'muL'].includes(key)"
                 size="small"
+                @update:model-value="setFieldValue(key, $event)"
               />
             </div>
           </div>
@@ -509,9 +534,10 @@ onBeforeUnmount(() => {
         <div class="boundary-selector">
           <span class="boundary-label">压力／温度位置</span>
           <el-radio-group
-            v-model="form.boundaryPosition"
+            :model-value="boundary.values.boundaryPosition"
             :disabled="busy || sourceLoading"
             size="small"
+            @update:model-value="setWellboreBoundaryValue(boundary, 'boundaryPosition', $event)"
           >
             <el-radio-button value="wellhead">井口</el-radio-button>
             <el-radio-button value="bottomhole">井底</el-radio-button>

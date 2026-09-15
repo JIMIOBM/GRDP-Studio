@@ -17,8 +17,14 @@ public record HydrateRequest(
         @NotEmpty(message = "气体组分不能为空") Map<String, Double> composition,
         @NotNull @Positive Double pressureMpa,
         @NotNull Double actualTemperatureC,
-        @Positive Double fugacityScale
+        @Positive Double fugacityScale,
+        Map<String, Object> pvtSnapshot
 ) {
+    public HydrateRequest(Long projectId, Long gasReservoirId, String wellName, Long pvtId, Long temperatureId,
+            Long pressureConversionId, Map<String, Double> composition, Double pressureMpa, Double actualTemperatureC, Double fugacityScale) {
+        this(projectId, gasReservoirId, wellName, pvtId, temperatureId, pressureConversionId, composition,
+                pressureMpa, actualTemperatureC, fugacityScale, null);
+    }
     public double effectiveFugacityScale() {
         return fugacityScale == null ? 2.0 : fugacityScale;
     }

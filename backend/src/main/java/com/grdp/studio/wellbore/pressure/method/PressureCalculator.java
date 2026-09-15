@@ -59,6 +59,11 @@ public final class PressureCalculator {
 
     /** Uses the supplied JS depth grid, linear temperature, DAK, LGE, HB and MB flow. */
     public static Result calculate(PressureCalculateRequest request) {
+        return calculate(request, (pressure, temperature) -> PressureCorrelations.originalProperties(
+                pressure, temperature + 273.15, request.gammaG, request.rhoL, request.muL));
+    }
+
+    public static Result calculate(PressureCalculateRequest request, BiFunction<Double, Double, Properties> properties) {
         validateDirectInput(request);
 
         List<Double> depths = buildDepths(request.depth, request.step);
@@ -70,13 +75,7 @@ public final class PressureCalculator {
                 request,
                 depths,
                 temperatures,
-                (pressure, temperature) -> PressureCorrelations.originalProperties(
-                        pressure,
-                        temperature + 273.15,
-                        request.gammaG,
-                        request.rhoL,
-                        request.muL
-                )
+                properties
         );
     }
 

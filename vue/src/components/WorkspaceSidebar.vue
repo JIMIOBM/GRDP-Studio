@@ -9,6 +9,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import TreeNode from '@/views/TreeNode.vue'
 import { ensurePipelineNavigation } from '@/utils/pipelineNavigation'
+import { ensureWellboreNavigation } from '@/utils/wellboreNavigation'
 
 const props = defineProps({
   nodes: { type: Array, default: () => [] },
@@ -25,7 +26,10 @@ const emit = defineEmits([
   'expand',
   'node-contextmenu'
 ])
-watch(() => props.nodes, nodes => ensurePipelineNavigation(nodes), { deep: true, immediate: true })
+watch(() => props.nodes, nodes => {
+  ensurePipelineNavigation(nodes)
+  ensureWellboreNavigation(nodes)
+}, { deep: true, immediate: true })
 
 const panelEl = ref(null)
 const minWidth = 262

@@ -1,10 +1,10 @@
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { liquidLoadingApi } from '@/api/wellboreRisk'
-import { pvtStorageApi } from '@/api/pvtStorage'
+import request from '@/utils/request'
+import { firstPvtSource, waterProperties } from './pvtSource'
 import { loadTemperatureSources } from '@/api/temperatureSources'
-import { waterPvtApi } from '@/api/waterPvt'
 import { wellborePressureApi } from '@/api/wellborePressure'
 import { wellboreTemperatureApi } from '@/api/wellboreTemperature'
 import { numberOf, productionValues } from '@/utils/temperatureSources'
@@ -22,22 +22,24 @@ const form = reactive({
   temperatureC: null,
   gasSpecificGravity: null,
   liquidDensityKgM3: null,
-  surfaceTensionMnM: null,
-  tubingIdMm: null
+  surfaceTensionNm: 0.07,
+  tubingIdMm: null,
+  inclinationAngle: null
 })
 
 const result = ref(null)
+const calculatedInput = ref(null)
+watch(form, () => { calculatedInput.value = null }, { deep: true })
 const history = ref([])
 const busy = ref(false)
 const densityBusy = ref(false)
 const historyVisible = ref(false)
 const pvtWaterSource = reactive({
   pvtId: null,
-  salinity: null,
-  volumeFactorMethod: 0,
-  compressibilityMethod: 0
+  pvtSnapshot: null
 })
 let densityCalculationSequence = 0
+let loadSequence = 0
 
 const context = () => ({
   projectId: Number(props.projectId),
@@ -46,24 +48,20 @@ const context = () => ({
 })
 const payload = () => ({
   ...context(),
+  pvtId: pvtWaterSource.pvtId,
+  pvtSnapshot: pvtWaterSource.pvtSnapshot,
   qg: Number(form.qg),
   qw: form.qw == null ? null : Number(form.qw),
   pressureMpa: Number(form.pressureMpa),
   temperatureC: Number(form.temperatureC),
   gasSpecificGravity: Number(form.gasSpecificGravity),
   liquidDensityKgM3: Number(form.liquidDensityKgM3),
-  surfaceTensionMnM: Number(form.surfaceTensionMnM),
+  surfaceTensionMnM: Number(form.surfaceTensionNm) * 1000,
   tubingIdMm: Number(form.tubingIdMm)
 })
 
 const parseJson = value => typeof value === 'string' ? JSON.parse(value) : value
 const parseResult = detail => parseJson(detail?.result_json ?? detail?.resultJson)
-const unwrapResponse = response => response?.data?.data ?? response?.data ?? response ?? {}
-
-const methodIndex = (value, options) => {
-  const index = options.indexOf(value)
-  return index >= 0 ? index : 0
-}
 
 const displayValue = value => {
   if (value == null || value === '' || Number.isNaN(Number(value))) return '-'
@@ -82,24 +80,26 @@ function applyInput (input) {
   form.temperatureC = input.temperatureC ?? input.Tc ?? null
   form.gasSpecificGravity = input.gasSpecificGravity ?? input.gamma_g ?? null
   form.liquidDensityKgM3 = input.liquidDensityKgM3 ?? input.rhoL ?? null
-  form.surfaceTensionMnM = input.surfaceTensionMnM ?? input.sigma ?? null
+  const surfaceTensionMnM = input.surfaceTensionMnM ?? input.sigma
+  form.surfaceTensionNm = input.surfaceTensionNm ?? (
+    surfaceTensionMnM == null ? 0.07 : Number(surfaceTensionMnM) / 1000
+  )
   form.tubingIdMm = input.tubingIdMm ?? input.d ?? null
 }
 
 async function refreshLiquidDensity (options = {}) {
   const notifyFailure = options.notifyFailure === true
+  const current = context()
   const pressure = Number(form.pressureMpa)
   const temperature = Number(form.temperatureC)
-  const salinity = Number(pvtWaterSource.salinity)
 
   if (
     !pvtWaterSource.pvtId ||
     !Number.isFinite(pressure) ||
     pressure <= 0 ||
-    !Number.isFinite(temperature) ||
-    !Number.isFinite(salinity) ||
-    salinity < 0
+    !Number.isFinite(temperature)
   ) {
+    if (notifyFailure) ElMessage.warning('请先读取当前井第一条PVT，并填写有效的压力和温度')
     return false
   }
 
@@ -107,24 +107,18 @@ async function refreshLiquidDensity (options = {}) {
   form.liquidDensityKgM3 = null
   densityBusy.value = true
   try {
-    const response = await waterPvtApi.calculateCurveTwo({
-      projectId: Number(props.projectId),
-      salinity,
-      originalPressure: pressure,
-      temperature,
-      pressureStart: pressure,
-      pressureEnd: pressure,
-      pressureStep: 1,
-      volumeFactorMethod: pvtWaterSource.volumeFactorMethod,
-      compressibilityMethod: pvtWaterSource.compressibilityMethod
-    })
-    if (sequence !== densityCalculationSequence) return false
+    const properties = await waterProperties(request, context(), pressure, temperature)
+    if (sequence !== densityCalculationSequence || JSON.stringify(current) !== JSON.stringify(context())
+      || pressure !== Number(form.pressureMpa) || temperature !== Number(form.temperatureC)) return false
 
-    const density = numberOf(unwrapResponse(response)?.items?.[0]?.density)
+    const density = numberOf(properties?.rhoL)
     if (density == null || density <= 0) {
       throw new Error('PVT密度接口未返回有效的液体密度')
     }
     form.liquidDensityKgM3 = density
+    form.gasSpecificGravity = properties.gammaG
+    pvtWaterSource.pvtId = properties.pvtId
+    pvtWaterSource.pvtSnapshot = properties.pvtSnapshot
     return true
   } catch (error) {
     if (notifyFailure && sequence === densityCalculationSequence) {
@@ -137,14 +131,14 @@ async function refreshLiquidDensity (options = {}) {
 }
 
 async function calculate () {
-  await refreshLiquidDensity({ notifyFailure: true })
+  if (!await refreshLiquidDensity({ notifyFailure: true })) return
   const requiredFields = [
     ['标况产气量', form.qg],
     ['压力', form.pressureMpa],
     ['温度', form.temperatureC],
     ['气体相对密度', form.gasSpecificGravity],
     ['液体密度', form.liquidDensityKgM3],
-    ['气液界面张力', form.surfaceTensionMnM],
+    ['气液界面张力', form.surfaceTensionNm],
     ['油管内径', form.tubingIdMm]
   ]
   const missing = requiredFields.find(([, value]) => value == null || value === '')
@@ -152,26 +146,31 @@ async function calculate () {
   if (Number(form.qg) < 0 || (form.qw != null && Number(form.qw) < 0)) {
     return ElMessage.warning('产气量和日产水量不能小于 0')
   }
-  if ([form.pressureMpa, form.gasSpecificGravity, form.liquidDensityKgM3, form.surfaceTensionMnM, form.tubingIdMm].some(value => Number(value) <= 0)) {
+  if ([form.pressureMpa, form.gasSpecificGravity, form.liquidDensityKgM3, form.surfaceTensionNm, form.tubingIdMm].some(value => Number(value) <= 0)) {
     return ElMessage.warning('压力、气体相对密度、液体密度、界面张力和油管内径必须大于 0')
   }
 
   busy.value = true
   try {
-    applyResult(await liquidLoadingApi.calculate(payload()))
+    const calculation = payload()
+    const currentResult = await liquidLoadingApi.calculate(calculation)
+    await nextTick()
+    if (JSON.stringify(calculation) !== JSON.stringify(payload())) return
+    applyResult(currentResult)
+    calculatedInput.value = calculation
   } finally {
     busy.value = false
   }
 }
 
 async function save () {
-  if (!result.value) return ElMessage.warning('请先计算')
+  if (!calculatedInput.value) return ElMessage.warning('请重新计算后保存')
   const { value } = await ElMessageBox.prompt('请输入方案名称', '保存积液计算', {
     inputValue: `积液方案${history.value.length + 1}`
   })
   busy.value = true
   try {
-    await liquidLoadingApi.save({ calculationName: value, calculation: payload() })
+    await liquidLoadingApi.save({ calculationName: value, calculation: calculatedInput.value })
     await loadHistory()
     ElMessage.success('积液计算已保存')
   } finally {
@@ -180,7 +179,9 @@ async function save () {
 }
 
 async function loadHistory () {
-  history.value = await liquidLoadingApi.list(...Object.values(context())) || []
+  const current = context()
+  const rows = await liquidLoadingApi.list(...Object.values(current)) || []
+  if (JSON.stringify(current) === JSON.stringify(context())) history.value = rows
 }
 
 async function openRecord (row) {
@@ -215,13 +216,18 @@ async function copyResult (value) {
 }
 
 async function useLatestSources (options = {}) {
+  const sequence = ++loadSequence
+  ++densityCalculationSequence
+  densityBusy.value = false
   const notify = options.notify !== false
   const current = context()
   const loaded = []
   const errors = []
   busy.value = true
   pvtWaterSource.pvtId = null
-  pvtWaterSource.salinity = null
+  pvtWaterSource.pvtSnapshot = null
+  form.gasSpecificGravity = form.liquidDensityKgM3 = null
+  calculatedInput.value = null
 
   const [sourceResult, pressures, temperatures] = await Promise.allSettled([
     loadTemperatureSources(current.projectId, current.gasReservoirId, current.wellName),
@@ -229,6 +235,7 @@ async function useLatestSources (options = {}) {
     wellboreTemperatureApi.list(current.projectId, current.gasReservoirId, current.wellName)
   ])
 
+  if (sequence !== loadSequence) return
   const source = sourceResult.status === 'fulfilled' ? sourceResult.value : null
   if (source) {
     errors.push(...(source.errors || []))
@@ -255,42 +262,20 @@ async function useLatestSources (options = {}) {
       form.tubingIdMm = source.input.idTubing
       loaded.push('油管内径')
     }
+    if (source.input?.angle != null) {
+      form.inclinationAngle = source.input.angle
+      loaded.push('井斜角')
+    }
 
-    const pvt = source.pvtRecords?.at(-1)
-    if (pvt?.pvtId || pvt?.id) {
-      try {
-        const pvtId = pvt.pvtId || pvt.id
-        const detail = (
-          await pvtStorageApi.getDetail(
-            pvtId,
-            current.projectId,
-            current.gasReservoirId,
-            current.wellName
-          )
-        )?.data
-        const gasSpecificGravity = numberOf(detail?.gasInput?.specificGravity)
-        const salinity = numberOf(detail?.waterInput?.salinity)
-        const waterSettings = parseJson(detail?.settings?.water) || {}
-        pvtWaterSource.pvtId = pvtId
-        pvtWaterSource.salinity = salinity
-        pvtWaterSource.volumeFactorMethod = methodIndex(
-          waterSettings.volumeFactorMethod,
-          ['McCain方法', 'Standing方法']
-        )
-        pvtWaterSource.compressibilityMethod = methodIndex(
-          waterSettings.compressibilityMethod,
-          ['Meehan方法', 'Dodson-Standing方法']
-        )
-        if (gasSpecificGravity != null) {
-          form.gasSpecificGravity = gasSpecificGravity
-          loaded.push('气体相对密度')
-        }
-        if (salinity == null) {
-          errors.push('最新PVT缺少地层水矿化度，无法按当前压力和温度计算液体密度')
-        }
-      } catch (error) {
-        errors.push(error?.msg || error?.message || 'PVT物性读取失败')
-      }
+    try {
+      const pvtSource = await firstPvtSource(request, current)
+      if (sequence !== loadSequence) return
+      pvtWaterSource.pvtId = pvtSource.pvtId
+      pvtWaterSource.pvtSnapshot = pvtSource.pvtSnapshot
+      form.gasSpecificGravity = numberOf(pvtSource.gasInput?.specificGravity)
+      loaded.push('第一条PVT气体相对密度')
+    } catch (error) {
+      errors.push(error?.msg || error?.message || '第一条PVT来源读取失败')
     }
   } else {
     errors.push(sourceResult.reason?.msg || sourceResult.reason?.message || '生产、完井及PVT数据读取失败')
@@ -300,6 +285,7 @@ async function useLatestSources (options = {}) {
     const pressureRows = pressures.value?.data ?? pressures.value ?? []
     if (pressureRows[0]?.id) {
       const detail = (await wellborePressureApi.detail(pressureRows[0].id, current.projectId, current.gasReservoirId, current.wellName))?.data
+      if (sequence !== loadSequence) return
       if (detail?.record?.boundaryPressureMpa) {
         form.pressureMpa = detail.record.boundaryPressureMpa
         loaded.push('压力')
@@ -313,8 +299,9 @@ async function useLatestSources (options = {}) {
     const temperatureRows = temperatures.value?.data ?? temperatures.value ?? []
     if (temperatureRows[0]?.id) {
       const detail = (await wellboreTemperatureApi.detail(temperatureRows[0].id, current.projectId, current.gasReservoirId, current.wellName))?.data
-      if (detail?.record?.bottomFluidTemperatureC != null) {
-        form.temperatureC = detail.record.bottomFluidTemperatureC
+      if (sequence !== loadSequence) return
+      if (detail?.record?.boundaryTemperatureC != null) {
+        form.temperatureC = detail.record.boundaryTemperatureC
         loaded.push('温度')
       }
     }
@@ -322,8 +309,10 @@ async function useLatestSources (options = {}) {
     errors.push(error?.msg || error?.message || '温度数据读取失败')
   }
 
+  if (sequence !== loadSequence) return
   if (await refreshLiquidDensity()) loaded.push('液体密度')
 
+  if (sequence !== loadSequence) return
   busy.value = false
   if (notify) {
     if (loaded.length) ElMessage.success(`已读取：${[...new Set(loaded)].join('、')}`)
@@ -332,6 +321,12 @@ async function useLatestSources (options = {}) {
 }
 
 onMounted(() => {
+  loadHistory()
+  useLatestSources({ notify: false })
+})
+watch(() => [props.projectId, props.gasReservoirId, props.node.wellName], () => {
+  result.value = calculatedInput.value = null
+  history.value = []
   loadHistory()
   useLatestSources({ notify: false })
 })
@@ -344,7 +339,7 @@ onMounted(() => {
       <div class="header-actions">
         <button type="button" @click="useLatestSources">读取最新井数据</button>
         <button type="button" @click="historyVisible = true">历史记录（{{ history.length }}）</button>
-        <button class="primary" type="button" :disabled="!result || busy" @click="save">保存</button>
+        <button class="primary" type="button" :disabled="!calculatedInput || busy" @click="save">保存</button>
       </div>
     </header>
 
@@ -373,11 +368,11 @@ onMounted(() => {
         >
       </label>
       <label class="field">
-        <span>气液界面张力（mN/m）</span>
-        <input v-model.number="form.surfaceTensionMnM" type="number" min="0" step="any" placeholder="请输入">
+        <span>气液界面张力（N/m）</span>
+        <input v-model.number="form.surfaceTensionNm" type="number" min="0" step="any" placeholder="请输入">
       </label>
 
-      <label class="field">
+      <label class="field parameter-row-start">
         <span>标况产气量（10⁴m³/d）</span>
         <input v-model.number="form.qg" type="number" min="0" step="any" placeholder="从生产数据获取">
       </label>
@@ -391,18 +386,29 @@ onMounted(() => {
       </label>
       <label class="field">
         <span>气体相对密度（dless）</span>
-        <input v-model.number="form.gasSpecificGravity" type="number" min="0" step="any" placeholder="从PVT获取">
+        <input v-model.number="form.gasSpecificGravity" type="number" min="0" step="any" readonly placeholder="从第一条PVT获取">
       </label>
 
-      <label class="field">
+      <label class="field parameter-row-start">
         <span>液体密度（kg/m³）</span>
         <input
           v-model.number="form.liquidDensityKgM3"
           type="number"
           min="0"
           step="any"
-          :readonly="densityBusy"
+          readonly
           :placeholder="densityBusy ? 'PVT计算中...' : '由PVT自动计算'"
+        >
+      </label>
+      <label class="field">
+        <span>井斜角（°）</span>
+        <input
+          v-model.number="form.inclinationAngle"
+          type="number"
+          min="0"
+          max="90"
+          step="any"
+          placeholder="从井斜数据获取"
         >
       </label>
       </div>
@@ -476,6 +482,7 @@ button.primary { min-width: 74px; border-color: #202020; background: #202020; co
 .form-canvas { padding: 20px 18px 34px; }
 .form-title { margin-bottom: 20px; font-weight: 600; }
 .parameter-grid { display: grid; grid-template-columns: repeat(4, minmax(170px, 1fr)); gap: 20px 24px; }
+.parameter-row-start { grid-column-start: 1; }
 .field { display: grid; gap: 8px; min-width: 0; color: #333; }
 .field input { width: 100%; height: 34px; padding: 0 11px; border: 1px solid #d4d7dc; border-radius: 4px; background: #fff; box-sizing: border-box; color: #303133; font: inherit; outline: none; }
 .field input:focus { border-color: #b49a00; box-shadow: 0 0 0 2px rgba(244,208,0,.14); }

@@ -1,8 +1,9 @@
 <script setup>
-import { computed, reactive, ref } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { hydrateApi } from '@/api/wellboreRisk'
-import { pvtStorageApi } from '@/api/pvtStorage'
+import request from '@/utils/request'
+import { firstPvtSource, pvtComposition } from './pvtSource'
 import { wellborePressureApi } from '@/api/wellborePressure'
 import { wellboreTemperatureApi } from '@/api/wellboreTemperature'
 
@@ -52,30 +53,25 @@ const droppedComponentKeys = [
   'H2O'
 ]
 
-const defaultComposition = {
-  CH4: 80.52,
-  C2H6: 0.04,
-  HE: 0.05,
-  H2: 0.02,
-  N2: 0.75,
-  CO2: 6.97,
-  H2S: 11.68
-}
 
 const form = reactive({
   pressureMpa: 50,
   actualTemperatureC: 40,
   fugacityScale: 2,
   pvtId: null,
+  pvtSnapshot: null,
   temperatureId: null,
   pressureConversionId: null,
   composition: Object.fromEntries(
-    components.map(([key]) => [key, defaultComposition[key] || 0])
+    components.map(([key]) => [key, 0])
   )
 })
 
 const result = ref(null)
+const calculatedInput = ref(null)
+watch(form, () => { calculatedInput.value = null }, { deep: true })
 const busy = ref(false)
+let loadSequence = 0
 
 const context = () => ({
   projectId: Number(props.projectId),
@@ -86,6 +82,7 @@ const context = () => ({
 const payload = () => ({
   ...context(),
   pvtId: form.pvtId,
+  pvtSnapshot: form.pvtSnapshot,
   temperatureId: form.temperatureId,
   pressureConversionId: form.pressureConversionId,
   pressureMpa: form.pressureMpa,
@@ -112,14 +109,19 @@ const resultComponents = computed(() => {
 async function calculate () {
   busy.value = true
   try {
-    result.value = await hydrateApi.calculate(payload())
+    const calculation = payload()
+    const currentResult = await hydrateApi.calculate(calculation)
+    await nextTick()
+    if (JSON.stringify(calculation) !== JSON.stringify(payload())) return
+    result.value = currentResult
+    calculatedInput.value = calculation
   } finally {
     busy.value = false
   }
 }
 
 async function save () {
-  if (!result.value) {
+  if (!calculatedInput.value) {
     return ElMessage.warning('请先计算')
   }
 
@@ -133,7 +135,7 @@ async function save () {
   try {
     await hydrateApi.save({
       calculationName: value,
-      calculation: payload()
+      calculation: calculatedInput.value
     })
     ElMessage.success('水合物预测已保存')
   } finally {
@@ -142,13 +144,12 @@ async function save () {
 }
 
 async function useLatestSources () {
+  const sequence = ++loadSequence
+  busy.value = true
+  try {
   const current = context()
   const [pvts, pressures, temperatures] = await Promise.allSettled([
-    pvtStorageApi.list(
-      current.projectId,
-      current.gasReservoirId,
-      current.wellName
-    ),
+    firstPvtSource(request, current),
     wellborePressureApi.list(
       current.projectId,
       current.gasReservoirId,
@@ -161,35 +162,13 @@ async function useLatestSources () {
     )
   ])
 
-  const pvtRows = pvts.value?.data ?? pvts.value ?? []
-  const latestPvt = pvtRows.at(-1)
-
-  if (latestPvt?.pvtId || latestPvt?.id) {
-    form.pvtId = latestPvt.pvtId || latestPvt.id
-
-    const detail = (
-      await pvtStorageApi.getDetail(
-        form.pvtId,
-        current.projectId,
-        current.gasReservoirId,
-        current.wellName
-      )
-    )?.data
-    const gas = detail?.gasInput
-
-    if (gas) {
-      form.composition.H2S = Number(gas.hydrogenSulfide) || 0
-      form.composition.CO2 = Number(gas.carbonDioxide) || 0
-      form.composition.N2 = Number(gas.nitrogen) || 0
-      form.composition.CH4 = Math.max(
-        0,
-        100 -
-          form.composition.H2S -
-          form.composition.CO2 -
-          form.composition.N2
-      )
-    }
-  }
+  if (sequence !== loadSequence) return
+  if (pvts.status !== 'fulfilled') throw pvts.reason
+  const pvtSource = pvts.value
+  Object.assign(form.composition, Object.fromEntries(components.map(([key]) => [key, 0])),
+    pvtComposition(pvtSource.gasInput))
+  form.pvtId = pvtSource.pvtId
+  form.pvtSnapshot = pvtSource.pvtSnapshot
 
   const pressureRows = pressures.value?.data ?? pressures.value ?? []
   const latestPressure = pressureRows[0]
@@ -206,6 +185,7 @@ async function useLatestSources () {
       )
     )?.data
 
+    if (sequence !== loadSequence) return
     form.pressureMpa =
       detail?.record?.boundaryPressureMpa ?? form.pressureMpa
   }
@@ -225,14 +205,27 @@ async function useLatestSources () {
       )
     )?.data
 
+    if (sequence !== loadSequence) return
     form.actualTemperatureC =
-      detail?.record?.bottomFluidTemperatureC ??
-      detail?.record?.predictedWellheadTemperatureC ??
+      detail?.record?.boundaryTemperatureC ??
       form.actualTemperatureC
   }
 
-  ElMessage.success('已关联当前井最新PVT、压力和温度方案')
+  ElMessage.success('已关联当前井第一条PVT及温压边界，请补充真实烃组成')
+  } catch (error) {
+    if (sequence === loadSequence) ElMessage.error(error?.msg || error?.message || '第一条PVT读取失败')
+  } finally {
+    if (sequence === loadSequence) busy.value = false
+  }
 }
+watch(() => [props.projectId, props.gasReservoirId, props.node.wellName], () => {
+  Object.assign(form.composition, Object.fromEntries(components.map(([key]) => [key, 0])))
+  form.pvtId = null
+  form.pvtSnapshot = null
+  form.temperatureId = form.pressureConversionId = null
+  result.value = calculatedInput.value = null
+  useLatestSources()
+}, { immediate: true })
 </script>
 
 <template>
@@ -241,7 +234,7 @@ async function useLatestSources () {
       <div class="result-tab">{{ node.wellName }} · 水合物预测结果</div>
       <div class="header-actions">
         <button type="button" @click="useLatestSources">读取最新井数据</button>
-        <button class="primary" type="button" :disabled="!result || busy" @click="save">保存</button>
+        <button class="primary" type="button" :disabled="!calculatedInput || busy" @click="save">保存</button>
       </div>
     </header>
 
@@ -267,7 +260,7 @@ async function useLatestSources () {
 
         <h3 class="subheading">天然气组分</h3>
         <p class="hint">
-          可输入摩尔百分数或摩尔分数；算法自动归一化。灰色标记的组分由原模型识别但不参与 hydT2 计算。
+          H₂S、CO₂、N₂来自当前井第一条PVT性质；其余组成需按真实数据补充，单位为摩尔百分数，总和应为100%。灰色组分不参与hydT2计算。
         </p>
 
         <div class="parameter-grid composition">
@@ -280,6 +273,7 @@ async function useLatestSources () {
             <span>{{ label }}</span>
             <el-input-number
               v-model="form.composition[key]"
+              :disabled="['H2S', 'CO2', 'N2'].includes(key)"
               :controls="false"
               :min="0"
             />

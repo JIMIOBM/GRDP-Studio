@@ -7,6 +7,7 @@ public class PressureCalculateRequest {
     public Long gasReservoirId;
     public Long temperatureRecordId;
     public Long pvtId;
+    public java.util.Map<String, Object> pvtSnapshot;
     public String wellName;
     public String operationMode = "production";
     public String boundaryPosition = "wellhead";

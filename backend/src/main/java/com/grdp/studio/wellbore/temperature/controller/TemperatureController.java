@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -35,16 +36,22 @@ public class TemperatureController {
 
     @PostMapping("/calculate")
     public ApiResponse<TemperatureCalculateResponse> calculate(
-            @RequestBody TemperatureCalculateRequest request
+            @RequestBody TemperatureCalculateRequest request,
+            @RequestHeader(value="token", required=false) String token,
+            @RequestHeader(value="Cookie", required=false) String cookie,
+            @RequestHeader(value="Process-Env", required=false) String environment
     ) {
-        return ApiResponse.success(TemperatureCalculateResponse.from(service.calculate(request)));
+        return ApiResponse.success(TemperatureCalculateResponse.from(service.calculate(request, token, cookie, environment)));
     }
 
     @PostMapping("/records/save")
     public ApiResponse<TemperatureRecordDetail> save(
-            @RequestBody TemperatureSaveRequest request
+            @RequestBody TemperatureSaveRequest request,
+            @RequestHeader(value="token", required=false) String token,
+            @RequestHeader(value="Cookie", required=false) String cookie,
+            @RequestHeader(value="Process-Env", required=false) String environment
     ) {
-        return ApiResponse.success(storage.save(request));
+        return ApiResponse.success(storage.save(request, token, cookie, environment));
     }
 
     @GetMapping("/records")

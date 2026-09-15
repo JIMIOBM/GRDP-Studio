@@ -33,11 +33,13 @@ import WellDataTableContent from '@/views/DataManagement/WellDataTableContent.vu
 import WellboreStructureContent from '@/views/WellboreCapacity/WellboreStructureContent.vue'
 import TemperatureModelContent from '@/views/WellboreCapacity/TempratrueModel.vue'
 import PressureConversion from '@/views/WellboreCapacity/PressureConversion.vue'
+import BoundaryConditionsContent from '@/views/WellboreCapacity/BoundaryConditionsContent.vue'
 import LiquidLoadingContent from '@/views/WellboreCapacity/LiquidLoadingContent.vue'
 import HydratePredictionContent from '@/views/WellboreCapacity/HydratePredictionContent.vue'
 import SingleWellProductivityInterface from '@/views/SingleWellProductivityInterface.vue'
 import PipelineCapacityContent from '@/views/PipelineCapacity/PipelineCapacityContent.vue'
 import { ensurePipelineNavigation, findPipelinePageNode, pipelinePageForCommand, resolvePipelinePage } from '@/utils/pipelineNavigation'
+import { createDefaultWellboreNodes, ensureWellboreNavigation } from '@/utils/wellboreNavigation'
 import { NODETYPE } from '@/constants/nodeType'
 import { analyticMethodApi, dataManagementApi, dynamicBalanceApi, materialBalanceApi, nodeApi, notifyApi, parametersApi, projectApi, typicalCurveApi, waterInvasionApi, wellApi } from '@/api/docker'
 import { pvtStorageApi } from '@/api/pvtStorage'
@@ -845,39 +847,6 @@ const createWellDataNodes = (wellName, wellId) =>
         }))
     }))
 
-const createDefaultWellboreNodes = (wellName, wellId) => [
-  {
-    id: `wellbore-structure-${wellName}`,
-    label: '井身结构',
-    type: 'wellbore-structure',
-    wellName,
-    children: []
-  },
-  {
-    id: `${wellId || wellName}-${WELLBORE_PVT_GROUP_TYPE}`,
-    label: 'PVT模型',
-    type: WELLBORE_PVT_GROUP_TYPE,
-    wellName,
-    pvtEntry: PVT_ENTRY_WELLBORE,
-    defaultExpanded: false,
-    children: []
-  },
-  {
-    id: `wellbore-liquid-loading-${wellName}`,
-    label: '井筒积液',
-    type: 'wellbore-liquid-loading',
-    wellName,
-    children: []
-  },
-  {
-    id: `wellbore-hydrate-${wellName}`,
-    label: '水合物',
-    type: 'wellbore-hydrate',
-    wellName,
-    children: []
-  }
-]
-
 const createEmptyWell = (wellName, wellId) => ({ //创建一口空井
   id: wellId || `well-${wellName}`,
   label: wellName,
@@ -953,12 +922,7 @@ const ensureWell = (wellName, wellId) => { //确保井存在
         }
       })
     } else if (group.id === 'wellbore-capacity') {
-      createDefaultWellboreNodes(wellName, wellItem.id).forEach(defaultNode => {
-        const existingNode = groupItem.children.find(item => item.type === defaultNode.type)
-        if (!existingNode) {
-          groupItem.children.push(defaultNode)
-        }
-      })
+      ensureWellboreNavigation([groupItem])
     }
   })
 
@@ -970,21 +934,11 @@ const openWellboreStructure = (wellName, moduleType = 'wellbore-structure') => {
   const wellboreGroup = wellItem?.children.find(item => item.type === 'wellbore-capacity')
   if (!wellItem || !wellboreGroup) return
 
-  const nodeId = `${moduleType}-${wellName}`
-  let node = wellboreGroup.children.find(item => item.id === nodeId)
-  if (!node) {
-    node = {
-      id: nodeId,
-      label: moduleType === 'wellbore-temperature' ? '温度模型'
-        : moduleType === 'wellbore-pressure' ? '压力折算-折算方法'
-          : moduleType === 'wellbore-liquid-loading' ? '井筒积液'
-            : moduleType === 'wellbore-hydrate' ? '水合物' : '井身结构',
-      type: moduleType,
-      wellName,
-      children: []
-    }
-    wellboreGroup.children.push(node)
-  }
+  const pressureGroup = wellboreGroup.children.find(item => item.type === 'wellbore-pressure-group')
+  const parent = moduleType === 'wellbore-pressure' ? pressureGroup : wellboreGroup
+  const node = parent?.children.find(item => item.type === moduleType)
+  if (!node) return
+  if (moduleType === 'wellbore-pressure') pressureGroup.expanded = true
 
   const wellRoot = getWellGroup()
   if (wellRoot) wellRoot.expanded = true
@@ -4492,7 +4446,7 @@ const handleSelect = async (node) => { // 点击左侧树节点
     return
   }
 
-  if (['wellbore-structure', 'wellbore-temperature', 'wellbore-pressure', 'wellbore-liquid-loading', 'wellbore-hydrate'].includes(node.type)) {
+  if (['wellbore-structure', 'wellbore-temperature', 'wellbore-pressure', 'wellbore-boundary', 'wellbore-liquid-loading', 'wellbore-hydrate'].includes(node.type)) {
     currentView.value = node.type
     currentViewNode.value = node
     return
@@ -4652,7 +4606,7 @@ const handleCommand = async ({ group, name, parent, wellName: commandWellName })
     return
   }
 
-  if (group === '井筒能力' && ['井身结构', '温度模型', '折算方法', '井筒积液', '水合物'].includes(name)) {
+  if (group === '井筒能力' && ['井身结构', '温度模型', '折算方法', '边界条件', '井筒积液', '水合物'].includes(name)) {
     const activeWellName = targetWellName
     if (!activeWellName) {
       ElMessage.warning('请先在左侧选择一口井')
@@ -4661,8 +4615,9 @@ const handleCommand = async ({ group, name, parent, wellName: commandWellName })
 
     const moduleType = name === '温度模型' ? 'wellbore-temperature'
       : name === '折算方法' ? 'wellbore-pressure'
-        : name === '井筒积液' ? 'wellbore-liquid-loading'
-          : name === '水合物' ? 'wellbore-hydrate' : 'wellbore-structure'
+        : name === '边界条件' ? 'wellbore-boundary'
+          : name === '井筒积液' ? 'wellbore-liquid-loading'
+            : name === '水合物' ? 'wellbore-hydrate' : 'wellbore-structure'
     openWellboreStructure(activeWellName, moduleType)
     return
   }
@@ -5038,6 +4993,7 @@ onBeforeUnmount(() => {
         <TemperatureModelContent v-if="currentView === 'wellbore-temperature'"
           :key="currentViewNode?.id" :node="currentViewNode" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
         <PressureConversion v-if="currentView === 'wellbore-pressure'" :key="currentViewNode?.id" :node="currentViewNode" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
+        <BoundaryConditionsContent v-if="currentView === 'wellbore-boundary'" :key="currentViewNode?.id" :node="currentViewNode" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
         <LiquidLoadingContent v-if="currentView === 'wellbore-liquid-loading'" :key="currentViewNode?.id" :node="currentViewNode" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
         <HydratePredictionContent v-if="currentView === 'wellbore-hydrate'" :key="currentViewNode?.id" :node="currentViewNode" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
         <WellboreStructureContent v-if="currentView === 'wellbore-structure'"

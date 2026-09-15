@@ -81,7 +81,7 @@ public class TemperatureStorageService {
     }
 
     @Transactional
-    public TemperatureRecordDetail save(TemperatureSaveRequest save) {
+    public TemperatureRecordDetail save(TemperatureSaveRequest save, String token, String cookie, String environment) {
         if (save == null || save.calculation == null) {
             throw new BusinessException(400, "缺少温度计算参数");
         }
@@ -92,9 +92,8 @@ public class TemperatureStorageService {
                 required(request.gasReservoirId, "气藏"),
                 request.wellName
         );
+        var result = calculator.calculate(request, token, cookie, environment);
         validatePvt(request.propertySource, request.pvtId, wellId);
-
-        var result = calculator.calculate(request);
         WellTemperatureEntity entity = new WellTemperatureEntity();
         entity.setWellId(wellId);
         entity.setPvtId(request.pvtId);

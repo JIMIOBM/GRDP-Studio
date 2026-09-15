@@ -122,7 +122,7 @@ public class PressureStorageService {
                 request.wellName
         );
         Long temperatureRecordId = resolveTemperatureRecordId(request);
-        Long pvtId = resolvePvtId(request, wellId);
+        resolvePvtId(request, wellId);
         var temperature = temperatures.detail(
                 temperatureRecordId,
                 request.projectId,
@@ -138,7 +138,7 @@ public class PressureStorageService {
         WellPressureConversionEntity entity = new WellPressureConversionEntity();
         entity.setWellId(wellId);
         entity.setTemperatureId(temperatureRecordId);
-        entity.setPvtId(pvtId);
+        entity.setPvtId(request.pvtId);
         entity.setPressureNo(nextNo(wellId));
         entity.setPressureName(name(save.pressureName, "压力折算方案"));
         entity.setOperationMode("production");
@@ -172,7 +172,7 @@ public class PressureStorageService {
         method.setMethodName("HB".equals(result.methodCode())
                 ? "Hagedorn & Brown"
                 : "Mukherjee & Brill");
-        method.setAlgorithmVersion("supplied-js-1");
+        method.setAlgorithmVersion("supplied-js-1-pvt");
         method.setIterationLimit(10);
         method.setConvergenceToleranceMpa(0.0001);
         method.setRelaxationFactor(0.5);
@@ -307,7 +307,7 @@ public class PressureStorageService {
             pvt = pvts.selectOne(
                     new LambdaQueryWrapper<WellPvtEntity>()
                             .eq(WellPvtEntity::getWellId, wellId)
-                            .orderByDesc(WellPvtEntity::getPvtNo)
+                            .orderByAsc(WellPvtEntity::getPvtNo)
                             .last("LIMIT 1")
             );
         }

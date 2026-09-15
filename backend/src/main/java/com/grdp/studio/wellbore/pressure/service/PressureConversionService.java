@@ -6,6 +6,8 @@ import org.springframework.stereotype.Service;
 
 @Service
 public class PressureConversionService {
+    private final PvtPropertyProvider pvt;
+    public PressureConversionService(PvtPropertyProvider pvt) { this.pvt = pvt; }
     public record Calculation(
             PressureCalculator.Result result,
             double gasSpecificGravity
@@ -26,6 +28,7 @@ public class PressureConversionService {
             String cookie,
             String environment
     ) {
-        return new Calculation(PressureCalculator.calculate(request), request.gammaG);
+        var session = pvt.open(request, token, cookie, environment);
+        return new Calculation(PressureCalculator.calculate(request, session.properties()), session.gasSpecificGravity());
     }
 }

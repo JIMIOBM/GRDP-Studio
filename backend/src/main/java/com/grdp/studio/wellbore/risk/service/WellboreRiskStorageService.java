@@ -20,13 +20,14 @@ import java.util.Map;
 @Service
 public class WellboreRiskStorageService {
     private final JdbcTemplate jdbc; private final ObjectMapper json;
-    private final LiquidLoadingCalculator liquidCalculator; private final HydrateCalculator hydrateCalculator;
-    public WellboreRiskStorageService(JdbcTemplate jdbc,ObjectMapper json,LiquidLoadingCalculator liquidCalculator,HydrateCalculator hydrateCalculator){this.jdbc=jdbc;this.json=json;this.liquidCalculator=liquidCalculator;this.hydrateCalculator=hydrateCalculator;}
+    private final WellboreRiskCalculationService calculator; private final HydrateCalculator hydrateCalculator;
+    public WellboreRiskStorageService(JdbcTemplate jdbc,ObjectMapper json,WellboreRiskCalculationService calculator,HydrateCalculator hydrateCalculator){this.jdbc=jdbc;this.json=json;this.calculator=calculator;this.hydrateCalculator=hydrateCalculator;}
 
     @Transactional
-    public Map<String,Object> saveLiquid(LiquidLoadingSaveRequest save){
-        LiquidLoadingRequest req=save.calculation(); long wellId=wellId(req.projectId(),req.gasReservoirId(),req.wellName());
-        LiquidLoadingResult r=liquidCalculator.calculate(req); int no=nextNo("project_well_liquid_loading",wellId);
+    public Map<String,Object> saveLiquid(LiquidLoadingSaveRequest save,String token,String cookie,String environment){
+        var calculation=calculator.calculateLiquid(save.calculation(),token,cookie,environment);
+        LiquidLoadingRequest req=calculation.request(); long wellId=wellId(req.projectId(),req.gasReservoirId(),req.wellName());
+        LiquidLoadingResult r=calculation.result(); int no=nextNo("project_well_liquid_loading",wellId);
         KeyHolder key=new GeneratedKeyHolder(); String sql="""
                 INSERT INTO project_well_liquid_loading(well_id,calculation_no,calculation_name,q_gas_1e4_m3d,q_water_m3d,
                 pressure_mpa,temperature_c,gas_specific_gravity,liquid_density_kg_m3,surface_tension_mn_m,tubing_id_mm,
@@ -51,7 +52,7 @@ public class WellboreRiskStorageService {
 
     @Transactional
     public Map<String,Object> saveHydrate(HydrateSaveRequest save){
-        HydrateRequest req=save.calculation();long wellId=wellId(req.projectId(),req.gasReservoirId(),req.wellName());validateSources(req,wellId);
+        HydrateRequest req=calculator.prepareHydrate(save.calculation());long wellId=wellId(req.projectId(),req.gasReservoirId(),req.wellName());validateSources(req,wellId);
         HydrateResult r=hydrateCalculator.calculate(req);int no=nextNo("project_well_hydrate_prediction",wellId);KeyHolder key=new GeneratedKeyHolder();
         String sql="""
                 INSERT INTO project_well_hydrate_prediction(well_id,pvt_id,temperature_id,pressure_conversion_id,calculation_no,calculation_name,

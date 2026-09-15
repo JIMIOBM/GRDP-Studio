@@ -5,7 +5,8 @@ public class TemperatureCalculateRequest {
     public String tempModel = "alves";
     /** 独立 Alves 温度算法当前仅接受井口边界。 */
     public String boundaryPosition = "wellhead";
-    public String propertySource = "MANUAL";
+    public String propertySource = "PVT";
+    public java.util.Map<String, Object> pvtSnapshot;
     public Long projectId, gasReservoirId, pvtId;
     public String wellName;
     /** 仅作为物性评价与输入快照保存，不构造压力剖面。 */

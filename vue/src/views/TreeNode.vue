@@ -41,6 +41,8 @@ const toggle = () => {
 const handleClick = () => {
   if (props.node.disabled) return
   const directoryOnly = props.node.type === 'well-data-static-pressure' ||
+    props.node.type === 'wellbore-pressure-group' ||
+    props.node.type === 'wellbore-pressure-comparison' ||
     props.node.type === 'pipeline-constraints-group' ||
     (props.node.type === 'pipeline-capacity-page' && props.node.section === 'constraints')
   if (!directoryOnly) emit('select', props.node)

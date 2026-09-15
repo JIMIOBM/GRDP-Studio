@@ -11,14 +11,21 @@ public class LiquidLoadingCalculator {
         double temperatureK = input.temperatureC() + 273.15;
         double z = zFactor(input.pressureMpa(), temperatureK, input.gasSpecificGravity());
         double rhoGas = gasDensity(input.pressureMpa(), temperatureK, input.gasSpecificGravity());
+        double bg = (0.101325 / input.pressureMpa()) * (temperatureK / 293.15) * z;
+        return calculate(input, rhoGas, z, bg);
+    }
+
+    /** 井筒业务由共同PVT服务提供工况物性；正反气量换算使用同一Bg。 */
+    public LiquidLoadingResult calculate(LiquidLoadingRequest input, double rhoGas, double z, double bg) {
+        if (!Double.isFinite(rhoGas) || rhoGas <= 0 || !Double.isFinite(z) || z <= 0 || !Double.isFinite(bg) || bg <= 0)
+            throw new com.grdp.studio.common.BusinessException(502, "PVT气体物性无效");
         Velocities critical = criticalVelocity(input.surfaceTensionMnM(), input.liquidDensityKgM3(), rhoGas);
-        double actual = actualVelocity(input.qg(), input.pressureMpa(), temperatureK,
-                input.gasSpecificGravity(), input.tubingIdMm());
+        double area = Math.PI * Math.pow(input.tubingIdMm() / 1000, 2) / 4;
+        double actual = input.qg() * 10000 * bg / 86400 / area;
         double ratioTurner = actual / critical.turner;
         double ratioTurner20 = actual / critical.turner20;
         double ratioLiMin = actual / critical.liMin;
-        double criticalRate = criticalRate(critical.turner20, input.pressureMpa(), temperatureK,
-                input.gasSpecificGravity(), input.tubingIdMm());
+        double criticalRate = critical.turner20 * area / bg * 86400 / 10000;
         String level;
         String levelKey;
         if (ratioTurner20 >= 1.0) { level = "不积液"; levelKey = "ok"; }
@@ -81,19 +88,6 @@ public class LiquidLoadingCalculator {
     private Velocities criticalVelocity(double sigma, double rhoL, double rhoG) {
         double base=Math.pow(((sigma/1000)*Math.max(rhoL-rhoG,0.1))/(rhoG*rhoG),0.25);
         return new Velocities(Math.max(6.56*base,0),Math.max(7.872*base,0),Math.max(2.50*base,0));
-    }
-
-    private double actualVelocity(double qg,double p,double t,double gamma,double diameterMm) {
-        double z=zFactor(p,t,gamma);
-        double area=Math.PI*Math.pow(diameterMm/1000,2)/4;
-        double actual=qg*10000*(0.101325/p)*(t/293.15)*(1/z);
-        return actual/86400/area;
-    }
-
-    private double criticalRate(double velocity,double p,double t,double gamma,double diameterMm) {
-        double z=zFactor(p,t,gamma);
-        double area=Math.PI*Math.pow(diameterMm/1000,2)/4;
-        return velocity*area*(p/0.101325)*(293.15/t)*z*86400/10000;
     }
 
     private static double round(double value,int scale) {
