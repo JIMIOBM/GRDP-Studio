@@ -50,6 +50,9 @@ const formatElapsed = value => {
     <el-table-column label="版本" width="82"><template #default="{ row }">v{{ row.versionNo }}</template></el-table-column>
     <el-table-column prop="study" label="Study" min-width="150" show-overflow-tooltip><template #default="{ row }">{{ row.study || '-' }}</template></el-table-column>
     <el-table-column label="类型" width="100"><template #default="{ row }">{{ runTypeLabel[row.runType] || row.runType }}</template></el-table-column>
+    <el-table-column v-if="rows.some(row => ['nodal', 'profile', 'combined'].includes(row.runType))" label="参数方案" min-width="190" show-overflow-tooltip>
+      <template #default="{ row }">{{ row.parameters?.schemaVersion === 'pipesim-well-parameters/1' && Number.isFinite(row.parameters.reservoirPressurePsi) ? `地层压力 ${row.parameters.reservoirPressurePsi} psia` : '原模型参数' }}</template>
+    </el-table-column>
     <el-table-column label="状态" width="120">
       <template #default="{ row }"><el-tag :type="statusMeta[row.status]?.[1] || 'info'">{{ statusMeta[row.status]?.[0] || row.status }}</el-tag></template>
     </el-table-column>

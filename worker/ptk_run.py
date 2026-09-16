@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import sys
 
@@ -212,6 +213,40 @@ def _execute_network(model, study, emit_event):
     return result, []
 
 
+def validate_scenario(parameters, run_task):
+    if parameters is None:
+        return
+    if (run_task != 'nodal' or not isinstance(parameters, dict)
+            or set(parameters) != {'schemaVersion', 'reservoirPressurePsi'}
+            or parameters['schemaVersion'] != 'pipesim-well-parameters/1'):
+        raise AdapterFailure('PROTOCOL', 'INVALID_SCENARIO_PARAMETERS', 'Unsupported well scenario parameters.')
+    value = parameters['reservoirPressurePsi']
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 < value <= 100000:
+        raise AdapterFailure('PROTOCOL', 'INVALID_SCENARIO_PARAMETERS', 'Reservoir pressure must be positive and at most 100000 psia.')
+
+
+def apply_scenario(model, completion, parameters):
+    if parameters is None:
+        return
+    from sixgill.definitions import Parameters
+    key = Parameters.Completion.RESERVOIRPRESSURE
+    try:
+        if model.describe(context=completion, parameter=key).units_symbol != 'psia':
+            raise AdapterFailure('MODEL', 'PARAMETER_UNIT_UNSUPPORTED', 'The completion pressure unit must be psia.')
+        original = model.get_value(completion, parameter=key)
+        if isinstance(original, bool) or not isinstance(original, (int, float)) or not math.isfinite(original):
+            raise AdapterFailure('MODEL', 'PARAMETER_READ_FAILED', 'The original reservoir pressure is unavailable.')
+        value = parameters['reservoirPressurePsi']
+        model.set_value(completion, parameter=key, value=value)
+        applied = model.get_value(completion, parameter=key)
+        if isinstance(applied, bool) or not isinstance(applied, (int, float)) or not math.isfinite(applied) or not math.isclose(applied, value, rel_tol=1e-9, abs_tol=1e-6):
+            raise AdapterFailure('MODEL', 'PARAMETER_READBACK_MISMATCH', 'The scenario pressure could not be confirmed.')
+    except AdapterFailure:
+        raise
+    except Exception:
+        raise AdapterFailure('MODEL', 'PARAMETER_APPLY_FAILED', 'The scenario pressure could not be applied.')
+
+
 def execute_request(request, model_factory=None, emit_event=None):
     emit_event = emit_event or (lambda state, message: None)
     model = None
@@ -220,8 +255,7 @@ def execute_request(request, model_factory=None, emit_event=None):
         required = ("modelPath", "study", "runTask", "parameters")
         if not isinstance(request, dict) or any(name not in request for name in required):
             raise AdapterFailure("PROTOCOL", "INVALID_REQUEST", "The adapter request is missing required fields.")
-        if request["parameters"] is not None:
-            raise AdapterFailure("PROTOCOL", "PARAMETERS_NOT_NULL", "Run parameters must be explicitly null.")
+        validate_scenario(request['parameters'], request['runTask'])
         run_task = request["runTask"]
         if run_task not in ("nodal", "profile", "combined", "network"):
             raise AdapterFailure("PROTOCOL", "INVALID_RUN_TASK", "runTask must be nodal, profile, combined, or network.")
@@ -253,6 +287,7 @@ def execute_request(request, model_factory=None, emit_event=None):
                     "warnings": warnings,
                 }
             components, model_kind = _run_components(model)
+            apply_scenario(model, components['Completion'][0], request['parameters'])
             well_name = components["Well"][0]
         except AdapterFailure:
             raise

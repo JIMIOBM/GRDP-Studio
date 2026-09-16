@@ -131,8 +131,9 @@ public class SoftwareIntegrationRunDispatcher {
         }
         WorkerRunAccepted accepted;
         try {
+            JsonNode parameters = objectMapper.readTree(current.getParametersJson());
             accepted = workerClient.execute(new WorkerRunExecuteRequest(current.getId(), storageKey, version.getSha256(),
-                    current.getStudyName(), current.getRunType(), null, current.getTimeoutSeconds()));
+                    current.getStudyName(), current.getRunType(), parameters.isNull() ? null : parameters, current.getTimeoutSeconds()));
         } catch (WorkerClientException exception) {
             SoftwareIntegrationRunEntity afterExecute = runStore.find(current.getId());
             if (afterExecute != null

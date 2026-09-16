@@ -2,10 +2,12 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
 import PipesimNetworkVariableTable from './PipesimNetworkVariableTable.vue'
+import { branchComparison, matchedBranches, networkCsv, nodeResultRows, validatedLayout } from './networkResultInteraction'
 
 const props = defineProps({
   result: { type: Object, default: null },
-  partial: { type: Boolean, default: false }
+  partial: { type: Boolean, default: false },
+  runId: { type: [String, Number], default: null }
 })
 
 const PROFILE_VARIABLES = [
@@ -32,8 +34,17 @@ const DEVICE_TYPES = [
 const topologyElement = ref(null)
 const profileElement = ref(null)
 const selectedBranch = ref('')
+const comparedBranches = ref([])
 const selectedProfileVariable = ref('Pressure')
 const detailTab = ref('system')
+const topologyPanel = ref(null)
+const focusedNode = ref('')
+const selectionLabel = ref('')
+const linkedBranches = ref([])
+const selectedNodeRows = ref([])
+const viewMessage = ref('')
+const isFullscreen = ref(false)
+const layoutKey = computed(() => props.runId == null ? null : `grdp:network-layout:v1:run:${props.runId}`)
 let topologyChart
 let profileChart
 let chartResizeObserver
@@ -82,6 +93,15 @@ const profileRows = computed(() => {
   }))
 })
 const hasProfileSeries = computed(() => Boolean(distanceVariable.value && selectedPrimaryVariable.value && profileRows.value.length))
+const comparisonOptions = computed(() => profiles.value.filter(profile => profile.branch !== selectedBranch.value).map(profile => ({
+  branch: profile.branch,
+  rows: branchComparison(selectedProfile.value, profile, selectedProfileVariable.value)
+})))
+const displayedProfiles = computed(() => [
+  { branch: selectedBranch.value, rows: profileRows.value },
+  ...comparisonOptions.value.filter(item => item.rows && comparedBranches.value.includes(item.branch))
+])
+const displayedRows = computed(() => displayedProfiles.value.flatMap(profile => profile.rows.map(row => ({ ...row, branch: profile.branch }))))
 const diagnosticGroups = computed(() => [
   { key: 'errors', label: '错误', type: 'danger', items: arrayValue(props.result?.summary?.errors) },
   { key: 'warnings', label: '警告', type: 'warning', items: arrayValue(props.result?.summary?.warnings) },
@@ -197,7 +217,7 @@ const graphData = () => {
   return { categories, data, links }
 }
 
-const renderTopologyChart = async () => {
+const renderTopologyChart = async (useSaved = true) => {
   await nextTick()
   if (!topologyElement.value || !topologyNodes.value.length) {
     topologyChart?.dispose()
@@ -210,6 +230,12 @@ const renderTopologyChart = async () => {
   }
   topologyChart ||= echarts.init(topologyElement.value)
   const { categories, data, links } = graphData()
+  if (useSaved && layoutKey.value) {
+    try {
+      const positions = validatedLayout(JSON.parse(localStorage.getItem(layoutKey.value)), topologySignature.value, data.map(item => item.id))
+      positions?.forEach((position, id) => Object.assign(data.find(item => item.id === id), { x: position.x, y: position.y }))
+    } catch { viewMessage.value = '本机布局不可读取，已使用默认布局。' }
+  }
   topologyChart.setOption({
     animation: false,
     tooltip: {
@@ -225,6 +251,7 @@ const renderTopologyChart = async () => {
     series: [{
       type: 'graph',
       layout: 'none',
+      preserveAspect: 'contain',
       left: 38,
       right: 48,
       top: 16,
@@ -242,7 +269,84 @@ const renderTopologyChart = async () => {
       emphasis: { focus: 'adjacency', lineStyle: { width: 2, opacity: 1 } }
     }]
   }, true)
+  topologyChart.off('click')
+  topologyChart.on('click', params => {
+    if (params.dataType === 'node') selectNode(params.data.id)
+    else if (params.dataType === 'edge') {
+      focusedNode.value = ''
+      selectionLabel.value = `${params.data.source} → ${params.data.target}`
+      selectedNodeRows.value = []
+      // A connection has no branch ID in the result contract. A unique common
+      // BranchEquipment membership is sufficient; a nearby endpoint alone is not.
+      const sourceBranches = matchedBranches(profiles.value, [params.data.source])
+      const targetBranches = matchedBranches(profiles.value, [params.data.target])
+      linkedBranches.value = sourceBranches.filter(branch => targetBranches.includes(branch))
+      if (linkedBranches.value.length === 1) selectedBranch.value = linkedBranches.value[0]
+    }
+  })
   topologyChart.resize()
+}
+
+const selectNode = id => {
+  if (!id) { focusedNode.value = ''; selectionLabel.value = ''; selectedNodeRows.value = []; linkedBranches.value = []; return }
+  focusedNode.value = id
+  selectionLabel.value = id
+  selectedNodeRows.value = nodeResultRows(nodeResults.value, id)
+  linkedBranches.value = matchedBranches(profiles.value, [id])
+  if (linkedBranches.value.length === 1) selectedBranch.value = linkedBranches.value[0]
+  topologyChart?.dispatchAction({ type: 'downplay', seriesIndex: 0 })
+  topologyChart?.dispatchAction({ type: 'highlight', seriesIndex: 0, name: id })
+  const series = topologyChart?.getModel().getSeriesByIndex(0)
+  const data = series?.getData()
+  const index = data?.indexOfName(id)
+  if (index >= 0) {
+    const point = data.getItemLayout(index)
+    if (point?.every(Number.isFinite)) topologyChart.setOption({ series: [{ center: point }] })
+  }
+}
+const saveLayout = () => {
+  if (!layoutKey.value || !topologyChart) return
+  const data = topologyChart.getModel().getSeriesByIndex(0).getData()
+  const positions = topologyNodes.value.map(node => {
+    const point = data.getItemLayout(data.indexOfName(node.id))
+    return { id: node.id, x: point?.[0], y: point?.[1] }
+  })
+  const snapshot = { signature: topologySignature.value, positions }
+  if (!validatedLayout(snapshot, topologySignature.value, topologyNodes.value.map(node => node.id))) {
+    viewMessage.value = '布局尚未就绪，请稍后保存。'
+    return
+  }
+  try {
+    localStorage.setItem(layoutKey.value, JSON.stringify(snapshot))
+    viewMessage.value = '当前运行的布局已保存到本浏览器。'
+  } catch { viewMessage.value = '浏览器存储不可用，布局未保存。' }
+}
+const toggleFullscreen = async () => {
+  try {
+    if (document.fullscreenElement === topologyPanel.value) await document.exitFullscreen()
+    else await topologyPanel.value?.requestFullscreen()
+  } catch { viewMessage.value = '当前浏览器不支持全屏。' }
+}
+const onFullscreenChange = () => {
+  isFullscreen.value = document.fullscreenElement === topologyPanel.value
+  nextTick(resizeCharts)
+}
+const download = (href, name) => {
+  const anchor = document.createElement('a')
+  anchor.href = href
+  anchor.download = `network-${props.runId ?? 'result'}-${name}`
+  anchor.click()
+}
+const exportImage = chart => {
+  if (!chart) return
+  download(chart.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: '#fff' }), chart === topologyChart ? 'topology.png' : 'profile.png')
+}
+const exportCsv = () => {
+  const rows = [['运行ID', 'Study', '分支', '总距离', '距离单位', '变量', '数值', '变量单位'],
+    ...displayedRows.value.map(row => [props.runId, props.result.study, row.branch, row.distance, distanceVariable.value?.unit, selectedProfileVariable.value, row.value, selectedPrimaryVariable.value?.unit])]
+  const url = URL.createObjectURL(new Blob([networkCsv(rows)], { type: 'text/csv;charset=utf-8' }))
+  download(url, 'profile.csv')
+  setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
 const renderProfileChart = async () => {
@@ -260,15 +364,16 @@ const renderProfileChart = async () => {
   const primary = selectedPrimaryVariable.value
   profileChart.setOption({
     animation: false,
-    color: [primary.color],
+    color: [primary.color, '#477A5B', '#D97706', '#7C4D9E', '#B32D2D'],
     title: {
       text: `${selectedBranch.value} 分支剖面`,
       left: 'center',
       top: 8,
       textStyle: { color: '#303133', fontSize: 15, fontWeight: 600 }
     },
-    tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
-    grid: { left: 76, right: 40, top: 58, bottom: 78, containLabel: true },
+    tooltip: { trigger: 'axis', renderMode: 'richText', axisPointer: { type: 'cross' } },
+    legend: { top: 34, type: 'scroll' },
+    grid: { left: 76, right: 40, top: 78, bottom: 78, containLabel: true },
     xAxis: {
       type: 'value',
       name: axisName('总距离', distanceVariable.value.unit),
@@ -287,15 +392,15 @@ const renderProfileChart = async () => {
       { type: 'inside', xAxisIndex: 0 },
       { type: 'slider', xAxisIndex: 0, height: 18, bottom: 18 }
     ],
-    series: [{
-      name: primary.label,
+    series: displayedProfiles.value.map((profile, index) => ({
+      name: profile.branch,
       type: 'line',
-      showSymbol: profileRows.value.length <= 80,
+      showSymbol: profile.rows.length <= 80,
       symbolSize: 5,
       connectNulls: false,
-      lineStyle: { width: 2, color: primary.color },
-      data: profileRows.value.map(row => [chartValue(row.distance), chartValue(row.value)])
-    }]
+      lineStyle: { width: 2, type: index ? 'dashed' : 'solid' },
+      data: profile.rows.map(row => [chartValue(row.distance), chartValue(row.value)])
+    }))
   }, true)
   profileChart.resize()
 }
@@ -305,7 +410,9 @@ const resizeCharts = () => {
   profileChart?.resize()
 }
 const resetTopologyView = () => {
-  renderTopologyChart()
+  try { if (layoutKey.value) localStorage.removeItem(layoutKey.value) } catch { /* View reset remains available without storage. */ }
+  viewMessage.value = '已恢复默认布局。'
+  renderTopologyChart(false)
 }
 const observeChartElements = async () => {
   await nextTick()
@@ -331,13 +438,24 @@ watch(topologySignature, () => {
   renderTopologyChart()
   observeChartElements()
 })
+watch(() => props.runId, () => {
+  focusedNode.value = ''
+  selectionLabel.value = ''
+  selectedNodeRows.value = []
+  linkedBranches.value = []
+  viewMessage.value = ''
+  renderTopologyChart()
+})
 watch(() => props.result, () => {
   renderProfileChart()
   observeChartElements()
 })
 watch([selectedBranch, selectedProfileVariable], renderProfileChart)
+watch([() => props.runId, () => props.result, selectedBranch, selectedProfileVariable], () => { comparedBranches.value = [] })
+watch(comparedBranches, renderProfileChart)
 onMounted(() => {
   window.addEventListener('resize', resizeCharts)
+  document.addEventListener('fullscreenchange', onFullscreenChange)
   if (typeof ResizeObserver !== 'undefined') chartResizeObserver = new ResizeObserver(resizeCharts)
   renderTopologyChart()
   renderProfileChart()
@@ -345,6 +463,7 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   window.removeEventListener('resize', resizeCharts)
+  document.removeEventListener('fullscreenchange', onFullscreenChange)
   chartResizeObserver?.disconnect()
   topologyChart?.dispose()
   profileChart?.dispose()
@@ -372,13 +491,22 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <section class="result-panel topology-panel">
+    <section ref="topologyPanel" class="result-panel topology-panel">
       <div class="panel-heading">
         <div><h3>管网组态</h3><p>拖动节点调整当前视图；拖动空白处平移，滚轮缩放。箭头仅表示返回的连接方向，不代表实际流向。</p></div>
         <div class="topology-heading-actions">
           <span>{{ topologyNodes.length }} 个节点 / {{ topologyEdges.length }} 条连接</span>
           <button type="button" class="topology-fit-button" data-testid="network-topology-fit" aria-label="重新应用确定性布局并适应视图" @click="resetTopologyView">适应视图</button>
         </div>
+      </div>
+      <div class="network-view-tools">
+        <el-select v-model="focusedNode" filterable clearable placeholder="搜索设备并定位" aria-label="搜索管网设备" @change="selectNode">
+          <el-option v-for="node in topologyNodes" :key="node.id" :value="node.id" :label="node.id" />
+        </el-select>
+        <el-button size="small" :disabled="!layoutKey" @click="saveLayout">保存布局</el-button>
+        <el-button size="small" @click="toggleFullscreen">{{ isFullscreen ? '退出全屏' : '全屏' }}</el-button>
+        <el-button size="small" :disabled="!topologyNodes.length" @click="exportImage(topologyChart)">导出拓扑图片</el-button>
+        <span role="status">{{ viewMessage }}</span>
       </div>
       <details class="topology-legend">
         <summary>设备符号</summary>
@@ -398,12 +526,17 @@ onBeforeUnmount(() => {
         data-testid="network-topology-canvas"
       />
       <el-empty v-else :description="partial ? '当前部分结果未提供可展示的拓扑' : '当前结果没有拓扑节点'" :image-size="72" />
+      <div v-if="selectionLabel" class="network-selection" aria-label="管网点选结果">
+        <div class="selection-heading"><strong>{{ selectionLabel }}</strong><span v-if="!linkedBranches.length">未返回可精确匹配的支路结果</span><el-button v-for="branch in linkedBranches" :key="branch" link @click="selectedBranch = branch">查看 {{ branch }} 剖面</el-button></div>
+        <el-table v-if="selectedNodeRows.length" :data="selectedNodeRows" border size="small" max-height="200"><el-table-column prop="variable" label="变量" /><el-table-column prop="unit" label="单位" /><el-table-column label="返回值"><template #default="{ row }">{{ detailText(row.value) }}</template></el-table-column></el-table>
+        <p v-else>未返回与该设备标识一致的节点变量。</p>
+      </div>
     </section>
 
     <section class="result-panel profile-panel">
       <div class="panel-heading profile-heading">
         <div><h3>分支剖面</h3><p>TotalDistance 为横轴；空值按曲线间断显示。</p></div>
-        <span v-if="selectedProfile">{{ selectedProfile.pointCount }} 个点</span>
+        <div class="network-view-tools"><span v-if="selectedProfile">{{ selectedProfile.pointCount }} 个点</span><el-button size="small" :disabled="!hasProfileSeries" @click="exportCsv">导出剖面 CSV</el-button><el-button size="small" :disabled="!hasProfileSeries" @click="exportImage(profileChart)">导出剖面图片</el-button></div>
       </div>
       <div v-if="profiles.length" class="profile-controls">
         <label>
@@ -424,11 +557,19 @@ onBeforeUnmount(() => {
           </el-select>
         </label>
       </div>
+      <div v-if="profiles.length > 1" class="branch-comparison">
+        <span>对比支路</span>
+        <el-select v-model="comparedBranches" multiple filterable clearable :multiple-limit="4" placeholder="选择同单位支路（最多 4 条）" aria-label="对比管网支路">
+          <el-option v-for="item in comparisonOptions" :key="item.branch" :label="item.branch" :value="item.branch" :disabled="!item.rows" />
+        </el-select>
+        <small>实线为当前支路，虚线为对比支路；各自使用原始距离，不插值、不对齐起点。单位或数据不匹配的支路不可选。</small>
+      </div>
       <p v-if="unavailableProfileFields.length" class="profile-unavailable">未返回的剖面字段（不可用）：{{ unavailableProfileFields.join('、') }}</p>
       <div v-if="hasProfileSeries" ref="profileElement" class="profile-chart" />
       <el-empty v-else :description="partial ? '当前部分结果未提供可绘制的距离和变量剖面' : '当前分支没有可绘制的主变量剖面'" :image-size="72" />
-      <el-table v-if="hasProfileSeries" :data="profileRows" border size="small" max-height="280">
+      <el-table v-if="hasProfileSeries" :data="displayedRows" border size="small" max-height="280">
         <el-table-column type="index" label="#" width="54" align="center" />
+        <el-table-column prop="branch" label="支路" min-width="140" />
         <el-table-column :label="axisName('总距离', distanceVariable.unit)" min-width="180">
           <template #default="{ row }"><span :class="{ missing: row.distance === null }">{{ displayValue(row.distance) }}</span></template>
         </el-table-column>
@@ -470,6 +611,10 @@ onBeforeUnmount(() => {
 </template>
 
 <style lang="scss" scoped>
+.branch-comparison { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 12px; }
+.branch-comparison .el-select { width: min(480px, 100%); }
+.branch-comparison small { flex-basis: 100%; color: #73777d; line-height: 1.6; }
+.network-view-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; font-size: 12px; }.network-view-tools .el-select { width: 220px; }.network-view-tools .el-button + .el-button { margin-left: 0; }.network-selection { border-top: 1px solid #dcdfe6; padding-top: 8px; font-size: 12px; }.network-selection p, .selection-heading > span { color: #73777d; }.selection-heading { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }.topology-panel:fullscreen { overflow: auto; padding: 16px; background: #fff; }.topology-panel:fullscreen .topology-chart { height: 65vh; }
 .network-result { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
 .network-result-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 18px; border: 1px solid #e1e7ef; border-top: 3px solid #f4d000; background: #f8fafc; }
 .network-kicker { color: #2b6cb3; font-size: 11px; font-weight: 700; letter-spacing: .08em; }

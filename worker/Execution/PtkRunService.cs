@@ -164,7 +164,7 @@ public sealed partial class PtkRunService : IDisposable
                 request.ExpectedModelSha256,
                 request.Study,
                 request.RunTask,
-                parameters = (object?)null,
+                parameters = request.Parameters,
                 request.TimeoutSeconds
             };
             descriptors.Add(await artifacts.WriteJsonAsync(directories.Output, "request.json", requestArtifact));
@@ -174,7 +174,7 @@ public sealed partial class PtkRunService : IDisposable
                 modelPath = directories.ModelCopy,
                 study = request.Study,
                 runTask = request.RunTask,
-                parameters = (object?)null
+                parameters = request.Parameters
             }));
 
             var remaining = deadline - DateTimeOffset.UtcNow;
@@ -426,8 +426,8 @@ public sealed partial class PtkRunService : IDisposable
             return WorkerApiError.Request("INVALID_STUDY", "study is required and must be a controlled model Study name.");
         if (request.RunTask is not ("nodal" or "profile" or "combined" or "network"))
             return WorkerApiError.Request("INVALID_RUN_TASK", "runTask must be nodal, profile, combined, or network.");
-        if (request.Parameters.ValueKind != JsonValueKind.Null)
-            return WorkerApiError.Request("PARAMETERS_NOT_NULL", "parameters is required and must be explicitly null.");
+        if (!WellScenarioParameters.Valid(request.Parameters, request.RunTask))
+            return WorkerApiError.Request("INVALID_SCENARIO_PARAMETERS", "Only validated nodal reservoir-pressure scenarios or explicit null parameters are supported.");
         if (request.TimeoutSeconds <= 0 || request.TimeoutSeconds > options.MaxRunTimeoutSeconds)
             return WorkerApiError.Request("INVALID_TIMEOUT", $"timeoutSeconds must be between 1 and {options.MaxRunTimeoutSeconds}.");
         return null;

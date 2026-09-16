@@ -74,14 +74,18 @@ public class SoftwareIntegrationRunServiceImpl implements SoftwareIntegrationRun
 
     @Override
     public SoftwareIntegrationRunSummaryResponse create(long versionId, SoftwareIntegrationCreateRunRequest request) {
-        if (!request.isParametersProvided() || request.getParameters() != null) {
-            throw new RunException(HttpStatus.BAD_REQUEST, "parameters 必须显式为 null");
+        if (!request.isParametersProvided()) {
+            throw new RunException(HttpStatus.BAD_REQUEST, "必须显式提供 parameters");
         }
         String runType = request.getRunType();
         if (!RUN_TYPES.contains(runType)) {
             throw new RunException(HttpStatus.BAD_REQUEST, "runType 必须为 nodal、profile、combined、network 或 eclipse");
         }
         SoftwareIntegrationModelVersionEntity version = requireVersion(versionId);
+        JsonNode scenario = objectMapper.valueToTree(request.getParameters());
+        if (!com.grdp.studio.softwareintegration.support.WellScenarioParameters.valid(scenario, version.getModelKind(), runType)) {
+            throw new RunException(HttpStatus.BAD_REQUEST, "参数方案仅支持已验证井筒的节点分析；地层压力必须为 0 到 100000 psia（不含 0）且不得含未知字段");
+        }
         if (!"READY".equals(version.getStatus())) throw new RunException(HttpStatus.CONFLICT, "只有 READY 模型版本可以创建运行");
         SoftwareIntegrationModelEntity model = modelMapper.selectById(version.getModelId());
         if (model == null || model.getDeletedAt() != null) throw new RunException(HttpStatus.NOT_FOUND, "模型不存在");
@@ -130,7 +134,7 @@ public class SoftwareIntegrationRunServiceImpl implements SoftwareIntegrationRun
             throw new RunException(HttpStatus.SERVICE_UNAVAILABLE, "ECLIPSE 100 2024.1 Worker 能力不可用");
         }
         SoftwareIntegrationRunEntity run = runStore.createQueued(project.getId(), model.getId(), version.getId(),
-                study, runType, eclipse ? ECLIPSE_TIMEOUT_SECONDS : properties.getDefaultRunTimeoutSeconds());
+                study, runType, eclipse ? ECLIPSE_TIMEOUT_SECONDS : properties.getDefaultRunTimeoutSeconds(), scenario.toString());
         return summary(run, model, version);
     }
 
@@ -142,7 +146,7 @@ public class SoftwareIntegrationRunServiceImpl implements SoftwareIntegrationRun
         return new SoftwareIntegrationRunDetailResponse(
                 run.getId(), run.getProjectId(), run.getModelId(), run.getModelVersionId(), model.getName(), version.getVersionNo(),
                 run.getStatus(), SoftwareIntegrationDiagnosticSanitizer.sanitize(run.getStudyName()),
-                run.getRunType(), nullNode(), run.getCreatedAt(), run.getQueuedAt(),
+                run.getRunType(), parse(run.getParametersJson()), run.getCreatedAt(), run.getQueuedAt(),
                 run.getClaimedAt(), run.getStartedAt(), run.getDeadlineAt(), run.getFinishedAt(), run.getTimeoutSeconds(),
                 elapsed(run), cancellable(run), sanitize(parse(run.getErrorJson())), sanitize(parse(run.getCleanupJson())), run.getResultContract(),
                 sanitize(parse(run.getResultJson())),
@@ -201,7 +205,7 @@ public class SoftwareIntegrationRunServiceImpl implements SoftwareIntegrationRun
                                                           SoftwareIntegrationModelVersionEntity version) {
         return new SoftwareIntegrationRunSummaryResponse(run.getId(), run.getProjectId(), run.getModelId(), run.getModelVersionId(),
                 model.getName(), version.getVersionNo(), SoftwareIntegrationDiagnosticSanitizer.sanitize(run.getStudyName()),
-                run.getRunType(), nullNode(), run.getStatus(),
+                run.getRunType(), parse(run.getParametersJson()), run.getStatus(),
                 run.getCreatedAt(), run.getQueuedAt(), run.getStartedAt(), run.getFinishedAt(), elapsed(run), cancellable(run));
     }
 

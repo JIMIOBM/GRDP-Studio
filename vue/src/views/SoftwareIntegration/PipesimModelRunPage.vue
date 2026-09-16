@@ -1,5 +1,6 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { softwareIntegrationApi } from '@/api/softwareIntegration'
 import { storeToRefs } from 'pinia'
 import { ElMessage } from 'element-plus'
 import { useSoftwareIntegrationStore } from '@/stores/softwareIntegration'
@@ -9,6 +10,7 @@ import PipesimProfileResult from './PipesimProfileResult.vue'
 import PipesimRunHistory from './PipesimRunHistory.vue'
 import EclipseRunResult from './EclipseRunResult.vue'
 import EclipseDataInspectionOverview from './EclipseDataInspectionOverview.vue'
+import { sourceReservoirPressure } from './wellParameterPreview'
 
 const props = defineProps({
   eclipsePresentation: { type: Boolean, default: true }
@@ -16,6 +18,7 @@ const props = defineProps({
 
 const store = useSoftwareIntegrationStore()
 const {
+  activeProjectId,
   activeModel,
   activeVersion,
   activeVersionId,
@@ -75,12 +78,12 @@ const eclipsePresentationAvailable = computed(() => isEclipseRunPresentation.val
 const eclipseRunRequest = computed(() => ({ study: null, runType: 'eclipse', parameters: null }))
 const displayRun = computed(() => activeRun.value || selectedRun.value)
 const isFiniteNumber = value => typeof value === 'number' && Number.isFinite(value)
-const validWellResult = computed(() => {
-  if (!isWellModel.value) return null
-  const result = selectedRun.value?.result
+const validateWellRun = run => {
+  const result = run?.result
   if (!result || result.schemaVersion !== 'pipesim-well-result/1') return null
   if (!['VALID_FULL', 'VALID_PARTIAL'].includes(result.resultContract)) return null
-  if (result.resultContract !== selectedRun.value?.resultContract || result.runTask !== selectedRun.value?.runType) return null
+  if (!['SUCCEEDED', 'PARTIAL_SUCCEEDED'].includes(run.status)) return null
+  if (result.resultContract !== run.resultContract || result.runTask !== run.runType) return null
   if (!['black_oil_liquid', 'basic_gas'].includes(result.model_kind)) return null
   if (!result.units || !['flow', 'pressure', 'depth', 'temperature'].every(field => result.units[field] &&
     (result.units[field].displayUnit === null || typeof result.units[field].displayUnit === 'string'))) return null
@@ -90,9 +93,48 @@ const validWellResult = computed(() => {
   if (!result.profile.every(point => isFiniteNumber(point?.depth) && point.depth >= 0 &&
     isFiniteNumber(point?.pressure) && isFiniteNumber(point?.temperature))) return null
   return result
+}
+const validWellResult = computed(() => isWellModel.value ? validateWellRun(selectedRun.value) : null)
+const comparisonId = ref(null)
+const comparisonRun = ref(null)
+const comparisonLoading = ref(false)
+const comparisonError = ref('')
+let comparisonGeneration = 0
+const comparisonOptions = computed(() => runHistory.value.filter(run => run.id !== selectedRun.value?.id &&
+  ['SUCCEEDED', 'PARTIAL_SUCCEEDED'].includes(run.status) && ['nodal', 'profile', 'combined'].includes(run.runType) &&
+  run.modelVersionId === activeVersionId.value && run.modelId === activeModel.value?.id))
+const comparisonResult = computed(() => validateWellRun(comparisonRun.value))
+const runLabel = run => run ? `运行 #${run.id} · v${run.versionNo || activeVersion.value?.versionNo} · ${run.study || '无 Study'}${run.parameters?.schemaVersion === 'pipesim-well-parameters/1' && Number.isFinite(run.parameters.reservoirPressurePsi) ? ` · 地层压力 ${run.parameters.reservoirPressurePsi} psia` : ''}` : ''
+watch(comparisonId, async id => {
+  const generation = ++comparisonGeneration
+  comparisonRun.value = null
+  comparisonError.value = ''
+  comparisonLoading.value = Boolean(id)
+  if (!id) return
+  const versionId = activeVersionId.value
+  const modelId = activeModel.value?.id
+  try {
+    const response = await softwareIntegrationApi.getRun(id)
+    if (generation !== comparisonGeneration) return
+    const run = response?.data
+    if (response?.code !== 200 || run?.id !== id || run?.modelVersionId !== versionId || run?.modelId !== modelId || !validateWellRun(run)) {
+      comparisonError.value = '所选历史结果不可用于比较。'
+      return
+    }
+    comparisonRun.value = run
+  } catch { if (generation === comparisonGeneration) comparisonError.value = '历史结果读取失败，请重新选择。' }
+  finally { if (generation === comparisonGeneration) comparisonLoading.value = false }
 })
+watch([activeVersionId, () => selectedRun.value?.id], () => {
+  comparisonGeneration++
+  comparisonId.value = null
+  comparisonRun.value = null
+  comparisonLoading.value = false
+  comparisonError.value = ''
+})
+onBeforeUnmount(() => { comparisonGeneration++ })
 const isNetworkVariable = entry => entry && isSafeTopologyText(entry.variable) &&
-  (entry.unit === null || isSafeTopologyText(entry.unit)) && Array.isArray(entry.values)
+  (entry.unit === null || isSafeTopologyText(entry.unit, true)) && Array.isArray(entry.values)
 const isNumericValue = value => value === null || isFiniteNumber(value) ||
   (Array.isArray(value) && value.length > 0 && value.every(isNumericValue)) ||
   (value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length > 0 &&
@@ -117,6 +159,12 @@ const copyNetworkProfile = profile => {
     profile.pointCount < 0 || !Array.isArray(profile.variables) ||
     !profile.variables.every(isNetworkVariable)) return null
   const variables = profile.variables.map(variable => {
+    if (variable.variable === 'BranchEquipment') {
+      return variable.values.length === profile.pointCount && variable.values.every(value =>
+        value === null || isSafeTopologyText(value, true))
+        ? { variable: variable.variable, unit: variable.unit, values: [...variable.values] }
+        : null
+    }
     return isNumericValue(variable.values)
       ? { variable: variable.variable, unit: variable.unit, values: copyNumericValue(variable.values) }
       : null
@@ -241,7 +289,7 @@ const networkTopologyUnavailable = computed(() => isNetworkModel.value &&
   ['SUCCEEDED', 'PARTIAL_SUCCEEDED'].includes(selectedRun.value?.status) &&
   ['VALID_FULL', 'VALID_PARTIAL'].includes(selectedRun.value?.result?.resultContract) &&
   !validNetworkResult.value)
-const canRun = computed(() => activeVersion.value?.status === 'READY' &&
+const canRun = computed(() => !previewPending.value && activeVersion.value?.status === 'READY' &&
   (isNetworkModel.value || isWellModel.value || isEclipseModel.value) &&
   (isEclipseModel.value ? eclipsePresentationAvailable.value : persistedStudies.value.includes(selectedStudy.value)) &&
   !hasActiveRun.value && !submittingRun.value && canCreateRunByCapability.value)
@@ -383,10 +431,55 @@ const changeVersion = async versionId => {
       : errorMessage(error))
   }
 }
+const scenarioEnabled = ref(false)
+const scenarioPressure = ref(null)
+const sourcePressure = computed(() => sourceReservoirPressure(activeVersion.value))
+const readingVersionId = ref(null)
+const previewPending = computed(() => readingVersionId.value === activeVersionId.value || ['UPLOADED', 'VALIDATING'].includes(activeVersion.value?.status))
+const canReadSource = computed(() => isWellModel.value && !hasActiveRun.value && !submittingRun.value && !previewPending.value && !workerBusy.value)
+const canUseSource = computed(() => isWellModel.value && !hasActiveRun.value && !submittingRun.value && !previewPending.value && sourcePressure.value > 0 && sourcePressure.value <= 100000)
+const readSourceParameters = async () => {
+  if (!canReadSource.value) return
+  const projectId = activeProjectId.value
+  const versionId = activeVersionId.value
+  readingVersionId.value = versionId
+  try {
+    await store.revalidateModel(projectId, versionId)
+    if (activeProjectId.value === projectId && activeVersionId.value === versionId) ElMessage.success('已提交重新验证，完成后显示原模型参数')
+  } catch {
+    if (activeProjectId.value === projectId && activeVersionId.value === versionId) ElMessage.error('原模型参数读取请求失败，请稍后重试')
+  } finally {
+    if (readingVersionId.value === versionId) readingVersionId.value = null
+  }
+}
+const useSourcePressure = () => {
+  if (!canUseSource.value) return
+  const pressure = sourcePressure.value
+  runType.value = 'nodal'
+  scenarioPressure.value = pressure
+  scenarioEnabled.value = true
+}
+watch([activeVersionId, runType], () => { scenarioEnabled.value = false; scenarioPressure.value = null }, { flush: 'sync' })
+const scenarioSnapshot = computed(() => selectedRun.value?.parameters?.schemaVersion === 'pipesim-well-parameters/1'
+  && Number.isFinite(selectedRun.value.parameters.reservoirPressurePsi) ? selectedRun.value.parameters.reservoirPressurePsi : null)
+const canReuseScenario = computed(() => isWellModel.value && activeVersion.value?.status === 'READY' && !hasActiveRun.value && !submittingRun.value &&
+  selectedRun.value?.modelVersionId === activeVersionId.value && scenarioSnapshot.value > 0 && scenarioSnapshot.value <= 100000)
+const reuseScenario = () => {
+  if (!canReuseScenario.value) return
+  const pressure = scenarioSnapshot.value
+  runType.value = 'nodal'
+  scenarioPressure.value = pressure
+  scenarioEnabled.value = true
+  ElMessage.success('已载入方案参数，可修改后点击运行；不会修改历史记录')
+}
 const submitRun = async () => {
   if (!canRun.value) return
+  if (scenarioEnabled.value && (!isWellModel.value || runType.value !== 'nodal' || !Number.isFinite(scenarioPressure.value) || scenarioPressure.value <= 0 || scenarioPressure.value > 100000)) {
+    ElMessage.error('压力方案仅支持节点分析，请输入大于 0 且不超过 100000 psia 的压力')
+    return
+  }
   try {
-    const detail = await store.createRun()
+    const detail = await store.createRun(scenarioEnabled.value ? { schemaVersion: 'pipesim-well-parameters/1', reservoirPressurePsi: scenarioPressure.value } : null)
     if (!detail) return
     activeTab.value = isEclipseModel.value ? 'eclipse' : (isNetworkModel.value ? 'network' : (runType.value === 'profile' ? 'profile' : 'nodal'))
     ElMessage.success('运行任务已创建')
@@ -506,6 +599,27 @@ defineExpose({ eclipseRunRequest })
         </div>
       </div>
 
+      <section v-if="isWellModel" class="well-scenario" aria-label="原模型参数">
+        <strong>原模型参数 · v{{ activeVersion?.versionNo }}</strong>
+        <span v-if="sourcePressure !== null" data-testid="source-reservoir-pressure">地层压力：{{ sourcePressure }} psia</span>
+        <span v-else>{{ previewPending ? '正在验证并读取原模型参数…' : '地层压力：暂无可用原值（尚未读取、读取失败或单位不支持）' }}</span>
+        <el-button link type="primary" :disabled="!canReadSource" :loading="previewPending" @click="readSourceParameters">重新验证并读取</el-button>
+        <el-button v-if="sourcePressure !== null" link type="primary" :disabled="!canUseSource" @click="useSourcePressure">以原值创建方案</el-button>
+        <small>从上传版本的隔离副本读取；重新验证期间暂不可计算，不修改原文件。</small>
+        <small v-if="sourcePressure > 100000">原值超出当前方案编辑范围，仅供查看。</small>
+      </section>
+      <section v-if="isWellModel && runType === 'nodal'" class="well-scenario" aria-label="井筒压力方案">
+        <el-checkbox v-model="scenarioEnabled" :disabled="hasActiveRun || submittingRun">使用地层压力方案</el-checkbox>
+        <template v-if="scenarioEnabled">
+          <label>地层压力 (psia) <el-input-number v-model="scenarioPressure" :min="0.000001" :max="100000" :disabled="hasActiveRun || submittingRun" aria-label="方案地层压力" /></label>
+          <span>仅修改本次计算副本；模型单位不匹配或设置失败时停止计算。</span>
+          <span v-if="sourcePressure !== null && Number.isFinite(scenarioPressure)" data-testid="pressure-scenario-comparison">原值 {{ sourcePressure }} → 方案值 {{ scenarioPressure }} psia</span>
+        </template>
+        <span v-else>使用上传模型的原始参数</span>
+      </section>
+      <div v-if="isWellModel && selectedRun" class="inline-notice"><span>当前结果 #{{ selectedRun.id }}：{{ scenarioSnapshot !== null ? `压力方案 · 地层压力 ${scenarioSnapshot} psia` : '原模型参数' }}</span>
+        <el-button v-if="scenarioSnapshot !== null" link type="primary" :disabled="!canReuseScenario" @click="reuseScenario">载入此方案参数</el-button>
+      </div>
       <p v-if="runCapabilityMessage" class="inline-notice warning" :title="`${runCapabilityMessage}；历史运行与已有结果仍可查看。`">
         新运行不可用：{{ runCapabilityMessage }}
       </p>
@@ -550,18 +664,31 @@ defineExpose({ eclipseRunRequest })
       结果未通过展示契约 <el-button link type="primary" @click="selectHistoricalSuccessfulNetworkRun">{{ historicalSuccessfulNetworkRun ? '选择历史成功运行' : '查看运行记录' }}</el-button>
     </p>
 
+    <div v-if="isWellModel && validWellResult" class="comparison-controls">
+      <span>{{ runLabel(selectedRun) }}</span>
+      <el-select v-model="comparisonId" filterable clearable :loading="comparisonLoading" placeholder="选择同版本历史结果对比" aria-label="井筒历史结果对比">
+        <el-option v-for="run in comparisonOptions" :key="run.id" :value="run.id" :label="`${runLabel(run)} · ${run.runType}`" />
+      </el-select>
+      <span v-if="comparisonError" role="status">{{ comparisonError }}</span>
+    </div>
     <el-tabs v-model="activeTab" class="result-tabs">
        <el-tab-pane v-if="isWellModel" label="节点分析" name="nodal">
-        <PipesimNodalResult :result="validWellResult" />
+        <PipesimNodalResult v-if="activeTab === 'nodal'" :result="validWellResult" :comparison-result="comparisonResult" :source-label="runLabel(selectedRun)" :comparison-label="runLabel(comparisonRun)" />
       </el-tab-pane>
        <el-tab-pane v-if="isWellModel" label="PT 剖面" name="profile">
-        <PipesimProfileResult :result="validWellResult" :partial="isPartial" />
+        <PipesimProfileResult v-if="activeTab === 'profile'" :result="validWellResult" :partial="isPartial" :comparison-result="comparisonResult" :source-label="runLabel(selectedRun)" :comparison-label="runLabel(comparisonRun)" />
+      </el-tab-pane>
+      <el-tab-pane v-if="isWellModel && validWellResult?.runTask === 'combined'" label="综合结果" name="combined">
+        <section v-if="activeTab === 'combined'" class="combined-results" aria-label="井筒综合结果">
+          <PipesimNodalResult :result="validWellResult" :comparison-result="comparisonResult" :source-label="runLabel(selectedRun)" :comparison-label="runLabel(comparisonRun)" />
+          <PipesimProfileResult :result="validWellResult" :partial="isPartial" :comparison-result="comparisonResult" :source-label="runLabel(selectedRun)" :comparison-label="runLabel(comparisonRun)" />
+        </section>
       </el-tab-pane>
       <el-tab-pane v-if="isNetworkModel" label="管网结果" name="network">
-        <PipesimNetworkResult :result="validNetworkResult" :partial="isNetworkPartial" />
+        <PipesimNetworkResult :result="validNetworkResult" :partial="isNetworkPartial" :run-id="selectedRun?.id" />
       </el-tab-pane>
       <el-tab-pane v-if="isEclipseModel" label="ECLIPSE 结果" name="eclipse">
-        <EclipseRunResult :run="selectedRun" />
+        <EclipseRunResult :run="selectedRun" :history="runHistory" />
       </el-tab-pane>
       <el-tab-pane v-if="isEclipseModel" label="DATA 检查" name="inspection">
         <EclipseDataInspectionOverview :embedded="true" />
@@ -624,6 +751,13 @@ defineExpose({ eclipseRunRequest })
 </template>
 
 <style lang="scss" scoped>
+.combined-results { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.combined-results > * { min-width: 0; }
+@media (max-width: 1200px) { .combined-results { grid-template-columns: 1fr; } }
+.well-scenario { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 8px 10px; border-bottom: 1px solid #deded9; font-size: 12px; }
+.well-scenario > span { color: #73777d; }
+.well-scenario > small { flex-basis: 100%; color: #73777d; }
+.comparison-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 7px 10px; background: #f3f3f0; font-size: 12px; }.comparison-controls .el-select { width: 340px; max-width: 100%; }
 .model-run-page { min-width: 0; min-height: 0; padding: 14px 18px 22px; color: #303133; overflow: auto; background: #fff; }
 .model-header { min-height: 38px; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 0 0 8px; border-bottom: 1px solid #dcdfe6; }
 .title-line { display: flex; align-items: center; gap: 10px; }

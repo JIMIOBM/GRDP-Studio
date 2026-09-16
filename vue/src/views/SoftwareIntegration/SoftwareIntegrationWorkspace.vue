@@ -19,6 +19,8 @@ const {
   loadingProjects
 } = storeToRefs(store)
 const creating = ref(false)
+const createError = ref('')
+const duplicateProject = computed(() => projects.value.find(project => project.name.trim().toLowerCase() === projectName.value.trim().toLowerCase()))
 const projectName = ref('')
 const projectDescription = ref('')
 const fileInput = ref()
@@ -160,7 +162,9 @@ const activateResource = async node => {
 }
 
 const createProject = async () => {
+  if (creating.value) return
   if (!projectName.value.trim()) return ElMessage.warning('请输入软件项目名称')
+  createError.value = ''
   creating.value = true
   try {
     const project = await store.createProject({ name: projectName.value, description: projectDescription.value })
@@ -173,8 +177,16 @@ const createProject = async () => {
     await flushPendingExternalImport()
     ElMessage.success('软件项目已创建')
   } catch (error) {
-    ElMessage.error(safeRequestMessage('软件项目创建失败，请稍后重试'))
+    createError.value = error?.code === 409 ? '项目名称已存在，请打开已有项目或更换名称。' : '软件项目创建失败，请稍后重试。'
   } finally { creating.value = false }
+}
+const openDuplicateProject = async () => {
+  if (!duplicateProject.value) return
+  try {
+    await selectResource({ id: `project-${duplicateProject.value.id}`, type: 'project', projectId: duplicateProject.value.id })
+    createDialogVisible.value = false
+    createError.value = ''
+  } catch { createError.value = '已有项目加载失败，请稍后重试。' }
 }
 
 const removeProject = async () => {
@@ -193,6 +205,7 @@ const removeProject = async () => {
 
 const chooseModel = () => fileInput.value?.click()
 const openCreateDialog = () => {
+  createError.value = ''
   projectName.value = ''
   projectDescription.value = ''
   createDialogVisible.value = true
@@ -374,6 +387,7 @@ defineExpose({ openCreateDialog, openImportModel, importExternalFile })
     </main>
     <el-dialog v-model="createDialogVisible" title="新建软件项目" width="500px" :close-on-click-modal="false">
       <el-form label-position="top" @submit.prevent="createProject">
+        <p v-if="createError" role="alert" class="project-create-error">{{ createError }} <el-button v-if="duplicateProject" link type="primary" @click="openDuplicateProject">打开已有项目</el-button></p>
         <el-form-item label="项目名称" required><el-input v-model="projectName" maxlength="100" autofocus /></el-form-item>
         <el-form-item label="项目说明"><el-input v-model="projectDescription" maxlength="500" type="textarea" :rows="3" /></el-form-item>
       </el-form>

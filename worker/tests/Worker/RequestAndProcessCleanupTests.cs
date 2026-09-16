@@ -29,7 +29,7 @@ public sealed class RequestAndProcessCleanupTests : IDisposable
 
         var result = await service.SubmitAsync(request, CancellationToken.None);
         Assert.Equal(400, result.HttpStatus);
-        Assert.Equal("PARAMETERS_NOT_NULL", Assert.IsType<WorkerError>(result.Body).Code);
+        Assert.Equal("INVALID_SCENARIO_PARAMETERS", Assert.IsType<WorkerError>(result.Body).Code);
     }
 
     [Fact]

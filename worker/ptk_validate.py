@@ -12,16 +12,18 @@ if ptk_path:
     sys.path.insert(0, ptk_path)
 
 from ptk_network import format_validation_issues, inspect_network  # noqa: E402
+from ptk_well_inspection import inspect_well_pressure  # noqa: E402
 
 
-def result(status, message, model_kind=None, well=None, studies=None, error=None):
+def result(status, message, model_kind=None, well=None, studies=None, error=None, inspection=None):
     print(json.dumps({
         "status": status,
         "message": message,
         "modelKind": model_kind,
         "well": well,
         "studies": studies or [],
-        "error": error
+        "error": error,
+        "inspection": inspection
     }, ensure_ascii=False), file=_PROTOCOL_OUTPUT, flush=True)
 
 
@@ -97,7 +99,8 @@ def validate(path):
             model_kind = "black_oil_liquid"
         else:
             return result("INVALID", "首版仅支持黑油液体或组合流体基础气井生产模型")
-        return result("READY", "模型验证完成", model_kind, components["Well"][0], studies)
+        inspection = inspect_well_pressure(model, completion, Parameters.Completion.RESERVOIRPRESSURE)
+        return result("READY", "模型验证完成", model_kind, components["Well"][0], studies, inspection=inspection)
     except (ImportError, ModuleNotFoundError):
         return result("ENVIRONMENT_ERROR", "PIPESIM Python Toolkit 不可用", error={
             "category": "ENVIRONMENT",

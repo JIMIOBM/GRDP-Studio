@@ -12,7 +12,10 @@ public sealed record ModelValidationResponse(
     string? ModelKind = null,
     string? Well = null,
     WorkerError? Error = null,
-    EclipseDataInspection? Inspection = null);
+    object? Inspection = null);
+
+public sealed record WellDataInspection(string SchemaVersion, WellPressureInspection? ReservoirPressure);
+public sealed record WellPressureInspection(double Value, string Unit);
 
 public sealed record EclipseDataInspection(
     string SchemaVersion,

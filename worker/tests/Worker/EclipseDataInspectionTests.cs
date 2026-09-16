@@ -275,7 +275,7 @@ public sealed class EclipseDataInspectionTests : IDisposable
         Assert.Empty(response.Studies);
         Assert.Equal("eclipse_100", response.ModelKind);
         Assert.NotNull(response.Inspection);
-        Assert.Equal("CASE.DATA", response.Inspection.CaseName);
+        Assert.Equal("CASE.DATA", Assert.IsType<EclipseDataInspection>(response.Inspection).CaseName);
         Assert.Equal(422, mismatch.HttpStatus);
         Assert.IsType<WorkerError>(mismatch.Body);
     }
@@ -309,7 +309,7 @@ public sealed class EclipseDataInspectionTests : IDisposable
 
         Assert.Equal(200, result.HttpStatus);
         var response = Assert.IsType<ModelValidationResponse>(result.Body);
-        Assert.Equal("case.data", response.Inspection!.CaseName);
+        Assert.Equal("case.data", Assert.IsType<EclipseDataInspection>(response.Inspection).CaseName);
     }
 
     [Fact]

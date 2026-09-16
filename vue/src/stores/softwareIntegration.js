@@ -467,7 +467,7 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
     return applyVersionSelection(defaultVersion?.id || null, generation)
   }
 
-  const createRun = async () => {
+  const createRun = async (parameters = null) => {
     if (!canCreateRunByCapability.value) throw new Error('当前模拟器执行能力不可用')
     const version = activeVersion.value
     if (!version || version.status !== 'READY' || (!isEclipseModel.value && !persistedStudies.value.includes(selectedStudy.value))) {
@@ -485,7 +485,7 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
     loadingHistory.value = false
     submittingRun.value = true
     try {
-      const summary = unwrap(await softwareIntegrationApi.createRun(version.id, isEclipseModel.value ? null : selectedStudy.value, requestedRunType))
+      const summary = unwrap(await softwareIntegrationApi.createRun(version.id, isEclipseModel.value ? null : selectedStudy.value, requestedRunType, parameters))
       if (detailRequestGeneration !== runDetailGeneration || expectedNavigation !== navigationGeneration ||
         activeProjectId.value !== expectedProjectId || activeModelId.value !== expectedModelId ||
         activeVersionId.value !== expectedVersionId || summary?.modelVersionId !== expectedVersionId) return null

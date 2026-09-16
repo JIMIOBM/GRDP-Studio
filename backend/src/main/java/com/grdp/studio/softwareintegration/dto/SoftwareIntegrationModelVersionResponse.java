@@ -3,6 +3,7 @@ package com.grdp.studio.softwareintegration.dto;
 import com.grdp.studio.softwareintegration.entity.SoftwareIntegrationModelVersionEntity;
 import com.grdp.studio.softwareintegration.support.SoftwareIntegrationDiagnosticSanitizer;
 import com.grdp.studio.softwareintegration.support.EclipseDataInspectionValidator;
+import com.grdp.studio.softwareintegration.support.PipesimWellInspectionValidator;
 import tools.jackson.databind.JsonNode;
 
 import java.time.LocalDateTime;
@@ -19,6 +20,9 @@ public record SoftwareIntegrationModelVersionResponse(
                 .map(SoftwareIntegrationDiagnosticSanitizer::sanitize).toList();
         JsonNode inspection = "READY".equals(entity.getStatus()) && "eclipse_100".equals(entity.getModelKind())
                 ? EclipseDataInspectionValidator.parsePersisted(entity.getInspectionJson()) : null;
+        if ("READY".equals(entity.getStatus()) && PipesimWellInspectionValidator.supports(entity.getModelKind())) {
+            inspection = PipesimWellInspectionValidator.parsePersisted(entity.getInspectionJson());
+        }
         return new SoftwareIntegrationModelVersionResponse(entity.getId(), entity.getVersionNo(), entity.getOriginalName(), entity.getSizeBytes(), entity.getSha256(), entity.getStatus(), entity.getModelKind(),
                 SoftwareIntegrationDiagnosticSanitizer.sanitize(entity.getValidationMessage()), studies, inspection, entity.getCreatedAt());
     }

@@ -56,7 +56,7 @@ public class SoftwareIntegrationRunStore {
     }
 
     public SoftwareIntegrationRunEntity createQueued(long projectId, long modelId, long versionId,
-                                                      String study, String runType, int timeoutSeconds) {
+                                                      String study, String runType, int timeoutSeconds, String parametersJson) {
         return transactions.execute(status -> {
             LocalDateTime now = LocalDateTime.now();
             SoftwareIntegrationRunEntity run = new SoftwareIntegrationRunEntity();
@@ -65,7 +65,7 @@ public class SoftwareIntegrationRunStore {
             run.setModelVersionId(versionId);
             run.setStudyName(study);
             run.setRunType(runType);
-            run.setParametersJson("null");
+            run.setParametersJson(parametersJson);
             run.setStatus(SoftwareIntegrationRunStatus.CREATED.name());
             run.setStatusVersion(0);
             run.setTimeoutSeconds(timeoutSeconds);

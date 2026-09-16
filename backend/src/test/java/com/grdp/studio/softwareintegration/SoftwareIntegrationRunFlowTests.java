@@ -168,6 +168,23 @@ class SoftwareIntegrationRunFlowTests {
     }
 
     @Test
+    void wellScenarioIsPersistedReturnedAndDispatchedWithoutChangingBaseline() throws Exception {
+        Seed seed = seed("READY", "models/scenario/model.pips");
+        var request = request("Study 1", "nodal");
+        request.setParameters(java.util.Map.of("schemaVersion", "pipesim-well-parameters/1", "reservoirPressurePsi", 4000));
+        var created = runService.create(seed.version().getId(), request);
+        assertThat(created.parameters().path("reservoirPressurePsi").asDouble()).isEqualTo(4000);
+        assertThat(runService.get(created.id()).parameters()).isEqualTo(created.parameters());
+        assertThat(runStore.find(created.id()).getParametersJson()).contains("reservoirPressurePsi");
+        dispatcher().dispatch();
+        assertThat(fakeWorker.lastExecuteRequest.parameters()).isEqualTo(created.parameters());
+        for (String task : List.of("profile", "combined", "network", "eclipse")) {
+            request.setRunType(task);
+            assertThatThrownBy(() -> runService.create(seed.version().getId(), request)).isInstanceOf(RunException.class);
+        }
+    }
+
+    @Test
     void eclipseBrowserRequestRequiresEveryFrozenNullFieldAndAvailableCapability() throws Exception {
         Seed eclipse = seed("READY", "models/eclipse/1/CASE.DATA", "ECLIPSE_100");
 
@@ -1445,7 +1462,7 @@ class SoftwareIntegrationRunFlowTests {
             if (executeHook != null) executeHook.accept(request.runId());
             if (executeError != null) throw executeError;
             assertThat(request.modelStorageKey()).doesNotMatch("^[A-Za-z]:.*");
-            assertThat(request.parameters()).isNull();
+            if (request.parameters() != null) assertThat(request.runTask()).isEqualTo("nodal");
             assertThat(request.timeoutSeconds()).isIn(600, 1800);
             return new WorkerRunAccepted(request.runId(), "CLAIMED", "worker-1", "generation-1");
         }

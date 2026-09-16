@@ -102,7 +102,7 @@ def fake_sixgill_modules():
         FlowRateType=types.SimpleNamespace(GASFLOWRATE="gasflowrate"),
     )
     definitions.Parameters = types.SimpleNamespace(
-        Completion=types.SimpleNamespace(GEOMETRYPROFILETYPE="geometry"),
+        Completion=types.SimpleNamespace(GEOMETRYPROFILETYPE="geometry", RESERVOIRPRESSURE="reservoir_pressure"),
         Well=types.SimpleNamespace(ASSOCIATEDBLACKOILFLUID="associated_fluid"),
         PTProfileSimulation=types.SimpleNamespace(
             CALCULATEDVARIABLE="calculated_variable",
@@ -120,6 +120,21 @@ def fake_sixgill_modules():
 
 
 class PtkRunContractTests(unittest.TestCase):
+    def test_scenario_is_applied_before_nodal_and_failure_closes_without_running(self):
+        for unit in ('psia', 'bara'):
+            model = FakeModel()
+            base_get = model.get_value
+            pressure = [3000]
+            calls = []
+            model.describe = lambda **kwargs: types.SimpleNamespace(units_symbol=unit)
+            model.get_value = lambda component, parameter=None: pressure[0] if parameter == 'reservoir_pressure' else base_get(component, parameter)
+            model.set_value = lambda component, parameter=None, value=None: pressure.__setitem__(0, value)
+            model.tasks.nodalanalysis = Runnable(lambda _: (calls.append(pressure[0]), NodalResult())[1])
+            envelope, _, _ = self.execute('nodal', model, {'schemaVersion': 'pipesim-well-parameters/1', 'reservoirPressurePsi': 4000})
+            self.assertTrue(model.closed)
+            self.assertEqual([4000] if unit == 'psia' else [], calls)
+            self.assertEqual('ok' if unit == 'psia' else 'error', envelope['status'])
+
     def execute(self, run_task, model=None, parameters=None):
         events = []
         model = model or FakeModel()
@@ -150,7 +165,7 @@ class PtkRunContractTests(unittest.TestCase):
                 model_factory=lambda _: opened.append(True),
             )
         self.assertEqual("error", envelope["status"])
-        self.assertEqual("PARAMETERS_NOT_NULL", envelope["error"]["code"])
+        self.assertEqual("INVALID_SCENARIO_PARAMETERS", envelope["error"]["code"])
         self.assertEqual([], opened)
 
     def test_nodal_contract_and_event_order(self):

@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
+import { networkCsv } from './networkResultInteraction'
 
 const props = defineProps({
   title: { type: String, required: true },
@@ -26,6 +27,16 @@ const displayValue = value => {
   if (value === null || value === undefined) return '-'
   if (typeof value === 'object') return JSON.stringify(value)
   return value
+}
+const exportCsv = () => {
+  if (!selectedEntry.value) return
+  const data = [['变量', '单位', '对象', '值'], ...rows.value.map(row => [selectedEntry.value.variable, selectedEntry.value.unit, row.name, row.value])]
+  const url = URL.createObjectURL(new Blob([networkCsv(data)], { type: 'text/csv;charset=utf-8' }))
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = 'network-variables.csv'
+  anchor.click()
+  setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
 watch(variables, entries => {
@@ -55,6 +66,7 @@ watch(variables, entries => {
         <el-option v-for="entry in variables" :key="entry.variable" :label="withUnit(entry)" :value="entry.variable" />
       </el-select>
       <el-input v-model="valueFilter" class="value-filter" clearable placeholder="筛选对象名称" />
+      <el-button size="small" :disabled="!rows.length" @click="exportCsv">导出当前表格 CSV</el-button>
     </div>
 
     <el-table v-if="selectedEntry" :data="rows" border size="small" max-height="420">
@@ -71,6 +83,7 @@ watch(variables, entries => {
 </template>
 
 <style lang="scss" scoped>
+.variable-toolbar { grid-template-columns: minmax(120px, 1fr) minmax(180px, 260px) minmax(140px, 220px) auto !important; } @media (max-width: 1000px) { .variable-toolbar { grid-template-columns: 1fr 1fr !important; } }
 .variable-results { min-height: 250px; }
 .variable-toolbar { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(220px, 340px) minmax(180px, 260px); align-items: end; gap: 12px; margin-bottom: 14px; }
 .variable-toolbar > div:first-child { min-width: 0; }

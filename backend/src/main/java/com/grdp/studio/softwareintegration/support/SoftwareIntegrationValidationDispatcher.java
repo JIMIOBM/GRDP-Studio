@@ -100,6 +100,9 @@ public class SoftwareIntegrationValidationDispatcher {
                         return;
                     }
                 }
+                if (PipesimWellInspectionValidator.supports(modelKind)) {
+                    inspection = PipesimWellInspectionValidator.validateAndSerialize(payload.get("inspection"), objectMapper);
+                }
                 String readyMessage = payload.path("message").asText("模型验证完成");
                 if (eclipse) readyMessage = SoftwareIntegrationEclipseSanitizer.sanitizeText(readyMessage);
                 if (!persistReady(version, modelKind, simulatorType,

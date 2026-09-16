@@ -47,6 +47,10 @@ const summary = run => ({
 
 async function installMockBackend(page, options = {}) {
   const state = {
+    models: structuredClone(models),
+    validationRequests: [],
+    holdValidation: false,
+    releaseValidation: null,
     runs: new Map(),
     histories: new Map([[101, options.wellHistory || []], [201, options.eclipseHistory || []], [301, options.networkHistory || []]]),
     createPayloads: [],
@@ -76,7 +80,14 @@ async function installMockBackend(page, options = {}) {
       return route.fulfill({ json: response([project]) })
     }
     if (path === '/software-integration/projects/1' && method === 'GET') {
-      return route.fulfill({ json: response({ project, models }) })
+      return route.fulfill({ json: response({ project, models: state.models }) })
+    }
+    if (path === '/software-integration/projects/1/model-versions/101/validate' && method === 'POST') {
+      state.validationRequests.push(101)
+      if (state.holdValidation) await new Promise(resolve => { state.releaseValidation = resolve })
+      state.models[0].versions[0].status = 'VALIDATING'
+      state.models[0].versions[0].inspection = null
+      return route.fulfill({ json: response({ project, models: state.models }) })
     }
 
     const historyMatch = path.match(/^\/software-integration\/model-versions\/(\d+)\/runs$/)
@@ -154,6 +165,67 @@ async function activateModel(page, name) {
   await page.getByText(name, { exact: true }).first().dblclick()
   await expect(page.getByRole('heading', { name, exact: true }).last()).toBeVisible()
 }
+
+test('原模型参数显式读取、回填和方案值对照', async ({ page }, testInfo) => {
+  const state = await installMockBackend(page)
+  await openWorkspace(page)
+  await activateModel(page, '井筒演示模型')
+  const preview = page.getByRole('region', { name: '原模型参数', exact: true })
+  await expect(preview).toContainText('暂无可用原值')
+  expect(state.validationRequests).toEqual([])
+  state.holdValidation = true
+  await preview.getByRole('button', { name: '重新验证并读取' }).click()
+  await expect.poll(() => Boolean(state.releaseValidation)).toBe(true)
+  await expect(page.getByRole('button', { name: '运行', exact: true })).toBeDisabled()
+  state.holdValidation = false
+  state.releaseValidation()
+  await expect(preview).toContainText('正在验证并读取')
+  await expect(page.getByRole('button', { name: '运行', exact: true })).toBeDisabled()
+  const well = state.models[0].versions[0]
+  well.status = 'READY'
+  well.inspection = { schemaVersion: 'pipesim-well-inspection/1', reservoirPressure: { value: 4321.25, unit: 'psia' } }
+  await expect(preview).toContainText('4321.25 psia', { timeout: 15000 })
+  await expect(page.getByRole('checkbox', { name: '使用地层压力方案' })).not.toBeChecked()
+  await preview.getByRole('button', { name: '以原值创建方案' }).click()
+  await expect(page.getByRole('spinbutton', { name: '方案地层压力' })).toHaveValue('4321.25')
+  await page.getByRole('spinbutton', { name: '方案地层压力' }).fill('4000')
+  await expect(page.getByTestId('pressure-scenario-comparison')).toHaveText('原值 4321.25 → 方案值 4000 psia')
+  expect(state.createPayloads).toHaveLength(0)
+  for (const width of [1440, 1280]) {
+    await page.setViewportSize({ width, height: width === 1280 ? 720 : 900 })
+    await page.screenshot({ path: testInfo.outputPath(`source-parameters-${width}.png`) })
+  }
+  await activateModel(page, '管网演示模型')
+  await expect(preview).toHaveCount(0)
+  await activateModel(page, '井筒演示模型')
+  await expect(page.getByRole('checkbox', { name: '使用地层压力方案' })).not.toBeChecked()
+  await preview.getByRole('button', { name: '重新验证并读取' }).click()
+  await expect(preview).toContainText('正在验证并读取')
+  well.status = 'READY'
+  well.inspection = { schemaVersion: 'pipesim-well-inspection/1', reservoirPressure: null }
+  await expect(preview).toContainText('暂无可用原值', { timeout: 15000 })
+  await expect(preview.getByRole('button', { name: '以原值创建方案' })).toHaveCount(0)
+})
+
+test('井筒压力方案提交精确快照，切换运行类型清空编辑', async ({ page }) => {
+  const historical = { id: 9000, modelId: 11, modelVersionId: 101, projectId: 1, versionNo: 1, study: 'Base Case', runType: 'nodal', status: 'FAILED', parameters: { schemaVersion: 'pipesim-well-parameters/1', reservoirPressurePsi: 3500 }, createdAt: '2026-09-15T10:00:00', cancellable: false, events: [], artifacts: [] }
+  const state = await installMockBackend(page, { wellHistory: [summary(historical)], runs: [historical] })
+  await openWorkspace(page)
+  await activateModel(page, '井筒演示模型')
+  await page.getByRole('radio', { name: '节点分析', exact: true }).check()
+  await page.getByRole('button', { name: '载入此方案参数' }).click()
+  await expect(page.getByRole('spinbutton', { name: '方案地层压力' })).toHaveValue('3500')
+  await page.locator('.run-type-control').getByText('PT 剖面', { exact: true }).click()
+  await page.locator('.run-type-control').getByText('节点分析', { exact: true }).click()
+  await expect(page.getByRole('checkbox', { name: '使用地层压力方案' })).not.toBeChecked()
+  await page.getByText('使用地层压力方案', { exact: true }).click()
+  await page.getByRole('spinbutton', { name: '方案地层压力' }).fill('4000')
+  await page.getByRole('button', { name: '运行', exact: true }).click()
+  await expect(page.getByText('当前结果 #9101：压力方案 · 地层压力 4000 psia')).toBeVisible()
+  expect(state.createPayloads[0].payload.parameters).toEqual({ schemaVersion: 'pipesim-well-parameters/1', reservoirPressurePsi: 4000 })
+  expect(state.runs.get(9000).parameters.reservoirPressurePsi).toBe(3500)
+  await expect(page.getByRole('button', { name: '载入此方案参数' })).toBeDisabled()
+})
 
 test('模型快速切换不会串入旧历史，并按模拟器契约创建运行', async ({ page }) => {
   const oldWellRun = {
@@ -419,7 +491,7 @@ test('ECLIPSE 使用单一标题和版本控制并提供检查与结果页签', 
   expect(state.unexpectedRequests).toEqual([])
 })
 
-test('PIPESIM Network 组态保持真实数量、设备图例与既有结果访问', async ({ page }) => {
+test('PIPESIM Network 组态保持真实数量、设备图例与既有结果访问', async ({ page }, testInfo) => {
   const componentTypes = [
     'Well', 'Sink', 'Junction', 'ControlValve', 'Pump', 'Compressor',
     'Separator', 'HeatExchanger', 'ProcessTank', 'Flowline', 'CustomDevice'
@@ -448,8 +520,15 @@ test('PIPESIM Network 组态保持真实数量、设备图例与既有结果访�
       branch: 'N1-N2',
       pointCount: 2,
       variables: [
+        { variable: 'BranchEquipment', unit: '', values: ['Flowline-A', 'Flowline-A'] },
         { variable: 'TotalDistance', unit: 'm', values: [0, 100] },
         { variable: 'Pressure', unit: 'bara', values: [90, 81.2] }
+      ]
+    }, {
+      branch: 'Comparison-branch', pointCount: 3,
+      variables: [
+        { variable: 'TotalDistance', unit: 'm', values: [15, 75, 125] },
+        { variable: 'Pressure', unit: 'bara', values: [91, 85, 79] }
       ]
     }],
     summary: { info: ['Network calculation completed'], warnings: [], errors: [] },
@@ -511,8 +590,40 @@ test('PIPESIM Network 组态保持真实数量、设备图例与既有结果访�
     await expect(page.locator(`[data-device-type="${deviceType}"]`)).toBeVisible()
   }
   await expect(page.locator('.topology-chart')).toHaveCount(1)
+  await page.getByRole('combobox', { name: '搜索管网设备' }).click()
+  await page.getByRole('option', { name: 'N2', exact: true }).click()
+  const selection = page.getByLabel('管网点选结果')
+  await expect(selection.getByText('81.2', { exact: true })).toBeVisible()
+  await expect(selection.getByText('未返回可精确匹配的支路结果')).toBeVisible()
+  await page.getByRole('button', { name: '保存布局', exact: true }).click()
+  await expect(page.getByText('当前运行的布局已保存到本浏览器。')).toBeVisible()
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('grdp:network-layout:v1:run:8501')))
+  expect(saved.positions).toHaveLength(11)
+  saved.positions[0].x += 27
+  await page.evaluate(snapshot => localStorage.setItem('grdp:network-layout:v1:run:8501', JSON.stringify(snapshot)), saved)
+  await activateModel(page, 'ECLIPSE演示模型')
+  await activateModel(page, '管网演示模型')
+  await page.getByRole('button', { name: '保存布局', exact: true }).click()
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('grdp:network-layout:v1:run:8501')).positions)).toEqual(saved.positions)
+  await page.getByText('设备符号', { exact: true }).click()
+  await page.getByTestId('network-topology-fit').click()
+  expect(await page.evaluate(() => localStorage.getItem('grdp:network-layout:v1:run:8501'))).toBeNull()
 
   await expect(page.getByText('分支剖面', { exact: true })).toBeVisible()
+  await page.getByText('选择同单位支路（最多 4 条）', { exact: true }).click()
+  await page.getByRole('option', { name: 'Comparison-branch', exact: true }).click()
+  await page.getByRole('combobox', { name: '对比管网支路' }).press('Escape')
+  await expect(page.locator('.profile-panel .el-table__body-wrapper').getByText('Comparison-branch', { exact: true })).toHaveCount(3)
+  const profileDownload = page.waitForEvent('download')
+  await page.getByRole('button', { name: '导出剖面 CSV', exact: true }).click()
+  const profileStream = await (await profileDownload).createReadStream()
+  let profileCsv = ''
+  for await (const chunk of profileStream) profileCsv += chunk.toString('utf8')
+  expect(profileCsv).toContain('"8501","Network Base","Comparison-branch","15","m","Pressure","91","bara"')
+  expect(profileCsv).toContain('"N1-N2","100","m","Pressure","81.2","bara"')
+  await activateModel(page, 'ECLIPSE演示模型')
+  await activateModel(page, '管网演示模型')
+  await expect(page.locator('.profile-panel .el-table__body-wrapper').getByText('Comparison-branch', { exact: true })).toHaveCount(0)
   await expect(page.getByText('N1-N2', { exact: true }).first()).toBeVisible()
   await expect(page.getByRole('tab', { name: '系统结果 (1)' })).toBeVisible()
   await expect(page.getByText('SystemOutletPressure', { exact: false }).first()).toBeVisible()
@@ -520,5 +631,150 @@ test('PIPESIM Network 组态保持真实数量、设备图例与既有结果访�
   const nodeResultPanel = page.getByRole('tabpanel', { name: '节点结果 (1)' })
   await expect(nodeResultPanel.getByText('Pressure (bara)', { exact: true }).first()).toBeVisible()
   await expect(nodeResultPanel.getByText('N2', { exact: true })).toBeVisible()
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 1280, height: 720 }]) {
+    await page.setViewportSize(viewport)
+    await page.locator('.topology-panel').scrollIntoViewIfNeeded()
+    await page.screenshot({ path: testInfo.outputPath(`network-${viewport.width}.png`) })
+    const bounds = await page.locator('.topology-panel').boundingBox()
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(viewport.width)
+  }
   expect(state.unexpectedRequests).toEqual([])
+})
+
+test('RSM 按对象和指标检索，同单位比较并导出原始点', async ({ page }, testInfo) => {
+  const run = {
+    id: 8601, projectId: 1, modelId: 22, modelVersionId: 201, versionNo: 1,
+    modelName: 'ECLIPSE演示模型', study: null, runType: 'eclipse', status: 'SUCCEEDED', resultContract: 'VALID_FULL',
+    events: [], artifacts: [], result: {
+      schemaVersion: 'eclipse-summary-result/1', modelKind: 'eclipse_100', runTask: 'eclipse', resultContract: 'VALID_FULL',
+      eclEnd: { comments: 0, warnings: 0, problems: 0, errors: 0, bugs: 0 }, outputFiles: [],
+      summary: { series: [
+        { keyword: 'WOPR', objectName: 'W1', unit: 'STB/DAY', points: [{ timeDays: 0, value: 10 }, { timeDays: 2, value: 7 }] },
+        { keyword: 'WOPR', objectName: 'W2', unit: 'STB/DAY', points: [{ timeDays: 1, value: 8 }, { timeDays: 3, value: 6 }] },
+        { keyword: 'WBHP', objectName: 'W1', unit: 'PSIA', points: [{ timeDays: 0, value: 150 }] },
+        { keyword: 'UNKNOWN', objectName: null, unit: null, points: [{ timeDays: 0, value: 1 }] }
+      ] }
+    }
+  }
+  const previous = structuredClone(run)
+  previous.id = 8600
+  previous.result.summary.series[0].points = [{ timeDays: 0.5, value: 12 }, { timeDays: 4, value: 5 }]
+  const state = await installMockBackend(page, { eclipseHistory: [summary(run), summary(previous)], runs: [run, previous] })
+  await openWorkspace(page)
+  await activateModel(page, 'ECLIPSE演示模型')
+  const explorer = page.getByLabel('RSM 曲线工作台')
+  await expect(explorer.getByRole('checkbox', { name: 'WOPR · W1', exact: true })).toBeChecked()
+  await expect(explorer.getByRole('checkbox', { name: 'WBHP · W1', exact: true })).toBeDisabled()
+  await explorer.getByRole('checkbox', { name: 'WOPR · W2', exact: true }).check()
+  await expect(explorer.getByText('已选 2/6')).toBeVisible()
+  await explorer.getByRole('textbox', { name: '搜索 RSM 指标' }).fill('井底')
+  await expect(explorer.getByRole('checkbox')).toHaveCount(1)
+  await explorer.getByRole('textbox', { name: '搜索 RSM 指标' }).fill('')
+  const downloadPromise = page.waitForEvent('download')
+  await explorer.getByRole('button', { name: '导出曲线 CSV', exact: true }).click()
+  const download = await downloadPromise
+  const stream = await download.createReadStream()
+  let csv = ''
+  for await (const chunk of stream) csv += chunk.toString('utf8')
+  expect(csv).toContain('"8601","WOPR","W2","STB/DAY","1","8"')
+  expect(csv).not.toContain('WBHP')
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 1280, height: 720 }]) {
+    await page.setViewportSize(viewport)
+    await explorer.scrollIntoViewIfNeeded()
+    await page.screenshot({ path: testInfo.outputPath(`rsm-${viewport.width}.png`) })
+    const box = await explorer.boundingBox()
+    expect(box.x + box.width).toBeLessThanOrEqual(viewport.width)
+  }
+  await explorer.getByRole('button', { name: '清空选择' }).click()
+  await explorer.getByRole('checkbox', { name: 'WBHP · W1', exact: true }).check()
+  await expect(explorer.getByRole('checkbox', { name: 'WOPR · W1', exact: true })).toBeDisabled()
+  await page.getByRole('combobox', { name: 'ECLIPSE 历史结果对比' }).click()
+  await page.getByRole('option', { name: /运行 #8600/ }).click()
+  await expect(explorer.getByRole('checkbox', { name: 'WOPR · W1 · #8600', exact: true })).toBeChecked()
+  await expect(explorer.getByRole('checkbox', { name: 'WOPR · W1 · #8601', exact: true })).toBeChecked()
+  await expect(explorer.getByRole('checkbox', { name: 'WBHP · W1 · #8600', exact: true })).toBeDisabled()
+  const comparedDownload = page.waitForEvent('download')
+  await explorer.getByRole('button', { name: '导出曲线 CSV', exact: true }).click()
+  const comparedStream = await (await comparedDownload).createReadStream()
+  let comparedCsv = ''
+  for await (const chunk of comparedStream) comparedCsv += chunk.toString('utf8')
+  expect(comparedCsv).toContain('"8600","WOPR","W1","STB/DAY","0.5","12"')
+  expect(comparedCsv).toContain('"8601","WOPR","W1","STB/DAY","2","7"')
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 1280, height: 720 }]) {
+    await page.setViewportSize(viewport)
+    await explorer.scrollIntoViewIfNeeded()
+    await page.screenshot({ path: testInfo.outputPath(`rsm-history-${viewport.width}.png`) })
+  }
+  await activateModel(page, '井筒演示模型')
+  await activateModel(page, 'ECLIPSE演示模型')
+  await expect(explorer.getByRole('checkbox', { name: /#8600/ })).toHaveCount(0)
+  state.heldRunId = 8600
+  await page.getByRole('combobox', { name: 'ECLIPSE 历史结果对比' }).click()
+  await page.getByRole('option', { name: /运行 #8600/ }).click()
+  await expect.poll(() => Boolean(state.releaseHeldRun)).toBe(true)
+  await activateModel(page, '井筒演示模型')
+  state.releaseHeldRun()
+  await expect(page.getByLabel('RSM 曲线工作台')).toHaveCount(0)
+})
+
+test('井筒历史比较保留来源与原始值，切换模型清除比较', async ({ page }, testInfo) => {
+  const makeRun = (id, pressure) => ({
+    id, projectId: 1, modelId: 11, modelVersionId: 101, versionNo: 1, modelName: '井筒演示模型',
+    study: 'Base Case', runType: 'combined', status: 'SUCCEEDED', resultContract: 'VALID_FULL', events: [], artifacts: [],
+    result: {
+      schemaVersion: 'pipesim-well-result/1', model_kind: 'black_oil_liquid', runTask: 'combined', resultContract: 'VALID_FULL',
+      units: Object.fromEntries(Object.entries({ flow: 'STB/DAY', pressure: 'PSIA', depth: 'FT', temperature: 'DEGF' }).map(([key, displayUnit]) => [key, { displayUnit }])),
+      ipr: [{ flow: 0, pressure }, { flow: 10, pressure: 0 }], vlp: [{ flow: 0, pressure: 0 }, { flow: 10, pressure }],
+      profile: [{ depth: 0, pressure, temperature: 70 }, { depth: 100, pressure: pressure + 20, temperature: 80 }]
+    }
+  })
+  const current = makeRun(8702, 200)
+  const previous = makeRun(8701, 100)
+  const state = await installMockBackend(page, { wellHistory: [summary(current), summary(previous)], runs: [current, previous] })
+  await openWorkspace(page)
+  await activateModel(page, '井筒演示模型')
+  await page.getByRole('tab', { name: '综合结果', exact: true }).click()
+  await expect(page.getByRole('region', { name: '井筒综合结果' }).locator('.nodal-result')).toBeVisible()
+  await expect(page.getByRole('region', { name: '井筒综合结果' }).locator('.profile-result')).toBeVisible()
+  await expect(page.locator('#well-nodal-export-csv')).toHaveCount(1)
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 1280, height: 720 }]) {
+    await page.setViewportSize(viewport)
+    await page.getByRole('region', { name: '井筒综合结果' }).scrollIntoViewIfNeeded()
+    await page.screenshot({ path: testInfo.outputPath(`combined-${viewport.width}.png`) })
+  }
+  await page.getByRole('tab', { name: '节点分析', exact: true }).click()
+  await page.getByRole('combobox', { name: '井筒历史结果对比' }).click()
+  await page.getByRole('option', { name: /8701/ }).click()
+  await expect.poll(() => state.runReads.get(8701)).toBe(1)
+  await expect(page.locator('.nodal-result').getByText('运行 #8701 · v1 · Base Case', { exact: true }).first()).toBeVisible()
+  const promise = page.waitForEvent('download')
+  await page.locator('#well-nodal-export-csv').click()
+  const stream = await (await promise).createReadStream()
+  let csv = ''
+  for await (const chunk of stream) csv += chunk.toString('utf8')
+  expect(csv).toContain('"运行 #8701 · v1 · Base Case","IPR","0","100"')
+  await page.getByRole('tab', { name: 'PT 剖面', exact: true }).click()
+  await expect(page.locator('.profile-result').getByText('运行 #8701 · v1 · Base Case', { exact: true }).first()).toBeVisible()
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 1280, height: 720 }]) {
+    await page.setViewportSize(viewport)
+    await page.locator('.profile-result').scrollIntoViewIfNeeded()
+    await page.screenshot({ path: testInfo.outputPath(`well-${viewport.width}.png`) })
+  }
+  await activateModel(page, 'ECLIPSE演示模型')
+  await activateModel(page, '井筒演示模型')
+  await expect(page.locator('.nodal-result').getByText('运行 #8701 · v1 · Base Case', { exact: true })).toHaveCount(0)
+  previous.result.units.flow.displayUnit = 'm3/d'
+  await page.getByRole('tab', { name: '节点分析', exact: true }).click()
+  await page.getByRole('combobox', { name: '井筒历史结果对比' }).click()
+  await page.getByRole('option', { name: /8701/ }).click()
+  await expect(page.locator('.nodal-result').getByText('结果单位不同，不能叠加比较。')).toBeVisible()
+  await activateModel(page, 'ECLIPSE演示模型')
+  await activateModel(page, '井筒演示模型')
+  state.heldRunId = 8701
+  await page.getByRole('combobox', { name: '井筒历史结果对比' }).click()
+  await page.getByRole('option', { name: /8701/ }).click()
+  await expect.poll(() => Boolean(state.releaseHeldRun)).toBe(true)
+  await activateModel(page, 'ECLIPSE演示模型')
+  state.releaseHeldRun()
+  await expect(page.getByText('运行 #8701 · v1 · Base Case', { exact: true })).toHaveCount(0)
 })

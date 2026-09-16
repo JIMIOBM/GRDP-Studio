@@ -1,19 +1,35 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
+import { downloadWellChart, downloadWellCsv, wellComparisonIssue } from './wellResultPresentation'
 
 const props = defineProps({
   result: { type: Object, default: null },
-  partial: { type: Boolean, default: false }
+  partial: { type: Boolean, default: false },
+  comparisonResult: { type: Object, default: null },
+  sourceLabel: { type: String, default: '当前运行' },
+  comparisonLabel: { type: String, default: '历史运行' }
 })
 
 const chartElement = ref(null)
 let chart
+let resizeObserver
 
 const rows = computed(() => Array.isArray(props.result?.profile) ? props.result.profile : [])
 const hasData = computed(() => rows.value.length > 0)
 const unit = field => props.result?.units?.[field]?.displayUnit || ''
 const axisName = (name, displayUnit) => displayUnit ? `${name} (${displayUnit})` : name
+const comparisonIssue = computed(() => wellComparisonIssue(props.result, props.comparisonResult, ['depth', 'pressure', 'temperature']) ||
+  (props.comparisonResult && !props.comparisonResult.profile?.length ? '所选运行没有 PT 剖面。' : ''))
+const sources = computed(() => [
+  { result: props.result, label: props.sourceLabel, history: false },
+  ...(props.comparisonResult && !comparisonIssue.value ? [{ result: props.comparisonResult, label: props.comparisonLabel, history: true }] : [])
+])
+const tableRows = computed(() => sources.value.flatMap(source => (source.result?.profile || []).map(point => ({ ...point, source: source.label }))))
+const exportCsv = () => downloadWellCsv([
+  ['来源', axisName('深度', unit('depth')), axisName('压力', unit('pressure')), axisName('温度', unit('temperature'))],
+  ...tableRows.value.map(point => [point.source, point.depth, point.pressure, point.temperature])
+], 'pipesim-profile.csv')
 
 const renderChart = async () => {
   await nextTick()
@@ -36,8 +52,8 @@ const renderChart = async () => {
       top: 8,
       textStyle: { color: '#333', fontSize: 15, fontWeight: 600 }
     },
-    legend: { top: 38, data: ['压力', '温度'], itemWidth: 18, itemHeight: 10 },
-    tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
+    legend: { top: 38, type: 'scroll', itemWidth: 18, itemHeight: 10 },
+    tooltip: { trigger: 'axis', renderMode: 'richText', axisPointer: { type: 'cross' } },
     grid: { left: 88, right: 60, top: 92, bottom: 48, containLabel: true },
     xAxis: [
       {
@@ -71,36 +87,29 @@ const renderChart = async () => {
       minorSplitLine: { show: true, lineStyle: { color: '#f1f5fa' } }
     },
     dataZoom: [{ type: 'inside', yAxisIndex: 0 }],
-    series: [
-      {
-        name: '压力',
-        type: 'line',
-        xAxisIndex: 0,
-        showSymbol: false,
-        lineStyle: { width: 2, color: '#2B6CB3' },
-        data: rows.value.map(point => [point.pressure, point.depth])
-      },
-      {
-        name: '温度',
-        type: 'line',
-        xAxisIndex: 1,
-        showSymbol: false,
-        lineStyle: { width: 2, color: '#B32D2D' },
-        data: rows.value.map(point => [point.temperature, point.depth])
-      }
-    ]
+    series: sources.value.flatMap(source => ['pressure', 'temperature'].map((key, index) => ({
+      name: `${source.history ? '对比' : '当前'} · ${source.label} · ${index ? '温度' : '压力'}`,
+      type: 'line', xAxisIndex: index, showSymbol: false,
+      lineStyle: { width: 2, type: source.history ? 'dashed' : 'solid', color: ['#2B6CB3', '#B32D2D'][index] },
+      itemStyle: { color: ['#2B6CB3', '#B32D2D'][index] },
+      data: source.result.profile.map(point => [point[key], point.depth])
+    })))
   }, true)
   chart.resize()
+  resizeObserver?.disconnect()
+  resizeObserver?.observe(chartElement.value)
 }
 
 const resizeChart = () => chart?.resize()
 
-watch(() => props.result, renderChart, { deep: true })
+watch(() => [props.result, props.comparisonResult, props.sourceLabel, props.comparisonLabel], renderChart, { deep: true })
 onMounted(() => {
+  resizeObserver = new ResizeObserver(resizeChart)
   window.addEventListener('resize', resizeChart)
   renderChart()
 })
 onBeforeUnmount(() => {
+  resizeObserver?.disconnect()
   window.removeEventListener('resize', resizeChart)
   chart?.dispose()
   chart = null
@@ -109,6 +118,8 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="profile-result">
+    <div v-if="hasData" class="result-tools"><span>PT 剖面 · {{ rows.length }} 点</span><el-button id="well-profile-export-png" size="small" @click="downloadWellChart(chart, 'pipesim-profile.png')">导出图片</el-button><el-button id="well-profile-export-csv" size="small" @click="exportCsv">导出曲线 CSV</el-button></div>
+    <p v-if="comparisonIssue" class="comparison-note" role="status">{{ comparisonIssue }}</p>
     <div v-if="hasData" ref="chartElement" class="result-chart" />
     <el-result
       v-else-if="partial"
@@ -117,8 +128,9 @@ onBeforeUnmount(() => {
       sub-title="节点分析结果已保留；本次组合运行没有有效的 PT 剖面数据。"
     />
     <el-empty v-else description="当前运行没有有效的 PT 剖面结果" :image-size="72" />
-    <el-table v-if="hasData" :data="rows" border size="small" max-height="300">
+    <el-table v-if="hasData" :data="tableRows" border size="small" max-height="300">
       <el-table-column type="index" label="#" width="54" align="center" />
+      <el-table-column prop="source" label="来源" min-width="180" />
       <el-table-column prop="depth" :label="axisName('深度', unit('depth'))" min-width="140" />
       <el-table-column prop="pressure" :label="axisName('压力', unit('pressure'))" min-width="140" />
       <el-table-column prop="temperature" :label="axisName('温度', unit('temperature'))" min-width="140" />
@@ -127,6 +139,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style lang="scss" scoped>
+.result-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }.result-tools > span { margin-right: auto; }.comparison-note { margin: 0; color: #986319; font-size: 12px; }
 .profile-result { min-height: 0; display: flex; flex-direction: column; gap: 14px; }
 .result-chart { height: 430px; min-height: 310px; border: 1px solid #e4e9f0; background: #fff; }
 @media (max-width: 900px) { .result-chart { height: 350px; } }

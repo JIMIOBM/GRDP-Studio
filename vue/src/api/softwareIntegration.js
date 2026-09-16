@@ -31,13 +31,13 @@ export const softwareIntegrationApi = {
   getCapabilities: () => request.get('/software-integration/capabilities'),
   listProjects: () => request.get('/software-integration/projects'),
   getProject: (projectId) => request.get(`/software-integration/projects/${projectId}`),
-  createProject: (data) => request.post('/software-integration/projects', data),
+  createProject: (data) => runRequest.post('/software-integration/projects', data),
   updateProject: (projectId, data) => request.put(`/software-integration/projects/${projectId}`, data),
   deleteProject: (projectId) => request.delete(`/software-integration/projects/${projectId}`),
   revalidateModel: (projectId, versionId) => request.post(`/software-integration/projects/${projectId}/model-versions/${versionId}/validate`),
-  createRun: (versionId, study, runType) => runRequest.post(
+  createRun: (versionId, study, runType, parameters = null) => runRequest.post(
     `/software-integration/model-versions/${versionId}/runs`,
-    { study, runType, parameters: null }
+    { study, runType, parameters }
   ),
   getRun: (runId) => runRequest.get(`/software-integration/runs/${runId}`),
   listRuns: (versionId, limit = 50) => runRequest.get(

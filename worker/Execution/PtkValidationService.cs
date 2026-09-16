@@ -101,7 +101,8 @@ public sealed partial class PtkValidationService
                 }
                 catch (JsonException) { }
             }
-            var response = new ModelValidationResponse(status ?? "INVALID", studies, message ?? "Model validation failed.", modelKind, well, structuredError);
+            var response = new ModelValidationResponse(status ?? "INVALID", studies, message ?? "Model validation failed.", modelKind, well, structuredError,
+                WellInspectionReader.Read(envelope, status, modelKind));
             return status switch
             {
                 "READY" => new(StatusCodes.Status200OK, response),

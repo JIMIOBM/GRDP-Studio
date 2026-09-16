@@ -115,6 +115,29 @@ class SoftwareIntegrationValidationDispatcherTests {
         assertThat(request.path("expectedSha256").asText()).isEqualTo("a".repeat(64));
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"black_oil_liquid", "basic_gas"})
+    void wellValidationPersistsOptionalInspectionWithoutChangingReadiness(String kind) {
+        for (String inspection : new String[]{
+                "{\"schemaVersion\":\"pipesim-well-inspection/1\",\"reservoirPressure\":{\"value\":4000,\"unit\":\"psia\"}}",
+                "{\"schemaVersion\":\"pipesim-well-inspection/1\",\"reservoirPressure\":null}",
+                "null", "{\"privatePath\":\"secret\"}"}) {
+            Seed seed = seed();
+            RESPONSE.set("{\"status\":\"READY\",\"studies\":[\"Study 1\"],\"modelKind\":\"" + kind + "\",\"inspection\":" + inspection + "}");
+            dispatcher().validate(seed.versionId());
+            SoftwareIntegrationModelVersionEntity version = versionMapper.selectById(seed.versionId());
+            assertThat(version.getStatus()).isEqualTo("READY");
+            JsonNode exposed = softwareIntegrationService.getProject(seed.projectId()).models().get(0).versions().get(0).inspection();
+            if (inspection.contains("schemaVersion")) {
+                assertThat(objectMapper.readTree(version.getInspectionJson())).isEqualTo(objectMapper.readTree(inspection));
+                assertThat(exposed).isEqualTo(objectMapper.readTree(inspection));
+            } else {
+                assertThat(version.getInspectionJson()).isNull();
+                assertThat(exposed).isNull();
+            }
+        }
+    }
+
     @Test
     void failedRevalidationPreservesKnownKindAndSanitizesWorkerDiagnostics() {
         Seed seed = seed();
