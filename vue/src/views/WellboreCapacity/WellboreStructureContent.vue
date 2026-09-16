@@ -158,7 +158,7 @@ const resetCamera = () => {
   controls.update()
 }
 
-// 将有效井斜坐标转换为局部坐标，并创建井筒、端点、网格和坐标轴。
+// 将有效井斜坐标转换为局部坐标，并创建井筒、端点、网格和坐标轴：X、Y、Z
 const renderTrajectory = () => {
   if (!scene) return
   clearTrajectory()

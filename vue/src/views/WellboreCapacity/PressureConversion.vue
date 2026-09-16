@@ -579,10 +579,6 @@ onBeforeUnmount(() => {
             <label>井底压力（MPa）</label>
             <el-input :model-value="method.profile?.at(-1)?.pressure?.toFixed(4) ?? '—'" readonly size="small" />
           </div>
-          <div class="field">
-            <label>井段收敛状态</label>
-            <el-input :model-value="method.allSegmentsConverged ? '全部井段收敛' : `未收敛井段 ${method.nonconvergedSegmentCount}`" readonly size="small" />
-          </div>
         </section>
       </div>
       <div v-show="!paramsCollapsed" class="param-tabs" role="tablist" aria-label="参数面板">
@@ -599,10 +595,7 @@ onBeforeUnmount(() => {
       <div v-if="result" class="summary">
         <span v-for="(method, code) in result.methods" :key="code">
           {{ code }}：井底
-          {{ method.profile.at(-1)?.pressure?.toFixed(4) }} MPa；
-          {{ method.allSegmentsConverged
-            ? '全部井段收敛'
-            : `未收敛井段 ${method.nonconvergedSegmentCount}` }}
+          {{ method.profile.at(-1)?.pressure?.toFixed(4) }} MPa
         </span>
       </div>
 
