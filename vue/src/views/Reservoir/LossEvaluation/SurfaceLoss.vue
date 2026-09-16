@@ -1,28 +1,24 @@
 <script setup>
-/**
- * 库 → 损耗评价 → 井筒损耗 / 地面损耗共用页面，不是单井产能页面。
- * lossKind='wellbore'：井筒放空损耗；lossKind='surface'：地面放空损耗及凝液溶解携带损耗。
- * 两者都支持直接输入最终气量、填写参数进行公式计算；当前不要求选择某口井。
- * 本页只组织输入和显示结果，分别调用 api/wellboreLoss、api/surfaceLoss 的后端接口。
- * 修改界面时：mode 分支控制两种输入方式，isSurface 分支控制地面损耗专用区域。
- */
+/** 库 → 损耗评价 → 地面损耗。本文件包含该页面的参数状态、接口请求、模板和样式。 */
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import NaturalGasImportDialog from '@/views/DataManagement/NaturalGasImportDialog.vue'
 import { wellboreLossApi } from '@/api/wellboreLoss'
 import { surfaceLossApi } from '@/api/surfaceLoss'
 import { workspaceTreeData } from '@/utils/workspaceTreeState'
 import { upsertReservoirLossRecordNode } from '@/utils/reservoirGeologicalLossTree'
+import NaturalGasImportDialog from '@/views/DataManagement/NaturalGasImportDialog.vue'
 
 const props = defineProps({
   reservoir: { type: Object, default: null },
-  lossKind: { type: String, default: 'wellbore' }
 })
+// 当前功能固定在本页面，不通过外部参数切换成其他页面。
+const lossKind = 'surface'
+
 // 名称随传入的储气库节点更新；所属库不以项目范围ID或单井名称代替。
 const resultTitle = computed(() => `${props.reservoir?.label || '未选择库'}-${lossTitle.value}计算结果`)
 // 井筒与地面放空的公式和PVT输入相同，复用表单；各自使用独立记录接口。
-const isSurface = computed(() => props.lossKind === 'surface')
+const isSurface = computed(() => lossKind === 'surface')
 const lossTitle = computed(() => isSurface.value ? '地面损耗' : '井筒损耗')
 const ventTitle = computed(() => isSurface.value ? '地面系统放空损耗气量' : '井筒损耗气量')
 const segmentTitle = computed(() => isSurface.value ? '放空段' : '放空井段')
@@ -144,7 +140,7 @@ const save = async () => {
   if (!calculation.value) { ElMessage.warning('请先完成计算再保存'); return }
   saving.value = true
   const scope = { recordId: recordId.value, projectId: projectId.value, gasReservoirId: gasReservoirId.value, storageId: storageId.value }
-  const savedLossKind = props.lossKind
+  const savedLossKind = lossKind
   const startedRevision = revision
   try {
     const response = await lossApi.value.save({ ...scope, input: buildInput(), calculation: calculation.value })
@@ -227,7 +223,7 @@ const handleGasImport = async ({ file, options }) => {
 // 同步使计算结果失效，防止编辑参数后立即保存旧结果；详情回填在nextTick后单独恢复结果。
 watch([directForm, formulaForm, volumes, condensateForm], resetResult, { deep: true, flush: 'sync' })
 // 首次进入及后续切换均走同一路径：清旧状态，有记录 ID 时再加载详情，避免跨库复用。
-watch([recordId, projectId, gasReservoirId, storageId, () => props.lossKind], async () => {
+watch([recordId, projectId, gasReservoirId, storageId, () => lossKind], async () => {
   loadVersion++; resetResult(); clearNewRecord()
   await loadDetail()
 }, { immediate: true })
@@ -235,7 +231,7 @@ onBeforeUnmount(() => { active = false; revision++; loadVersion++ })
 </script>
 
 <template>
-  <section class="wellbore-loss" :class="{ 'surface-loss': isSurface }">
+  <section class="wellbore-loss surface-loss">
     <!-- 顶部功能区：标题随损耗类型变化；PVT 导入只在公式法显示，保存适用于两种方式。 -->
     <header class="result-tabs">
       <div class="result-tab" :title="resultTitle"><span>{{ resultTitle }}</span></div>
@@ -247,7 +243,7 @@ onBeforeUnmount(() => { active = false; revision++; loadVersion++ })
 
     <!-- 保存期间禁用表单交互，保证正在保存的参数与结果对应。 -->
     <main class="form-canvas" :inert="saving">
-      <div v-if="isSurface" class="form-title">{{ mode === 'direct' ? '地面损耗' : '地面系统放空损耗' }}</div>
+      <div  class="form-title">{{ mode === 'direct' ? '地面损耗' : '地面系统放空损耗' }}</div>
       <div class="mode-row">
         <span class="mode-label">计算方式</span>
         <div class="mode-switch" role="tablist" :aria-label="`${lossTitle}计算方式`">
@@ -256,12 +252,12 @@ onBeforeUnmount(() => { active = false; revision++; loadVersion++ })
         </div>
       </div>
 
-      <!-- 直接输入区：井筒填写一项损耗气量，地面还需填写凝液溶解携带损耗气量。 -->
+      <!-- 直接输入区：分别填写地面放空损耗和凝液溶解携带损耗。 -->
       <template v-if="mode === 'direct'">
-        <div class="form-title">{{ isSurface ? '请输入损耗气量' : '请输入井筒损耗气量' }}</div>
+        <div class="form-title">请输入损耗气量</div>
         <div class="parameter-grid direct-grid">
           <label class="field"><span>{{ ventTitle }}（10⁴m³）</span><input v-model="directForm.lossVolume" placeholder="请输入" /></label>
-          <label v-if="isSurface" class="field"><span>凝液溶解携带损耗气量（10⁴m³）</span><input v-model="directForm.condensateLossVolume" placeholder="请输入" /></label>
+          <label  class="field"><span>凝液溶解携带损耗气量（10⁴m³）</span><input v-model="directForm.condensateLossVolume" placeholder="请输入" /></label>
         </div>
       </template>
 
@@ -271,11 +267,11 @@ onBeforeUnmount(() => { active = false; revision++; loadVersion++ })
         <section class="volume-section">
           <div class="section-heading">
             <div><strong>{{ segmentTitle }}容积</strong></div>
-            <button class="add-button" type="button" @click="addVolume">＋ 添加{{ isSurface ? '放空段' : '井段' }}</button>
+            <button class="add-button" type="button" @click="addVolume">＋ 添加放空段</button>
           </div>
           <div class="volume-list">
             <div v-for="(item, index) in volumes" :key="item.id" class="volume-row">
-              <span class="volume-index">{{ isSurface ? '放空段' : '井段' }} {{ index + 1 }}</span>
+              <span class="volume-index">放空段 {{ index + 1 }}</span>
               <label class="field compact"><span>{{ segmentTitle }}容积（m³）</span><input v-model="item.value" placeholder="请输入" /></label>
               <button class="remove-button" type="button" :disabled="volumes.length === 1" @click="removeVolume(index)">删除</button>
             </div>
@@ -306,7 +302,7 @@ onBeforeUnmount(() => { active = false; revision++; loadVersion++ })
       </template>
 
       <!-- 只有公式法输入凝析油体积和气油比；直接模式在上方输入最终凝液损耗气量。 -->
-      <section v-if="isSurface && mode === 'formula'" class="condensate-section">
+      <section v-if="mode === 'formula'" class="condensate-section">
         <div class="subheading">凝液溶解携带损耗</div>
         <div class="parameter-grid">
           <label class="field"><span>分离器出口凝析油体积（10⁴m³）</span><input v-model="condensateForm.volume" placeholder="请输入" /></label>
@@ -322,9 +318,9 @@ onBeforeUnmount(() => { active = false; revision++; loadVersion++ })
       <section class="result-card">
         <h3>计算结果</h3>
         <!-- 两种方式均分别展示放空损耗和凝液损耗；切换方式或重置只清除结果。 -->
-        <div :class="{ 'surface-result-grid': isSurface }" aria-live="polite">
+        <div class="surface-result-grid" aria-live="polite">
           <div class="result-line"><span>{{ ventTitle }}（10⁴m³）：</span><strong>{{ resultText }}</strong></div>
-          <div v-if="isSurface" class="result-line"><span>凝液溶解携带损耗气量（10⁴m³）：</span><strong>{{ condensateResultText }}</strong></div>
+          <div  class="result-line"><span>凝液溶解携带损耗气量（10⁴m³）：</span><strong>{{ condensateResultText }}</strong></div>
         </div>
       </section>
     </main>

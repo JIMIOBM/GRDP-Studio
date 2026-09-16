@@ -24,7 +24,12 @@ import { isProductivityTestRecord, deleteProductivityTestRecord } from '@/utils/
 import BinomialPressureContent from '@/views/WellControlInventory/BinomialPressureContent.vue'
 import ModifiedIsochronalContent from '@/views/SingleWellProductivity/ModifiedIsochronalContent.vue'
 import ExponentialContent from '@/views/SingleWellProductivity/ExponentialContent.vue'
-import ProductivityComparison from '@/views/SingleWellProductivity/ProductivityComparison.vue'
+import MultiPeriodComparison from '@/views/SingleWellProductivity/MultiPeriodComparison.vue'
+import MultiMethodComparison from '@/views/SingleWellProductivity/MultiMethodComparison.vue'
+import InjectionProductionComparison from '@/views/SingleWellProductivity/InjectionProductionComparison.vue'
+
+// 各功能有独立页面；切换页面时重新创建其参数和请求状态。
+const productivityComparisonPages = { '多周期': MultiPeriodComparison, '多方法': MultiMethodComparison, '注采对比': InjectionProductionComparison }
 import DynamicProductivityContent from '@/views/SingleWellProductivity/DynamicProductivityContent.vue'
 import DynamicUnstableProductivityContent from '@/views/SingleWellProductivity/DynamicUnstableProductivityContent.vue'
 import TheoreticalProductivityContent from '@/views/SingleWellProductivity/TheoreticalProductivityContent.vue'
@@ -1732,8 +1737,8 @@ onBeforeUnmount(() => window.removeEventListener('click', closeStableContextMenu
         </template>
 
         <template v-else-if="activeModule === '产能对比'">
-          <ProductivityComparison :well-name="selectedWellName" :project-id="PROJECT_ID"
-            :gas-reservoir-id="GAS_RESERVOIR_ID" :method-type="activeMethod" />
+          <component :is="productivityComparisonPages[activeMethod]" :key="activeMethod"
+            :well-name="selectedWellName" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
         </template>
       </main>
     </div>

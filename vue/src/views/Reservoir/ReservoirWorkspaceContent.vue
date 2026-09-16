@@ -1,14 +1,22 @@
 <script setup>
 /**
  * 库级工作区入口：根据菜单命令选择要显示的页面，本文件不负责损耗计算。
- * “损耗评价 → 地质损耗 → 微观损耗 / 逸散性损耗”使用 GeologicalLossContent。
- * “损耗评价 → 井筒损耗 / 地面损耗”使用 WellboreLossContent，通过 lossKind 区分。
+ * LossEvaluation/：损耗评价，微观、逸散、井筒、地面损耗分别使用独立 Vue 页面。
+ * ProductivityEvaluation/：产能评价，独立管理库的多周期、多方法、注采对比，不引用井的页面。
+ * 新增其他板块时，在 Reservoir 下建立对应板块文件夹，本入口只负责分发页面。
  * 其他尚未接入专用页面的库级功能，显示下方的通用入口占位界面。
  */
 import { computed } from 'vue'
-import GeologicalLossContent from './GeologicalLossContent.vue'
-import WellboreLossContent from './WellboreLossContent.vue'
-import ProductivityComparison from '@/views/SingleWellProductivity/ProductivityComparison.vue'
+import MicroscopicLoss from './LossEvaluation/MicroscopicLoss.vue'
+import EscapeLoss from './LossEvaluation/EscapeLoss.vue'
+import WellboreLoss from './LossEvaluation/WellboreLoss.vue'
+import SurfaceLoss from './LossEvaluation/SurfaceLoss.vue'
+import MultiPeriodComparison from './ProductivityEvaluation/MultiPeriodComparison.vue'
+import MultiMethodComparison from './ProductivityEvaluation/MultiMethodComparison.vue'
+import InjectionProductionComparison from './ProductivityEvaluation/InjectionProductionComparison.vue'
+
+const lossPages = { '微观损耗': MicroscopicLoss, '逸散性损耗': EscapeLoss, '井筒损耗': WellboreLoss, '地面损耗': SurfaceLoss }
+const comparisonPages = { '多周期': MultiPeriodComparison, '多方法': MultiMethodComparison, '注采对比': InjectionProductionComparison }
 
 // reservoir 是当前储气库节点（包含项目范围和 storageId）；command 是菜单功能及其层级路径。
 const props = defineProps({
@@ -42,18 +50,10 @@ const isPeriodComparison = computed(() => props.command?.group === '产能评价
 </script>
 
 <template>
-  <!-- 地质损耗共用页：由 command.name 选择微观或逸散性表单。 -->
-  <GeologicalLossContent
-    v-if="isGeologicalLoss"
-    :key="`${reservoir?.storageId}-${command.name}`"
-    :reservoir="reservoir"
-    :command="command"
-  />
-  <!-- 放空损耗共用页：surface 额外包含凝液损耗，wellbore 只处理井筒损耗。 -->
-  <WellboreLossContent
-    v-else-if="isVentLoss"
-    :key="`${reservoir?.storageId}-${command.name}`"
-    :loss-kind="command.name === '地面损耗' ? 'surface' : 'wellbore'"
+  <!-- 每个损耗功能都有独立页面；项目、库或功能变化时销毁旧页面状态。 -->
+  <component :is="lossPages[command.name]"
+    v-if="isGeologicalLoss || isVentLoss"
+    :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-${command.name}`"
     :reservoir="reservoir"
   />
   <!-- 与单井页面一致：先显示模块页签，再显示参数栏和右侧分析结果页签。 -->
@@ -61,10 +61,10 @@ const isPeriodComparison = computed(() => props.command?.group === '产能评价
     <div class="comparison-module-tabs">
       <div class="comparison-module-tab"><span>产能对比-{{ command.name }}</span></div>
     </div>
-    <ProductivityComparison
+    <component :is="comparisonPages[command.name]"
       :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-${command.name}`"
       :project-id="reservoir?.projectId" :gas-reservoir-id="reservoir?.gasReservoirId"
-      :storage-id="reservoir?.storageId" :storage-name="reservoirLabel" comparison-scope="storage" :method-type="command.name" />
+      :storage-id="reservoir?.storageId" :storage-name="reservoirLabel" />
   </section>
   <!-- 其他尚未接入的库级功能仍保留占位入口。 -->
   <section v-else class="reservoir-workspace" :aria-label="title">

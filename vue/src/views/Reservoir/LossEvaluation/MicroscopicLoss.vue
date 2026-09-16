@@ -1,23 +1,20 @@
 <script setup>
-/**
- * 库 → 损耗评价 → 地质损耗页面，同一组件承载“微观损耗”和“逸散性损耗”。
- * 微观损耗：填写孔隙体积、残余气饱和度及温压/PVT 参数；支持导入天然气基础数据。
- * 逸散性损耗：填写周期垫气量、库存量、注气量和预测变化率，不使用微观损耗表单。
- * 本页负责输入、结果展示和记录回填；计算及保存通过 api/geologicalLoss 调用后端。
- * 修改界面时：template 中的 isMicroscopic 分支是微观表单，v-else 分支是逸散性表单。
- */
+/** 库 → 损耗评价 → 地质损耗 → 微观损耗。本文件包含该页面的参数状态、接口请求、模板和样式。 */
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import NaturalGasImportDialog from '@/views/DataManagement/NaturalGasImportDialog.vue'
 import { geologicalLossApi } from '@/api/geologicalLoss'
 import { workspaceTreeData } from '@/utils/workspaceTreeState'
 import { upsertReservoirLossRecordNode } from '@/utils/reservoirGeologicalLossTree'
+import NaturalGasImportDialog from '@/views/DataManagement/NaturalGasImportDialog.vue'
 
-const props = defineProps({ reservoir: { type: Object, default: null }, command: { type: Object, default: null } })
+const props = defineProps({ reservoir: { type: Object, default: null } })
+// 当前功能固定在本页面，不通过外部参数切换成其他页面。
+const featureName = '微观损耗'
+
 const route = useRoute()
 const router = useRouter()
-const isMicroscopic = computed(() => props.command?.name === '微观损耗')
+const isMicroscopic = computed(() => featureName === '微观损耗')
 const title = computed(() => isMicroscopic.value ? '微观损耗' : '逸散性损耗')
 // 标题使用当前库节点的显示名称，不展示数据库ID，也不借用当前选中井的名称。
 const resultTitle = computed(() => `${props.reservoir?.label || '未选择库'}-${title.value}计算结果`)
@@ -165,7 +162,7 @@ const handleGasImport = async ({ file, options }) => {
 }
 
 // 目录切换后先恢复空白表单，再按记录 ID 回填；初次进入由 onMounted 加载详情。
-watch(() => [props.command?.name, recordId.value, storageId.value], async () => { revision++; isMicroscopic.value ? resetMicroscopic() : resetEscape(); await loadDetail() })
+watch(() => [featureName, recordId.value, storageId.value], async () => { revision++; isMicroscopic.value ? resetMicroscopic() : resetEscape(); await loadDetail() })
 // 参数一变就同步使旧结果失效，避免下一次点击保存时带上修改前的计算值。
 watch(microscopicForm, () => { revision++; microscopicCalculation.value = null }, { deep: true, flush: 'sync' })
 watch(escapeForm, () => { revision++; escapeCalculation.value = null }, { deep: true, flush: 'sync' })
@@ -178,7 +175,7 @@ onMounted(loadDetail)
     <header class="result-tabs">
       <div class="result-tab" :title="resultTitle"><span>{{ resultTitle }}</span></div>
       <div class="header-actions">
-        <button v-if="isMicroscopic" class="secondary" type="button" @click="importDialogVisible = true">导入PVT</button>
+        <button  class="secondary" type="button" @click="importDialogVisible = true">导入PVT</button>
         <button class="primary" type="button" :disabled="saving" @click="save">{{ saving ? '保存中…' : '保存' }}</button>
       </div>
     </header>
@@ -186,7 +183,7 @@ onMounted(loadDetail)
       <div class="form-title">请输入计算参数</div>
       <div class="parameter-grid">
         <!-- 微观损耗参数区：孔隙/饱和度、下限温压与天然气物性计算选项。 -->
-        <template v-if="isMicroscopic">
+
           <!-- 业务界面只展示中文名称和单位，公式符号保留在后端计算及设计文档中。 -->
           <label class="field"><span>气水过渡带孔隙体积（10⁴m³）</span><input v-model="microscopicForm.poreVolume" placeholder="请输入" /></label>
           <label class="field"><span>上周期残余气饱和度（%）</span><input v-model="microscopicForm.previousResidualSaturation" placeholder="请输入" /></label>
@@ -201,20 +198,12 @@ onMounted(loadDetail)
           <label class="field"><span>非烃气体修正方法</span><select v-model="microscopicForm.modificationMethod"><option :value="0">Wichert-Aziz 修正方法</option><option :value="1">Carr-Kobayashi-Burrows 方法</option></select></label>
           <label class="field"><span>天然气偏差系数计算方法</span><select v-model="microscopicForm.deviationFactorMethod"><option :value="0">Dranchuk-Abu-Kassem 方法</option><option :value="1">Dranchuk-Purvis-Robinson 方法</option><option :value="2">Hall-Yarborough 方法</option></select></label>
           <label class="field"><span>天然气黏度计算方法</span><select v-model="microscopicForm.viscosityMethod"><option :value="0">Lee-Gonzalez-Eakin 方法</option><option :value="1">Carr-Kobayashi-Burrows 方法</option><option :value="2">Sutton 方法</option></select></label>
-        </template>
-        <!-- 逸散性损耗参数区：周期气量和预测变化率，与上面的微观参数互斥显示。 -->
-        <template v-else>
-          <label class="field"><span>上一周期储气库垫气量（10⁴m³）</span><input v-model="escapeForm.previousCushionGasVolume" placeholder="请输入" /></label>
-          <label class="field"><span>本周期储气库可动垫气量（10⁴m³）</span><input v-model="escapeForm.movableCushionGasVolume" placeholder="请输入" /></label>
-          <label class="field"><span>本周期储气库未动用库存量（10⁴m³）</span><input v-model="escapeForm.unusedInventoryVolume" placeholder="请输入" /></label>
-          <label class="field"><span>储气库注气量（10⁴m³）</span><input v-model="escapeForm.injectionVolume" placeholder="请输入" /></label>
-          <label class="field"><span>本周期预测垫气变化率（%）</span><input v-model="escapeForm.predictedChangeRate" placeholder="请输入" /></label>
-        </template>
+
       </div>
-      <div v-if="isMicroscopic && importedFileName" class="import-note">已导入：{{ importedFileName }}</div>
+      <div v-if="importedFileName" class="import-note">已导入：{{ importedFileName }}</div>
       <div class="calculation-actions"><button class="calculate" type="button" :disabled="calculating" @click="calculate">{{ calculating ? '计算中…' : '计 算' }}</button><button class="reset" type="button" @click="resetCalculationResult">重 置</button></div>
       <!-- 结果区只展示当前方法的后端返回值；尚无结果时显示占位符，不在模板内计算。 -->
-      <section class="result-card"><h3>计算结果</h3><div class="result-line"><span>{{ isMicroscopic ? '微观损耗气量（10⁴m³）' : '逸散性损耗气量（10⁴m³）' }}：</span><strong>{{ formatResult(outputValue) || '—' }}</strong></div></section>
+      <section class="result-card"><h3>计算结果</h3><div class="result-line"><span>微观损耗气量（10⁴m³）：</span><strong>{{ formatResult(outputValue) || '—' }}</strong></div></section>
     </main>
     <NaturalGasImportDialog v-model="importDialogVisible" import-kind="data" @confirm="handleGasImport" />
   </section>
