@@ -18,8 +18,16 @@ if (typeof props.node.expanded === 'boolean') {
   props.node.expanded = expanded.value
 }
 
+// 父目录收起时同时重置下级；下次打开只展开这一层，不自动铺开历史子目录。
+const collapseChildren = (node) => {
+  for (const child of node.children || []) {
+    child.expanded = false
+    collapseChildren(child)
+  }
+}
 watch(() => props.node.expanded, value => {
   if (typeof value === 'boolean') expanded.value = value
+  if (value === false) collapseChildren(props.node)
 })
 // lazy 节点即使尚无 children 也要显示展开箭头，首次展开时由父页面调用接口填充。
 const hasChildren = () => props.node.lazy || (props.node.children && props.node.children.length > 0)
@@ -29,12 +37,11 @@ const toggle = () => {
   expanded.value = !expanded.value
   // 展开状态写回公共树节点，跨工作台重新渲染时保持原状。
   props.node.expanded = expanded.value
-  // 公共目录会在两个工作台之间复用。有时节点保留了“已展开”状态，
-  // 但其懒加载结果尚未读取；这时用户第一次点击会变成收起操作。
-  // 对尚未加载的懒节点，无论本次是展开还是收起，都立即触发一次读取，
-  // 避免必须再点第二次才调用对应接口。
-  if (expanded.value || (props.node.lazy && !props.node.loaded)) {
+  // 收起不加载数据，避免异步返回又将刚收起的分支展开。
+  if (expanded.value) {
     emit('expand', props.node)
+  } else {
+    collapseChildren(props.node)
   }
 }
 

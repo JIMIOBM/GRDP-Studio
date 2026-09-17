@@ -1,12 +1,10 @@
 <script setup>
 import { ref } from 'vue'
-import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { User, Lock } from '@element-plus/icons-vue'
 import { projectName } from '../../config/config.default'
-import { connectNotifySocket } from '@/utils/notifySocket'
+import { disconnectNotifySocket } from '@/utils/notifySocket'
 
-const router = useRouter()
 const loading = ref(false)
 const formRef = ref()
 
@@ -20,52 +18,56 @@ const rules = {
   password: [{ required: true, message: '请输入密码', trigger: 'blur' }]
 }
 
-const loginDockerPlatform = async () => {
+const loginDockerPlatform = async (credentials) => {
   const response = await fetch('/docker-auth/login', {
     method: 'POST',
     credentials: 'same-origin',
     headers: {
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify({
-      username: form.value.username,
-      password: form.value.password
-    })
+    body: JSON.stringify(credentials)
   })
   const result = await response.json().catch(() => ({}))
 
-  if (!response.ok || result.success === false) {
-    throw new Error(result.message || '原平台登录失败')
+  // 不能把代理返回的 HTML 或不完整响应当作登录成功。
+  if (!response.ok || result.success !== true || !result.account?.id) {
+    throw new Error(result.message || '登录认证失败，请确认认证服务已启动')
   }
+  return result.account
 }
 
 const enterIpr = async (account) => {
   localStorage.setItem('account', JSON.stringify(account))
-  connectNotifySocket()
   ElMessage.success('登录成功')
-  await router.replace('/ipr')
+  // 整页进入工作台，清除上一账号留在内存中的目录/结果/通知连接。
+  // 新页面中的 HTTP 和 WebSocket 会自动使用刚写入的 HttpOnly 会话 Cookie。
+  window.location.replace('/ipr')
 }
 
 const onLogin = async () => {
-  await formRef.value.validate(async (valid) => {
-    if (!valid) return
-    loading.value = true
-    try {
-      // The business backend does not own authentication. Authenticate once
-      // against the original platform and use that identity locally as well.
-      // await loginDockerPlatform()
-      const account = {
-        id: form.value.username,
-        username: form.value.username,
-        nickname: form.value.username
-      }
-      await enterIpr(account)
-    } catch (error) {
-      ElMessage.error(error.message || '登录失败')
-    } finally {
-      loading.value = false
+  if (loading.value) return
+  try {
+    // 自动填充可能没有触发 input 事件；提交时以输入框当前值为准，再同步表单校验。
+    const values = new FormData(formRef.value.$el)
+    const credentials = {
+      username: String(values.get('username') ?? '').trim(),
+      // 密码中的空格可能是有效字符，不能做 trim 或其它隐式转换。
+      password: String(values.get('password') ?? '')
     }
-  })
+    Object.assign(form.value, credentials)
+    loading.value = true
+    const valid = await formRef.value.validate().catch(() => false)
+    if (!valid) return
+    disconnectNotifySocket()
+    localStorage.removeItem('account')
+    const account = await loginDockerPlatform(credentials)
+    form.value.password = ''
+    await enterIpr(account)
+  } catch (error) {
+    ElMessage.error(error.message || '登录失败')
+  } finally {
+    loading.value = false
+  }
 }
 </script>
 
@@ -77,10 +79,10 @@ const onLogin = async () => {
 
       <el-form ref="formRef" :model="form" :rules="rules" @submit.prevent @keyup.enter="onLogin">
         <el-form-item prop="username">
-          <el-input v-model="form.username" placeholder="用户名" size="large" :prefix-icon="User" />
+          <el-input v-model="form.username" name="username" autocomplete="username" placeholder="用户名" size="large" :prefix-icon="User" />
         </el-form-item>
         <el-form-item prop="password">
-          <el-input v-model="form.password" type="password" placeholder="密码" size="large" show-password :prefix-icon="Lock" />
+          <el-input v-model="form.password" name="password" autocomplete="current-password" type="password" placeholder="密码" size="large" show-password :prefix-icon="Lock" />
         </el-form-item>
         <el-form-item>
           <el-button class="login-btn" type="primary" size="large" native-type="button" :loading="loading" @click="onLogin">登 录</el-button>

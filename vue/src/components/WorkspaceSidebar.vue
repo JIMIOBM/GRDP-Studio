@@ -136,6 +136,18 @@ function startResize (event) {
 }
 watch(() => props.collapsed, stopResize)
 onMounted(() => {
+  // 重新进入工作台时，井下板块和子目录默认收起，不沿用上次整片展开的状态。
+  // 保留井列表/井节点本身的位置和当前选中记录，不影响右侧已打开的分析。
+  const collapseFolders = nodes => {
+    for (const node of nodes || []) {
+      node.expanded = false
+      node.defaultExpanded = false
+      collapseFolders(node.children)
+    }
+  }
+  const wells = props.nodes.find(node => node.id === 'g-well')?.children || []
+  for (const well of wells) collapseFolders(well.children)
+
   window.addEventListener('pointerdown', closeStorageMenu)
   window.addEventListener('keydown', handleMenuKeydown)
   window.addEventListener('resize', closeStorageMenu)
