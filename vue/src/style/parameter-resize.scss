@@ -1,0 +1,17 @@
+.parameter-resize-handle {
+  position: absolute;
+  right: 0;
+  width: 6px;
+  z-index: 5;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+  background: transparent;
+  border-right: 1px solid #e0e0e0;
+  &:hover, &:focus-visible, &.dragging {
+    background: rgba(64, 132, 217, .18);
+    border-right-color: #409eff;
+    outline: none;
+  }
+  &[hidden] { display: none; }
+}

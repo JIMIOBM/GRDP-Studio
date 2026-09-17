@@ -1,11 +1,20 @@
 import request from '@/utils/request'
 
 export const productivityTestsApi = {
+  delete: (testId, projectId, gasReservoirId, wellName, testMethod) =>
+    request.delete(`/productivity-tests/${testId}`, {
+      params: { projectId, gasReservoirId, wellName, testMethod }
+    }),
   list: (projectId, gasReservoirId, wellName, testMethod = 'modified-isochronal') =>
     request.get('/productivity-tests', {
       params: { projectId, gasReservoirId, wellName, testMethod }
     }),
-  detail: testId => request.get(`/productivity-tests/${testId}`),
+  detail: (testId, projectId, gasReservoirId, wellName) =>
+    request.get(`/productivity-tests/${testId}`, {
+      params: { projectId, gasReservoirId, wellName }
+    }),
+  calculateModifiedIsochronalExponential: data =>
+    request.post('/productivity-tests/modified-isochronal/exponential/calculate', data),
   importFile: file => {
     const formData = new FormData()
     formData.append('file', file)

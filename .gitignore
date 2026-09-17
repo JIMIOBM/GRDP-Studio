@@ -20,3 +20,42 @@ worker/tests/Worker/obj/
 # Local development files
 AGENTS.md
 .opencode/
+/output/
+backend/*.log
+outputs/
+docs/
+# 本地损耗评价数据库备份包含业务数据，不纳入版本管理。
+/backups/storage-loss-*/
+
+# 默认忽略本地测试与数据库脚本，明确保留下方模块文件。
+/backend/src/test/
+!/backend/src/test/
+/backend/src/test/*
+!/backend/src/test/java/
+/backend/src/test/java/*
+!/backend/src/test/java/com/
+/backend/src/test/java/com/*
+!/backend/src/test/java/com/grdp/
+/backend/src/test/java/com/grdp/*
+!/backend/src/test/java/com/grdp/studio/
+/backend/src/test/java/com/grdp/studio/*
+!/backend/src/test/java/com/grdp/studio/productivity/
+/backend/src/test/java/com/grdp/studio/productivity/*
+!/backend/src/test/java/com/grdp/studio/productivity/ProductivityTestValidationTests.java
+!/backend/src/test/java/com/grdp/studio/pipeline/
+/vue/tests/
+!/vue/tests/
+/vue/tests/*
+!/vue/tests/backPressureCalculation.test.js
+!/vue/tests/workspaceContext.test.js
+!/vue/tests/pvtSelection.test.js
+/backend/sql/
+!/backend/sql/
+/backend/sql/*
+!/backend/sql/pipeline_capacity.sql
+!/backend/sql/README-pipeline.md
+!/backend/sql/gas-properties-methods.md
+!/backend/sql/hydrate-method.md
+!/backend/sql/productivity_coefficient.sql
+!/backend/sql/README-coefficient.md
+!/backend/src/test/java/com/grdp/studio/coefficient/

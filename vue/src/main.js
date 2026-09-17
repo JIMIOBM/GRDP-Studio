@@ -8,9 +8,12 @@ import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import App from './App.vue'
 import router from './router'
 import './style/index.scss'
-import { initNotifySocket } from '@/utils/notifySocket'
+import './style/parameter-panels.scss'
+import './style/parameter-resize.scss'
+import resizableParameterPanel from './directives/resizableParameterPanel'
 
 const app = createApp(App)
+app.directive('resizable-parameter-panel', resizableParameterPanel)
 
 // 注册所有 element-plus 图标
 for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
@@ -22,4 +25,3 @@ app.use(router)
 app.use(ElementPlus, { locale: zhCn })
 
 app.mount('#app')
-initNotifySocket()

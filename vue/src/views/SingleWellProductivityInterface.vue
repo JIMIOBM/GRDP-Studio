@@ -12,44 +12,127 @@
  * 页面路由：/single-well-productivity
  * 该页面与 IprInterface.vue 相互独立；其他菜单板块仍返回 IprInterface.vue。
  */
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { productivityCoefficientApi } from '@/api/productivityCoefficient'
+import { COEFFICIENT_GROUP, COEFFICIENT_METHOD, COEFFICIENT_RECORD, ensureCoefficientTree, applyCoefficientRecords, coefficientLocation } from '@/utils/productivityCoefficientTree'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import RibbonMenu from '@/components/RibbonMenu.vue'
 import WorkspaceSidebar from '@/components/WorkspaceSidebar.vue'
+import { isLossRecord, lossRecordLabel, deleteLossRecord, removeSavedTreeRecord } from '@/utils/lossRecordActions'
+import { isProductivityTestRecord, deleteProductivityTestRecord } from '@/utils/productivityTestRecordActions'
 import BinomialPressureContent from '@/views/WellControlInventory/BinomialPressureContent.vue'
 import ModifiedIsochronalContent from '@/views/SingleWellProductivity/ModifiedIsochronalContent.vue'
+import ExponentialContent from '@/views/SingleWellProductivity/ExponentialContent.vue'
+import MultiPeriodComparison from '@/views/SingleWellProductivity/MultiPeriodComparison.vue'
+import MultiMethodComparison from '@/views/SingleWellProductivity/MultiMethodComparison.vue'
+import InjectionProductionComparison from '@/views/SingleWellProductivity/InjectionProductionComparison.vue'
+
+// 各功能有独立页面；切换页面时重新创建其参数和请求状态。
+const productivityComparisonPages = { '多周期': MultiPeriodComparison, '多方法': MultiMethodComparison, '注采对比': InjectionProductionComparison }
+import DynamicProductivityContent from '@/views/SingleWellProductivity/DynamicProductivityContent.vue'
+import DynamicUnstableProductivityContent from '@/views/SingleWellProductivity/DynamicUnstableProductivityContent.vue'
+import TheoreticalProductivityContent from '@/views/SingleWellProductivity/TheoreticalProductivityContent.vue'
+import TheoreticalUnstableProductivityContent from '@/views/SingleWellProductivity/TheoreticalUnstableProductivityContent.vue'
 import { NODETYPE } from '@/constants/nodeType'
+import {
+  WORKSPACE_PROJECT_ID,
+  WORKSPACE_GAS_RESERVOIR_ID,
+  resolveWorkspaceContextId
+} from '@/constants/workspaceContext'
 import { wellApi } from '@/api/docker'
-import { getPvtRecords } from '@/utils/pvtRecords'
+import { pvtStorageApi } from '@/api/pvtStorage'
+import { isPvtRecord, deletePvtTreeRecord, deletedPvtRecord, matchesPvtScope } from '@/utils/pvtRecordActions'
+import { selectDefaultPvtRecord } from '@/utils/pvtSelection'
+import { productivityStorageApi } from '@/api/productivityStorage'
+import { productivityTestsApi } from '@/api/productivityTests'
+import { dynamicProductivityApi } from '@/api/dynamicProductivity'
+import { theoreticalProductivityApi } from '@/api/theoreticalProductivity'
+import {
+  ISOCHRONAL_METHOD_NODE_TYPE,
+  ISOCHRONAL_RECORD_NODE_TYPE,
+  loadAllIsochronalTreeNodes,
+  loadIsochronalTreeNodes
+} from '@/utils/isochronalTree'
 import {
   loadAllModifiedIsochronalTreeNodes,
   loadModifiedIsochronalTreeNodes
 } from '@/utils/modifiedIsochronalTree'
 import {
+  loadAllOwnedProductivityTestTreeNodes,
+  loadOwnedProductivityTestTreeNodes,
+  OWNED_PRODUCTIVITY_METHOD_NODE_TYPES,
+  OWNED_PRODUCTIVITY_METHOD_NODE_TYPE,
+  OWNED_PRODUCTIVITY_RECORD_NODE_TYPE
+} from '@/utils/ownedProductivityTestTree'
+import {
+  DYNAMIC_PRODUCTIVITY_NODE_TYPE,
+  DYNAMIC_STABLE_METHOD_NODE_TYPE,
+  DYNAMIC_STABLE_RECORD_NODE_TYPE,
+  DYNAMIC_UNSTABLE_METHOD_NODE_TYPE,
+  DYNAMIC_UNSTABLE_RECORD_NODE_TYPE,
+  loadAllDynamicStableTreeNodes,
+  loadDynamicStableTreeNodes,
+  loadDynamicUnstableTreeNodes
+} from '@/utils/dynamicStableTree'
+import {
+  THEORETICAL_CALCULATION_NODE_TYPE,
+  THEORETICAL_STABLE_METHOD_NODE_TYPE,
+  THEORETICAL_STABLE_RECORD_NODE_TYPE,
+  THEORETICAL_UNSTABLE_METHOD_NODE_TYPE,
+  THEORETICAL_UNSTABLE_RECORD_NODE_TYPE,
+  loadAllTheoreticalStableTreeNodes,
+  loadTheoreticalStableTreeNodes,
+  loadTheoreticalUnstableTreeNodes
+} from '@/utils/theoreticalStableTree'
+import {
   workspaceActiveNodeId,
   workspacePendingCommand,
   workspacePendingNode,
   workspaceSelectedWellName,
+  resolveWorkspaceTargetWellName,
   workspaceTreeCollapsed,
   workspaceTreeData,
-  workspaceTreeKeyword
+  workspaceTreeKeyword,
+  workspaceRibbonScope,
+  ensureWorkspaceReservoir,
+  setWorkspaceRibbonScope,
+  selectWorkspaceNodeScope,
+  getReservoirCommandLocation
 } from '@/utils/workspaceTreeState'
 
-const PROJECT_ID = 6
-const GAS_RESERVOIR_ID = 4
-const MODIFIED_ISOCHRONAL_PROJECT_ID = 6
-const MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID = 4
+const props = defineProps({
+  embedded: { type: Boolean, default: false },
+  embeddedNode: { type: Object, default: null },
+  projectId: { type: Number, default: null },
+  gasReservoirId: { type: Number, default: null }
+})
 
 const route = useRoute()
 const router = useRouter()
+const PROJECT_ID = resolveWorkspaceContextId(
+  props.projectId,
+  props.embeddedNode?.projectId,
+  route.query.projectId,
+  WORKSPACE_PROJECT_ID
+)
+const GAS_RESERVOIR_ID = resolveWorkspaceContextId(
+  props.gasReservoirId,
+  props.embeddedNode?.gasReservoirId,
+  route.query.gasReservoirId,
+  WORKSPACE_GAS_RESERVOIR_ID
+)
+const MODIFIED_ISOCHRONAL_PROJECT_ID = PROJECT_ID
+const MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID = GAS_RESERVOIR_ID
+ensureWorkspaceReservoir({ projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID })
+if (!props.embedded) setWorkspaceRibbonScope('well')
 
 const MODULES = [
   { name: '产能试井', methods: ['回压试井', '等时试井', '修正等时', '一点法'] },
   { name: '产能系数', methods: ['二项式', '指数式'] },
   { name: '理论计算', methods: ['稳定流', '不稳定流'] },
   { name: '动态产能', methods: ['稳定流', '不稳定流'] },
-  { name: '产能对比', methods: ['多周期'] }
+  { name: '产能对比', methods: ['多周期', '多方法', '注采对比'] }
 ]
 
 const WORKSPACE_GROUPS = [
@@ -75,29 +158,66 @@ const wells = ref([])
 const loadingWells = ref(false)
 const keyword = workspaceTreeKeyword
 const selectedWellName = workspaceSelectedWellName
-if (route.query.well) selectedWellName.value = String(route.query.well)
+// 左侧目录当前指向的井，仅供下一次顶部命令确定目标井。
+// 它与 selectedWellName（右侧当前展示的井）分开，避免点击井/目录就刷新右侧。
+const sidebarTargetWellName = ref(selectedWellName.value)
+if (props.embeddedNode?.wellName) selectedWellName.value = String(props.embeddedNode.wellName)
+else if (route.query.well) selectedWellName.value = String(route.query.well)
+sidebarTargetWellName.value = selectedWellName.value
 const sideTreeCollapsed = workspaceTreeCollapsed
 // 展开后适当加宽以容纳三种计算方式；收起形态对齐 PVT 的“图表数据”侧栏。
 const paramsCollapsed = ref(false)
-const routeModule = String(route.query.module || '')
+const routeModule = props.embeddedNode ? '产能试井' : String(route.query.module || '')
 const routeConfig = MODULES.find(item => item.name === routeModule)
-const routeMethod = String(route.query.method || '')
+const routeMethod = props.embeddedNode ? '等时试井' : String(route.query.method || '')
 const activeModule = ref(routeConfig?.name || '')
 const activeMethod = ref(routeConfig?.methods.includes(routeMethod) ? routeMethod : '')
-const routeTestId = Number(route.query.testId)
-const routeEvaluationId = Number(route.query.evaluationId)
+const routeTestId = Number(props.embeddedNode?.testId ?? route.query.testId)
+const activeCoefficientId = ref(Number(route.query.coefficientId) || null)
+const coefficientWorkspaceKey = ref(0)
+const coefficientReady = ref(false)
+const routeEvaluationId = Number(props.embeddedNode?.evaluationId ?? route.query.evaluationId)
+const routeStableId = Number(props.embeddedNode?.stableId ?? route.query.stableId)
 const activeProductivityTestId = ref(Number.isFinite(routeTestId) && routeTestId > 0 ? routeTestId : null)
 const activeEvaluationId = ref(Number.isFinite(routeEvaluationId) && routeEvaluationId > 0 ? routeEvaluationId : null)
+const activeStableId = ref(Number.isFinite(routeStableId) && routeStableId > 0 ? routeStableId : null)
+const autoCalculateStable = ref(route.query.initialCalc === '1')
+const stableContextMenu = ref({ visible: false, x: 0, y: 0, node: null })
 const selectedPvtTable = ref('')
 const selectedDataTable = ref('')
 const maximumFormationPressure = ref('56.34')
 const formationTemperature = ref('120')
 const onePointAlpha = ref('0.25')
+// 产能系数
+const coefficientFormationPressure = ref('')
+const coefficientFormationTemperature = ref('')
+const productivityCoefficientC = ref('')
+const productivityExponentN = ref('')
+const correctedCoefficientC = ref('')
+const correctedExponentN = ref('')
+const fittedFormationPressure = ref('')
+// 产能系数二项式参数点横坐标 q
+const fittedFlowRate = ref('')
+const exponentialCalculationMethod = ref('拟压力')
+const openFlowRate = ref('')
+
 const calculationMethod = ref('拟压力')
 const calculationResult = ref('二项式')
+const operationType = ref('production')
 const activeContentTab = ref('chart')
 const pressureContentRef = ref(null)
+const dataFileInput = ref(null)
+const importingData = ref(false)
+const importedDataFileName = ref('当前井产能测试数据')
+const databasePvtRecords = ref([])
+const selectedPvtDetail = ref(null)
+const pressureWorkspaceKey = ref(0)
 const calculationOutput = ref(null)
+const savingProductivityTest = ref(false)
+const storedProductivityTest = ref(null)
+const savingResult = ref(false)
+const resultDirty = ref(false)
+const savedInputSignature = ref('')
 
 const scientific = value => {
   const number = Number(value)
@@ -115,30 +235,25 @@ const sidebarTreeData = computed(() => {
 
   return workspaceTreeData.value.map(node => node.id === 'g-well'
     ? {
-        ...node,
-        children: (node.children || []).filter(well =>
-          String(well.wellName || well.label || '').toLowerCase().includes(value)
-        )
-      }
+      ...node,
+      children: (node.children || []).filter(well =>
+        String(well.wellName || well.label || '').toLowerCase().includes(value)
+      )
+    }
     : node
   )
 })
 
-const availablePvtRecords = computed(() =>
-  selectedWellName.value
-    ? getPvtRecords(PROJECT_ID, GAS_RESERVOIR_ID, selectedWellName.value)
-    : []
-)
+const pvtTableOptions = computed(() => databasePvtRecords.value.map(record => ({
+  value: String(record.pvtId),
+  label: record.pvtName || `PVT性质${record.pvtNo}`
+})))
 
-const pvtTableOptions = computed(() => {
-  return availablePvtRecords.value.map(record => `PVT性质${record.index}`)
-})
+const selectedPvtOption = computed(() => databasePvtRecords.value.find(
+  record => String(record.pvtId) === String(selectedPvtTable.value)
+) || null)
 
-const selectedPvtRecord = computed(() => {
-  if (!selectedWellName.value || !selectedPvtTable.value) return null
-  const index = Number(String(selectedPvtTable.value).match(/(\d+)$/)?.[1])
-  return availablePvtRecords.value.find(record => Number(record.index) === index) || null
-})
+const selectedPvtRecord = computed(() => selectedPvtDetail.value)
 
 watch(selectedPvtRecord, record => {
   const firstResult = record?.gasResultRows?.[0]
@@ -151,12 +266,192 @@ watch(selectedPvtRecord, record => {
   if (Number.isFinite(pvtTemperature)) formationTemperature.value = String(pvtTemperature)
 }, { immediate: true })
 
-const dataTableOptions = computed(() => selectedWellName.value
-  ? [`${selectedWellName.value}-产能测试数据`]
-  : []
-)
+watch([calculationMethod, calculationResult], () => {
+  if (!isOwnedPressureMethod.value) return
+  calculationOutput.value = null
+  resultDirty.value = false
+})
 
-const testTitle = computed(() => `产能试井-${activeMethod.value}`)
+watch(operationType, value => {
+  if (!isOwnedPressureMethod.value) return
+  // 注采方向变化后，旧方向的结果不能继续显示或保存。
+  calculationOutput.value = null
+  resultDirty.value = false
+  const storedOperationType = storedProductivityTest.value?.operationType
+  if (!activeProductivityTestId.value || !storedOperationType || storedOperationType === value) return
+  activeProductivityTestId.value = null
+  activeEvaluationId.value = null
+  storedProductivityTest.value = null
+  savedInputSignature.value = ''
+  pressureWorkspaceKey.value += 1
+})
+
+const unwrapData = response => response?.data ?? response ?? {}
+const loadCoefficientNodes = async (wellName, expand = false) => {
+  const scope = { projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName }
+  const records = unwrapData(await productivityCoefficientApi.list(scope))
+  applyCoefficientRecords(workspaceTreeData.value, scope, records, expand)
+}
+const resetCoefficientWorkspace = () => {
+  activeCoefficientId.value = null
+  coefficientFormationPressure.value = ''
+  coefficientFormationTemperature.value = ''
+  productivityCoefficientC.value = ''
+  productivityExponentN.value = ''
+  correctedCoefficientC.value = ''
+  correctedExponentN.value = ''
+  fittedFormationPressure.value = ''
+  fittedFlowRate.value = ''
+  openFlowRate.value = ''
+  operationType.value = 'production'
+  // 同方法重新新建也要重建子组件，清空A/B、压力方法及待返回的记录请求。
+  coefficientWorkspaceKey.value += 1
+}
+const restoreCoefficient = record => {
+  const p = record.parameters
+  coefficientFormationPressure.value = p.pressure ?? ''
+  coefficientFormationTemperature.value = p.temperature ?? ''
+  productivityCoefficientC.value = p.c ?? ''
+  productivityExponentN.value = p.n ?? ''
+  correctedCoefficientC.value = p.correctedC ?? ''
+  correctedExponentN.value = p.correctedN ?? ''
+  fittedFormationPressure.value = p.pointPressure ?? ''
+  fittedFlowRate.value = p.pointRate ?? ''
+  operationType.value = record.operation
+  ++pvtDetailRequest
+  selectedPvtDetail.value = { ...record.pvtSnapshot, pvtId: record.pvtId ?? null }
+  if (record.pvtId && !databasePvtRecords.value.some(p => Number(p.pvtId) === Number(record.pvtId))) {
+    databasePvtRecords.value.push({ pvtId: record.pvtId, pvtName: record.pvtSnapshot?.pvtName || '已保存PVT快照' })
+  }
+  selectedPvtTable.value = record.pvtId ? String(record.pvtId) : ''
+}
+const coefficientSaved = async record => {
+  activeCoefficientId.value = Number(record.id)
+  await router.replace(coefficientLocation({ ...record, coefficientId: record.id, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID }))
+  try { await loadCoefficientNodes(record.wellName, true) }
+  catch (error) { ElMessage.warning('记录已保存，但目录刷新失败，请重新展开产能系数目录') }
+}
+const parseSettings = value => {
+  if (!value) return {}
+  if (typeof value === 'object') return value
+  try { return JSON.parse(value) } catch { return {} }
+}
+
+const normalizePvtDetail = detail => {
+  const gasInput = detail?.gasInput || {}
+  const gasSettings = { ...gasInput, ...parseSettings(detail?.settings?.gas) }
+  return {
+    pvtId: detail?.record?.pvtId,
+    index: detail?.record?.pvtNo,
+    pvtNo: detail?.record?.pvtNo,
+    pvtName: detail?.record?.pvtName,
+    gasRows: [[gasInput.gasType, gasInput.specificGravity, gasInput.hydrogenSulfide,
+    gasInput.carbonDioxide, gasInput.nitrogen, gasInput.condensateOilDensity]],
+    gasInput,
+    gasSettings,
+    gasResultRows: detail?.gasResults || []
+  }
+}
+
+const pvtOptionsLoading = ref(false)
+let pvtListRequest = 0
+let pvtDetailRequest = 0
+const loadSelectedPvtDetail = async () => {
+  const requestId = ++pvtDetailRequest
+  const wellName = selectedWellName.value
+  const pvtId = selectedPvtTable.value
+  selectedPvtDetail.value = null
+  if (!pvtId || !wellName) return
+  try {
+    const detail = unwrapData(await pvtStorageApi.getDetail(
+      pvtId, PROJECT_ID, GAS_RESERVOIR_ID, wellName
+    ))
+    // 快速切井/切表时，只接受最后一次选择对应的明细，避免旧请求覆盖新表。
+    if (requestId !== pvtDetailRequest || wellName !== selectedWellName.value || pvtId !== selectedPvtTable.value) return
+    selectedPvtDetail.value = normalizePvtDetail(detail)
+  } catch (error) {
+    if (requestId !== pvtDetailRequest || wellName !== selectedWellName.value || pvtId !== selectedPvtTable.value) return
+    ElMessage.warning(error?.msg || error?.message || 'PVT性质明细读取失败')
+  }
+}
+
+const loadPvtOptions = async (preferredPvtId = null) => {
+  const requestId = ++pvtListRequest
+  ++pvtDetailRequest
+  const wellName = selectedWellName.value
+  const preferredId = preferredPvtId ?? selectedPvtTable.value
+  pvtOptionsLoading.value = false
+  databasePvtRecords.value = []
+  selectedPvtDetail.value = null
+  selectedPvtTable.value = ''
+  if (!wellName) return
+  pvtOptionsLoading.value = true
+  try {
+    const records = unwrapData(await pvtStorageApi.list(
+      PROJECT_ID, GAS_RESERVOIR_ID, wellName
+    )) || []
+    if (requestId !== pvtListRequest || wellName !== selectedWellName.value) return
+    // 列表直接来自当前井的数据库记录，与左侧目录是否展开无关，不限制 PVT 编号。
+    const usableRecords = Array.isArray(records) ? records : []
+    databasePvtRecords.value = usableRecords
+    const match = selectDefaultPvtRecord(usableRecords, preferredId)
+    selectedPvtTable.value = String(match?.pvtId || '')
+    await loadSelectedPvtDetail()
+  } catch (error) {
+    if (requestId !== pvtListRequest || wellName !== selectedWellName.value) return
+    selectedPvtTable.value = ''
+    console.warn('当前井PVT性质读取失败', error)
+    ElMessage.warning('当前井PVT列表读取失败，请重新进入功能重试')
+  } finally {
+    if (requestId === pvtListRequest) pvtOptionsLoading.value = false
+  }
+}
+
+const changeSelectedPvt = async () => {
+  // 更换参数来源后旧结果不能继续保存；保留当前表格输入，等待用户重新计算。
+  calculationOutput.value = null
+  resultDirty.value = false
+  await loadSelectedPvtDetail()
+}
+
+watch(deletedPvtRecord, deleted => {
+  if (!matchesPvtScope(deleted, { projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName: selectedWellName.value })) return
+  ++pvtListRequest
+  pvtOptionsLoading.value = false
+  databasePvtRecords.value = databasePvtRecords.value.filter(item => Number(item.pvtId) !== Number(deleted.pvtId))
+  if (Number(selectedPvtTable.value) === Number(deleted.pvtId)) {
+    selectedPvtTable.value = ''
+    changeSelectedPvt()
+  }
+})
+
+const chooseDataFile = () => dataFileInput.value?.click()
+const handleDataFile = async event => {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file) return
+  importingData.value = true
+  try {
+    const result = unwrapData(await productivityTestsApi.importFile(file))
+    const rows = result.rows || []
+    selectedDataTable.value = 'local-import'
+    await nextTick()
+    pressureContentRef.value?.replaceInputRows?.(rows)
+    importedDataFileName.value = `${file.name} · ${rows.length} 行`
+    ElMessage.success(`已导入 ${rows.length} 条产能测试数据`)
+  } catch (error) {
+    ElMessage.error(error?.msg || error?.message || '本地文件导入失败')
+  } finally {
+    importingData.value = false
+  }
+}
+
+const tabTitle = computed(() => {
+  if (activeMethod.value) {
+    return `${activeModule.value}-${activeMethod.value}`
+  }
+  return activeModule.value
+})
 const pressureTestType = computed(() => ({
   '回压试井': 'back-pressure',
   '等时试井': 'isochronal',
@@ -170,6 +465,10 @@ const pressureCalculationMethod = computed(() => ({
 }[calculationMethod.value] || 'pressure'))
 const usesPressureCalculation = computed(() =>
   activeModule.value === '产能试井' && Boolean(activeMethod.value)
+)
+const isOwnedPressureMethod = computed(() =>
+  activeModule.value === '产能试井' &&
+  ['back-pressure', 'one-point'].includes(pressureTestType.value)
 )
 
 const normalizeWells = payload => {
@@ -187,13 +486,31 @@ const selectModule = (moduleName, method = '') => {
   if (!config) return
   activeModule.value = config.name
   activeMethod.value = config.methods.includes(method) ? method : config.methods[0]
+  if (moduleName === '产能系数') {
+    resetCoefficientWorkspace()
+    // 新方案使用当前井的PVT来源，不沿用上一条记录的历史快照。
+    void loadPvtOptions()
+  }
   activeContentTab.value = 'chart'
+  if (['理论计算', '动态产能'].includes(activeModule.value)) activeStableId.value = null
+  if (isOwnedPressureMethod.value) {
+    storedProductivityTest.value = null
+    activeProductivityTestId.value = null
+    calculationOutput.value = null
+    resultDirty.value = false
+    savedInputSignature.value = ''
+    selectedDataTable.value = pressureTestType.value
+    pressureWorkspaceKey.value += 1
+  }
   router.replace({
     name: 'SingleWellProductivity',
     query: {
       module: activeModule.value,
       method: activeMethod.value,
-      well: selectedWellName.value
+      well: selectedWellName.value,
+      projectId: PROJECT_ID,
+      gasReservoirId: GAS_RESERVOIR_ID,
+      ...(autoCalculateStable.value ? { initialCalc: '1' } : {})
     }
   })
 }
@@ -216,23 +533,316 @@ const loadAllModifiedIsochronalNodes = async () => {
   })
 }
 
+const loadIsochronalNodes = async (wellName, { expand = false } = {}) => loadIsochronalTreeNodes({
+  treeData: workspaceTreeData.value,
+  projectId: PROJECT_ID,
+  gasReservoirId: GAS_RESERVOIR_ID,
+  wellName,
+  expand
+})
+
+const loadAllIsochronalNodes = async () => loadAllIsochronalTreeNodes({
+  treeData: workspaceTreeData.value,
+  projectId: PROJECT_ID,
+  gasReservoirId: GAS_RESERVOIR_ID
+})
+
+const loadOwnedProductivityNodes = async (wellName, { expand = false, testMethod = null } = {}) =>
+  loadOwnedProductivityTestTreeNodes({
+    treeData: workspaceTreeData.value,
+    projectId: PROJECT_ID,
+    gasReservoirId: GAS_RESERVOIR_ID,
+    wellName,
+    expand,
+    testMethod
+  })
+
+const loadAllOwnedProductivityNodes = async () => loadAllOwnedProductivityTestTreeNodes({
+  treeData: workspaceTreeData.value,
+  projectId: PROJECT_ID,
+  gasReservoirId: GAS_RESERVOIR_ID
+})
+
+const loadDynamicStableNodes = async (wellName, { expand = false } = {}) =>
+  loadDynamicStableTreeNodes({
+    treeData: workspaceTreeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID,
+    wellName, expand, force: expand
+  })
+
+const loadDynamicUnstableNodes = async (wellName, { expand = false } = {}) =>
+  loadDynamicUnstableTreeNodes({
+    treeData: workspaceTreeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID,
+    wellName, expand, force: expand
+  })
+
+const loadTheoreticalStableNodes = async (wellName, { expand = false } = {}) =>
+  loadTheoreticalStableTreeNodes({
+    treeData: workspaceTreeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID,
+    wellName, expand, force: expand
+  })
+
+const loadTheoreticalUnstableNodes = async (wellName, { expand = false } = {}) =>
+  loadTheoreticalUnstableTreeNodes({
+    treeData: workspaceTreeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID,
+    wellName, expand, force: expand
+  })
+
+const loadAllStableNodes = async () => {
+  // 两个工具都会调整“单井产能”的 children，按固定顺序执行可避免并发覆盖节点。
+  await loadAllTheoreticalStableTreeNodes({
+    treeData: workspaceTreeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID
+  })
+  await loadAllDynamicStableTreeNodes({
+    treeData: workspaceTreeData.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID
+  })
+}
+
+const isStableRecordNode = node => [
+  THEORETICAL_STABLE_RECORD_NODE_TYPE,
+  THEORETICAL_UNSTABLE_RECORD_NODE_TYPE,
+  DYNAMIC_STABLE_RECORD_NODE_TYPE,
+  DYNAMIC_UNSTABLE_RECORD_NODE_TYPE
+].includes(node?.type)
+
+const closeStableContextMenu = () => { stableContextMenu.value.visible = false }
+const handleStableContextMenu = (node, event) => {
+  if (!isStableRecordNode(node) && !isLossRecord(node) && !isPvtRecord(node) && !isProductivityTestRecord(node)) return closeStableContextMenu()
+  stableContextMenu.value = {
+    visible: true,
+    x: Math.max(8, Math.min(event.clientX, window.innerWidth - 190)),
+    y: Math.max(8, Math.min(event.clientY, window.innerHeight - 86)),
+    node
+  }
+}
+
+const reloadStableBranch = async (node, expand = true) => {
+  if (node.type === THEORETICAL_STABLE_RECORD_NODE_TYPE) {
+    return loadTheoreticalStableNodes(node.wellName, { expand })
+  }
+  if (node.type === THEORETICAL_UNSTABLE_RECORD_NODE_TYPE) {
+    return loadTheoreticalUnstableNodes(node.wellName, { expand })
+  }
+  if (node.type === DYNAMIC_UNSTABLE_RECORD_NODE_TYPE) {
+    return loadDynamicUnstableNodes(node.wellName, { expand })
+  }
+  return loadDynamicStableNodes(node.wellName, { expand })
+}
+
+/** 展开哪个计算方法，就只加载该方法在当前井下的历史记录。 */
+const handleSidebarExpand = async node => {
+  try {
+    if ([COEFFICIENT_GROUP, COEFFICIENT_METHOD].includes(node.type)) {
+      await loadCoefficientNodes(node.wellName)
+      return
+    }
+    if (node.type === THEORETICAL_CALCULATION_NODE_TYPE) {
+      await Promise.all([
+        loadTheoreticalStableNodes(node.wellName),
+        loadTheoreticalUnstableNodes(node.wellName)
+      ])
+    } else if (node.type === DYNAMIC_PRODUCTIVITY_NODE_TYPE) {
+      await Promise.all([
+        loadDynamicStableNodes(node.wellName),
+        loadDynamicUnstableNodes(node.wellName)
+      ])
+    } else if (node.type === ISOCHRONAL_METHOD_NODE_TYPE) {
+      await loadIsochronalNodes(node.wellName)
+    } else if (node.type === 'productivity-test-modified-isochronal-method') {
+      await loadModifiedIsochronalNodes(node.wellName)
+    } else if (node.type === OWNED_PRODUCTIVITY_METHOD_NODE_TYPE || OWNED_PRODUCTIVITY_METHOD_NODE_TYPES.has(node.type)) {
+      await loadOwnedProductivityNodes(node.wellName, { testMethod: node.testMethod })
+    } else if (node.type === THEORETICAL_STABLE_METHOD_NODE_TYPE) {
+      await loadTheoreticalStableNodes(node.wellName)
+    } else if (node.type === THEORETICAL_UNSTABLE_METHOD_NODE_TYPE) {
+      await loadTheoreticalUnstableNodes(node.wellName)
+    } else if (node.type === DYNAMIC_STABLE_METHOD_NODE_TYPE) {
+      await loadDynamicStableNodes(node.wellName)
+    } else if (node.type === DYNAMIC_UNSTABLE_METHOD_NODE_TYPE) {
+      await loadDynamicUnstableNodes(node.wellName)
+    }
+  } catch (error) {
+    ElMessage.warning(error?.response?.data?.msg || error?.message || '目录记录加载失败')
+  }
+}
+
+const renameStableNode = async () => {
+  const node = stableContextMenu.value.node
+  closeStableContextMenu()
+  if (!isStableRecordNode(node)) return
+  try {
+    const regimeLabel = [DYNAMIC_UNSTABLE_RECORD_NODE_TYPE, THEORETICAL_UNSTABLE_RECORD_NODE_TYPE].includes(node.type) ? '不稳定流' : '稳定流'
+    const { value } = await ElMessageBox.prompt(`请输入新的${regimeLabel}名称`, '重命名', {
+      inputValue: node.label,
+      inputPattern: /\S+/,
+      inputErrorMessage: '名称不能为空',
+      confirmButtonText: '确定', cancelButtonText: '取消'
+    })
+    const identity = { projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName: node.wellName }
+    if ([DYNAMIC_UNSTABLE_RECORD_NODE_TYPE, THEORETICAL_UNSTABLE_RECORD_NODE_TYPE].includes(node.type)) {
+      const api = node.type === THEORETICAL_UNSTABLE_RECORD_NODE_TYPE
+        ? theoreticalProductivityApi : dynamicProductivityApi
+      await api.renameUnstable(node.unstableId, {
+        ...identity, unstableName: String(value).trim()
+      })
+    } else {
+      const api = node.type === THEORETICAL_STABLE_RECORD_NODE_TYPE
+        ? theoreticalProductivityApi : dynamicProductivityApi
+      await api.renameStable(node.stableId, { ...identity, stableName: String(value).trim() })
+    }
+    await reloadStableBranch(node)
+    ElMessage.success('重命名成功')
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') {
+      ElMessage.error(error.response?.data?.message || error.message || '重命名失败')
+    }
+  }
+}
+
+const deleteStableNode = async () => {
+  const node = stableContextMenu.value.node
+  closeStableContextMenu()
+  if (isProductivityTestRecord(node)) {
+    try {
+      await ElMessageBox.confirm(`删除“${node.label}”及其输入、二项式/指数式计算结果和IPR曲线？此操作不可撤销。`, '删除产能试井记录', {
+        type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消'
+      })
+      await deleteProductivityTestRecord(node)
+      removeSavedTreeRecord(workspaceTreeData.value, node)
+      if (String(workspaceActiveNodeId.value) === String(node.id)) workspaceActiveNodeId.value = ''
+      if (activeModule.value === '产能试井' && Number(activeProductivityTestId.value) === Number(node.testId)
+          && selectedWellName.value === node.wellName && Number(PROJECT_ID) === Number(node.projectId)
+          && Number(GAS_RESERVOIR_ID) === Number(node.gasReservoirId)) {
+        activeProductivityTestId.value = null
+        activeEvaluationId.value = null
+        storedProductivityTest.value = null
+        calculationOutput.value = null
+        resultDirty.value = false
+        savedInputSignature.value = ''
+        pressureWorkspaceKey.value += 1
+        activeMethod.value = ''
+        const query = { ...route.query }
+        delete query.testId
+        delete query.evaluationId
+        delete query.method
+        await router.replace({ query })
+      }
+      ElMessage.success(`${node.label}已删除`)
+    } catch (error) {
+      if (error !== 'cancel' && error !== 'close') ElMessage.error(error?.response?.data?.msg || error.message || '删除产能试井记录失败')
+    }
+    return
+  }
+  if (isPvtRecord(node)) {
+    try {
+      await ElMessageBox.confirm(`删除“${node.label}”及其天然气、地层水、岩石性质的输入和计算结果？此操作不可撤销。`, '删除PVT记录', {
+        type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消'
+      })
+      const { removedIds } = await deletePvtTreeRecord(node, workspaceTreeData.value, { projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID })
+      if (removedIds.includes(String(workspaceActiveNodeId.value))) workspaceActiveNodeId.value = ''
+      ElMessage.success('PVT记录已删除')
+    } catch (error) {
+      if (error !== 'cancel' && error !== 'close') ElMessage.error(error?.msg || error.response?.data?.msg || error.message || '删除PVT记录失败')
+    }
+    return
+  }
+  if (isLossRecord(node)) {
+    try {
+      await ElMessageBox.confirm(`删除“${node.label}”及其输入、计算结果和相关明细？此操作不可撤销。`, '删除记录', {
+        type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消'
+      })
+      await deleteLossRecord(node)
+      removeSavedTreeRecord(workspaceTreeData.value, node)
+      if (String(workspaceActiveNodeId.value) === String(node.id)) workspaceActiveNodeId.value = ''
+      ElMessage.success(`${lossRecordLabel(node)}记录已删除`)
+    } catch (error) {
+      if (error !== 'cancel' && error !== 'close') ElMessage.error(error.response?.data?.msg || error.message || '删除损耗记录失败')
+    }
+    return
+  }
+  if (!isStableRecordNode(node)) return
+  try {
+    const regimeLabel = [DYNAMIC_UNSTABLE_RECORD_NODE_TYPE, THEORETICAL_UNSTABLE_RECORD_NODE_TYPE].includes(node.type) ? '不稳定流' : '稳定流'
+    await ElMessageBox.confirm(
+      `删除后将同时删除“${node.label}”的输入、三种输出和IPR曲线，此操作不可撤销，是否继续？`,
+      `删除${regimeLabel}`,
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }
+    )
+    const projectId = node.projectId ?? PROJECT_ID
+    const gasReservoirId = node.gasReservoirId ?? GAS_RESERVOIR_ID
+    if (!node.wellName || !(Number(node.unstableId ?? node.stableId) > 0)) throw new Error('记录归属信息不完整，无法删除')
+    if ([DYNAMIC_UNSTABLE_RECORD_NODE_TYPE, THEORETICAL_UNSTABLE_RECORD_NODE_TYPE].includes(node.type)) {
+      const api = node.type === THEORETICAL_UNSTABLE_RECORD_NODE_TYPE
+        ? theoreticalProductivityApi : dynamicProductivityApi
+      await api.deleteUnstable(node.unstableId, projectId, gasReservoirId, node.wellName)
+    } else {
+      const api = node.type === THEORETICAL_STABLE_RECORD_NODE_TYPE
+        ? theoreticalProductivityApi : dynamicProductivityApi
+      await api.deleteStable(node.stableId, projectId, gasReservoirId, node.wellName)
+    }
+    removeSavedTreeRecord(workspaceTreeData.value, node)
+    if (String(workspaceActiveNodeId.value) === String(node.id)) workspaceActiveNodeId.value = ''
+    const deletedModule = [THEORETICAL_STABLE_RECORD_NODE_TYPE, THEORETICAL_UNSTABLE_RECORD_NODE_TYPE].includes(node.type) ? '理论计算' : '动态产能'
+    // 不同井、稳定/不稳定流及理论/动态记录可能拥有相同数字 ID，不能只比较 ID。
+    if (activeModule.value === deletedModule && activeMethod.value === regimeLabel && selectedWellName.value === node.wellName
+      && Number(projectId) === Number(PROJECT_ID) && Number(gasReservoirId) === Number(GAS_RESERVOIR_ID)
+      && Number(activeStableId.value) === Number(node.unstableId ?? node.stableId)) {
+      autoCalculateStable.value = false
+      activeStableId.value = null
+      await router.replace({
+        name: 'SingleWellProductivity',
+        query: { module: activeModule.value, method: activeMethod.value, well: selectedWellName.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID }
+      })
+    }
+    ElMessage.success(`${node.label}已删除`)
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') {
+      ElMessage.error(error.response?.data?.message || error.message || '稳定流删除失败')
+    }
+  }
+}
+
 const handleCommand = async ({ group, name, parent }) => {
+  if (workspaceRibbonScope.value === 'reservoir') {
+    const location = getReservoirCommandLocation({ group, name, parent })
+    if (location) await router.push(location)
+    else ElMessage.warning('请先在左侧选择一个储气库')
+    return
+  }
   // 顶部菜单栏“单井产能”板块：留在当前独立页面并切换功能模块/计算方法。
   if (group === '单井产能') {
-    if (!selectedWellName.value) {
+    const targetWellName = sidebarTargetWellName.value || selectedWellName.value
+    if (!targetWellName) {
       ElMessage.warning('请先在左侧选择一口井')
       return
     }
+    // 点击目录本身不切换右侧；用户明确点击顶部功能后，才正式切换到目标井。
+    if (targetWellName !== selectedWellName.value) await selectWell(targetWellName)
+    else await loadPvtOptions(selectedPvtTable.value)
     if (parent === '产能试井' && name === '修正等时') {
       activeProductivityTestId.value = null
       activeEvaluationId.value = null
     }
+    if (parent === '产能试井' && name === '等时试井') {
+      activeProductivityTestId.value = null
+      calculationOutput.value = null
+      pressureWorkspaceKey.value += 1
+      selectedDataTable.value = 'local-import'
+      importedDataFileName.value = '当前井产能测试数据'
+    }
+    // 理论计算和动态产能的稳定流/不稳定流都在顶部点击后立即计算；
+    // 左侧历史记录仍只恢复快照，不携带该标记。
+    autoCalculateStable.value = ['理论计算', '动态产能'].includes(parent || name)
+      && ['稳定流', '不稳定流'].includes(name)
     selectModule(parent || name, parent ? name : '')
     return
   }
 
   // 将本次点击一并交给 IPR 工作台，避免用户切换后还要再点第二次。
-  workspacePendingCommand.value = { group, name, parent }
+  // 跨工作台的命令携带左侧目标井，不依赖先打开该井的 PVT/其他记录。
+  workspacePendingCommand.value = {
+    group, name, parent,
+    wellName: resolveWorkspaceTargetWellName(sidebarTargetWellName.value || selectedWellName.value)
+  }
   await router.push({ name: 'IprInterface' })
 }
 
@@ -287,28 +897,252 @@ const loadWells = async () => {
 }
 
 const selectWell = async wellName => {
-  selectedWellName.value = wellName
+  const targetWellName = String(wellName || '').trim()
+  if (!targetWellName || targetWellName === selectedWellName.value) return
+
+  if (activeModule.value === '产能系数') resetCoefficientWorkspace()
+  selectedWellName.value = targetWellName
   selectedPvtTable.value = ''
-  selectedDataTable.value = ''
+  selectedDataTable.value = activeMethod.value === '等时试井'
+    ? 'local-import'
+    : (isOwnedPressureMethod.value ? pressureTestType.value : '')
+  importedDataFileName.value = '当前井产能测试数据'
   activeProductivityTestId.value = null
   activeEvaluationId.value = null
-  try {
-    await loadModifiedIsochronalNodes(wellName)
-  } catch (error) {
-    ElMessage.warning(error?.msg || error?.message || '已保存试井记录读取失败')
+  activeStableId.value = null
+  autoCalculateStable.value = false
+  if (isOwnedPressureMethod.value) {
+    storedProductivityTest.value = null
+    calculationOutput.value = null
+    resultDirty.value = false
+    savedInputSignature.value = ''
   }
+  pressureWorkspaceKey.value += 1
+  try {
+    // 全部井的目录在页面初始化时已经加载。切井只更新当前井上下文和右侧数据，
+    // 不重新替换树分支，否则 TreeNode 会被卸载重建并表现为左侧菜单刷新。
+    await loadPvtOptions()
+  } catch (error) {
+    ElMessage.warning(error?.msg || error?.message || '当前井PVT性质读取失败')
+  }
+
+  const query = {
+    ...route.query,
+    well: targetWellName,
+    projectId: PROJECT_ID,
+    gasReservoirId: GAS_RESERVOIR_ID
+  }
+  // 这些编号都属于上一口井；切井后保留会让右侧用新井名读取旧井记录。
+  delete query.testId
+  delete query.evaluationId
+  delete query.stableId
+  delete query.initialCalc
+  delete query.coefficientId
+  activeCoefficientId.value = null
+  await router.replace({ name: 'SingleWellProductivity', query })
 }
 
 const handleSidebarSelect = async node => {
-  if (!node) return
+  if (!node || node.disabled) return
+  if ([COEFFICIENT_GROUP, COEFFICIENT_METHOD].includes(node.type)) return
+  if (node.type === COEFFICIENT_RECORD) {
+    if (node.wellName !== selectedWellName.value) await selectWell(node.wellName)
+    activeModule.value = '产能系数'
+    resetCoefficientWorkspace()
+    activeMethod.value = node.method
+    activeCoefficientId.value = Number(node.coefficientId)
+    workspaceActiveNodeId.value = node.id
+    await router.replace(coefficientLocation({ ...node, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID }))
+    return
+  }
+  if (selectWorkspaceNodeScope(node) === 'reservoir') {
+    workspaceActiveNodeId.value = node.id
+    if (node.command) {
+      const location = getReservoirCommandLocation(node.command)
+      if (location) await router.push(location)
+    }
+    return
+  }
+
+  // 记录目录所指向的井，但此处不直接修改右侧组件正在使用的 selectedWellName。
+  if (node.wellName) sidebarTargetWellName.value = node.wellName
+
+  // 理论计算/动态产能及其“稳定流”都是纯目录节点：TreeNode 自己负责展开、收起，
+  // 这里不能改变右侧页面，也不能覆盖当前具体记录的高亮状态。
+  if ([
+    THEORETICAL_CALCULATION_NODE_TYPE,
+    DYNAMIC_PRODUCTIVITY_NODE_TYPE,
+    THEORETICAL_STABLE_METHOD_NODE_TYPE,
+    THEORETICAL_UNSTABLE_METHOD_NODE_TYPE,
+    DYNAMIC_STABLE_METHOD_NODE_TYPE,
+    DYNAMIC_UNSTABLE_METHOD_NODE_TYPE
+  ].includes(node.type)) {
+    workspacePendingNode.value = null
+    return
+  }
+
   workspaceActiveNodeId.value = node.id || ''
 
   const isModifiedIsochronalRecord =
     node.type === NODETYPE.NodeType_ProductivityEvaluationModifiedIsochronalWellTest
   const isProductivityTestNode = node.type === 'productivity-test' || node.label === '产能试井'
 
+  if ([THEORETICAL_STABLE_RECORD_NODE_TYPE, DYNAMIC_STABLE_RECORD_NODE_TYPE].includes(node.type) && node.stableId) {
+    workspacePendingNode.value = null
+    selectedWellName.value = node.wellName || selectedWellName.value
+    activeModule.value = node.type === THEORETICAL_STABLE_RECORD_NODE_TYPE ? '理论计算' : '动态产能'
+    activeMethod.value = '稳定流'
+    activeStableId.value = Number(node.stableId)
+    autoCalculateStable.value = false
+    await loadPvtOptions()
+    await router.replace({
+      name: 'SingleWellProductivity',
+      query: {
+        module: activeModule.value, method: '稳定流', well: selectedWellName.value,
+        projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, stableId: activeStableId.value
+      }
+    })
+    return
+  }
+
+  if ([DYNAMIC_UNSTABLE_RECORD_NODE_TYPE, THEORETICAL_UNSTABLE_RECORD_NODE_TYPE].includes(node.type) && node.unstableId) {
+    workspacePendingNode.value = null
+    selectedWellName.value = node.wellName || selectedWellName.value
+    activeModule.value = node.type === THEORETICAL_UNSTABLE_RECORD_NODE_TYPE ? '理论计算' : '动态产能'
+    activeMethod.value = '不稳定流'
+    activeStableId.value = Number(node.unstableId)
+    autoCalculateStable.value = false
+    await loadPvtOptions()
+    await router.replace({
+      name: 'SingleWellProductivity',
+      query: {
+        module: activeModule.value, method: '不稳定流', well: selectedWellName.value,
+        projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, stableId: activeStableId.value
+      }
+    })
+    return
+  }
+
   // “产能试井”仅作为目录层级，不代表一条真实试井记录。
-  if (isProductivityTestNode) return
+  if (isProductivityTestNode || node.type === ISOCHRONAL_METHOD_NODE_TYPE || OWNED_PRODUCTIVITY_METHOD_NODE_TYPES.has(node.type)) return
+
+  if (node.type === OWNED_PRODUCTIVITY_METHOD_NODE_TYPE ||
+    OWNED_PRODUCTIVITY_METHOD_NODE_TYPES.has(node.type)) {
+    selectedWellName.value = node.wellName || selectedWellName.value
+    activeModule.value = '产能试井'
+    activeMethod.value = node.pageMethod || (node.testMethod === 'one-point' ? '一点法' : '回压试井')
+    selectedDataTable.value = node.testMethod
+    activeProductivityTestId.value = null
+    activeEvaluationId.value = null
+    storedProductivityTest.value = null
+    calculationOutput.value = null
+    resultDirty.value = false
+    savedInputSignature.value = ''
+    pressureWorkspaceKey.value += 1
+    await loadPvtOptions()
+    await router.replace({
+      name: 'SingleWellProductivity',
+      query: {
+        module: '产能试井', method: activeMethod.value, well: selectedWellName.value,
+        projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID
+      }
+    })
+    return
+  }
+
+  if (node.type === OWNED_PRODUCTIVITY_RECORD_NODE_TYPE && node.testId) {
+    selectedWellName.value = node.wellName || selectedWellName.value
+    activeModule.value = '产能试井'
+    activeMethod.value = node.pageMethod || (node.testMethod === 'one-point' ? '一点法' : '回压试井')
+    selectedDataTable.value = node.testMethod
+    activeProductivityTestId.value = Number(node.testId)
+    activeEvaluationId.value = null
+    calculationOutput.value = null
+    resultDirty.value = false
+    try {
+      const response = await productivityTestsApi.detail(
+        node.testId, PROJECT_ID, GAS_RESERVOIR_ID, selectedWellName.value
+      )
+      const detail = unwrapData(response)
+      const firstResult = detail.results?.[0] || detail.result
+      storedProductivityTest.value = detail
+      operationType.value = detail.operationType === 'injection' ? 'injection' : 'production'
+      maximumFormationPressure.value = String(detail.input?.maximumFormationPressure ?? '')
+      formationTemperature.value = String(detail.input?.formationTemperature ?? '')
+      onePointAlpha.value = String(detail.input?.onePointAlpha ?? '0.25')
+      calculationMethod.value = ({
+        'pseudo-pressure': '拟压力',
+        'pressure-squared': '压力平方方法',
+        pressure: '压力法'
+      })[firstResult?.pressureMethod] || '压力法'
+      calculationResult.value = firstResult?.calculationResultType === 'exponential' ? '指数式' : '二项式'
+      savedInputSignature.value = inputSignature({
+        maximumFormationPressure: detail.input?.maximumFormationPressure,
+        formationTemperature: detail.input?.formationTemperature,
+        onePointAlpha: detail.input?.onePointAlpha,
+        points: (detail.inputItems || []).map(item => ({
+          pointNumber: item.testPointNumber,
+          gasProduction: item.testDailyGasProduction,
+          reservoirPressure: item.reservoirPressure,
+          flowPressure: item.testFlowPressure
+        }))
+      }, detail.pvtId)
+      await loadPvtOptions(detail.pvtId)
+      pressureWorkspaceKey.value += 1
+      await router.replace({
+        name: 'SingleWellProductivity',
+        query: {
+          module: '产能试井', method: activeMethod.value,
+          well: selectedWellName.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, testId: node.testId
+        }
+      })
+    } catch (error) {
+      ElMessage.error(error.response?.data?.msg || error.message || '试井记录读取失败')
+    }
+    return
+  }
+
+  if (node.type === ISOCHRONAL_RECORD_NODE_TYPE && node.testId) {
+    // 独立的新建/计算页只负责把点击交还给 /ipr；真正的记录详情由
+    // /ipr 中复用的本工作台加载，使所有左侧记录节点拥有一致的地址行为。
+    if (!props.embedded) {
+      workspacePendingNode.value = node
+      await router.push({ name: 'IprInterface' })
+      return
+    }
+
+    selectedWellName.value = node.wellName || selectedWellName.value
+    activeProductivityTestId.value = Number(node.testId)
+    activeEvaluationId.value = null
+    activeModule.value = '产能试井'
+    activeMethod.value = '等时试井'
+    pressureWorkspaceKey.value += 1
+    selectedDataTable.value = 'local-import'
+    importedDataFileName.value = `${node.label || '已保存等时试井'}数据`
+    try {
+      const response = await productivityStorageApi.getIsochronal(
+        node.testId, PROJECT_ID, GAS_RESERVOIR_ID
+      )
+      const detail = response?.data
+      await loadPvtOptions(detail.record.pvtId)
+      maximumFormationPressure.value = String(detail.input.maximumFormationPressure)
+      formationTemperature.value = String(detail.input.formationTemperature)
+      calculationMethod.value = ({
+        'pseudo-pressure': '拟压力',
+        'pressure-squared': '压力平方方法',
+        pressure: '压力法'
+      })[detail.pressureMethod] || '压力法'
+      calculationResult.value = detail.result?.calculationResultType === 'exponential'
+        ? '指数式'
+        : '二项式'
+      operationType.value = detail.record?.operationType === 'injection' ? 'injection' : 'production'
+      await nextTick()
+      pressureContentRef.value?.restorePersisted?.(detail)
+    } catch (error) {
+      ElMessage.error(error.response?.data?.msg || error.message || '等时试井记录读取失败')
+    }
+    return
+  }
 
   if (isModifiedIsochronalRecord) {
     // 该类节点本身已含有所属井和记录编号，点击时直接打开页面。
@@ -322,13 +1156,15 @@ const handleSidebarSelect = async node => {
     const targetWell = selectedWellName.value
     const targetTestId = activeProductivityTestId.value
     if (route.query.module !== '产能试井' || route.query.method !== '修正等时' ||
-        route.query.well !== targetWell || Number(route.query.testId) !== Number(targetTestId)) {
+      route.query.well !== targetWell || Number(route.query.testId) !== Number(targetTestId)) {
       await router.replace({
         name: 'SingleWellProductivity',
         query: {
           module: '产能试井',
           method: '修正等时',
           well: targetWell,
+          projectId: PROJECT_ID,
+          gasReservoirId: GAS_RESERVOIR_ID,
           testId: targetTestId,
           ...(activeEvaluationId.value ? { evaluationId: activeEvaluationId.value } : {})
         }
@@ -337,23 +1173,163 @@ const handleSidebarSelect = async node => {
     return
   }
 
-  if (node.wellName) {
-    await selectWell(node.wellName)
-  }
-
   const isWorkspaceGroup = WORKSPACE_GROUPS.some(group => group.id === node.type)
   const isWellNode = node.wellName && node.label === node.wellName
   const isRootNode = ['g-well', 'g-reservoir', 'g-group'].includes(node.id)
 
   if (isWorkspaceGroup || isWellNode || isRootNode) return
 
+  if (node.wellName) {
+    await selectWell(node.wellName)
+  }
+
   workspacePendingNode.value = node
   await router.push({ name: 'IprInterface' })
 }
 
+const inputSignature = (input, pvtId = null) => JSON.stringify({
+  pvtId: pvtId == null || pvtId === '' ? null : Number(pvtId),
+  maximumFormationPressure: Number(input?.maximumFormationPressure),
+  formationTemperature: Number(input?.formationTemperature),
+  onePointAlpha: Number(input?.onePointAlpha),
+  gasType: input?.gasType || null,
+  specificGravity: Number(input?.specificGravity) || null,
+  hydrogenSulfide: Number(input?.hydrogenSulfide) || 0,
+  carbonDioxide: Number(input?.carbonDioxide) || 0,
+  nitrogen: Number(input?.nitrogen) || 0,
+  points: (input?.points || []).map(point => [
+    Number(point.pointNumber),
+    Number(point.gasProduction),
+    Number(point.reservoirPressure),
+    Number(point.flowPressure)
+  ])
+})
+
+const handleResultChange = (output, metadata = {}) => {
+  calculationOutput.value = output
+  if (isOwnedPressureMethod.value) resultDirty.value = !metadata.stored
+}
+
+const resultChartPoints = snapshot => {
+  const exponential = snapshot.result.calculationResultType === 'exponential'
+  const definitions = exponential
+    ? [
+      ['analysis', snapshot.result.analysisPoints],
+      ['regression', snapshot.result.regressionLine],
+      ['transient', snapshot.result.transientLine]
+    ]
+    : [
+      ['regularized', snapshot.result.analysisPoints],
+      ['regression', snapshot.result.regressionLine],
+      ['shifted-regression', snapshot.result.transientLine]
+    ]
+  return definitions.flatMap(([curveType, points]) => (points || []).map((point, index) => ({
+    curveType,
+    pointNumber: index + 1,
+    sourcePointNumber: curveType === 'analysis' ? index + 1 : null,
+    xValue: Number(point.x),
+    yValue: Number(point.y),
+    deleted: false,
+    dataLabel: point.label || null
+  })))
+}
+
+const resultIprPoints = snapshot => (snapshot.result.iprCurves || []).flatMap((curve, curveIndex) =>
+  (curve.points || []).map((point, pointIndex) => ({
+    curveNumber: curveIndex + 1,
+    pointNumber: pointIndex + 1,
+    formationPressure: snapshot.result.calculationResultType === 'exponential'
+      ? Number(curve.formationPressure)
+      : null,
+    gasProduction: Number(point.gasProduction),
+    bottomHoleFlowingPressure: Number(point.bottomHoleFlowingPressure),
+    deleted: false,
+    dataLabel: point.label || null
+  }))
+)
+
+const saveCalculation = async () => {
+  if (!isOwnedPressureMethod.value || savingResult.value) return
+  const snapshot = pressureContentRef.value?.getPersistenceSnapshot?.()
+  if (!snapshot?.result || !snapshot.input?.points?.length) {
+    ElMessage.warning('请先完成计算')
+    return
+  }
+  if (snapshot.pressureMethod === 'pseudo-pressure' && !selectedPvtRecord.value) {
+    ElMessage.warning('拟压力方法必须选择PVT表')
+    return
+  }
+  savingResult.value = true
+  try {
+    const signature = inputSignature(snapshot.input, selectedPvtTable.value)
+    const replaceInput = !activeProductivityTestId.value || signature !== savedInputSignature.value
+    const response = await productivityTestsApi.save({
+      testId: activeProductivityTestId.value,
+      projectId: PROJECT_ID,
+      gasReservoirId: GAS_RESERVOIR_ID,
+      wellName: selectedWellName.value,
+      pvtId: selectedPvtRecord.value ? Number(selectedPvtTable.value) : null,
+      operationType: operationType.value,
+      testMethod: pressureTestType.value,
+      testNo: null,
+      testDate: String(snapshot.testDate || new Date().toISOString().slice(0, 10)).slice(0, 10),
+      wellType: null,
+      replaceInput,
+      input: {
+        ...snapshot.input,
+        points: undefined
+      },
+      inputItems: snapshot.input.points.map(point => ({
+        testPointNumber: Number(point.pointNumber),
+        testDailyGasProduction: Number(point.gasProduction),
+        reservoirPressure: Number(point.reservoirPressure),
+        testFlowPressure: Number(point.flowPressure)
+      })),
+      result: {
+        calculationResultType: snapshot.result.calculationResultType,
+        pressureMethod: snapshot.pressureMethod,
+        evaluationId: snapshot.result.evaluationId,
+        darcySeepageCoefficient: snapshot.result.darcyCoefficient,
+        nonDarcySeepageCoefficient: snapshot.result.nonDarcyCoefficient,
+        openFlowCapacity: snapshot.result.openFlowCapacity,
+        productivityCoefficient: snapshot.result.productivityCoefficient,
+        productivityExponent: snapshot.result.productivityExponent,
+        gradient: snapshot.result.gradient,
+        intercept: snapshot.result.intercept,
+        rSquared: snapshot.result.rSquared,
+        reliabilityLevel: snapshot.result.reliabilityLevel,
+        reliabilityDescription: snapshot.result.reliabilityDescription,
+        chartPoints: resultChartPoints(snapshot),
+        iprPoints: resultIprPoints(snapshot)
+      }
+    })
+    const saved = unwrapData(response)
+    activeProductivityTestId.value = Number(saved.testId)
+    savedInputSignature.value = signature
+    resultDirty.value = false
+    await loadOwnedProductivityNodes(selectedWellName.value, { expand: true })
+    const detail = unwrapData(await productivityTestsApi.detail(
+      saved.testId, PROJECT_ID, GAS_RESERVOIR_ID, selectedWellName.value
+    ))
+    storedProductivityTest.value = detail
+    await router.replace({
+      name: 'SingleWellProductivity',
+      query: {
+        module: '产能试井', method: activeMethod.value,
+        well: selectedWellName.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, testId: saved.testId
+      }
+    })
+    ElMessage.success(`已保存${activeMethod.value}${saved.testNo}`)
+  } catch (error) {
+    ElMessage.error(error.response?.data?.msg || error.response?.data?.message || error.message || '保存失败')
+  } finally {
+    savingResult.value = false
+  }
+}
+
 const handleCalculate = async () => {
-  if (!selectedPvtTable.value) {
-    ElMessage.warning('请选择PVT表')
+  if (calculationMethod.value === '拟压力' && !selectedPvtTable.value) {
+    ElMessage.warning('请先计算并保存PVT表')
     return
   }
   if (!selectedDataTable.value) {
@@ -363,6 +1339,64 @@ const handleCalculate = async () => {
   calculationOutput.value = null
   await nextTick()
   await pressureContentRef.value?.analyze?.()
+}
+
+const handleSourceInputSync = ({ maximumFormationPressure: pressure, formationTemperature: temperature }) => {
+  if (Number.isFinite(Number(pressure))) maximumFormationPressure.value = String(pressure)
+  if (Number.isFinite(Number(temperature))) formationTemperature.value = String(temperature)
+}
+
+const handleSaveIsochronal = async () => {
+  if (activeMethod.value !== '等时试井' || savingProductivityTest.value) return
+  if (!selectedPvtRecord.value) {
+    ElMessage.warning('请选择PVT表')
+    return
+  }
+  const snapshot = pressureContentRef.value?.getPersistenceSnapshot?.()
+  if (!snapshot) {
+    ElMessage.warning('请先完成等时试井计算')
+    return
+  }
+  if (!snapshot.input.points.length) {
+    ElMessage.warning('没有可保存的等时试井输入数据')
+    return
+  }
+  savingProductivityTest.value = true
+  try {
+    const pvtNo = Number(selectedPvtOption.value?.pvtNo)
+    const response = await productivityStorageApi.saveIsochronal({
+      projectId: PROJECT_ID,
+      gasReservoirId: GAS_RESERVOIR_ID,
+      wellName: selectedWellName.value,
+      testId: activeProductivityTestId.value,
+      pvtNo,
+      pvtName: selectedPvtOption.value?.pvtName || `PVT性质${pvtNo}`,
+      ...snapshot
+    })
+    const record = response?.data
+    activeProductivityTestId.value = Number(record.testId)
+    const detail = (await productivityStorageApi.getIsochronal(
+      record.testId, PROJECT_ID, GAS_RESERVOIR_ID
+    ))?.data
+    pressureContentRef.value?.restorePersisted?.(detail)
+    const nodes = await loadIsochronalNodes(selectedWellName.value, { expand: true })
+    const savedNode = nodes.find(item => Number(item.testId) === Number(record.testId))
+    if (savedNode) workspaceActiveNodeId.value = savedNode.id
+    if (!props.embedded) {
+      await router.replace({
+        name: 'SingleWellProductivity',
+        query: {
+          module: '产能试井', method: '等时试井',
+          well: selectedWellName.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, testId: record.testId
+        }
+      })
+    }
+    ElMessage.success(`已保存等时试井${record.testNo}`)
+  } catch (error) {
+    ElMessage.error(error.response?.data?.msg || error.response?.data?.message || error.message || '保存失败')
+  } finally {
+    savingProductivityTest.value = false
+  }
 }
 
 const toggleParamsPanel = () => {
@@ -384,238 +1418,382 @@ const handleProductivitySaved = async saved => {
       module: '产能试井',
       method: '修正等时',
       well: selectedWellName.value,
+      projectId: PROJECT_ID,
+      gasReservoirId: GAS_RESERVOIR_ID,
       testId: saved.testId
     }
   })
 }
 
+const handleStableSaved = async saved => {
+  activeStableId.value = Number(saved.unstableId ?? saved.stableId)
+  const nodes = activeModule.value === '理论计算'
+    ? activeMethod.value === '不稳定流'
+      ? await loadTheoreticalUnstableNodes(selectedWellName.value, { expand: true })
+      : await loadTheoreticalStableNodes(selectedWellName.value, { expand: true })
+    : activeMethod.value === '不稳定流'
+      ? await loadDynamicUnstableNodes(selectedWellName.value, { expand: true })
+      : await loadDynamicStableNodes(selectedWellName.value, { expand: true })
+  const savedNode = nodes.find(node => Number(node.unstableId ?? node.stableId) === activeStableId.value
+    && (activeMethod.value !== '不稳定流' || [DYNAMIC_UNSTABLE_RECORD_NODE_TYPE, THEORETICAL_UNSTABLE_RECORD_NODE_TYPE].includes(node.type)))
+  if (savedNode) workspaceActiveNodeId.value = savedNode.id
+  await router.replace({
+    name: 'SingleWellProductivity',
+    query: {
+      module: activeModule.value, method: activeMethod.value, well: selectedWellName.value,
+      projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, stableId: activeStableId.value
+    }
+  })
+}
+
+const handleStableRecordMissing = async () => {
+  activeStableId.value = null
+  if (activeModule.value === '理论计算') {
+    if (activeMethod.value === '不稳定流') await loadTheoreticalUnstableNodes(selectedWellName.value)
+    else await loadTheoreticalStableNodes(selectedWellName.value)
+  }
+  else if (activeMethod.value === '不稳定流') await loadDynamicUnstableNodes(selectedWellName.value)
+  else await loadDynamicStableNodes(selectedWellName.value)
+  await router.replace({
+    name: 'SingleWellProductivity',
+    query: { module: activeModule.value, method: activeMethod.value, well: selectedWellName.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID }
+  })
+}
+
+const handleInitialStableCalculated = async () => {
+  // 首次计算已经完成，立即消费路由标记，防止普通刷新再次自动发起三次计算。
+  autoCalculateStable.value = false
+  await router.replace({
+    name: 'SingleWellProductivity',
+    query: { module: activeModule.value, method: activeMethod.value, well: selectedWellName.value, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID }
+  })
+}
+
 onMounted(async () => {
+  window.addEventListener('click', closeStableContextMenu)
   await loadWells()
-  void loadAllModifiedIsochronalNodes()
+  if (isOwnedPressureMethod.value) selectedDataTable.value = pressureTestType.value
+  if (selectedWellName.value) await loadPvtOptions()
+  coefficientReady.value = true
+  if (route.query.method === '等时试井' || props.embeddedNode) selectedDataTable.value = 'local-import'
+  await Promise.allSettled([
+    loadAllModifiedIsochronalNodes(),
+    loadAllIsochronalNodes()
+  ])
+  try {
+    await loadAllOwnedProductivityNodes()
+  } catch (error) {
+    console.warn('部分回压/一点法记录加载失败', error)
+  }
+  try {
+    await loadAllStableNodes()
+    ensureCoefficientTree(workspaceTreeData.value)
+  } catch (error) {
+    console.warn('理论计算/动态产能目录加载失败', error)
+  }
+  if (selectedWellName.value && (route.query.method === '等时试井' || props.embeddedNode) && activeProductivityTestId.value) {
+    await handleSidebarSelect({
+      id: `productivity-test-isochronal-${activeProductivityTestId.value}`,
+      type: ISOCHRONAL_RECORD_NODE_TYPE,
+      testId: activeProductivityTestId.value,
+      wellName: selectedWellName.value
+    })
+  } else if (selectedWellName.value && isOwnedPressureMethod.value && activeProductivityTestId.value) {
+    await handleSidebarSelect({
+      id: `owned-productivity-test-${pressureTestType.value}-${activeProductivityTestId.value}`,
+      type: OWNED_PRODUCTIVITY_RECORD_NODE_TYPE,
+      testMethod: pressureTestType.value,
+      pageMethod: activeMethod.value,
+      testId: activeProductivityTestId.value,
+      wellName: selectedWellName.value
+    })
+  }
 })
+onBeforeUnmount(() => window.removeEventListener('click', closeStableContextMenu))
 </script>
 
 <template>
   <!-- 顶部菜单栏对应板块：单井产能。 -->
-  <div class="productivity-interface">
-    <RibbonMenu @command="handleCommand" @tab-change="handleRibbonTabChange" />
+  <div class="productivity-interface" :class="{ embedded: props.embedded }">
+    <RibbonMenu v-if="!props.embedded" :scope="workspaceRibbonScope" @scope-change="setWorkspaceRibbonScope"
+      @command="handleCommand" @tab-change="handleRibbonTabChange" />
 
     <div class="productivity-main">
       <!-- 公共左侧目录：与 IprInterface.vue 使用同一个组件。 -->
-      <WorkspaceSidebar
-        v-model:keyword="keyword"
-        v-model:collapsed="sideTreeCollapsed"
-        :nodes="sidebarTreeData"
-        :active-id="workspaceActiveNodeId"
-        :loading="loadingWells"
-        @select="handleSidebarSelect"
-      />
+      <WorkspaceSidebar v-if="!props.embedded" v-model:keyword="keyword" v-model:collapsed="sideTreeCollapsed"
+        :nodes="sidebarTreeData" :active-id="workspaceActiveNodeId" :loading="loadingWells"
+        @select="handleSidebarSelect" @expand="handleSidebarExpand" @node-contextmenu="handleStableContextMenu" />
 
       <main class="productivity-content">
-        <template v-if="activeModule === '产能试井' && activeMethod">
-          <div class="test-tabs">
-            <div class="test-tab">
-              <span>{{ testTitle }}</span>
-            </div>
+        <div v-if="activeModule && activeMethod" class="test-tabs">
+          <div class="test-tab">
+            <span>{{ tabTitle }}</span>
           </div>
+        </div>
 
-          <ModifiedIsochronalContent
-            v-if="activeMethod === '修正等时'"
-            :project-id="MODIFIED_ISOCHRONAL_PROJECT_ID"
-            :gas-reservoir-id="MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID"
-            :well-name="selectedWellName"
-            :test-id="activeProductivityTestId"
-            :evaluation-id="activeEvaluationId"
-            @saved="handleProductivitySaved"
-          />
+        <template v-if="activeModule === '产能试井' && activeMethod">
+
+          <ModifiedIsochronalContent v-if="activeMethod === '修正等时'" :project-id="MODIFIED_ISOCHRONAL_PROJECT_ID"
+            :gas-reservoir-id="MODIFIED_ISOCHRONAL_GAS_RESERVOIR_ID" :well-name="selectedWellName"
+            :test-id="activeProductivityTestId" :evaluation-id="activeEvaluationId" @saved="handleProductivitySaved" />
 
           <section v-else class="test-workspace">
-            <aside class="parameter-panel" :class="{ collapsed: paramsCollapsed }">
-              <button
-                v-if="paramsCollapsed"
-                class="parameter-collapsed-tab"
-                type="button"
-                title="展开参数设置"
-                @click="toggleParamsPanel"
-              >
+            <aside v-resizable-parameter-panel="paramsCollapsed" class="parameter-panel water-parameter-theme" :class="{ collapsed: paramsCollapsed }">
+              <button v-if="paramsCollapsed" class="parameter-collapsed-tab" type="button" title="展开参数设置"
+                @click="toggleParamsPanel">
                 参数设置
               </button>
 
               <template v-else>
                 <div class="parameter-heading">
                   <span>参数设置</span>
-                  <button
-                    class="parameter-toggle"
-                    type="button"
-                    title="收起参数设置"
-                    aria-label="收起参数设置"
-                    @click="toggleParamsPanel"
-                  >
+                  <button class="parameter-toggle" type="button" title="收起参数设置" aria-label="收起参数设置"
+                    @click="toggleParamsPanel">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="#777" aria-hidden="true">
                       <path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z" />
                     </svg>
                   </button>
                 </div>
                 <div class="parameter-form">
-                <label class="field-group">
-                  <span>选择PVT表</span>
-                  <select v-model="selectedPvtTable">
-                    <option value="">请选择</option>
-                    <option v-for="option in pvtTableOptions" :key="option" :value="option">
-                      {{ option }}
-                    </option>
-                  </select>
-                </label>
+                  <label class="field-group">
+                    <span>当前PVT表</span>
+                    <input :value="pvtOptionsLoading
+                      ? '正在加载PVT…'
+                      : selectedPvtOption ? 'PVT性质1' : '当前井暂无已保存PVT性质'" readonly />
+                  </label>
 
-                <label class="field-group">
-                  <span>选择数据表</span>
-                  <select v-model="selectedDataTable">
-                    <option value="">请选择</option>
-                    <option v-for="option in dataTableOptions" :key="option" :value="option">
-                      {{ option }}
-                    </option>
-                  </select>
-                </label>
+                  <label class="field-group">
+                    <span>选择数据表</span>
+                    <button type="button" class="local-import-button" :disabled="importingData" @click="chooseDataFile">
+                      {{ importingData ? '正在导入…' : '本地导入' }}
+                    </button>
+                    <input ref="dataFileInput" class="hidden-data-file" type="file" accept=".xlsx,.xls,.csv"
+                      @change="handleDataFile" />
+                    <small class="imported-data-name">{{ importedDataFileName }}</small>
+                  </label>
 
-                <div class="section-heading">
-                  <span>其他数据</span>
-                  <i></i>
-                </div>
+                  <div class="section-heading">
+                    <span>其他数据</span>
+                    <i></i>
+                  </div>
 
-                <label class="field-group">
-                  <span>计算IPR曲线的最大地层压力（MPa）</span>
-                  <input v-model="maximumFormationPressure" inputmode="decimal" />
-                </label>
+                  <label class="field-group">
+                    <span>计算IPR曲线的最大地层压力（MPa）</span>
+                    <input v-model="maximumFormationPressure" inputmode="decimal" />
+                  </label>
 
-                <label class="field-group">
-                  <span>地层温度（℃）</span>
-                  <input v-model="formationTemperature" inputmode="decimal" />
-                </label>
+                  <label class="field-group">
+                    <span>地层温度（℃）</span>
+                    <input v-model="formationTemperature" inputmode="decimal" />
+                  </label>
 
-                <label v-if="activeMethod === '一点法'" class="field-group">
-                  <span>产能系数（α）</span>
-                  <input v-model="onePointAlpha" inputmode="decimal" />
-                </label>
+                  <label v-if="activeMethod === '一点法'" class="field-group">
+                    <span>产能系数（α）</span>
+                    <input v-model="onePointAlpha" inputmode="decimal" />
+                  </label>
 
-                <fieldset class="radio-group">
-                  <legend>计算方法</legend>
-                  <label><input v-model="calculationMethod" type="radio" value="拟压力" />拟压力</label>
-                  <label><input v-model="calculationMethod" type="radio" value="压力平方方法" />压力平方方法</label>
-                  <label><input v-model="calculationMethod" type="radio" value="压力法" />压力法</label>
-                </fieldset>
+                  <fieldset class="radio-group">
+                    <legend>计算方法</legend>
+                    <label><input v-model="calculationMethod" type="radio" value="拟压力" />拟压力</label>
+                    <label><input v-model="calculationMethod" type="radio" value="压力平方方法" />压力平方方法</label>
+                    <label><input v-model="calculationMethod" type="radio" value="压力法" />压力法</label>
+                  </fieldset>
 
-                <fieldset class="radio-group result-methods">
-                  <legend>计算结果</legend>
-                  <label><input v-model="calculationResult" type="radio" value="二项式" />二项式</label>
-                  <label><input v-model="calculationResult" type="radio" value="指数式" />指数式</label>
-                </fieldset>
+                  <fieldset class="radio-group">
+                    <legend>注采类型</legend>
+                    <label><input v-model="operationType" type="radio" value="production" />采气</label>
+                    <label><input v-model="operationType" type="radio" value="injection" />注气</label>
+                  </fieldset>
 
-                  <button type="button" class="calculate-button" @click="handleCalculate">计算</button>
+                  <fieldset class="radio-group result-methods">
+                    <legend>计算结果</legend>
+                    <label><input v-model="calculationResult" type="radio" value="二项式" />二项式</label>
+                    <label><input v-model="calculationResult" type="radio" value="指数式" />指数式</label>
+                  </fieldset>
+
+                  <div class="parameter-actions">
+                    <button type="button" class="calculate-button" @click="handleCalculate">计算</button>
+                    <button v-if="isOwnedPressureMethod" type="button" class="save-button"
+                      :disabled="savingResult || !calculationOutput || !resultDirty" @click="saveCalculation">{{
+                        savingResult ? '保存中…' : '保存' }}</button>
+                    <button v-if="activeMethod === '等时试井'" type="button" class="save-button"
+                      :disabled="savingProductivityTest || !calculationOutput" @click="handleSaveIsochronal">{{
+                        savingProductivityTest ? '保存中…' : '保存' }}</button>
+                  </div>
                   <div v-if="calculationOutput" class="calculation-output">
                     <template v-if="calculationOutput.calculationResultType === 'exponential'">
                       <label class="field-group">
-                        <span>产能系数 C</span>
+                        <span>{{ operationType === 'injection' ? '注气能力系数 C' : '产能系数 C' }}</span>
                         <input :value="scientific(calculationOutput.productivityCoefficient)" readonly />
                       </label>
                       <label class="field-group">
-                        <span>产能指数 n</span>
+                        <span>{{ operationType === 'injection' ? '注气指数 n' : '产能指数 n' }}</span>
                         <input :value="Number(calculationOutput.productivityExponent).toFixed(4)" readonly />
                       </label>
                     </template>
                     <template v-else>
                       <label class="field-group">
-                        <span>达西渗流系数 A</span>
+                        <span>{{ operationType === 'injection' ? '注气达西渗流系数 A' : '达西渗流系数 A' }}</span>
                         <input :value="scientific(calculationOutput.darcyCoefficient)" readonly />
                       </label>
                       <label class="field-group">
-                        <span>非达西高速流系数 B</span>
+                        <span>{{ operationType === 'injection' ? '注气非达西高速流系数 B' : '非达西高速流系数 B' }}</span>
                         <input :value="scientific(calculationOutput.nonDarcyCoefficient)" readonly />
                       </label>
                     </template>
+                    <label class="field-group">
+                      <span>{{ operationType === 'injection' ? '最大注气量(10⁴m³/d)' : '无阻流量(10⁴m³/d)' }}</span>
+                      <input
+                        :value="Number.isFinite(Number(calculationOutput.aofRate)) ? Number(calculationOutput.aofRate).toFixed(4) : ''"
+                        readonly />
+                    </label>
                   </div>
                 </div>
               </template>
             </aside>
 
             <div class="result-output-panel" :aria-label="`${testTitle}结果区域`">
-              <BinomialPressureContent
-                v-if="usesPressureCalculation && selectedDataTable"
-                :key="`${selectedWellName}-${activeMethod}-${selectedDataTable}-${calculationResult}`"
-                ref="pressureContentRef"
-                embedded
-                auto-select-data
-                :well-names="wells.map(item => item.wellName)"
-                :initial-well-name="selectedWellName"
-                :initial-test-type="pressureTestType"
-                :external-formation-pressure="Number(maximumFormationPressure)"
-                :external-temperature="Number(formationTemperature)"
-                :external-one-point-alpha="Number(onePointAlpha)"
+              <BinomialPressureContent v-if="usesPressureCalculation && selectedDataTable"
+                :key="`${selectedWellName}-${activeMethod}-${pressureWorkspaceKey}`" ref="pressureContentRef" embedded
+                auto-select-data :well-names="wells.map(item => item.wellName)" :initial-well-name="selectedWellName"
+                :initial-test-type="pressureTestType" :external-formation-pressure="Number(maximumFormationPressure)"
+                :external-temperature="Number(formationTemperature)" :external-one-point-alpha="Number(onePointAlpha)"
                 :external-calculation-method="pressureCalculationMethod"
                 :external-calculation-result="calculationResult === '指数式' ? 'exponential' : 'binomial'"
-                :pvt-result-rows="selectedPvtRecord?.gasResultRows || []"
-                :pvt-record="selectedPvtRecord"
-                :project-id="PROJECT_ID"
-                :gas-reservoir-id="GAS_RESERVOIR_ID"
-                @result-change="calculationOutput = $event"
-              />
+                :external-operation-type="operationType"
+                :pvt-result-rows="selectedPvtRecord?.gasResultRows || []" :pvt-record="selectedPvtRecord"
+                :stored-test="storedProductivityTest"
+                :restore-only="!!activeProductivityTestId"
+                :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID"
+                @result-change="handleResultChange"
+                @source-input-sync="handleSourceInputSync" />
 
               <template v-else>
-              <div v-show="activeContentTab === 'table'" class="result-table-panel">
-                <el-table
-                  :data="resultGridRows"
-                  :show-header="false"
-                  height="100%"
-                  size="small"
-                  border
-                  empty-text=""
-                  row-key="id"
-                >
-                  <el-table-column
-                    v-for="column in resultGridColumns"
-                    :key="column.prop"
-                    :prop="column.prop"
-                    :min-width="column.minWidth"
-                  />
-                </el-table>
-              </div>
+                <div v-show="activeContentTab === 'table'" class="result-table-panel">
+                  <el-table :data="resultGridRows" :show-header="false" height="100%" size="small" border empty-text=""
+                    row-key="id">
+                    <el-table-column v-for="column in resultGridColumns" :key="column.prop" :prop="column.prop"
+                      :min-width="column.minWidth" />
+                  </el-table>
+                </div>
 
-              <div
-                v-show="activeContentTab === 'chart'"
-                class="result-chart-panel"
-                :aria-label="`${testTitle}结果分析图`"
-              ></div>
+                <div v-show="activeContentTab === 'chart'" class="result-chart-panel" :aria-label="`${testTitle}结果分析图`">
+                </div>
 
-              <div class="bottom-chart-tabs">
-                <button
-                  type="button"
-                  class="bottom-chart-tab"
-                  :class="{ active: activeContentTab === 'table' }"
-                  @click="activeContentTab = 'table'"
-                >
-                  数据列表
-                </button>
-                <button
-                  type="button"
-                  class="bottom-chart-tab"
-                  :class="{ active: activeContentTab === 'chart' }"
-                  @click="activeContentTab = 'chart'"
-                >
-                  结果分析图
-                </button>
-              </div>
+                <div class="bottom-chart-tabs">
+                  <button type="button" class="bottom-chart-tab" :class="{ active: activeContentTab === 'table' }"
+                    @click="activeContentTab = 'table'">
+                    数据列表
+                  </button>
+                  <button type="button" class="bottom-chart-tab" :class="{ active: activeContentTab === 'chart' }"
+                    @click="activeContentTab = 'chart'">
+                    结果分析图
+                  </button>
+                </div>
               </template>
             </div>
           </section>
         </template>
+        <template v-else-if="activeModule === '产能系数'">
+          <ExponentialContent v-if="coefficientReady && !loadingWells && !pvtOptionsLoading" :key="`${selectedWellName}-${activeMethod}-${coefficientWorkspaceKey}`"
+            :record-id="activeCoefficientId" @restore="restoreCoefficient" @saved="coefficientSaved"
+            :pvt-table-options="pvtTableOptions" :selected-pvt-table="selectedPvtTable"
+            :pvt-loading="pvtOptionsLoading" @select-pvt="selectedPvtTable = $event; changeSelectedPvt()"
+            :operation-type="operationType" :well-name="selectedWellName"
+            :maximum-formation-pressure="coefficientFormationPressure"
+            @update:maximum-formation-pressure="coefficientFormationPressure = $event"
+            :formation-temperature="coefficientFormationTemperature"
+            @update:formation-temperature="coefficientFormationTemperature = $event"
+            :productivity-coefficient-c="productivityCoefficientC"
+            :productivity-exponent-n="productivityExponentN" :corrected-coefficient-c="correctedCoefficientC"
+            :corrected-exponent-n="correctedExponentN" :fitted-formation-pressure="fittedFormationPressure"
+            :fitted-flow-rate="fittedFlowRate" :open-flow-rate="openFlowRate" :pvt-record="selectedPvtRecord"
+            :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" :method-type="activeMethod"
+            @update:coefficient-c="productivityCoefficientC = $event"
+            @update:exponent-n="productivityExponentN = $event" @update:corrected-c="correctedCoefficientC = $event"
+            @update:corrected-n="correctedExponentN = $event" @update:fitted-pressure="fittedFormationPressure = $event"
+            @update:fitted-flow-rate="fittedFlowRate = $event" @update:open-flow-rate="openFlowRate = $event"
+            @update:operation-type="operationType = $event" />
+        </template>
 
+        <template v-else-if="activeModule === '理论计算' && activeMethod === '稳定流'">
+          <TheoreticalProductivityContent :well-name="selectedWellName" :project-id="PROJECT_ID"
+            :gas-reservoir-id="GAS_RESERVOIR_ID" :pvt-table-options="pvtTableOptions" :pvt-records="databasePvtRecords"
+            :stable-id="activeStableId" :auto-calculate="autoCalculateStable" @saved="handleStableSaved"
+            @record-missing="handleStableRecordMissing" @initial-calculated="handleInitialStableCalculated" />
+        </template>
+
+        <template v-else-if="activeModule === '动态产能' && activeMethod === '稳定流'">
+          <DynamicProductivityContent :well-name="selectedWellName" :project-id="PROJECT_ID"
+            :gas-reservoir-id="GAS_RESERVOIR_ID" :pvt-table-options="pvtTableOptions" :pvt-records="databasePvtRecords"
+            :stable-id="activeStableId" :auto-calculate="autoCalculateStable" @saved="handleStableSaved"
+            @record-missing="handleStableRecordMissing" @initial-calculated="handleInitialStableCalculated" />
+        </template>
+
+        <template v-else-if="activeModule === '理论计算' && activeMethod === '不稳定流'">
+          <TheoreticalUnstableProductivityContent :well-name="selectedWellName" :project-id="PROJECT_ID"
+            :gas-reservoir-id="GAS_RESERVOIR_ID" :pvt-table-options="pvtTableOptions" :pvt-records="databasePvtRecords"
+            :unstable-id="activeStableId" :auto-calculate="autoCalculateStable" @saved="handleStableSaved"
+            @record-missing="handleStableRecordMissing" @initial-calculated="handleInitialStableCalculated" />
+        </template>
+
+        <template v-else-if="activeModule === '动态产能' && activeMethod === '不稳定流'">
+          <DynamicUnstableProductivityContent :well-name="selectedWellName" :project-id="PROJECT_ID"
+            :gas-reservoir-id="GAS_RESERVOIR_ID" :pvt-table-options="pvtTableOptions" :pvt-records="databasePvtRecords"
+            :unstable-id="activeStableId" :auto-calculate="autoCalculateStable" @saved="handleStableSaved"
+            @record-missing="handleStableRecordMissing" @initial-calculated="handleInitialStableCalculated" />
+        </template>
+
+        <template v-else-if="activeModule === '产能对比'">
+          <component :is="productivityComparisonPages[activeMethod]" :key="activeMethod"
+            :well-name="selectedWellName" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
+        </template>
       </main>
     </div>
   </div>
+  <Teleport to="body">
+    <div v-if="stableContextMenu.visible" class="stable-context-menu"
+      :style="{ left: `${stableContextMenu.x}px`, top: `${stableContextMenu.y}px` }" @click.stop @contextmenu.prevent>
+      <button v-if="isStableRecordNode(stableContextMenu.node)" type="button" @click="renameStableNode">重命名</button>
+      <button type="button" class="danger" @click="deleteStableNode">删除</button>
+    </div>
+  </Teleport>
 </template>
 
 <style lang="scss" scoped>
 $accent: #f4d000;
 $accent-soft: #fff8d8;
+
+:global(.stable-context-menu) {
+  position: fixed;
+  z-index: 4000;
+  min-width: 168px;
+  padding: 6px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, .18);
+}
+
+:global(.stable-context-menu button) {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  color: #333;
+}
+
+:global(.stable-context-menu button:hover) {
+  background: #f5f7fa;
+}
+
+:global(.stable-context-menu button.danger) {
+  color: #d93025;
+}
 
 .productivity-interface {
   height: 100vh;
@@ -625,6 +1803,11 @@ $accent-soft: #fff8d8;
   background: #fff;
   color: #252525;
   font: 14px "Microsoft YaHei", "Segoe UI", sans-serif;
+
+  &.embedded {
+    width: 100%;
+    height: 100%;
+  }
 }
 
 .productivity-main {
@@ -669,7 +1852,7 @@ $accent-soft: #fff8d8;
   border-bottom: 2px solid transparent;
   white-space: nowrap;
 
-  > span {
+  >span {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -744,7 +1927,9 @@ $accent-soft: #fff8d8;
   justify-content: center;
   cursor: pointer;
 
-  &:hover { background: $accent-soft; }
+  &:hover {
+    background: $accent-soft;
+  }
 }
 
 .parameter-collapsed-tab {
@@ -778,7 +1963,7 @@ $accent-soft: #fff8d8;
   margin-bottom: 9px;
   color: #333;
 
-  > span {
+  >span {
     display: block;
     margin-bottom: 3px;
     font-size: 12px;
@@ -806,6 +1991,41 @@ $accent-soft: #fff8d8;
   }
 }
 
+.local-import-button {
+  width: 100%;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid #aaa;
+  border-radius: 3px;
+  background: #fff;
+  color: #333;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover {
+    border-color: #777;
+  }
+
+  &:disabled {
+    color: #999;
+    cursor: wait;
+  }
+}
+
+.hidden-data-file {
+  display: none;
+}
+
+.imported-data-name {
+  display: block;
+  margin-top: 4px;
+  overflow: hidden;
+  color: #777;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .section-heading {
   height: 22px;
   margin: 10px 0 7px;
@@ -815,7 +2035,11 @@ $accent-soft: #fff8d8;
   font-size: 13px;
   font-weight: 500;
 
-  i { flex: 1; height: 1px; background: #999; }
+  i {
+    flex: 1;
+    height: 1px;
+    background: #999;
+  }
 }
 
 .radio-group {
@@ -848,7 +2072,20 @@ $accent-soft: #fff8d8;
   }
 }
 
-.result-methods { margin-bottom: 10px; }
+.result-methods {
+  margin-bottom: 10px;
+}
+
+.disabled-radio {
+  color: #aaa;
+  cursor: not-allowed !important;
+}
+
+.parameter-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 
 .calculate-button {
   min-width: 86px;
@@ -864,7 +2101,33 @@ $accent-soft: #fff8d8;
   cursor: pointer;
   transition: background-color 0.15s ease;
 
-  &:hover { background: #050505; }
+  &:hover {
+    background: #050505;
+  }
+}
+
+.save-button {
+  min-width: 86px;
+  height: 32px;
+  padding: 0 22px;
+  border: 1px solid #252525;
+  border-radius: 5px;
+  background: #fff;
+  color: #252525;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    background: #f5f5f5;
+  }
+
+  &:disabled {
+    border-color: #d7d7d7;
+    color: #aaa;
+    cursor: not-allowed;
+  }
 }
 
 .calculation-output {
@@ -935,8 +2198,9 @@ $accent-soft: #fff8d8;
 }
 
 .bottom-chart-tabs {
-  height: 34px;
-  flex: 0 0 34px;
+  // 未加载数据时的占位标签也沿用正式试井页面的尺寸和选中样式。
+  height: 30px;
+  flex: 0 0 30px;
   display: flex;
   align-items: stretch;
   border-top: 1px solid #e4e7ed;
@@ -944,8 +2208,8 @@ $accent-soft: #fff8d8;
 }
 
 .bottom-chart-tab {
-  min-width: 104px;
-  height: 34px;
+  min-width: 82px;
+  height: 30px;
   padding: 0 14px;
   border: 0;
   border-right: 1px solid #e4e7ed;
@@ -980,7 +2244,7 @@ $accent-soft: #fff8d8;
 }
 
 @media (max-width: 800px) {
-  .field-group > span {
+  .field-group>span {
     line-height: 18px;
   }
 
@@ -988,5 +2252,4 @@ $accent-soft: #fff8d8;
     margin: 0 5px 5px 0;
   }
 }
-
 </style>

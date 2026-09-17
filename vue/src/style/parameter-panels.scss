@@ -1,0 +1,267 @@
+// 水侵分析参数面板的共用外观。只有显式标记的参数栏使用，结果区和导航不受影响。
+// 覆盖页面 scoped 尺寸；拖拽产生的内联宽度仍优先，避免锁死用户调整。
+.water-parameter-theme.water-parameter-theme.water-parameter-theme {
+  box-sizing: border-box;
+  width: 238px;
+  min-width: 238px;
+  flex: 0 0 auto;
+  padding: 0;
+  font-family: 'Microsoft YaHei', 'PingFang SC', -apple-system, 'Segoe UI', sans-serif;
+  font-size: 13px;
+  color: #333;
+  background: #fff;
+  border-right-color: #e0e0e0;
+  &.collapsed { width: 22px; min-width: 22px; flex-basis: 22px; }
+  // PVT 数据录入侧栏没有独立的 panel-body，内边距由根节点承担。
+  &.gas-parameter-panel, &.water-parameter-panel { padding: 4px 12px 14px; }
+
+  :is(.panel-head, .panel-header, .parameter-heading),
+  > .panel-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex: 0 0 34px;
+    min-height: 34px;
+    height: 34px;
+    box-sizing: border-box;
+    padding: 7px 12px 6px;
+    margin: 0;
+    border-bottom: 1px solid #f0f0f0;
+    background: #fff;
+    color: #333;
+    font: inherit;
+    font-weight: 400;
+    line-height: 20px;
+  }
+
+  .panel-title { font: inherit; margin: 0; }
+
+  :is(.panel-toggle, .parameter-toggle) {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: 0;
+    border-radius: 2px;
+    background: transparent;
+    cursor: pointer;
+    &:hover { background: #eef4ff; }
+  }
+
+  :is(.panel-collapsed-tab, .parameter-collapsed-tab) {
+    width: 22px;
+    min-width: 22px;
+    height: 76px;
+    padding: 0;
+    border: 1px solid #e0e0e0;
+    border-left: 0;
+    background: #fff;
+    color: #333;
+    font: inherit;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+    &:hover { background: #eef4ff; color: #1f6fd6; }
+  }
+
+  :is(.panel-body, .parameter-form) {
+    min-height: 0;
+    min-width: 0;
+    box-sizing: border-box;
+    padding: 4px 12px 14px;
+  }
+
+  :is(.sec-label, .section-title, .section-heading, .form-section,
+      .gas-section-heading, .water-section-heading) {
+    height: auto;
+    min-height: 0;
+    margin: 10px 0 7px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: #333;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 20px;
+    &:first-child { margin-top: 4px; }
+    &::after { content: none; }
+    > i, > .gas-section-rule, > .water-section-rule { display: none; }
+  }
+
+  .parameter-section { margin: 0; padding: 0; border: 0; }
+  :is(.gas-parameter-section, .water-parameter-section) { margin: 0; }
+
+  :is(.field-grid, .parameter-grid) {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr));
+    column-gap: 24px;
+    row-gap: 0;
+  }
+
+  :is(.field, .field-group, .gas-field-group, .water-field-group) {
+    display: block;
+    min-width: 0;
+    margin: 0 0 9px;
+    padding: 0;
+    > label:not(.el-radio):not(.el-checkbox), > span {
+      display: block;
+      margin-bottom: 3px;
+      color: #555;
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 400;
+      line-height: 18px;
+    }
+  }
+
+  // 原生表单与 Element Plus small 控件保持相同的高度、文本起点和边框。
+  :is(.field, .field-group, .gas-field-group, .water-field-group) > input:not([type='radio']):not([type='checkbox']):not([type='file']):not([type='hidden']),
+  select, .local-import-button, .file-button {
+    width: 100%;
+    min-width: 0;
+    height: 24px;
+    padding: 0 7px;
+    box-sizing: border-box;
+    border: 1px solid #dcdfe6;
+    border-radius: 4px;
+    outline: none;
+    box-shadow: none;
+    background: #fff;
+    color: #606266;
+    font: inherit;
+    font-size: 12px;
+    line-height: 22px;
+    text-align: left;
+    &:hover { border-color: #c0c4cc; }
+    &:focus { border-color: #409eff; box-shadow: 0 0 0 1px #409eff inset; }
+    &:disabled { background: #f5f7fa; color: #a8abb2; cursor: not-allowed; border-color: #e4e7ed; }
+  }
+
+  :is(.el-input, .el-input-number, .el-select) {
+    --el-component-size-small: 24px;
+    --el-font-size-base: 12px;
+    width: 100%;
+    font: inherit;
+    font-size: 12px;
+  }
+
+  .el-input .el-input__wrapper, .el-select .el-select__wrapper {
+    min-height: 24px;
+    height: 24px;
+    padding: 0 7px;
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 12px;
+    box-shadow: 0 0 0 1px #dcdfe6 inset;
+    &:hover { box-shadow: 0 0 0 1px #c0c4cc inset; }
+    &.is-focus, &.is-focused { box-shadow: 0 0 0 1px #409eff inset; }
+  }
+  .el-input.is-disabled .el-input__wrapper,
+  .el-select .el-select__wrapper.is-disabled {
+    background: #f5f7fa;
+    box-shadow: 0 0 0 1px #e4e7ed inset;
+  }
+  .el-input .el-input__inner, .el-select .el-select__selected-item {
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 400;
+    height: 22px;
+    line-height: 22px;
+    text-align: left;
+  }
+  .el-input-number:not(.is-without-controls) .el-input__wrapper { padding: 0 31px; }
+  .el-input-number.is-controls-right:not(.is-without-controls) .el-input__wrapper { padding: 0 31px 0 7px; }
+  .el-input-number.is-without-controls .el-input .el-input__wrapper { padding: 0 7px; font-family: inherit; }
+
+  .el-form-item { margin-bottom: 9px; }
+  .el-form-item .el-form-item__label {
+    height: auto;
+    margin-bottom: 3px;
+    padding: 0;
+    color: #555;
+    font-size: 12px;
+    line-height: 18px;
+  }
+
+  :is(.radio-group, .radios, .field-section, .operation-group) {
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    margin: 0 0 9px;
+    > legend { padding: 0; margin: 10px 0 7px; color: #333; font-size: 13px; font-weight: 500; }
+  }
+  input:is([type='radio'], [type='checkbox']) { accent-color: #333; }
+  :is(.radio-group, .radios, .operation-options, .calculation-method-options) label {
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 400;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin: 0 8px 4px 0;
+    min-height: 20px;
+    white-space: nowrap;
+  }
+  :is(.operation-options, .calculation-method-options) { display: flex; flex-wrap: wrap; }
+
+  :is(.form-actions, .action-buttons, .actions, .parameter-actions, .gas-parameter-actions, .water-parameter-actions, .btn-row) {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 4px 0 9px;
+    padding: 0;
+  }
+  :is(.calculate-button, .save-button, .action-buttons > button, .parameter-actions > button,
+      .gas-parameter-actions > button, .water-parameter-actions > button, .actions > button, .el-button) {
+    min-width: 0;
+    width: auto;
+    flex: 0 0 auto;
+    height: 24px;
+    min-height: 24px;
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0 11px;
+    border: 1px solid #dcdfe6;
+    border-radius: 3px;
+    background: #fff;
+    color: #606266;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 22px;
+    box-shadow: none;
+    cursor: pointer;
+    &:hover:not(:disabled):not(.is-disabled) { background: #ecf5ff; border-color: #c6e2ff; color: #409eff; }
+    &:disabled, &.is-disabled { background: #fff; border-color: #ebeef5; color: #c0c4cc; cursor: not-allowed; }
+  }
+  :is(.panel-body, .parameter-form) > .calculate-button { margin: 4px 0 9px; }
+
+  .param-tabs {
+    height: 30px;
+    min-height: 30px;
+    max-height: 30px;
+    flex-shrink: 0;
+    border-top: 1px solid #e0e0e0;
+    background: #fff;
+    > :is(button, .param-tab) {
+      flex: 1;
+      height: 29px;
+      min-width: 0;
+      margin: 0;
+      padding: 0;
+      border: 0;
+      border-right: 1px solid #e0e0e0;
+      border-radius: 0;
+      background: #fff;
+      color: #555;
+      font: inherit;
+      &.active { background: #f4d000; color: #1a1a1a; font-weight: 600; }
+      &:last-child { border-right: 0; }
+    }
+  }
+}

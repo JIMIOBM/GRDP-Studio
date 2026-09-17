@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="多方法">
+  <title>多方法</title>
+  <rect width="64" height="64" rx="10" fill="#f0f7ff"/>
+  <g fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M12 15v37h42" stroke="#345"/><path d="M21 44V32h6v12M33 44V20h6v24" stroke="#1677ff"/><path d="M45 44V26h6v18" stroke="#13c2c2"/>
+  </g>
+</svg>

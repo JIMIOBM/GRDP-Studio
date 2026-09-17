@@ -89,7 +89,7 @@ const resizingParamsPanel = ref(false)  // 用户是否正在拖拽调整参数�
 const input = computed(() => wellData.value?.input || {})
 const output = computed(() => chartTabs.value[activeChartIdx.value]?.output || {})
 const outputFields = computed(() => OUTPUT_FIELD_CONFIGS[activeChartIdx.value] || [])
-const hasOutputResults = computed(() => outputFields.value.length > 0)
+const hasOutputResults = computed(() => activeTab.value?.hasOutput && outputFields.value.length > 0)
 const isWaterActivityTab = computed(() => activeChartIdx.value === 4)
 const hasDataListForActiveTab = computed(() => activeChartIdx.value >= 0 && activeChartIdx.value < 4)
 const isDataListTab = computed(() => activeContentTab.value === 'table')
@@ -130,6 +130,7 @@ const downloadProductionTemplate = async () => {
 }
 
 const legendItems = computed(() => {
+  if (!activeTab.value?.hasChart) return []
   if (isWaterActivityTab.value) return []
   if (activeChartIdx.value === 0) return [{ name: '无因次视压力PFD(dless)', color: '#5470c6' }]
   if (activeChartIdx.value === 1) return [{ name: '无因次视压力PHD(dless)', color: '#5470c6' }]
@@ -145,7 +146,9 @@ const legendItems = computed(() => {
 })
 const legendStyle = computed(() => {
   if (legendPosition.value.x === null || legendPosition.value.y === null) {
-    return { top: '36px', right: '18px' }
+    // 默认落在坐标网格右上角内侧；保留用户拖动后的自定义位置。
+    const grid = baseGrid()
+    return { top: `${34 + (chartTabs.value.length ? 34 : 0) + grid.top + 12}px`, right: `${grid.right + 12}px` }
   }
   return {
     left: `${legendPosition.value.x}px`,
@@ -223,18 +226,43 @@ const getMethodValue = (methods, key) => {
   return value
 }
 
-// 只保留有 chartItems 的 outputs，作为图表标签页
+// 空对象、空数组和只有日期等基础字段的记录不代表分析成功；0 是有效结果。
+function hasResultNumber(value) {
+  return (typeof value === 'number' || (typeof value === 'string' && value.trim() !== ''))
+    && Number.isFinite(Number(value))
+}
+
+function hasResultField(record, key) {
+  const value = record?.[key]
+  return key.endsWith('Desc')
+    ? typeof value === 'string' && value.trim() !== ''
+    : hasResultNumber(value)
+}
+
+const ANALYSIS_ROW_KEYS = [
+  ['apparentPressure', 'recoveryDegree'],
+  ['apparentPressure', 'recoveryDegree'],
+  ['waterInflux'],
+  ['gasDriveIndex', 'reservoirVolumetricDriveIndex', 'waterInvasionEnergyDriveIndex']
+]
+const ACTIVITY_OUTPUT_KEYS = ['abandonWaterInflux', 'reservoirOriginalVolume', 'waterInvasionReplacementCoefficient', 'waterActivenessDesc']
+
+// 按接口原有顺序保留全部五项，缺失项置灰，不过滤数组以免页签错位。
 const chartTabs = computed(() => {
-  if (!wellData.value) return []
-  return (wellData.value.outputs || [])
-      .slice(0, CHART_TAB_LABELS.length)
-      .map((o, index) => ({
-        analysisId:  o.analysisId,
-        label:       CHART_TAB_LABELS[index],
-        chartItems:  o.chartItems || [],
-        output:      o.output || {},
-        outputItems: o.outputItems || []
-      }))
+  return CHART_TAB_LABELS.map((label, index) => {
+    const result = wellData.value?.outputs?.[index] || {}
+    const chartItems = Array.isArray(result.chartItems) ? result.chartItems : []
+    const outputItems = Array.isArray(result.outputItems) ? result.outputItems : []
+    const output = result.output || {}
+    const hasChart = index < 4 && chartItems.slice(0, index === 3 ? 3 : 1).some(item =>
+      getChartData(item).some(point => index < 2 ? hasResultNumber(point.x) : String(point.x).trim() !== '')
+    )
+    const hasRows = outputItems.some(row => (ANALYSIS_ROW_KEYS[index] || []).some(key => hasResultField(row, key)))
+    const outputKeys = index === 4 ? ACTIVITY_OUTPUT_KEYS : (OUTPUT_FIELD_CONFIGS[index] || []).flatMap(field => field.keys)
+    const hasOutput = outputKeys.some(key => hasResultField(output, key))
+    return { label, chartItems, output, outputItems, hasChart, hasRows, hasOutput,
+      available: hasChart || hasRows || hasOutput }
+  })
 })
 
 const activeTab = computed(() => chartTabs.value[activeChartIdx.value] || null)
@@ -414,8 +442,9 @@ function fmtSci(v) {
 
 //图表数据处理
 function getChartData(item) {
-  return (item?.data || [])
-      .filter(d => !d.isDeleted)
+  return (Array.isArray(item?.data) ? item.data : [])
+      .filter(d => d && !d.isDeleted && d.xValue !== null && d.xValue !== undefined
+        && String(d.xValue).trim() !== '' && hasResultNumber(d.yValue))
       .map(d => ({
         x: d.xValue,
         y: Number(d.yValue),
@@ -626,7 +655,11 @@ function renderDriveMechanismChart(tab) {
 
 //总渲染入口，决定当前改该画哪种图
 function renderChart() {
-  if (!chart || !activeTab.value) return
+  if (!chart) return
+  if (!activeTab.value?.available) {
+    chart.clear()
+    return
+  }
   if (isDataListTab.value) {
     chart.clear()
     return
@@ -637,7 +670,7 @@ function renderChart() {
   }
 
   const tab = activeTab.value
-  if (!tab.chartItems?.length) {
+  if (!tab.hasChart) {
     chart.clear()
     return
   }
@@ -693,17 +726,23 @@ watch(() => [
   props.node?.waterInvasionRefreshKey
 ], fetchData, { immediate: true })
 
-//监听图表页切换
-watch(activeChartIdx, () => {
+// 重新加载或切换页签时，只保留可用的选中项，并优先展示实际返回的内容。
+watch([chartTabs, activeChartIdx], ([tabs]) => {
+  if (!tabs[activeChartIdx.value]?.available) {
+    activeChartIdx.value = tabs.findIndex(tab => tab.available)
+  }
+  const tab = activeTab.value
+  if (tab?.hasRows && !tab.hasChart) activeContentTab.value = 'table'
+  if (tab?.hasOutput && !tab.hasChart && !tab.hasRows) activeParamTab.value = 'output'
   if (!hasOutputResults.value && activeParamTab.value === 'output') {
     activeParamTab.value = 'input'
   }
-  if (!hasDataListForActiveTab.value && activeContentTab.value === 'table') {
+  if ((!hasDataListForActiveTab.value || !tab?.hasRows) && activeContentTab.value === 'table') {
     activeContentTab.value = 'chart'
   }
   renderChartSoon()
   renderChartSoon(180)
-})
+}, { immediate: true })
 
 watch(activeContentTab, () => {
   renderChartSoon()
@@ -731,7 +770,7 @@ onBeforeUnmount(() => {
     <!-- 左侧参数面板 -->
     <div
         ref="paramsPanelEl"
-        class="params-panel"
+        class="params-panel water-parameter-theme"
         :class="{ collapsed: paramsCollapsed, narrow: !paramsCollapsed && paramsPanelWidth < 380 }"
         :style="{ width: paramsCollapsed ? '22px' : `${paramsPanelWidth}px`, minWidth: paramsCollapsed ? '22px' : `${paramsPanelWidth}px` }"
     >
@@ -912,13 +951,16 @@ onBeforeUnmount(() => {
       <div v-if="chartTabs.length" class="chart-tabs">
         <button
             v-for="(tab, i) in chartTabs"
-            :key="tab.analysisId"
+            :key="tab.label"
             type="button"
             class="chart-tab"
             :class="{ active: i === activeChartIdx }"
+            :disabled="!tab.available"
+            :title="tab.available ? tab.label : '暂无分析结果'"
             @click="activeChartIdx = i"
         >{{ tab.label }}</button>
       </div>
+      <div v-if="!loading && activeChartIdx === -1" class="analysis-empty">暂无可用的分析结果</div>
       <div v-show="activeContentTab === 'chart' && !isWaterActivityTab" ref="chartEl" class="chart-instance"/>
 
       <div v-if="isDataListTab && hasDataListForActiveTab" class="data-list-panel">
@@ -1201,6 +1243,13 @@ onBeforeUnmount(() => {
   :deep(.el-checkbox__input.is-checked + .el-checkbox__label) {
     color: #303133;
   }
+
+}
+
+.analysis-empty {
+  padding: 36px 16px;
+  color: #909399;
+  text-align: center;
 }
 
 .condition-row {
@@ -1354,6 +1403,15 @@ onBeforeUnmount(() => {
   flex: 1;
   min-height: 0;
   width: 100%;
+}
+
+.chart-tab:disabled,
+.chart-tab:disabled:hover {
+  color: #b0b0b0;
+  background: #fafafa;
+  border-bottom-color: transparent;
+  cursor: not-allowed;
+  font-weight: normal;
 }
 
 .data-list-panel {

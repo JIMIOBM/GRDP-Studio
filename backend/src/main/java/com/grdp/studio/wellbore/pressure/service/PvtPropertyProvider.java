@@ -1,0 +1,32 @@
+package com.grdp.studio.wellbore.pressure.service;
+
+import com.grdp.studio.wellbore.pvt.WellborePvtService;
+import com.grdp.studio.wellbore.pressure.dto.PressureCalculateRequest;
+import com.grdp.studio.wellbore.pressure.method.PressureCalculator;
+import org.springframework.stereotype.Service;
+import java.util.function.BiFunction;
+
+/** 将当前井首条PVT方案适配为HB/MB需要的局部(P,T)物性。 */
+@Service
+public class PvtPropertyProvider {
+    public record Session(double gasSpecificGravity, BiFunction<Double, Double, PressureCalculator.Properties> properties) {}
+    private final WellborePvtService pvt;
+    public PvtPropertyProvider(WellborePvtService pvt) { this.pvt = pvt; }
+
+    public Session open(PressureCalculateRequest request, String token, String cookie, String processEnv) {
+        var source = pvt.first(request.projectId, request.gasReservoirId, request.wellName);
+        pvt.validateSnapshot(source, request.pvtId, request.pvtSnapshot);
+        var session = pvt.open(source, request.projectId, token, cookie, processEnv, true);
+        var boundaryWater = session.water().apply(request.boundaryPressure, request.tWh);
+        request.pvtId = source.pvtId();
+        request.pvtSnapshot = source.snapshot();
+        request.gammaG = source.specificGravity();
+        request.rhoL = boundaryWater.density();
+        request.muL = boundaryWater.viscosity();
+        return new Session(request.gammaG, (pressure, temperature) -> {
+            var gp = session.gas().apply(pressure, temperature);
+            var wp = session.water().apply(pressure, temperature);
+            return new PressureCalculator.Properties(gp.volumeFactor(), gp.density(), gp.viscosity(), wp.density(), wp.viscosity());
+        });
+    }
+}

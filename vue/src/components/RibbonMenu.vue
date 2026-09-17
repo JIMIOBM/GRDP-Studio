@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, nextTick, onBeforeUnmount, onMounted, watch } from 'vue'
+import { reservoirRibbonGroups } from '@/config/reservoirRibbon'
 
 /**
  * 顶部功能区菜单（Ribbon）组件
@@ -14,10 +15,14 @@ const props = defineProps({ //允许外部传菜单配置
   activeTabName: {
     type: String,
     default: ''
+  },
+  scope: {
+    type: String,
+    default: 'well'
   }
 })
 
-const emit = defineEmits(['command', 'tab-change']) //向父组件发送命令
+const emit = defineEmits(['command', 'tab-change', 'scope-change']) //向父组件发送命令
 
 const defaultTabs = [
   {
@@ -35,7 +40,7 @@ const defaultTabs = [
       {
         title: '井控库存',
         columns: [
-          { type: 'large', label: '诊断曲线', dropdown: true, dropdownItems: ['Blasingame', 'Transient', 'AG', 'Wattenbarger', 'NPI'] },
+        { type: 'large', label: '诊断曲线' },
           { type: 'checks', items: ['物质平衡', '流动平衡', '动态平衡'] },
           { type: 'checks', items: ['水侵分析', '解析法'], squares: 5 }
         ]
@@ -47,7 +52,7 @@ const defaultTabs = [
           { type: 'large', label: '产能系数', dropdown: true, dropdownItems: ['二项式', '指数式'] },
           { type: 'large', label: '理论计算', dropdown: true, dropdownItems: ['稳定流', '不稳定流'] },
           { type: 'large', label: '动态产能', dropdown: true, dropdownItems: ['稳定流', '不稳定流'] },
-          { type: 'large', label: '产能对比', dropdown: true, dropdownItems: ['多周期'] }
+          { type: 'large', label: '产能对比', dropdown: true, dropdownItems: ['多周期', '多方法', '注采对比'] }
         ]
       },
       {
@@ -229,6 +234,11 @@ const normalizeRibbonTabs = (tabs) => tabs.map(tab => ({
     return {
       ...group,
       columns: (group.columns || []).map(col => {
+               if (col?.type === 'large' && col?.label === '诊断曲线' && !col.dropdown) {
+          shouldMoveDiagnosticItems = true
+          return col
+        }
+
         if (isDiagnosticDropdown(col)) {
           shouldMoveDiagnosticItems = true
           return {
@@ -272,7 +282,15 @@ const normalizeRibbonTabs = (tabs) => tabs.map(tab => ({
   })
 }))
 
-const tabList = computed(() => normalizeRibbonTabs(props.tabs || defaultTabs))
+// 库只替换“解析融合”的功能分组，其余公共页签继续沿用原配置。
+// 单井诊断图版的旧布局转换不适用于库的“图版法”下拉菜单。
+const tabList = computed(() => {
+  if (props.tabs) return normalizeRibbonTabs(props.tabs)
+  const tabs = normalizeRibbonTabs(defaultTabs)
+  return props.scope === 'reservoir'
+    ? [{ ...tabs[0], groups: reservoirRibbonGroups }, ...tabs.slice(1)]
+    : tabs
+})
 const activeTab = ref(0)
 const activeTabGroups = computed(() => tabList.value[activeTab.value]?.groups || [])
 const ribbonBody = ref(null)
@@ -326,6 +344,15 @@ watch(activeTab, () => {
   })
 })
 
+watch(() => props.scope, () => {
+  activeTab.value = 0
+  openDropdown.value = ''
+  nextTick(() => {
+    if (ribbonBody.value) ribbonBody.value.scrollLeft = 0
+    updateRibbonOverflow()
+  })
+})
+
 
 //把 ../assets/ribbon-icons/ 下面所有 svg 图标都加载进来。
 const iconModules = import.meta.glob('../assets/ribbon-icons/*.svg', {
@@ -367,7 +394,24 @@ const iconAliases = {
   'PIPESIM 井筒模型': 'PIPESIM',
   'PIPESIM Network 模型': '管流计算',
   模型组合: '一体化耦合优化',
-  方案构建: '方案生成'
+  方案构建: '方案生成',
+  孔隙体积: '岩石及流体性质',
+  运行压力: '压力折算',
+  库容参数: '产能系数',
+  地层压力: '压力折算',
+  物质平衡法: '物质平衡',
+  水侵动态分析: '水侵分析',
+  指标对比: '结果对比',
+  主控因素分析: '节点分析',
+  地质损耗: '岩石及流体性质',
+  井筒损耗: '井身结构',
+  地面损耗: '管流计算',
+  敏感性分析: '散点图',
+  相关性分析: '曲线图',
+  井间对比: '结果对比',
+  管网拓扑结构: '管流计算',
+  对比分析: '结果对比',
+  方案比选: '方案必选'
 }
 
 const switchTab = (idx) => { //切换页签
@@ -375,8 +419,20 @@ const switchTab = (idx) => { //切换页签
   emit('tab-change', tabList.value[idx]?.name || '')
 }
 
-const onItemClick = (groupTitle, label, parent = '', commandId = '') => { //点击菜单项
-  if (!label) return
+const itemLabel = item => typeof item === 'string' ? item : item?.label || ''
+const itemDisabled = item => Boolean(item && typeof item === 'object' && item.disabled)
+const openDropdown = ref('')
+const dropdownKey = (group, index) => `${props.scope}:${activeTab.value}:${group}:${index}`
+const updateDropdown = (key, visible) => {
+  if (visible) openDropdown.value = key
+  // 旧弹层的关闭动画可能晚于新弹层打开，不能让其延迟回调关闭新菜单。
+  else if (openDropdown.value === key) openDropdown.value = ''
+}
+
+const onItemClick = (groupTitle, item, parent = '', commandId = '') => { //点击菜单项
+  const label = itemLabel(item)
+  if (!label || itemDisabled(item)) return
+  openDropdown.value = ''
   emit('command', {group: groupTitle, name: label, parent, commandId})
 }
 
@@ -392,6 +448,12 @@ const getIcon = (label) => iconMap[normalizeIconKey(iconAliases[label] || label)
   >
     <!-- 顶部页签条 -->
     <div class="ribbon-tabs">
+      <div class="ribbon-scope" aria-label="功能范围">
+        <button type="button" :class="{ selected: scope === 'well' }"
+          :aria-pressed="scope === 'well'" @click="emit('scope-change', 'well')">井</button>
+        <button type="button" :class="{ selected: scope === 'reservoir' }"
+          :aria-pressed="scope === 'reservoir'" @click="emit('scope-change', 'reservoir')">库</button>
+      </div>
       <div
           v-for="(tab, idx) in tabList"
           :key="tab.name"
@@ -421,7 +483,7 @@ const getIcon = (label) => iconMap[normalizeIconKey(iconAliases[label] || label)
 
       <div ref="ribbonBody" class="ribbon-body" @scroll.passive="updateRibbonOverflow">
         <div class="ribbon-group" v-for="group in activeTabGroups" :key="group.title">
-        <div class="group-content" :class="{ 'production-group': group.title === '配产配注' }">
+        <div class="group-content" :class="{ 'production-group': group.title === '配产配注', 'reservoir-group': scope === 'reservoir' }">
           <template v-for="(col, ci) in group.columns" :key="ci">
 
             <!-- 复选项列 -->
@@ -429,17 +491,22 @@ const getIcon = (label) => iconMap[normalizeIconKey(iconAliases[label] || label)
               <label
                   class="check-item"
                   v-for="item in col.items"
-                  :key="item"
+                  :key="itemLabel(item)"
+                  :class="{ disabled: itemDisabled(item) }"
+                  role="button"
+                  :tabindex="itemDisabled(item) ? -1 : 0"
+                  :aria-disabled="itemDisabled(item)"
                   @click="onItemClick(group.title, item, '', col.commandIds?.[item])"
+                  @keydown.enter.prevent="onItemClick(group.title, item, '', col.commandIds?.[item])"
               >
                 <img
-                    v-if="getIcon(item)"
+                    v-if="getIcon(itemLabel(item))"
                     class="small-icon"
-                    :src="getIcon(item)"
-                    :alt="item"
+                    :src="getIcon(itemLabel(item))"
+                    alt=""
                 >
                 <span v-else class="checkbox"></span>
-                <span class="check-label">{{ item }}</span>
+                <span class="check-label">{{ itemLabel(item) }}</span>
               </label>
               <div v-if="col.squares" class="square-row">
                 <template v-if="Array.isArray(col.squares)">
@@ -480,11 +547,15 @@ const getIcon = (label) => iconMap[normalizeIconKey(iconAliases[label] || label)
                 v-else-if="col.type === 'large' && col.dropdown && col.dropdownItems?.length"
                 placement="bottom-start"
                 trigger="click"
+                :visible="openDropdown === dropdownKey(group.title, ci)"
+                @update:visible="updateDropdown(dropdownKey(group.title, ci), $event)"
                 :popper-class="['ribbon-popover', col.popperClass].filter(Boolean).join(' ')"
                 :show-arrow="false"
             >
               <template #reference>
-                <div class="col-large">
+                <div class="col-large" role="button" tabindex="0" :aria-label="col.label"
+                  :aria-expanded="openDropdown === dropdownKey(group.title, ci)"
+                  @keydown.enter.prevent="openDropdown = openDropdown === dropdownKey(group.title, ci) ? '' : dropdownKey(group.title, ci)">
                   <img
                       v-if="getIcon(col.icon || col.label)"
                       class="big-icon"
@@ -502,17 +573,22 @@ const getIcon = (label) => iconMap[normalizeIconKey(iconAliases[label] || label)
                 <div
                     class="ribbon-dropdown-item"
                     v-for="item in col.dropdownItems"
-                    :key="item"
+                    :key="itemLabel(item)"
+                    :class="{ disabled: itemDisabled(item) }"
+                    role="button"
+                    :tabindex="itemDisabled(item) ? -1 : 0"
+                    :aria-disabled="itemDisabled(item)"
                     @click="onItemClick(group.title, item, col.label, col.dropdownCommandIds?.[item])"
+                    @keydown.enter.prevent="onItemClick(group.title, item, col.label, col.dropdownCommandIds?.[item])"
                 >
                   <img
-                      v-if="getIcon(item)"
+                      v-if="getIcon(itemLabel(item))"
                       class="dropdown-icon"
-                      :src="getIcon(item)"
-                      :alt="item"
+                      :src="getIcon(itemLabel(item))"
+                      alt=""
                   >
                   <span v-else class="d-checkbox"></span>
-                  <span class="d-label">{{ item }}</span>
+                  <span class="d-label">{{ itemLabel(item) }}</span>
                 </div>
               </div>
             </el-popover>
@@ -522,7 +598,10 @@ const getIcon = (label) => iconMap[normalizeIconKey(iconAliases[label] || label)
                 v-else-if="col.type === 'large'"
                 class="col-large"
                 :class="{ passive: col.passive }"
+                role="button"
+                :tabindex="col.passive ? -1 : 0"
                 @click="!col.passive && onItemClick(group.title, col.label, '', col.commandId)"
+                @keydown.enter.prevent="!col.passive && onItemClick(group.title, col.label, '', col.commandId)"
             >
               <img
                   v-if="getIcon(col.icon || col.label)"
@@ -606,6 +685,8 @@ $square-border: #c2c2c2;
   height: 32px;
   background-color: $tab-bg;
   padding-left: 4px;
+  overflow-x: auto;
+  flex-shrink: 0;
 
   .ribbon-tab {
     height: 100%;
@@ -617,6 +698,7 @@ $square-border: #c2c2c2;
     color: #e6e6e6;
     cursor: pointer;
     transition: background-color 0.15s;
+    flex-shrink: 0;
 
     &:hover {
       background-color: #3c3c3c;
@@ -627,6 +709,52 @@ $square-border: #c2c2c2;
       color: #202020;
     }
   }
+}
+
+.ribbon-scope {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 0 8px 0 4px;
+  margin-right: 4px;
+  border-right: 1px solid #555;
+  button {
+    min-width: 38px;
+    height: 26px;
+    border: 1px solid #555;
+    border-right-width: 0;
+    color: #d9d9d9;
+    background: #383838;
+    cursor: pointer;
+    transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+
+    &:first-child {
+      border-radius: 3px 0 0 3px;
+    }
+
+    &:last-child {
+      border-right-width: 1px;
+      border-radius: 0 3px 3px 0;
+    }
+
+    &:hover:not(.selected) {
+      background: #464646;
+      color: #fff;
+      border-color: #737373;
+    }
+
+    &.selected {
+      background: $accent-yellow;
+      color: #202020;
+      border-color: $accent-yellow;
+      font-weight: 600;
+    }
+  }
+}
+
+.reservoir-group .col-large {
+  width: auto;
+  min-width: 56px;
 }
 
 /* ===== 功能区主体 ===== */
@@ -811,6 +939,21 @@ $square-border: #c2c2c2;
       object-fit: contain;
       pointer-events: none;
     }
+  }
+}
+
+/* 已配置图标的小按钮不再使用灰色占位底；只影响两组小方块命令。 */
+.col-checks .square-row .command-square,
+.col-squares .pad-square.command-square {
+  background: #fff;
+  border-color: #aeb8c4;
+  border-radius: 2px;
+
+  .square-icon {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    filter: contrast(1.3) saturate(1.15);
   }
 }
 
@@ -1070,6 +1213,13 @@ $square-border: #c2c2c2;
 
     .d-label {
       line-height: 1;
+    }
+
+    &.disabled {
+      color: #a8abb2;
+      cursor: not-allowed;
+      background: transparent;
+      .d-label { text-decoration: line-through; }
     }
   }
 }

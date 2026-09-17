@@ -1146,7 +1146,7 @@ watch(
 <template>
   <section class="well-data-content">
     <div class="data-tabs">
-      <template v-if="isStaticPressureView">
+      <template v-if="props.dataType === 'staticPressure'">
         <div
           v-for="tab in STATIC_PRESSURE_TABS"
           :key="tab.dataType"

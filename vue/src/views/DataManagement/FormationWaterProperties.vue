@@ -596,7 +596,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="water-properties-view">
     <div v-if="activeResultTab === '数据列表'" class="water-workspace">
-      <aside class="water-parameter-panel">
+      <aside v-resizable-parameter-panel class="water-parameter-panel water-parameter-theme">
         <div class="water-parameter-section">
           <div class="water-section-heading">
             <span>计算方法</span>

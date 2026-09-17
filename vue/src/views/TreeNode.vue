@@ -18,8 +18,16 @@ if (typeof props.node.expanded === 'boolean') {
   props.node.expanded = expanded.value
 }
 
+// 父目录收起时同时重置下级；下次打开只展开这一层，不自动铺开历史子目录。
+const collapseChildren = (node) => {
+  for (const child of node.children || []) {
+    child.expanded = false
+    collapseChildren(child)
+  }
+}
 watch(() => props.node.expanded, value => {
   if (typeof value === 'boolean') expanded.value = value
+  if (value === false) collapseChildren(props.node)
 })
 // lazy 节点即使尚无 children 也要显示展开箭头，首次展开时由父页面调用接口填充。
 const hasChildren = () => props.node.lazy || (props.node.children && props.node.children.length > 0)
@@ -29,11 +37,22 @@ const toggle = () => {
   expanded.value = !expanded.value
   // 展开状态写回公共树节点，跨工作台重新渲染时保持原状。
   props.node.expanded = expanded.value
-  if (expanded.value) emit('expand', props.node)
+  // 收起不加载数据，避免异步返回又将刚收起的分支展开。
+  if (expanded.value) {
+    emit('expand', props.node)
+  } else {
+    collapseChildren(props.node)
+  }
 }
 
 const handleClick = () => {
-  emit('select', props.node)
+  if (props.node.disabled) return
+  const directoryOnly = props.node.type === 'well-data-static-pressure' ||
+    props.node.type === 'wellbore-pressure-group' ||
+    props.node.type === 'wellbore-pressure-comparison' ||
+    props.node.type === 'pipeline-constraints-group' ||
+    (props.node.type === 'pipeline-capacity-page' && props.node.section === 'constraints')
+  if (!directoryOnly) emit('select', props.node)
   if (hasChildren()) {
     toggle()
   }
@@ -42,6 +61,7 @@ const handleClick = () => {
 const onChildSelect = (n) => emit('select', n)
 const onChildExpand = (n) => emit('expand', n)
 const handleContextMenu = (event) => {
+  if (props.node.disabled) return
   emit('node-contextmenu', props.node, event)
 }
 const onChildContextMenu = (node, event) => emit('node-contextmenu', node, event)
@@ -51,7 +71,8 @@ const onChildContextMenu = (node, event) => emit('node-contextmenu', node, event
   <div class="tree-node">
     <div
       class="node-label"
-      :class="{ active: node.id === activeId }"
+      :class="{ active: node.id === activeId, disabled: node.disabled }"
+      :aria-disabled="Boolean(node.disabled)"
       @click="handleClick"
       @contextmenu.prevent.stop="handleContextMenu"
     >
@@ -105,6 +126,13 @@ const onChildContextMenu = (node, event) => emit('node-contextmenu', node, event
   &.active {
     background-color: #e3effd;
     color: #4084d9;
+  }
+
+  &.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    text-decoration: line-through;
+    background: transparent;
   }
 
   .caret {

@@ -802,7 +802,7 @@ onBeforeUnmount(() => {
   <div class="flow-balance-wrap" v-loading="loading">
     <aside
         ref="paramsPanelEl"
-        class="params-panel"
+        class="params-panel water-parameter-theme"
         :class="{ collapsed: paramsCollapsed, narrow: !paramsCollapsed && paramsPanelWidth < 380 }"
         :style="{
         width: paramsCollapsed ? '22px' : `${paramsPanelWidth}px`,

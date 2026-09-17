@@ -7,6 +7,7 @@ import com.grdp.studio.pvtstorage.dto.PvtSaveRequest;
 import com.grdp.studio.pvtstorage.dto.PvtSaveResponse;
 import com.grdp.studio.pvtstorage.service.PvtStorageService;
 import jakarta.validation.Valid;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -52,6 +53,20 @@ public class PvtStorageController {
     ) {
         return ApiResponse.success(
                 pvtStorageService.getDetail(pvtId, projectId, gasReservoirId, wellName));
+    }
+
+    /**
+     * 删除左侧菜单中选中的一次 PVT。服务层会校验其所属井，并整组删除主表和子表数据。
+     */
+    @DeleteMapping("/{pvtId}")
+    public ApiResponse<Void> delete(
+            @PathVariable long pvtId,
+            @RequestParam long projectId,
+            @RequestParam long gasReservoirId,
+            @RequestParam String wellName
+    ) {
+        pvtStorageService.delete(pvtId, projectId, gasReservoirId, wellName);
+        return ApiResponse.success();
     }
 
     @PostMapping("/save")

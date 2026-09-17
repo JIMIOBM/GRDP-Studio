@@ -15,6 +15,7 @@ const dockerRequest = axios.create({
 })
 
 let lastDockerUnauthorizedTipAt = 0
+let redirectingToLogin = false
 
 dockerRequest.interceptors.request.use(
   (config) => {
@@ -34,7 +35,18 @@ dockerRequest.interceptors.request.use(
 
 // 响应拦截：统一报错
 dockerRequest.interceptors.response.use(
-  (res) => res,
+  (res) => {
+    const contentType = String(res.headers?.['content-type'] || '').toLowerCase()
+    const htmlBody = typeof res.data === 'string' && /^\s*(?:<!doctype\s+html|<html\b)/i.test(res.data)
+    if (contentType.includes('text/html') || htmlBody) {
+      const error = new Error('原平台请求未进入计算服务（登录状态失效或代理目标异常），请重新登录原平台后再试')
+      // 不把 SPA 首页源码继续传给页面层，否则会被当作服务端错误全文弹出。
+      error.response = { ...res, data: { message: error.message } }
+      error.config = res.config
+      return Promise.reject(error)
+    }
+    return res
+  },
   (err) => {
     const msg = err.response?.data?.message || err.message || '请求失败'
     if (!err.config?.silentError) {
@@ -43,6 +55,13 @@ dockerRequest.interceptors.response.use(
         if (now - lastDockerUnauthorizedTipAt > 3000) {
           lastDockerUnauthorizedTipAt = now
           ElMessage.error('原平台登录状态已失效，请重新登录后再试')
+        }
+        // 本地 account 只能通过前端路由守卫，不能代表原平台会话仍然有效。
+        // 会话过期后返回登录页，避免工作台目录请求全部失败并停留在空白页面。
+        localStorage.removeItem('account')
+        if (!redirectingToLogin && window.location.pathname !== '/login') {
+          redirectingToLogin = true
+          window.location.replace('/login')
         }
       } else {
         ElMessage.error(`原平台服务错误：${msg}`)
@@ -230,12 +249,26 @@ export const wellApi = {
      * GET /projectanalysis/{projectId}/{gasReservoirId}/wells
      * 返回 { wells: [...], fields: [...] }
      */
-    getWells: (projectId, gasReservoirId) =>
-        dockerRequest.get(`/projectanalysis/${projectId}/${gasReservoirId}/wells`)
+    getWells: (projectId, gasReservoirId, options = {}) =>
+        dockerRequest.get(`/projectanalysis/${projectId}/${gasReservoirId}/wells`, options)
 }
 
 /* ===== 单井产能 - 产能试井 ===== */
 export const productivityEvaluationApi = {
+  calculateFlowEquation: (data, options = {}) =>
+    dockerRequest.post(
+      '/projectanalysis/productivityevaluation/flowequation/calc',
+      data,
+      { timeout: 180000, ...options }
+    ),
+  calculateStableFlowEquations: ({ projectId, gasReservoirId, wellNames, parameterSource = 1 }, options = {}) =>
+    Promise.allSettled([1, 2, 3].map(evaluationForm =>
+      dockerRequest.post(
+        '/projectanalysis/productivityevaluation/flowequation/calc',
+        { projectId, gasReservoirId, wellNames, evaluationForm, parameterSource },
+        { timeout: 180000, ...options }
+      )
+    )),
   initialize: (data, options = {}) =>
     dockerRequest.post(
       '/projectanalysis/productivityevaluation/deliverabilitytest/calc',

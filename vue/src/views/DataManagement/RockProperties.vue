@@ -544,7 +544,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="rock-properties-view">
     <!-- 左侧参数面板 -->
-    <div ref="paramsPanelEl" class="params-panel" :class="{ collapsed: paramsCollapsed }">
+    <div v-resizable-parameter-panel="paramsCollapsed" ref="paramsPanelEl" class="params-panel water-parameter-theme" :class="{ collapsed: paramsCollapsed }">
       <div v-if="paramsCollapsed" class="panel-collapsed-tab" @click="toggleParamsPanel">
         参数设置
       </div>

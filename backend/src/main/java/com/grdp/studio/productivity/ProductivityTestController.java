@@ -1,8 +1,11 @@
 package com.grdp.studio.productivity;
 
 import com.grdp.studio.common.ApiResponse;
+import com.grdp.studio.pvtstorage.dto.PvtRecordDetail;
+import com.grdp.studio.pvtstorage.service.PvtStorageService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -18,9 +21,15 @@ import java.util.List;
 @RequestMapping("/productivity-tests")
 public class ProductivityTestController {
     private final ProductivityTestService service;
+    private final ModifiedIsochronalExponentialCalculator exponentialCalculator;
+    private final PvtStorageService pvtStorageService;
 
-    public ProductivityTestController(ProductivityTestService service) {
+    public ProductivityTestController(ProductivityTestService service,
+                                      ModifiedIsochronalExponentialCalculator exponentialCalculator,
+                                      PvtStorageService pvtStorageService) {
         this.service = service;
+        this.exponentialCalculator = exponentialCalculator;
+        this.pvtStorageService = pvtStorageService;
     }
 
     @GetMapping
@@ -32,8 +41,38 @@ public class ProductivityTestController {
     }
 
     @GetMapping("/{testId}")
-    public ApiResponse<ProductivityTestModels.Detail> detail(@PathVariable long testId) {
-        return ApiResponse.success(service.detail(testId));
+    public ApiResponse<ProductivityTestModels.Detail> detail(
+            @PathVariable long testId,
+            @RequestParam long projectId,
+            @RequestParam long gasReservoirId,
+            @RequestParam String wellName) {
+        return ApiResponse.success(service.detail(testId, projectId, gasReservoirId, wellName));
+    }
+
+    @PostMapping("/modified-isochronal/exponential/calculate")
+    public ApiResponse<ModifiedIsochronalExponentialModels.CalculateResponse> calculateExponential(
+            @Valid @RequestBody ModifiedIsochronalExponentialModels.CalculateRequest request) {
+        PvtRecordDetail pvt = pvtStorageService.getDetail(request.pvtId(), request.projectId(),
+                request.gasReservoirId(), request.wellName());
+        var pseudoPressurePoints = pvt.gasResults().stream()
+                .filter(point -> point.pressure() != null && point.pseudoPressure() != null)
+                .map(point -> new ModifiedIsochronalExponentialModels.PseudoPressurePoint(
+                        point.pressure(), point.pseudoPressure()))
+                .toList();
+        var trustedRequest = new ModifiedIsochronalExponentialModels.CalculateRequest(
+                request.projectId(), request.gasReservoirId(), request.wellName(), request.pvtId(),
+                request.operationType(), request.pressureMethod(), request.maximumFormationPressure(),
+                request.inputItems(), pseudoPressurePoints, request.pressureFunctionDifferences(),
+                request.pressureFunctionCurves());
+        return ApiResponse.success(exponentialCalculator.calculate(trustedRequest));
+    }
+
+    @DeleteMapping("/{testId}")
+    public ApiResponse<Void> delete(@PathVariable long testId, @RequestParam long projectId,
+            @RequestParam long gasReservoirId, @RequestParam String wellName,
+            @RequestParam String testMethod) {
+        service.delete(testId, projectId, gasReservoirId, wellName, testMethod);
+        return ApiResponse.success();
     }
 
     @PostMapping("/import")

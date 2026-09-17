@@ -5,7 +5,8 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 
 /**
- * 井头查询实体，只映射 PVT 定位所需的字段。
+ * 井头查询实体，用于按项目、气藏和井名定位 project_well_heads 主键，
+ * 也映射 PVT 定位所需的字段。
  */
 @TableName("project_well_heads")
 public class WellHeadLookupEntity {

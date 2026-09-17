@@ -13,6 +13,22 @@ npm run build      # 生产打包
 
 后端默认通过 `vite.config.js` 中的代理 `/api -> http://localhost:8080`，按需修改。
 
+## 登录说明
+
+开发环境直接在新平台 `/login` 输入旧平台账号密码即可，不需要先打开旧平台登录。
+新平台通过 `/docker-auth/login` 调用旧平台认证服务并校验会话，成功后才进入工作台。
+浏览器使用 HttpOnly 会话 Cookie 访问旧接口和计算通知；密码不会写入本地存储，代理不共享用户会话。
+
+- 旧平台认证服务仍需运行，默认地址为 `http://127.0.0.1:9919`。
+- 旧平台业务接口/通知服务默认地址为 `http://127.0.0.1:9920`。
+- 可在 `vue/.env.local` 中配置 `DOCKER_AUTH_BASE_URL`，修改后重启开发服务器。
+- 兼容旧平台不同版本的 `ahksoil_identity_session` 和 `grdp_identity_session`，
+  以认证服务实际返回并校验通过的会话为准，不依赖旧页面脚本中的名称。
+  自定义部署可通过 `DOCKER_SESSION_COOKIE_NAME` 指定名称；登录与 HTTP/WebSocket 代理使用相同规则。
+- 认证失败时停留在登录页，不生成本地登录标记。
+- 此登录桥接当前由 Vite 开发服务器提供；`npm run build` 不会将该服务打包进静态页面。
+  正式部署须在服务端提供同名登录接口及 HTTP/WebSocket 代理，启用 HTTPS、安全会话和后端权限校验，不能只部署 `dist`。
+
 ## 主要路由
 
 | 路径            | 页面                         |

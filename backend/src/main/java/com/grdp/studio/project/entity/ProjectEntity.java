@@ -9,7 +9,7 @@ import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.LocalDateTime;
 
-@TableName("t_project")
+@TableName("project_summaries")
 public class ProjectEntity {
 
     @TableId(type = IdType.AUTO)
@@ -17,15 +17,17 @@ public class ProjectEntity {
 
     private String name;
 
+    @TableField(exist = false)
     private String description;
 
-    @TableField(fill = FieldFill.INSERT)
+    @TableField(value = "create_time", fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
 
-    @TableField(fill = FieldFill.INSERT_UPDATE)
+    @TableField(exist = false)
     private LocalDateTime updatedAt;
 
-    @TableLogic
+    @TableLogic(value = "0", delval = "1")
+    @TableField("delete_status")
     private Integer deleted;
 
     public Long getId() {

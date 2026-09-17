@@ -1,0 +1,1 @@
+package com.grdp.studio.wellbore.temperature.mapper; import com.baomidou.mybatisplus.core.mapper.BaseMapper; import com.grdp.studio.wellbore.temperature.entity.TemperatureProfileEntity; public interface TemperatureProfileMapper extends BaseMapper<TemperatureProfileEntity> {}

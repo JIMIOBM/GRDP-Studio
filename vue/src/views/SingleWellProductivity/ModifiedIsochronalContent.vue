@@ -5,6 +5,7 @@ import { ElMessage } from 'element-plus'
 import { nodeApi, productivityEvaluationApi } from '@/api/docker'
 import { NODETYPE } from '@/constants/nodeType'
 import { pvtStorageApi } from '@/api/pvtStorage'
+import { deletedPvtRecord, matchesPvtScope } from '@/utils/pvtRecordActions'
 import { productivityTestsApi } from '@/api/productivityTests'
 
 const props = defineProps({
@@ -29,6 +30,7 @@ const staticRows = () => [[45, 35.61, 34.933472], [59.1, 35.605, 34.655762],
 const fileInput = ref(null)
 const chartEl = ref(null)
 const pvtOptions = ref([])
+const pvtDetailCache = new Map()
 const selectedPvtId = ref('')
 const selectedGas = ref({ ...GAS_DEFAULTS })
 const rows = ref(staticRows())
@@ -36,11 +38,13 @@ const importedFileName = ref('修正等时验证数据（静态）')
 const maximumFormationPressure = ref(56.34)
 const formationTemperature = ref(120)
 const calculationMethod = ref('pseudo-pressure')
+const calculationResultType = ref('binomial')
 const operationType = ref('production')
 const testDate = ref(STATIC_DATE)
 const currentResult = ref(null)
 const activePanel = ref('input')
 const activeChart = ref('analysis')
+const paramsCollapsed = ref(false)
 const loading = ref(false)
 const calculating = ref(false)
 const saving = ref(false)
@@ -48,31 +52,103 @@ const importing = ref(false)
 const inputDirty = ref(true)
 const resultDirty = ref(false)
 const evaluationIds = ref({})
+const equationPanelPosition = ref(null)
+const analysisLegendPosition = ref(null)
 let chart
+let chartResizeObserver
 let loadSequence = 0
 const initializedForms = new Set()
 
 const unwrap = response => response?.data ?? response ?? {}
 const scientific = value => Number.isFinite(Number(value)) ? Number(value).toExponential(4).replace('e', 'E') : ''
+const GAS_TYPE_NAMES = ['干气', '湿气', '凝析气']
+const MODIFICATION_METHOD_NAMES = ['Wichert-Aziz 修正方法', 'Carr-Kobayashi-Burrous 修正方法']
+const DEVIATION_METHOD_NAMES = ['Dranchuk-Abu-Kassem 方法', 'Dranchuk-Purvis-Robinson 方法', 'Hall-Yarborough 方法']
+const VISCOSITY_METHOD_NAMES = ['Lee-Gonzalez-Eakin 方法', 'Carr-Kobayashi-Burrous 方法', 'Sutton 方法']
+const isMissingValue = value => value === null || value === undefined ||
+  ['null', 'undefined', 'nan'].includes(String(value).trim().toLowerCase()) || String(value).trim() === ''
+const platformNumber = (value, fallback = 0) => {
+  if (isMissingValue(value)) return fallback
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? numeric : fallback
+}
+const platformMethodIndex = (value, names, fallback = 0) => {
+  if (isMissingValue(value)) return fallback
+  const numeric = Number(value)
+  if (Number.isInteger(numeric) && numeric >= 0 && numeric < names.length) return numeric
+  const index = names.indexOf(String(value).trim())
+  return index >= 0 ? index : fallback
+}
 const gasWithDefaults = value => Object.fromEntries(Object.entries(GAS_DEFAULTS).map(([key, fallback]) => {
   const current = value?.[key]
-  return [key, current === null || current === undefined || current === '' ? fallback : current]
+  return [key, isMissingValue(current) ? fallback : current]
 }))
+const normalizeGasType = value => {
+  if (value === null || value === undefined || String(value).trim() === '') return null
+  const numeric = Number(value)
+  if (Number.isInteger(numeric) && numeric >= 0 && numeric <= 2) return numeric
+  const text = String(value).trim().toLowerCase()
+  if (text.includes('湿') || text.includes('wet')) return 1
+  if (text.includes('凝析') || text.includes('condensate')) return 2
+  if (text.includes('干') || text.includes('dry')) return 0
+  return null
+}
+const platformGasType = value => {
+  const index = normalizeGasType(value)
+  return index === null ? '' : GAS_TYPE_NAMES[index]
+}
+const gasFromPvtDetail = detail => {
+  const settings = typeof detail?.settings?.gas === 'string'
+    ? JSON.parse(detail.settings.gas || '{}')
+    : (detail?.settings?.gas || {})
+  const source = { ...(detail?.gasInput || {}), ...settings }
+  return gasWithDefaults({ ...source,
+    modificationMethod: platformMethodIndex(
+      isMissingValue(source.modificationMethod) ? source.gasCorrectionMethod : source.modificationMethod,
+      MODIFICATION_METHOD_NAMES),
+    deviationFactorMethod: platformMethodIndex(source.deviationFactorMethod, DEVIATION_METHOD_NAMES),
+    viscosityMethod: platformMethodIndex(source.viscosityMethod, VISCOSITY_METHOD_NAMES)
+  })
+}
+const isValidPvtGas = gas => normalizeGasType(gas?.gasType) !== null &&
+  Number.isFinite(Number(gas?.specificGravity)) && Number(gas.specificGravity) > 0
 const normalizeMethod = value => ({ 1: 'pressure', 2: 'pressure-squared', 3: 'pseudo-pressure',
   '压力形式': 'pressure', '压力平方形式': 'pressure-squared', '拟压力形式': 'pseudo-pressure' }[value] ||
   (['pressure', 'pressure-squared', 'pseudo-pressure'].includes(value) ? value : 'pseudo-pressure'))
 
+let pvtOptionsRequest = 0
 const loadPvtOptions = async () => {
+  const requestId = ++pvtOptionsRequest
   pvtOptions.value = []
+  pvtDetailCache.clear()
   if (!props.wellName) return void (selectedPvtId.value = '')
   try {
-    const records = (unwrap(await pvtStorageApi.list(props.projectId, props.gasReservoirId, props.wellName)) || [])
-      .filter(item => item.pvtName !== 'PVT表1（静态验证数据）')
-    pvtOptions.value = records
-    if (!records.some(item => String(item.pvtId) === String(selectedPvtId.value))) {
-      selectedPvtId.value = records.length ? String(records[0].pvtId) : ''
+    const summaries = unwrap(await pvtStorageApi.list(
+      props.projectId, props.gasReservoirId, props.wellName
+    )) || []
+    if (requestId !== pvtOptionsRequest) return
+    // 选项必须与当前井 project_well_pvt 主表完全一致；参数完整性在计算时校验，
+    // 不能因为名称或明细缺项在修正等时页面静默隐藏数据库记录。
+    pvtOptions.value = Array.isArray(summaries) ? summaries : []
+    await Promise.all(pvtOptions.value.map(async record => {
+      try {
+        const detail = unwrap(await pvtStorageApi.getDetail(
+          record.pvtId, props.projectId, props.gasReservoirId, props.wellName
+        ))
+        if (requestId === pvtOptionsRequest) pvtDetailCache.set(String(record.pvtId), detail)
+      } catch (error) {
+        console.warn(`PVT性质${record.pvtNo}明细读取失败`, error)
+      }
+    }))
+    if (requestId !== pvtOptionsRequest) return
+    if (!pvtOptions.value.some(item => String(item.pvtId) === String(selectedPvtId.value))) {
+      const preferred = pvtOptions.value.find(item => isValidPvtGas(
+        gasFromPvtDetail(pvtDetailCache.get(String(item.pvtId)))
+      ))
+      selectedPvtId.value = String((preferred || pvtOptions.value[0])?.pvtId || '')
     }
   } catch (error) {
+    if (requestId !== pvtOptionsRequest) return
     selectedPvtId.value = ''
     console.warn('PVT数据库记录读取失败', error)
   }
@@ -81,11 +157,14 @@ const loadPvtOptions = async () => {
 const loadPvtDetail = async () => {
   markInputDirty()
   if (!selectedPvtId.value) return void (selectedGas.value = { ...GAS_DEFAULTS })
-  const detail = unwrap(await pvtStorageApi.getDetail(selectedPvtId.value, props.projectId,
-    props.gasReservoirId, props.wellName))
-  const settings = typeof detail.settings?.gas === 'string'
-    ? JSON.parse(detail.settings.gas || '{}') : (detail.settings?.gas || {})
-  selectedGas.value = gasWithDefaults({ ...(detail.gasInput || {}), ...settings })
+  const targetId = selectedPvtId.value
+  const requestId = pvtOptionsRequest
+  const detail = pvtDetailCache.get(String(selectedPvtId.value)) || unwrap(await pvtStorageApi.getDetail(
+    selectedPvtId.value, props.projectId, props.gasReservoirId, props.wellName))
+  if (requestId !== pvtOptionsRequest || targetId !== selectedPvtId.value) return
+  selectedGas.value = gasFromPvtDetail(detail)
+  const pvtTemperature = Number(detail.gasInput?.formationTemperature)
+  if (Number.isFinite(pvtTemperature)) formationTemperature.value = pvtTemperature
 }
 
 const evaluationFormByMethod = { pressure: 1, 'pressure-squared': 2, 'pseudo-pressure': 3 }
@@ -100,6 +179,94 @@ const analysisCurves = [
   { curveType: 'shifted-regression', field: 'shiftLinearRegressionPressure', sourceName: '线性回归分析平移线', name: '平移线', color: '#f5b642' },
   { curveType: 'stable', field: 'stableRegularizedPressure', sourceName: '稳定数据点', name: '稳定点', color: '#ee6666' }
 ]
+const exponentialAnalysisCurves = [
+  { curveType: 'analysis', name: '测试点', color: '#5470c6' },
+  { curveType: 'regression', name: '稳定回归线', color: '#333' },
+  { curveType: 'transient', name: '不稳定辅助线', color: '#f5b642' }
+]
+const curvesForResult = type => type === 'exponential' ? exponentialAnalysisCurves : analysisCurves
+
+// 修正等时法规定最后一个测试点为延长稳定点。指数式结果将全部测试点保存为
+// analysis 曲线，因此只在展示时将最后一点拆出，避免改变持久化数据契约。
+const visibleChartPoints = points => (points || [])
+  .filter(point => !point.deleted)
+  .map(point => [point.x, point.y])
+
+// 使用实际绘图区边界及面板尺寸定位；拖动后保存相对位置，缩放时仍留在图内。
+const analysisPanelBounds = (width, height) => ({
+  left: 104, top: 52,
+  right: Math.max(104, chart.getWidth() - 42 - width),
+  bottom: Math.max(52, chart.getHeight() - 70 - height)
+})
+const panelPosition = (width, height, relative, bottom = false) => {
+  const bounds = analysisPanelBounds(width, height)
+  const [x, y] = relative || [1, bottom ? 1 : 0]
+  return [bounds.left + x * (bounds.right - bounds.left), bounds.top + y * (bounds.bottom - bounds.top)]
+}
+const rememberPanelPosition = (element, width, height) => {
+  const bounds = analysisPanelBounds(width, height)
+  const clamp = value => Math.max(0, Math.min(1, value))
+  return [
+    clamp(((element.x ?? 0) - bounds.left) / (bounds.right - bounds.left || 1)),
+    clamp(((element.y ?? 0) - bounds.top) / (bounds.bottom - bounds.top || 1))
+  ]
+}
+const movableFormulaPanel = text => {
+  const lines = String(text || '').split('\n')
+  const widestLine = Math.max(...lines.map(line => line.length), 1)
+  const width = Math.max(260, Math.min(420, widestLine * 7.7 + 28))
+  const height = Math.max(56, lines.length * 20 + 16)
+  return {
+    id: 'analysis-formula-panel', type: 'group', position: panelPosition(width, height, equationPanelPosition.value, true),
+    z: 1000, zlevel: 20, draggable: true, cursor: 'move',
+    ondrag: function () {
+      equationPanelPosition.value = rememberPanelPosition(this, width, height)
+    },
+    children: [
+      { type: 'rect', z: 1000, zlevel: 20, shape: { x: 0, y: 0, width, height, r: 3 }, style: {
+        fill: 'rgba(255,255,255,.96)', stroke: '#cfd7e3', lineWidth: 1,
+        shadowBlur: 7, shadowColor: 'rgba(0,0,0,.16)', shadowOffsetY: 2
+      } },
+      { type: 'text', z: 1001, zlevel: 20, style: { x: 14, y: 10, text, fill: '#444',
+        font: '13px "Microsoft YaHei", sans-serif', lineHeight: 20, textVerticalAlign: 'top' } }
+    ]
+  }
+}
+
+const movableAnalysisLegend = items => {
+  const context = document.createElement('canvas').getContext('2d')
+  if (context) context.font = '12px "Microsoft YaHei", sans-serif'
+  const width = Math.max(190, Math.min(330, Math.max(...items.map(item =>
+    context?.measureText(item.name).width || item.name.length * 7), 1) + 49))
+  const rowHeight = 21
+  const height = items.length * rowHeight + 12
+  const children = [{
+    type: 'rect', z: 1000, zlevel: 20, shape: { x: 0, y: 0, width, height },
+    style: { fill: '#fff', stroke: '#cfd5dc', lineWidth: 1,
+      shadowBlur: 7, shadowColor: 'rgba(0,0,0,.14)', shadowOffsetY: 2 }
+  }]
+  items.forEach((item, index) => {
+    const y = 6 + rowHeight * index + rowHeight / 2
+    if (item.type === 'scatter') {
+      children.push({ type: 'circle', z: 1001, zlevel: 20, shape: { cx: 17, cy: y, r: 5.5 },
+        style: { fill: item.color } })
+    } else {
+      children.push({ type: 'line', z: 1001, zlevel: 20,
+        shape: { x1: 8, y1: y, x2: 28, y2: y },
+        style: { stroke: item.color, lineWidth: 2, lineDash: item.dotted ? [3, 3] : null } })
+    }
+    children.push({ type: 'text', z: 1001, zlevel: 20, style: { x: 35, y, text: item.name,
+      fill: '#303030', font: '12px "Microsoft YaHei", sans-serif', verticalAlign: 'middle' } })
+  })
+  return {
+    id: 'analysis-legend-panel', type: 'group', position: panelPosition(width, height, analysisLegendPosition.value),
+    z: 1000, zlevel: 20, draggable: true, cursor: 'move',
+    ondrag: function () {
+      analysisLegendPosition.value = rememberPanelPosition(this, width, height)
+    },
+    children
+  }
+}
 
 const chartData = item => (item?.data || []).map(point => ({
   x: Number(point.xValue), y: Number(point.yValue), deleted: Boolean(point.isDeleted),
@@ -129,8 +296,90 @@ const parseResult = detail => {
     analysisSeries, iprSeries }
 }
 
+// 结果系数保留现有注采符号约定；注气 IPR 横轴使用正的注气量大小。
+// 拟压力沿用本次原平台计算的物性：最高地层压力曲线满足
+// m(Pmax)-m(Pwf)=Aq+Bq²，因此可恢复同一次计算的 m(Pwf)-m(Pmax) 网格。
+const injectionPressurePotential = (detail, method, maximumPressure) => {
+  if (method === 'pressure') return pressure => pressure
+  if (method === 'pressure-squared') return pressure => pressure ** 2
+  const source = parseResult(detail).iprSeries.find(series => series.curveNumber === 10)
+  const a = Number(detail.output?.darcySeepageCoefficient)
+  const b = Number(detail.output?.nonDarcySeepageCoefficient)
+  if (!source || ![a, b].every(Number.isFinite)) throw new Error('缺少本次计算的拟压力网格，无法计算注气IPR')
+  const samples = source.data.filter(point => !point.deleted && point.y < maximumPressure)
+    .map(point => ({ pressure: point.y, potential: -(a * point.x + b * point.x ** 2) }))
+    .sort((left, right) => left.pressure - right.pressure)
+    .filter((point, index, values) => !index || point.pressure > values[index - 1].pressure)
+  samples.push({ pressure: maximumPressure, potential: 0 })
+  if (samples.length < 2 || samples[0].pressure > maximumPressure / 10 ||
+      samples.some((point, index) => !Number.isFinite(point.potential) ||
+        (index && point.potential <= samples[index - 1].potential))) {
+    throw new Error('本次拟压力网格不完整或非单调，无法计算注气IPR')
+  }
+  return pressure => {
+    // 边界查询直接使用端点，避免十进制压力的浮点尾差越界。
+    if (pressure <= samples[0].pressure) return samples[0].potential
+    if (pressure >= maximumPressure) return samples[samples.length - 1].potential
+    const upperIndex = samples.findIndex(point => point.pressure >= pressure)
+    if (upperIndex === 0) return samples[0].potential
+    const lower = samples[upperIndex - 1]; const upper = samples[upperIndex]
+    return lower.potential + (upper.potential - lower.potential) *
+      (pressure - lower.pressure) / (upper.pressure - lower.pressure)
+  }
+}
+
+const calculateInjectionIpr = (result, potential, maximumPressure) => {
+  const exponential = result.calculationResultType === 'exponential'
+  // 此处接收符号转换前的计算系数；展示和保存的系数由 applyOperationSign 处理。
+  const a = Number(result.darcyCoefficient); const b = Number(result.nonDarcyCoefficient)
+  const c = Number(result.productivityCoefficient); const n = Number(result.productivityExponent)
+  if (exponential ? !(c > 0 && n > 0 && Number.isFinite(c) && Number.isFinite(n))
+    : !([a, b].every(Number.isFinite) && a >= 0 && b >= 0 && a + b > 0)) {
+    throw new Error('产能系数无法求得有效的注气IPR')
+  }
+  return Array.from({ length: 10 }, (_, index) => {
+    const formationPressure = index === 9 ? maximumPressure : maximumPressure * ((index + 1) / 10)
+    const base = potential(formationPressure)
+    const count = index === 9 ? 0 : 80
+    const data = Array.from({ length: count + 1 }, (_, pointIndex) => {
+      const pressure = pointIndex === 0 ? formationPressure : pointIndex === count ? maximumPressure
+        : formationPressure + (maximumPressure - formationPressure) * (pointIndex / count)
+      const difference = Math.max(0, potential(pressure) - base)
+      const rate = difference === 0 ? 0 : exponential ? c * difference ** n
+        : b === 0 ? difference / a
+          : difference / (a / 2 + Math.hypot(a, 2 * Math.sqrt(b) * Math.sqrt(difference)) / 2)
+      // 超出数值表示范围的点不送入图表或保存数据，也不打断其他测点计算。
+      return Number.isFinite(rate) && rate >= 0
+        ? { x: rate, y: pressure, deleted: false, dataLabel: '' } : null
+    }).filter(Boolean)
+    return { curveNumber: index + 1, formationPressure, data }
+  })
+}
+
+const opposite = value => Number.isFinite(Number(value)) ? -Number(value) : value
+const applyOperationSign = (result, potential) => {
+  if (operationType.value !== 'injection') return result
+  const analysisSeries = result.calculationResultType === 'binomial'
+    ? (result.analysisSeries || []).map(series => ({ ...series,
+      data: (series.data || []).map(point => ({ ...point, y: opposite(point.y) }))
+    }))
+    : result.analysisSeries
+  return {
+    ...result,
+    darcyCoefficient: opposite(result.darcyCoefficient),
+    nonDarcyCoefficient: opposite(result.nonDarcyCoefficient),
+    productivityCoefficient: opposite(result.productivityCoefficient),
+    transientProductivityCoefficient: opposite(result.transientProductivityCoefficient),
+    aofRate: opposite(result.aofRate), gradient: opposite(result.gradient), intercept: opposite(result.intercept),
+    // 原计算器返回的是绝对量公式；清空它以便图上按带符号的注气系数重建公式。
+    equation: '',
+    analysisSeries,
+    iprSeries: calculateInjectionIpr(result, potential, Number(maximumFormationPressure.value))
+  }
+}
+
 const completeResult = result =>
-  analysisCurves.every(config => result?.analysisSeries?.some(series =>
+  curvesForResult(result?.calculationResultType).every(config => result?.analysisSeries?.some(series =>
     series.curveType === config.curveType && series.data.length)) &&
   (result?.iprSeries?.length || 0) > 1
 
@@ -208,7 +457,7 @@ const resolveEvaluationId = async method => {
       return discovered
     }
   }
-  throw new Error('原平台已完成初始化，但未找到对应修正等时评价主键')
+  throw new Error('当前井口无修正等时结果')
 }
 
 const fetchCompleteResult = async method => {
@@ -221,53 +470,136 @@ const fetchCompleteResult = async method => {
   return { ...parseResult(detail), calculationMethod: normalizeMethod(method) }
 }
 
-const calculateResult = async () => {
+// 注气仅在计算边界交换压力；表格及持久化始终保留原始压力含义。
+const calculationPressures = row => operationType.value === 'injection'
+  ? { reservoirPressure: Number(row.flowingPressure), testFlowPressure: Number(row.recoveryPressure) }
+  : { reservoirPressure: Number(row.recoveryPressure), testFlowPressure: Number(row.flowingPressure) }
+
+const calculatePlatformResult = async (minimumPoints = 2) => {
   const validRows = rows.value.filter(row =>
     [row.flowRate, row.recoveryPressure, row.flowingPressure].every(value => Number.isFinite(Number(value))))
-  if (validRows.length < 2) throw new Error('至少需要两个有效测试点')
-  if (validRows.some(row => Number(row.flowRate) <= 0 ||
-      Number(row.recoveryPressure) <= Number(row.flowingPressure))) {
-    throw new Error('测试气产量必须大于0，且地层/恢复压力必须大于测试流压')
+  if (validRows.length < minimumPoints) throw new Error(
+    minimumPoints === 3 ? '修正等时指数式至少需要3个有效测试点，最后一行为稳定点' : '至少需要两个有效测试点')
+  if (validRows.some(row => Number(row.flowRate) <= 0)) {
+    throw new Error('测试气产量必须大于0')
   }
   const method = normalizeMethod(calculationMethod.value)
   const evaluationForm = evaluationFormByMethod[method]
   const evaluationId = await resolveEvaluationId(method)
   const gas = gasWithDefaults(selectedGas.value)
-  if (!gas.gasType || !Number.isFinite(Number(gas.specificGravity)) || Number(gas.specificGravity) <= 0) {
+  const gasTypeIndex = normalizeGasType(gas.gasType)
+  const specificGravity = platformNumber(gas.specificGravity, Number.NaN)
+  if (gasTypeIndex === null || !Number.isFinite(specificGravity) || specificGravity <= 0) {
     throw new Error('所选PVT性质缺少有效的气体类型或天然气相对密度')
   }
+  // 原平台的产能评价接口使用中文气体类型名称；PVT库中的历史记录则可能保存为 0/1/2。
+  const gasType = GAS_TYPE_NAMES[gasTypeIndex]
   const input = {
     id: evaluationId, ProductivityEvaluationId: evaluationId,
     originalFormationPressure: Number(maximumFormationPressure.value),
     formationTemperature: Number(formationTemperature.value), horizontalSectionLength: 0,
     skinFactor: 0, permeability: 0, thickness: 0, gasDrainageRadius: 0, wellboreRadius: 0,
-    gasType: gas.gasType, specificGravity: Number(gas.specificGravity),
-    hydrogenSulfide: Number(gas.hydrogenSulfide || 0), carbonDioxide: Number(gas.carbonDioxide || 0),
-    nitrogen: Number(gas.nitrogen || 0),
-    condensateOilDensityUnderStandardCondition: Number(gas.condensateOilDensity || 0),
-    modificationMethod: Number(gas.modificationMethod || 0),
-    deviationFactorMethod: Number(gas.deviationFactorMethod || 0),
-    viscosityMethod: Number(gas.viscosityMethod || 0), edges: {},
-    condensateOilDensity: Number(gas.condensateOilDensity || 0)
+    gasType, specificGravity,
+    hydrogenSulfide: platformNumber(gas.hydrogenSulfide),
+    carbonDioxide: platformNumber(gas.carbonDioxide), nitrogen: platformNumber(gas.nitrogen),
+    condensateOilDensityUnderStandardCondition: platformNumber(gas.condensateOilDensity),
+    modificationMethod: platformMethodIndex(gas.modificationMethod, MODIFICATION_METHOD_NAMES),
+    deviationFactorMethod: platformMethodIndex(gas.deviationFactorMethod, DEVIATION_METHOD_NAMES),
+    viscosityMethod: platformMethodIndex(gas.viscosityMethod, VISCOSITY_METHOD_NAMES), edges: {},
+    condensateOilDensity: platformNumber(gas.condensateOilDensity)
   }
-  const response = await productivityEvaluationApi.calculate(props.wellName, {
-    gasReservoirId: Number(props.gasReservoirId), projectId: Number(props.projectId),
+  await productivityEvaluationApi.calculate(props.wellName, {
+    // 原平台单井产能模块约定 calc 请求的 gasReservoirId 固定为 0；
+    // 实际气藏 ID 仅用于初始化评价节点和读取计算结果。
+    gasReservoirId: 0, projectId: Number(props.projectId),
     evaluationId, deletePointIds: [], input,
     inputItems: validRows.map((row, index) => ({ testPointNumber: index + 1,
-      reserviorPressure: Number(row.recoveryPressure),
-      testDailyGasProduction: Number(row.flowRate), testFlowPressure: Number(row.flowingPressure),
+      reserviorPressure: calculationPressures(row).reservoirPressure,
+      testDailyGasProduction: Number(row.flowRate), testFlowPressure: calculationPressures(row).testFlowPressure,
       testDailyOilProduction: 0 })),
     evaluationForm, evaluationType: 4, wellName: props.wellName
   }, { silentError: true })
-  let detail = response?.data?.data ?? response?.data ?? response
-  if (!detail?.output) {
-    const resultResponse = await productivityEvaluationApi.getResult(
-      props.projectId, props.gasReservoirId, evaluationId, { silentError: true }
-    )
-    detail = resultResponse?.data?.data ?? resultResponse?.data ?? resultResponse
-  }
+  // calc 负责写入计算结果；随后始终按评价节点编号读取完整 output/chart/IPR 契约。
+  const resultResponse = await productivityEvaluationApi.getResult(
+    props.projectId, props.gasReservoirId, evaluationId, { silentError: true }
+  )
+  const detail = resultResponse?.data?.data ?? resultResponse?.data ?? resultResponse
+  if (!detail?.output) throw new Error('原平台未返回完整的修正等时计算结果')
   evaluationIds.value = { ...evaluationIds.value, [method]: evaluationId }
-  return { ...parseResult(detail), calculationMethod: method, evaluationId }
+  return { detail, validRows, method, evaluationId }
+}
+
+const calculateResult = async () => {
+  const { detail, method, evaluationId } = await calculatePlatformResult()
+  const potential = operationType.value === 'injection'
+    ? injectionPressurePotential(detail, method, Number(maximumFormationPressure.value)) : null
+  return applyOperationSign({ ...parseResult(detail), calculationMethod: method, evaluationId }, potential)
+}
+
+const calculateExponentialResult = async () => {
+  // 与二项式完全共用 PVT 参数和原平台物性计算；这里只从返回值恢复 ΔΦ，随后替换指数式公式。
+  const { detail, validRows, method, evaluationId } = await calculatePlatformResult(3)
+  const regularized = chartData((detail.chartItems || []).find(item =>
+    item.yAxisField === 'regularizedPressure' || String(item.name).trim() === '不稳定数据点'))
+  if (regularized.length < validRows.length) {
+    throw new Error('原平台计算结果缺少与测试点对应的压力函数数据')
+  }
+  const pressureFunctionDifferences = validRows.map((row, index) => {
+    const point = regularized[index]
+    const rate = Number(row.flowRate)
+    if (!Number.isFinite(point?.y) || point.y <= 0 ||
+        Math.abs(Number(point.x) - rate) > Math.max(1e-6, Math.abs(rate) * 1e-4)) {
+      throw new Error(`原平台第${index + 1}个压力函数点与当前试井数据不一致`)
+    }
+    return { testPointNumber: index + 1, pressureFunctionDifference: rate * point.y }
+  })
+  const output = detail.output || {}
+  const darcy = Number(output.darcySeepageCoefficient)
+  const nonDarcy = Number(output.nonDarcySeepageCoefficient)
+  if (![darcy, nonDarcy].every(Number.isFinite)) {
+    throw new Error('原平台计算结果缺少生成IPR所需的二项式压力函数系数')
+  }
+  const platformIpr = parseResult(detail).iprSeries
+  if (platformIpr.length < 2) throw new Error('原平台计算结果缺少IPR压力函数网格')
+  const pressureFunctionCurves = platformIpr.map(series => ({
+    formationPressure: Number(maximumFormationPressure.value) * series.curveNumber / 10,
+    points: series.data.map(point => ({
+      bottomHoleFlowingPressure: Number(point.y),
+      pressureFunctionDifference: Math.max(0, darcy * Number(point.x) + nonDarcy * Number(point.x) ** 2)
+    }))
+  }))
+  const response = unwrap(await productivityTestsApi.calculateModifiedIsochronalExponential({
+    projectId: Number(props.projectId), gasReservoirId: Number(props.gasReservoirId),
+    // 指数式计算器按真实注采类型确定压力函数方向；原平台计算仍在上方交换字段。
+    wellName: props.wellName, pvtId: Number(selectedPvtId.value), operationType: operationType.value,
+    pressureMethod: method,
+    maximumFormationPressure: Number(maximumFormationPressure.value),
+    inputItems: validRows.map((row, index) => ({ testPointNumber: index + 1,
+      testDailyGasProduction: Number(row.flowRate),
+      reservoirPressure: Number(row.recoveryPressure), testFlowPressure: Number(row.flowingPressure) })),
+    pressureFunctionDifferences, pressureFunctionCurves
+  }))
+  const analysisSeries = exponentialAnalysisCurves.map(config => ({ ...config,
+    data: (config.curveType === 'analysis' ? response.analysisPoints
+      : config.curveType === 'regression' ? response.regressionLine : response.transientLine)
+      .map(point => ({ x: Number(point.x), y: Number(point.y), deleted: false,
+        dataLabel: point.label || '' }))
+  }))
+  const iprSeries = (response.iprCurves || []).map((curve, index) => ({
+    curveNumber: index + 1, formationPressure: Number(curve.formationPressure),
+    data: (curve.points || []).map(point => ({ x: Number(point.gasProduction),
+      y: Number(point.bottomHoleFlowingPressure), deleted: false, dataLabel: point.label || '' }))
+  }))
+  return applyOperationSign({ calculationResultType: 'exponential', calculationMethod: response.pressureMethod,
+    evaluationId,
+    formationPressure: Number(maximumFormationPressure.value),
+    productivityCoefficient: Number(response.productivityCoefficient),
+    productivityExponent: Number(response.productivityExponent),
+    transientProductivityCoefficient: Number(response.transientProductivityCoefficient),
+    aofRate: Number(response.openFlowCapacity), rSquared: Number(response.rSquared),
+    reliability: response.reliabilityDescription || '', equation: response.equation || '',
+    analysisSeries, iprSeries }, operationType.value === 'injection'
+    ? injectionPressurePotential(detail, method, Number(maximumFormationPressure.value)) : null)
 }
 
 const saveResult = async (result, pvtId) => {
@@ -278,7 +610,9 @@ const saveResult = async (result, pvtId) => {
   })))
   const iprPoints = result.iprSeries.flatMap(series => series.data.map((point, index) => ({
     curveNumber: series.curveNumber, pointNumber: index + 1, gasProduction: point.x,
-    bottomHoleFlowingPressure: point.y, deleted: point.deleted, dataLabel: point.dataLabel
+    bottomHoleFlowingPressure: point.y, deleted: point.deleted, dataLabel: point.dataLabel,
+    formationPressure: Number(series.formationPressure ??
+      Number(maximumFormationPressure.value) * series.curveNumber / 10)
   })))
   const saved = unwrap(await productivityTestsApi.save({
     testId: props.testId ? Number(props.testId) : null, projectId: Number(props.projectId),
@@ -288,7 +622,7 @@ const saveResult = async (result, pvtId) => {
     wellType: null, replaceInput: !props.testId || inputDirty.value,
     input: { maximumFormationPressure: Number(maximumFormationPressure.value),
       formationTemperature: Number(formationTemperature.value), onePointAlpha: null,
-      gasType: gas.gasType, specificGravity: Number(gas.specificGravity), hydrogenSulfide: Number(gas.hydrogenSulfide || 0),
+      gasType: platformGasType(gas.gasType), specificGravity: Number(gas.specificGravity), hydrogenSulfide: Number(gas.hydrogenSulfide || 0),
       carbonDioxide: Number(gas.carbonDioxide || 0), nitrogen: Number(gas.nitrogen || 0),
       condensateOilDensity: gas.condensateOilDensity, modificationMethod: String(gas.modificationMethod ?? ''),
       deviationFactorMethod: String(gas.deviationFactorMethod ?? ''), viscosityMethod: String(gas.viscosityMethod ?? '') },
@@ -297,9 +631,12 @@ const saveResult = async (result, pvtId) => {
       .map((row, index) => ({ testPointNumber: index + 1,
       testDailyGasProduction: Number(row.flowRate), reservoirPressure: Number(row.recoveryPressure),
       testFlowPressure: Number(row.flowingPressure) })),
-    result: { pressureMethod: result.calculationMethod, evaluationId: result.evaluationId,
+    result: { calculationResultType: result.calculationResultType || 'binomial',
+      pressureMethod: result.calculationMethod, evaluationId: result.evaluationId,
       darcySeepageCoefficient: result.darcyCoefficient,
       nonDarcySeepageCoefficient: result.nonDarcyCoefficient, openFlowCapacity: result.aofRate,
+      productivityCoefficient: result.productivityCoefficient,
+      productivityExponent: result.productivityExponent,
       gradient: result.gradient, intercept: result.intercept, rSquared: result.rSquared,
       reliabilityLevel: Number.isFinite(result.reliabilityLevel) ? result.reliabilityLevel :
         (result.rSquared >= .9 ? 2 : result.rSquared >= .7 ? 1 : 0),
@@ -316,7 +653,8 @@ const calculate = async () => {
   try {
     const pvtId = Number(selectedPvtId.value)
     if (!Number.isFinite(pvtId) || pvtId <= 0) throw new Error('请选择有效的数据库PVT性质')
-    const result = await calculateResult()
+    const result = calculationResultType.value === 'exponential'
+      ? await calculateExponentialResult() : await calculateResult()
     currentResult.value = result; activePanel.value = 'analysis'; activeChart.value = 'analysis'
     resultDirty.value = true
     await nextTick(); renderChart()
@@ -358,44 +696,69 @@ const normalizeRows = items => (items || []).map((item, index) => ({ sequence: i
   recoveryPressure: item.reservoirPressure ?? item.reserviorPressure ?? item.recoveryPressure,
   flowingPressure: item.testFlowPressure ?? item.flowingPressure }))
 
-const loadTest = async () => {
+const loadTest = async (requestedType = null, requestedMethod = null) => {
   const sequence = ++loadSequence
   resultDirty.value = false
   currentResult.value = null
   activePanel.value = 'input'
   if (!props.testId) {
-    selectedPvtId.value = pvtOptions.value.length ? String(pvtOptions.value[0].pvtId) : ''
+    // loadPvtOptions 已优先选中气体类型和相对密度完整的记录，不要再用第一条覆盖它。
+    if (!pvtOptions.value.some(item => String(item.pvtId) === String(selectedPvtId.value))) {
+      selectedPvtId.value = pvtOptions.value.length ? String(pvtOptions.value[0].pvtId) : ''
+    }
     selectedGas.value = { ...GAS_DEFAULTS }; rows.value = staticRows()
     importedFileName.value = '修正等时验证数据（静态）'; maximumFormationPressure.value = 56.34
     formationTemperature.value = 120; calculationMethod.value = 'pseudo-pressure'; testDate.value = STATIC_DATE
-    operationType.value = 'production'; inputDirty.value = true
+    operationType.value = 'production'; calculationResultType.value = 'binomial'; inputDirty.value = true
     evaluationIds.value = {}
     if (selectedPvtId.value) {
       try {
-        const detail = unwrap(await pvtStorageApi.getDetail(selectedPvtId.value, props.projectId,
-          props.gasReservoirId, props.wellName))
-        const settings = typeof detail.settings?.gas === 'string'
-          ? JSON.parse(detail.settings.gas || '{}') : (detail.settings?.gas || {})
-        if (sequence === loadSequence) selectedGas.value = gasWithDefaults({ ...(detail.gasInput || {}), ...settings })
+        const detail = pvtDetailCache.get(String(selectedPvtId.value)) || unwrap(await pvtStorageApi.getDetail(
+          selectedPvtId.value, props.projectId, props.gasReservoirId, props.wellName))
+        if (sequence === loadSequence) {
+          selectedGas.value = gasFromPvtDetail(detail)
+          const pvtTemperature = Number(detail.gasInput?.formationTemperature)
+          if (Number.isFinite(pvtTemperature)) formationTemperature.value = pvtTemperature
+        }
       } catch (error) { console.warn('默认PVT性质明细读取失败', error) }
     }
     return
   }
   loading.value = true
   try {
-    const detail = unwrap(await productivityTestsApi.detail(props.testId)); const input = detail.input || {}
+    const detail = unwrap(await productivityTestsApi.detail(
+      props.testId, props.projectId, props.gasReservoirId, props.wellName
+    )); const input = detail.input || {}
     if (sequence !== loadSequence) return
+    const targetType = requestedType === 'exponential' ? 'exponential'
+      : requestedType === 'binomial' ? 'binomial' : null
+    const targetMethod = requestedMethod ? normalizeMethod(requestedMethod) : null
+    const availableResults = Array.isArray(detail.results) ? detail.results : []
+    const selectedResult = availableResults.find(item =>
+      (!targetType || (item.calculationResultType || 'binomial') === targetType) &&
+      (!targetMethod || normalizeMethod(item.pressureMethod) === targetMethod)
+    ) || (!targetType && !targetMethod ? detail.result : null)
     selectedPvtId.value = pvtOptions.value.some(item => Number(item.pvtId) === Number(detail.pvtId))
       ? String(detail.pvtId) : ''
     selectedGas.value = gasWithDefaults(input); maximumFormationPressure.value = input.maximumFormationPressure
-    formationTemperature.value = input.formationTemperature; calculationMethod.value = normalizeMethod(detail.result?.pressureMethod)
+    formationTemperature.value = input.formationTemperature
+    calculationMethod.value = normalizeMethod(selectedResult?.pressureMethod || requestedMethod)
+    calculationResultType.value = selectedResult?.calculationResultType === 'exponential' || requestedType === 'exponential'
+      ? 'exponential' : 'binomial'
     operationType.value = detail.operationType || 'production'; testDate.value = detail.testDate
     evaluationIds.value = Object.fromEntries((detail.evaluations || []).map(item =>
       [normalizeMethod(item.pressureMethod), Number(item.evaluationId)]))
     rows.value = normalizeRows(detail.inputItems)
     importedFileName.value = `${detail.testName}已保存数据`
-    const result = detail.result || {}; const chartItems = result.chartPoints || []
-    const analysisSeries = analysisCurves.map(config => ({ ...config,
+    if (!selectedResult) {
+      inputDirty.value = false
+      currentResult.value = null
+      activePanel.value = 'input'
+      return
+    }
+    const result = selectedResult; const chartItems = result.chartPoints || []
+    const selectedCurves = curvesForResult(calculationResultType.value)
+    const analysisSeries = selectedCurves.map(config => ({ ...config,
       data: chartItems.filter(point => point.curveType === config.curveType).map(point => ({
         x: Number(point.xValue), y: Number(point.yValue), deleted: Boolean(point.deleted),
         dataLabel: point.dataLabel || ''
@@ -407,19 +770,24 @@ const loadTest = async () => {
       return groups
     }, new Map())
     const iprSeries = [...iprByCurve].map(([curveNumber, points]) => ({ curveNumber,
+      formationPressure: Number(points[0]?.formationPressure ??
+        Number(input.maximumFormationPressure) * curveNumber / 10),
       data: points.map(point => ({ x: Number(point.gasProduction),
         y: Number(point.bottomHoleFlowingPressure), deleted: Boolean(point.deleted),
         dataLabel: point.dataLabel || '' }))
     })).sort((a, b) => a.curveNumber - b.curveNumber)
-    let loadedResult = { calculationMethod: result.pressureMethod, evaluationId: result.evaluationId,
+    let loadedResult = { calculationResultType: calculationResultType.value,
+      calculationMethod: result.pressureMethod, evaluationId: result.evaluationId,
       formationPressure: Number(input.maximumFormationPressure),
       darcyCoefficient: result.darcySeepageCoefficient,
       nonDarcyCoefficient: result.nonDarcySeepageCoefficient, aofRate: result.openFlowCapacity,
+      productivityCoefficient: result.productivityCoefficient,
+      productivityExponent: result.productivityExponent,
       gradient: result.gradient, intercept: result.intercept, rSquared: result.rSquared,
       reliabilityLevel: result.reliabilityLevel, reliability: result.reliabilityDescription,
       analysisSeries, iprSeries }
     inputDirty.value = false
-    if (!completeResult(loadedResult)) {
+    if (calculationResultType.value === 'binomial' && !completeResult(loadedResult)) {
       try {
         const complete = await fetchCompleteResult(result.pressureMethod)
         if (sequence !== loadSequence) return
@@ -442,6 +810,18 @@ const loadTest = async () => {
   }
 }
 
+const switchResultType = async () => {
+  resultDirty.value = false
+  if (props.testId && !inputDirty.value) await loadTest(calculationResultType.value, calculationMethod.value)
+  else invalidateResult()
+}
+
+const switchPressureMethod = async () => {
+  resultDirty.value = false
+  if (props.testId && !inputDirty.value) await loadTest(calculationResultType.value, calculationMethod.value)
+  else invalidateResult()
+}
+
 const chooseFile = () => fileInput.value?.click()
 const handleFile = async event => {
   const file = event.target.files?.[0]; event.target.value = ''
@@ -456,16 +836,16 @@ const handleFile = async event => {
 const addRow = () => { rows.value.push({ sequence: rows.value.length + 1, date: testDate.value,
   flowRate: null, recoveryPressure: null, flowingPressure: null }); markInputDirty() }
 const removeRow = index => { rows.value.splice(index, 1); rows.value.forEach((row, i) => { row.sequence = i + 1 }); markInputDirty() }
-const commitCell = (row, field, event, numeric = false) => {
-  const text = event.currentTarget.textContent.trim()
-  row[field] = numeric && text !== '' ? Number(text) : text
-  markInputDirty()
-}
-const finishCell = event => event.currentTarget.blur()
 const invalidateResult = () => { currentResult.value = null; resultDirty.value = false; activePanel.value = 'input' }
 const markInputDirty = () => { inputDirty.value = true; invalidateResult() }
 
 const compact = value => Number(value).toFixed(3).replace(/\.?0+$/, '')
+const pressureDirectionText = text => operationType.value === 'injection'
+  ? text.replace(/ψws\s*-\s*ψwf/g, 'ψwf - ψws')
+    .replace(/m\(Pr\)\s*-\s*m\(Pwf\)/g, 'm(Pwf) - m(Pr)')
+    .replace(/Pr²\s*-\s*Pwf²/g, 'Pwf² - Pr²')
+    .replace(/Pr\s*-\s*Pwf/g, 'Pwf - Pr')
+  : text
 const analysisUnit = method => ({
   'pseudo-pressure': '(ψws - ψwf)/qsc\n[(MPa²/(mPa·s))/(10⁴m³/d)]',
   'pressure-squared': '(Pr² - Pwf²)/qsc\n[MPa²/(10⁴m³/d)]',
@@ -477,6 +857,57 @@ const equationLeft = method => ({
   'pressure-squared': 'Pr² - Pwf²',
   pressure: 'Pr - Pwf'
 }[method] || 'Δp')
+const exponentialAnalysisUnit = method => ({
+  'pseudo-pressure': 'm(Pr) - m(Pwf)\n[MPa²/(mPa·s)]',
+  'pressure-squared': 'Pr² - Pwf²\n[MPa²]',
+  pressure: 'Pr - Pwf\n[MPa]'
+}[method] || '压力函数差')
+
+// IPR 曲线在 qsc=0 时必须回到该条曲线的地层压力。原平台和旧存量数据
+// 有时未带零产量点，或端点存在浮点误差；若直接交给 ECharts 平滑，
+// 曲线会看起来没有在左侧纵轴的真实压力处相交。
+const iprFormationPressure = (series, maximumPressure) => {
+  const pressureLimit = Number(maximumPressure)
+  const curveNumber = Number(series?.curveNumber)
+  // 原平台固定绘制 10 条 IPR 曲线，各曲线地层压力为用户输入上限的
+  // 1/10 ... 10/10。旧评价记录中的 originalFormationPressure 可能是井的原始压力，
+  // 不能用它代替“计算 IPR 曲线的最大地层压力”。
+  if (Number.isFinite(pressureLimit) && pressureLimit > 0 &&
+      Number.isFinite(curveNumber) && curveNumber > 0) {
+    return pressureLimit * curveNumber / 10
+  }
+  const storedPressure = Number(series?.formationPressure)
+  if (Number.isFinite(storedPressure) && storedPressure >= 0) return storedPressure
+
+  const zeroRatePoint = (series?.data || []).find(point =>
+    !point.deleted && Math.abs(Number(point.x)) <= 1e-8 && Number.isFinite(Number(point.y)))
+  if (zeroRatePoint) return Number(zeroRatePoint.y)
+
+  return null
+}
+
+const iprChartData = (series, formationPressure) => {
+  const points = (series?.data || [])
+    .filter(point => !point.deleted && Number.isFinite(Number(point.x)) &&
+      Number.isFinite(Number(point.y)))
+    .map(point => [
+      Number(point.x),
+      operationType.value !== 'injection' && Number.isFinite(formationPressure)
+        ? Math.min(formationPressure, Math.max(0, Number(point.y)))
+        : Number(point.y)
+    ])
+    .sort((left, right) => left[0] - right[0])
+  if (!points.length || !Number.isFinite(formationPressure)) return points
+
+  if (operationType.value === 'injection') {
+    const positivePoints = points.filter(point => point[0] > 1e-8)
+    return [[0, formationPressure], ...positivePoints]
+  }
+
+  const firstPositiveIndex = points.findIndex(point => point[0] > 1e-8)
+  const positivePoints = firstPositiveIndex < 0 ? [] : points.slice(firstPositiveIndex)
+  return [[0, formationPressure], ...positivePoints]
+}
 
 const renderChart = () => {
   if (!chartEl.value || !currentResult.value || activePanel.value !== 'analysis') return
@@ -485,66 +916,160 @@ const renderChart = () => {
     chart = null
   }
   chart ||= echarts.getInstanceByDom(chartEl.value) || echarts.init(chartEl.value)
+  // 先同步容器尺寸，再计算 graphic 的位置，避免首次展示沿用隐藏时的尺寸。
+  chart.resize()
   const result = currentResult.value; const isIpr = activeChart.value === 'ipr'
-  const formationPressure = Number(result.formationPressure || maximumFormationPressure.value)
+  const isExponential = result.calculationResultType === 'exponential'
+  // 与等时试井的指数式一致：仅在绘图时取 ln，再用 value 轴绘制均匀主/次网格。
+  // 不修改原始结果、持久化数据或 IPR 数据；非正数无法取对数，只在图上过滤。
+  const toAnalysisChartData = points => points
+    .map(([x, y]) => [Number(x), Number(y)])
+    .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y) && (!isExponential || (x > 0 && y > 0)))
+    .map(([x, y]) => isExponential ? [Math.log(x), Math.log(y)] : [x, y])
+  const isInjection = operationType.value === 'injection'
+  const [exponentialAxisExpression, exponentialAxisUnit] = pressureDirectionText(exponentialAnalysisUnit(result.calculationMethod)).split('\n')
+  const iprPressureDifference = pressureDirectionText(result.calculationMethod === 'pseudo-pressure'
+    ? 'm(Pr) - m(Pwf)' : equationLeft(result.calculationMethod))
+  const iprEquation = isExponential
+    ? `qsc = ${isInjection ? '|C|' : 'C'} [${iprPressureDifference}]ⁿ`
+    : `${iprPressureDifference} = ${isInjection ? '|A|' : 'A'} qsc + ${isInjection ? '|B|' : 'B'} qsc²`
+  const inputMaximumPressure = Number(maximumFormationPressure.value)
+  const resultFormationPressure = Number(result.formationPressure)
+  const formationPressure = Number.isFinite(inputMaximumPressure) && inputMaximumPressure > 0
+    ? inputMaximumPressure
+    : resultFormationPressure
+  // 与原平台坐标系一致：最高曲线截距为输入压力，纵轴顶部预留 10%。
+  // 例如输入 90 MPa 时，主刻度步长为 9 MPa，纵轴最高到 99 MPa。
+  const iprYAxisInterval = Number.isFinite(formationPressure) && formationPressure > 0
+    ? formationPressure / 10 : undefined
   const iprYAxisMax = Number.isFinite(formationPressure) && formationPressure > 0
-    ? Math.ceil(formationPressure / 10) * 10 : undefined
-  const visible = points => points.filter(point => !point.deleted).map(point => [point.x, point.y])
+    ? formationPressure * 1.1 : undefined
   const series = isIpr
-    ? result.iprSeries.map(item => ({ name: `Pr${item.curveNumber}=${compact(formationPressure * item.curveNumber / 10)} MPa`,
-      type: 'line', smooth: true, showSymbol: false, lineStyle: { width: 2 }, data: visible(item.data) }))
-    : result.analysisSeries.map(item => ({ name: `${item.name}${legendUnit(result.calculationMethod)}`,
-      type: ['regularized', 'stable'].includes(item.curveType) ? 'scatter' : 'line',
-      z: ['regularized', 'stable'].includes(item.curveType) ? 5 : 2,
-      symbolSize: item.curveType === 'stable' ? 12 : 10,
-      showSymbol: ['regularized', 'stable'].includes(item.curveType),
-      itemStyle: { color: item.color }, lineStyle: { color: item.color, width: 2,
-        type: item.curveType === 'shifted-regression' ? 'dotted' : 'solid' }, data: visible(item.data) }))
-  const equation = `${equationLeft(result.calculationMethod)} = ${scientific(result.darcyCoefficient)} qsc + ${scientific(result.nonDarcyCoefficient)} qsc²\nR² = ${Number(result.rSquared).toFixed(4)}`
-  chart.setOption({ animation: false, color: ['#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de', '#3ba272', '#fc8452', '#9a60b4', '#ea7ccc', '#2ec7c9'],
-    title: { text: isIpr ? 'IPR曲线' : '修正等时试井分析图', left: 'center', top: 8,
-      textStyle: { fontSize: 17, fontWeight: 600, color: '#333' } },
-    tooltip: { trigger: isIpr ? 'axis' : 'item' },
-    legend: { type: 'scroll', orient: 'vertical', right: 22, top: 52,
+    ? result.iprSeries.map(item => {
+      const curveFormationPressure = iprFormationPressure(item, formationPressure)
+      return { name: `Pr${item.curveNumber}=${compact(curveFormationPressure)} MPa`,
+        // IPR 数据本身已按压力网格密集采样。ECharts 的单调贝塞尔平滑
+        // 会在每个离散点之间生成 S 形过渡，反而呈现不符合物理的波浪。
+        type: 'line', smooth: false, showSymbol: false,
+        lineStyle: { width: 2 },
+        data: iprChartData(item, curveFormationPressure) }
+    })
+    : result.analysisSeries.flatMap(item => {
+      if (isExponential && item.curveType === 'analysis') {
+        const points = visibleChartPoints(item.data)
+        const stablePoint = points.length > 1 ? points.at(-1) : null
+        return [
+          { name: item.name, type: 'scatter', z: 5, symbolSize: 10,
+            itemStyle: { color: item.color }, data: toAnalysisChartData(stablePoint ? points.slice(0, -1) : points) },
+          ...(stablePoint ? [{ name: '稳定点', type: 'scatter', z: 6, symbolSize: 12,
+            itemStyle: { color: '#ee6666' }, data: toAnalysisChartData([stablePoint]) }] : [])
+        ]
+      }
+      const isScatter = ['regularized', 'stable'].includes(item.curveType)
+      return [{ name: isExponential ? item.name : `${item.name}${legendUnit(result.calculationMethod)}`,
+        type: isScatter ? 'scatter' : 'line', z: isScatter ? 5 : 2,
+        symbolSize: item.curveType === 'stable' ? 12 : 10,
+        showSymbol: isScatter,
+        itemStyle: { color: item.color }, lineStyle: { color: item.color, width: 2,
+          type: ['shifted-regression', 'transient'].includes(item.curveType) ? 'dotted' : 'solid' },
+        data: toAnalysisChartData(visibleChartPoints(item.data)) }]
+    })
+  const equation = isExponential
+    ? (result.equation || `qsc = ${scientific(result.productivityCoefficient)} × [${equationLeft(result.calculationMethod)}]^${Number(result.productivityExponent).toFixed(4)}`)
+    : `${equationLeft(result.calculationMethod)} = ${scientific(result.darcyCoefficient)} qsc + ${scientific(result.nonDarcyCoefficient)} qsc²`
+  const formulaText = `${pressureDirectionText(equation)}\nR² = ${Number(result.rSquared).toFixed(4)}`
+  const legendItems = series.map(item => ({
+    name: item.name,
+    type: item.type,
+    color: item.itemStyle?.color || item.lineStyle?.color || '#333',
+    dotted: item.lineStyle?.type === 'dotted'
+  }))
+  // 两种公式共用展示样式；指数式坐标值已取 ln，IPR 仍显示实际压力和气量。
+  const axisPresentation = {
+    nameTextStyle: { color: '#333', fontSize: 14, lineHeight: 18 },
+    axisLine: { show: true, lineStyle: { color: '#444', width: 1 } },
+    axisTick: { show: true, lineStyle: { color: '#555' } },
+    axisLabel: { color: '#444', fontSize: 12 },
+    splitLine: { show: true, lineStyle: { color: '#dbe4f1', width: 1 } },
+    minorTick: { show: true, splitNumber: 5 },
+    minorSplitLine: { show: true, lineStyle: { color: '#edf2f8', width: 1 } }
+  }
+  chart.setOption({ animation: false, backgroundColor: '#fff', color: ['#5470c6', '#91cc75', '#fac858', '#ee6666', '#73c0de', '#3ba272', '#fc8452', '#9a60b4', '#ea7ccc', '#2ec7c9'],
+    title: { text: isIpr ? (operationType.value === 'injection' ? '注气IPR曲线' : 'IPR曲线') : '修正等时试井分析图', left: 'center', top: 8,
+      subtext: isIpr ? iprEquation : '',
+      textStyle: { fontSize: 14, fontWeight: 600, color: '#3f3f3f' } },
+    tooltip: { trigger: isIpr ? 'axis' : 'item', confine: true,
+      backgroundColor: 'rgba(255,255,255,.96)', borderColor: '#cfd5dc', borderWidth: 1,
+      textStyle: { color: '#333', fontSize: 12 } },
+    legend: { show: isIpr, type: 'scroll', orient: 'vertical', right: 22, top: 52,
       itemWidth: 17, itemHeight: 10, backgroundColor: 'rgba(255,255,255,.9)',
       borderColor: '#e5e9f0', borderWidth: 1, padding: 9 },
-    grid: { left: 92, right: isIpr ? 205 : 245, top: 70, bottom: 70 },
-    xAxis: { type: 'value', scale: !isIpr, name: 'qsc(10⁴m³/d)', nameLocation: 'middle', nameGap: 42,
+    grid: { left: 92, right: 30, top: isIpr ? 66 : 40, bottom: 58,
+      show: true, borderColor: '#d7dfeb', borderWidth: 1 },
+    xAxis: { ...axisPresentation, type: 'value', scale: !isIpr,
+      name: isIpr ? `${isInjection ? '注气量' : '采气量'} qsc (10⁴m³/d)` : isExponential ? 'ln(qsc(10⁴m³/d))' : 'qsc(10⁴m³/d)', nameLocation: 'middle', nameGap: 32,
       min: isIpr ? 0 : undefined,
-      minorTick: { show: true }, minorSplitLine: { show: true, lineStyle: { color: '#f2f5fa' } },
-      splitLine: { lineStyle: { color: '#dfe6f1' } } },
-    yAxis: { type: 'value', scale: !isIpr, min: isIpr ? 0 : undefined,
+      splitNumber: 12 },
+    yAxis: { ...axisPresentation, type: 'value', scale: !isIpr, min: isIpr ? 0 : undefined,
       max: isIpr ? iprYAxisMax : undefined,
-      name: isIpr ? 'Pwf (MPa)' : analysisUnit(result.calculationMethod),
-      nameLocation: 'middle', nameGap: 62, nameTextStyle: { lineHeight: 18 },
-      minorTick: { show: true }, minorSplitLine: { show: true, lineStyle: { color: '#f2f5fa' } },
-      splitLine: { lineStyle: { color: '#dfe6f1' } } }, series,
-    graphic: isIpr ? [] : [{ type: 'text', left: '55%', top: '73%', z: 100, zlevel: 10, silent: true,
-      style: { text: equation, fill: '#333', font: '14px sans-serif', lineHeight: 22,
-        backgroundColor: 'rgba(255,255,255,.92)', padding: [5, 8] } }] }, true)
-  chart.resize()
+      interval: isIpr ? iprYAxisInterval : undefined,
+      name: isIpr ? '井底流压 Pwf (MPa)' : isExponential
+        ? `ln(${exponentialAxisExpression})\n${exponentialAxisUnit || ''}`
+        : pressureDirectionText(analysisUnit(result.calculationMethod)),
+      nameLocation: 'middle', nameGap: 62, splitNumber: 10 }, series,
+    graphic: isIpr ? [] : [
+      movableAnalysisLegend(legendItems),
+      movableFormulaPanel(formulaText)
+    ] }, true)
 }
 const switchPanel = async panel => { activePanel.value = panel; if (panel === 'analysis') { await nextTick(); renderChart() } }
 const switchChart = async mode => { activeChart.value = mode; await nextTick(); renderChart() }
-const resizeChart = () => chart?.resize()
+const resizeChart = () => {
+  if (activePanel.value === 'analysis' && currentResult.value) renderChart()
+  else chart?.resize()
+}
+const toggleParamsPanel = async () => { paramsCollapsed.value = !paramsCollapsed.value; await nextTick(); resizeChart() }
 
-watch(() => props.testId, loadTest)
+watch(deletedPvtRecord, deleted => {
+  if (!matchesPvtScope(deleted, props)) return
+  ++pvtOptionsRequest
+  pvtOptions.value = pvtOptions.value.filter(item => Number(item.pvtId) !== Number(deleted.pvtId))
+  pvtDetailCache.delete(String(deleted.pvtId))
+  if (Number(selectedPvtId.value) === Number(deleted.pvtId)) {
+    selectedPvtId.value = ''
+    selectedGas.value = { ...GAS_DEFAULTS }
+    markInputDirty()
+  }
+})
+
+watch(() => props.testId, () => loadTest())
 watch(() => props.wellName, async () => { await loadPvtOptions(); await loadTest() })
-onMounted(async () => { await loadPvtOptions(); await loadTest(); window.addEventListener('resize', resizeChart) })
-onBeforeUnmount(() => { window.removeEventListener('resize', resizeChart); chart?.dispose(); chart = null })
+onMounted(() => {
+  // 折叠参数栏、切换面板和外层目录变化时，图表也要按实际容器尺寸重排。
+  chartResizeObserver = new ResizeObserver(resizeChart)
+  if (chartEl.value) chartResizeObserver.observe(chartEl.value)
+  window.addEventListener('resize', resizeChart)
+  loadPvtOptions().then(() => loadTest())
+})
+onBeforeUnmount(() => { window.removeEventListener('resize', resizeChart); chartResizeObserver?.disconnect(); chart?.dispose(); chart = null })
 </script>
 
 <template>
   <section v-loading="loading" class="modified-workspace">
-    <aside class="params-panel">
-      <div class="panel-head">参数设置</div>
-      <div class="panel-body">
+    <aside v-resizable-parameter-panel="paramsCollapsed" class="params-panel water-parameter-theme" :class="{ collapsed: paramsCollapsed }">
+      <button v-if="paramsCollapsed" type="button" class="parameter-collapsed-tab" title="展开参数设置" @click="toggleParamsPanel">参数设置</button>
+      <div v-show="!paramsCollapsed" class="panel-head"><span>参数设置</span>
+        <button type="button" class="parameter-toggle" title="收起参数设置" aria-label="收起参数设置" @click="toggleParamsPanel">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="#777" aria-hidden="true"><path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z" /></svg>
+        </button>
+      </div>
+      <div v-show="!paramsCollapsed" class="panel-body">
         <label class="field"><span>选择PVT表</span><select v-model="selectedPvtId" @change="loadPvtDetail">
           <option value="" disabled>{{ pvtOptions.length ? '请选择PVT性质' : '当前井暂无PVT性质' }}</option>
           <option v-for="item in pvtOptions" :key="item.pvtId" :value="String(item.pvtId)">{{ item.pvtName || `PVT性质${item.pvtNo}` }}</option>
         </select></label>
         <label class="field"><span>选择数据表</span>
-          <button type="button" class="file-button" :title="importedFileName" :disabled="importing" @click="chooseFile">{{ importing ? '正在解析…' : '导入表1' }}</button>
+          <button type="button" class="file-button" :title="importedFileName" :disabled="importing" @click="chooseFile">{{ importing ? '正在解析…' : '本地导入' }}</button>
           <input ref="fileInput" class="hidden-file" type="file" accept=".xlsx,.xls,.csv" @change="handleFile" />
           <small>{{ importedFileName }} · {{ rows.length }} 行</small>
         </label>
@@ -552,50 +1077,149 @@ onBeforeUnmount(() => { window.removeEventListener('resize', resizeChart); chart
         <label class="field"><span>计算IPR曲线的最大地层压力（MPa）</span><input v-model.number="maximumFormationPressure" @change="markInputDirty" /></label>
         <label class="field"><span>地层温度（℃）</span><input v-model.number="formationTemperature" @change="markInputDirty" /></label>
         <fieldset class="radios"><legend>计算方法</legend>
-          <label><input v-model="calculationMethod" type="radio" value="pseudo-pressure" @change="invalidateResult" />拟压力</label>
-          <label><input v-model="calculationMethod" type="radio" value="pressure-squared" @change="invalidateResult" />压力平方法</label>
-          <label><input v-model="calculationMethod" type="radio" value="pressure" @change="invalidateResult" />压力法</label>
+          <label><input v-model="calculationMethod" type="radio" value="pseudo-pressure" @change="switchPressureMethod" />拟压力</label>
+          <label><input v-model="calculationMethod" type="radio" value="pressure-squared" @change="switchPressureMethod" />压力平方方法</label>
+          <label><input v-model="calculationMethod" type="radio" value="pressure" @change="switchPressureMethod" />压力法</label>
         </fieldset>
         <fieldset class="radios"><legend>注采类型</legend>
-          <label><input v-model="operationType" type="radio" value="production" />采气</label>
-          <label class="disabled-option" title="注气计算暂未开放"><input type="radio" value="injection" disabled />注气</label>
+          <label><input v-model="operationType" type="radio" value="production" @change="markInputDirty" />采气</label>
+          <label><input v-model="operationType" type="radio" value="injection" @change="markInputDirty" />注气</label>
         </fieldset>
-        <fieldset class="radios"><legend>计算结果</legend><label><input checked disabled type="radio" />二项式</label></fieldset>
+        <fieldset class="radios"><legend>计算结果</legend>
+          <label><input v-model="calculationResultType" type="radio" value="binomial" @change="switchResultType" />二项式</label>
+          <label><input v-model="calculationResultType" type="radio" value="exponential" @change="switchResultType" />指数式</label>
+        </fieldset>
         <div class="action-buttons">
           <button type="button" class="calculate" :disabled="calculating || saving" @click="calculate">{{ calculating ? '计算中…' : '计算' }}</button>
           <button type="button" class="save" :disabled="!currentResult || !resultDirty || calculating || saving" @click="save">{{ saving ? '保存中…' : '保存' }}</button>
         </div>
         <div v-if="currentResult" class="inline-output">
-          <label>达西渗流项系数A<input :value="scientific(currentResult.darcyCoefficient)" readonly /></label>
-          <label>非达西渗流项系数B<input :value="scientific(currentResult.nonDarcyCoefficient)" readonly /></label>
+          <template v-if="currentResult.calculationResultType === 'exponential'">
+            <label>指数式产能系数C<input :value="scientific(currentResult.productivityCoefficient)" readonly /></label>
+            <label>产能指数n<input :value="currentResult.productivityExponent" readonly /></label>
+            <label>拟合优度R²<input :value="currentResult.rSquared" readonly /></label>
+            <label>可靠性说明<input :value="currentResult.reliability" readonly /></label>
+          </template>
+          <template v-else>
+            <label>达西渗流项系数A<input :value="scientific(currentResult.darcyCoefficient)" readonly /></label>
+            <label>非达西渗流项系数B<input :value="scientific(currentResult.nonDarcyCoefficient)" readonly /></label>
+          </template>
           <label>无阻流量(10⁴m³/d)<input :value="currentResult.aofRate" readonly /></label>
         </div>
       </div>
     </aside>
     <main class="result-area">
       <div v-show="activePanel === 'input'" class="editable-data-grid">
-        <div class="data-toolbar"><span>可直接编辑；计算时使用当前表格值</span><el-button size="small" @click="addRow">新增测点</el-button></div>
+        <div class="data-toolbar"><span>{{ wellName || '未选择井' }} - 修正等时试井数据</span><el-button size="small" @click="addRow">增加测点</el-button></div>
         <el-table :data="rows" border height="100%">
-          <el-table-column label="序号" width="70" align="center"><template #default="scope">{{ String(scope.$index + 1).padStart(2, '0') }}</template></el-table-column>
-          <el-table-column label="产能试井日期" min-width="145" align="center"><template #default="scope"><div class="grid-cell" contenteditable="true" spellcheck="false" @keydown.enter.prevent="finishCell" @blur="commitCell(scope.row, 'date', $event)">{{ scope.row.date }}</div></template></el-table-column>
-          <el-table-column label="地层/恢复压力（MPa）" min-width="175" align="center"><template #default="scope"><div class="grid-cell" contenteditable="true" spellcheck="false" @keydown.enter.prevent="finishCell" @blur="commitCell(scope.row, 'recoveryPressure', $event, true)">{{ scope.row.recoveryPressure }}</div></template></el-table-column>
-          <el-table-column label="测试气产量（10⁴m³/d）" min-width="175" align="center"><template #default="scope"><div class="grid-cell" contenteditable="true" spellcheck="false" @keydown.enter.prevent="finishCell" @blur="commitCell(scope.row, 'flowRate', $event, true)">{{ scope.row.flowRate }}</div></template></el-table-column>
-          <el-table-column label="测试流压（MPa）" min-width="150" align="center"><template #default="scope"><div class="grid-cell" contenteditable="true" spellcheck="false" @keydown.enter.prevent="finishCell" @blur="commitCell(scope.row, 'flowingPressure', $event, true)">{{ scope.row.flowingPressure }}</div></template></el-table-column>
-          <el-table-column label="操作" width="70" align="center"><template #default="scope"><el-button link type="danger" @click="removeRow(scope.$index)">删除</el-button></template></el-table-column>
+          <el-table-column type="index" label="序号" width="60" />
+          <el-table-column label="日期" min-width="130"><template #default="scope"><el-input v-model="scope.row.date" size="small" :aria-label="`第${scope.$index + 1}行日期`" @update:model-value="markInputDirty" /></template></el-table-column>
+          <el-table-column :label="operationType === 'injection' ? '地层压力(MPa)' : '地层/恢复压力(MPa)'" min-width="170"><template #default="scope"><el-input-number v-model="scope.row.recoveryPressure" :controls="false" size="small" :aria-label="`第${scope.$index + 1}行地层恢复压力`" @update:model-value="markInputDirty" /></template></el-table-column>
+          <el-table-column :label="operationType === 'injection' ? '测试注气量(10⁴m³/d)' : '测试气产量(10⁴m³/d)'" min-width="175"><template #default="scope"><el-input-number v-model="scope.row.flowRate" :controls="false" size="small" :aria-label="`第${scope.$index + 1}行测试气量`" @update:model-value="markInputDirty" /></template></el-table-column>
+          <el-table-column :label="operationType === 'injection' ? '井底注入压力(MPa)' : '测试流压(MPa)'" min-width="145"><template #default="scope"><el-input-number v-model="scope.row.flowingPressure" :controls="false" size="small" :aria-label="`第${scope.$index + 1}行测试流压`" @update:model-value="markInputDirty" /></template></el-table-column>
+          <!-- 最后一行始终是稳定点；仅标记已有行角色，不新增或改变计算参数。 -->
+          <el-table-column label="测点类型" width="90" align="center"><template #default="scope"><el-tag v-if="scope.$index === rows.length - 1" type="danger" size="small">稳定点</el-tag><span v-else>等时点</span></template></el-table-column>
+          <el-table-column label="操作" width="75" align="center"><template #default="scope"><el-button link type="danger" @click="removeRow(scope.$index)">删除</el-button></template></el-table-column>
         </el-table>
       </div>
       <div v-show="activePanel === 'analysis'" class="analysis-view">
         <div class="chart-switch"><label><input type="radio" :checked="activeChart === 'analysis'" @change="switchChart('analysis')" />结果分析图</label>
-          <label><input type="radio" :checked="activeChart === 'ipr'" @change="switchChart('ipr')" />IPR曲线</label></div>
+          <label><input type="radio" :checked="activeChart === 'ipr'" @change="switchChart('ipr')" />{{ operationType === 'injection' ? '注气IPR曲线' : 'IPR曲线' }}</label></div>
         <div ref="chartEl" class="chart" />
       </div>
       <div class="bottom-tabs"><button :class="{ active: activePanel === 'input' }" @click="switchPanel('input')">数据列表</button>
-        <button :class="{ active: activePanel === 'analysis' }" :disabled="!currentResult" @click="switchPanel('analysis')">结果分析</button></div>
+        <button :class="{ active: activePanel === 'analysis' }" :disabled="!currentResult" @click="switchPanel('analysis')">结果分析图</button></div>
     </main>
   </section>
 </template>
 
 <style lang="scss" scoped>
-.modified-workspace{display:flex;height:100%;min-height:0;background:#fff}.params-panel{width:360px;min-width:360px;display:flex;flex-direction:column;border-right:1px solid #ddd}.panel-head{height:34px;padding:0 12px;display:flex;align-items:center;background:#f2f2f2;border-bottom:1px solid #ddd;font-size:13px}.panel-body{flex:1;overflow:auto;padding:10px 14px}.field{display:block;margin-bottom:11px;font-size:12px}.field>span{display:block;margin-bottom:4px}.field select,.field input,.file-button,.inline-output input{width:100%;height:28px;box-sizing:border-box;border:1px solid #aaa;border-radius:3px;background:#fff;padding:0 8px}.file-button{text-align:left;cursor:pointer}.hidden-file{display:none}.field small{display:block;margin-top:4px;overflow:hidden;color:#777;text-overflow:ellipsis;white-space:nowrap}.section-title{display:flex;align-items:center;gap:8px;margin:5px 0 10px;font-size:13px}.section-title i{flex:1;height:1px;background:#999}.radios{margin:0 0 10px;padding:0;border:0;font-size:13px}.radios legend{margin-bottom:6px;padding:0}.radios label{margin-right:12px;white-space:nowrap}.action-buttons{display:flex;gap:8px}.calculate,.save{height:30px;padding:0 24px;border:0;border-radius:3px;color:#fff;cursor:pointer}.calculate{background:#111}.save{background:#409eff}.calculate:disabled,.save:disabled{opacity:.6;cursor:not-allowed}.inline-output{margin-top:14px}.inline-output label{display:block;margin-bottom:10px;color:#555;font-size:12px}.inline-output input{display:block;margin-top:4px;color:#333}.result-area{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column}.editable-data-grid,.analysis-view{flex:1;min-height:0;display:flex;flex-direction:column}.data-toolbar,.chart-switch{height:38px;padding:0 12px;display:flex;align-items:center;gap:14px;flex-shrink:0;border-bottom:1px solid #ddd;color:#666;font-size:12px}.data-toolbar{justify-content:space-between}.chart{flex:1;min-height:0}.grid-cell{min-height:34px;padding:8px 10px;box-sizing:border-box;line-height:18px;text-align:center;outline:none;white-space:nowrap}.grid-cell:focus{padding:7px 9px;border:1px solid #409eff;background:#fff}:deep(.el-table .cell){padding:0;text-align:center}:deep(.el-table th.el-table__cell>.cell){padding:0 10px}:deep(.el-table td.el-table__cell){padding:0;background:#fff}:deep(.el-table__row:hover>td.el-table__cell){background:#fff!important}.bottom-tabs{height:31px;display:flex;flex-shrink:0;border-top:1px solid #ddd}.bottom-tabs button{min-width:110px;border:0;border-right:1px solid #ddd;background:#fff2f4;color:#999;cursor:pointer}.bottom-tabs button.active{color:#222;box-shadow:inset 0 -2px #2b171a;font-weight:600}.bottom-tabs button:disabled{cursor:not-allowed;opacity:.5}
-.disabled-option{color:#aaa}
+$border: #dcdfe6;
+$yellow: #f4d000;
+
+.modified-workspace {
+  display: flex;
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+  background: #fff;
+  color: #303133;
+}
+
+// 参数栏与等时试井使用相同宽度和控件间距，折叠不销毁表单状态。
+.params-panel {
+  width: 280px;
+  min-width: 280px;
+  flex: 0 0 280px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #d7d7d7;
+  overflow: hidden;
+
+  &.collapsed { width: 34px; min-width: 34px; flex-basis: 34px; }
+}
+.panel-head {
+  height: 34px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  background: #f2f2f2;
+  border-bottom: 1px solid #d7d7d7;
+  font-size: 13px;
+}
+.parameter-toggle {
+  width: 20px; height: 20px; padding: 0; border: 0; border-radius: 2px;
+  background: transparent; display: flex; align-items: center; justify-content: center; cursor: pointer;
+  &:hover { background: #fff6c5; }
+}
+.parameter-collapsed-tab {
+  width: 100%; height: 76px; padding: 8px 0 0; border: 0; border-bottom: 1px solid $border;
+  background: #fff; color: #222; font: inherit; font-size: 13px; writing-mode: vertical-rl;
+  text-orientation: upright; display: flex; align-items: center; cursor: pointer;
+  &:hover { background: #fff6c5; }
+}
+.panel-body { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 12px 14px; }
+.field { display: block; margin-bottom: 9px; color: #333; }
+.field > span { display: block; margin-bottom: 3px; font-size: 12px; line-height: 18px; }
+.field select, .field input, .file-button, .inline-output input {
+  width: 100%; height: 24px; box-sizing: border-box; border: 1px solid #aaa; border-radius: 3px;
+  background: #fff; color: #333; padding: 0 8px; font: inherit; font-size: 13px; outline: none;
+  &:focus { border-color: #b99500; box-shadow: 0 0 0 2px rgba(242, 200, 17, .16); }
+}
+.file-button { height: 26px; text-align: left; cursor: pointer; }
+.hidden-file { display: none; }
+.field small { display: block; margin-top: 4px; overflow: hidden; color: #777; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.section-title { height: 22px; display: flex; align-items: center; gap: 8px; margin: 10px 0 7px; font-size: 13px; font-weight: 500; }
+.section-title i { flex: 1; height: 1px; background: #999; }
+.radios { margin: 0 0 10px; padding: 0; border: 0; }
+.radios legend { margin-bottom: 7px; padding: 0; font-size: 13px; font-weight: 500; }
+.radios label { display: inline-flex; align-items: center; gap: 4px; margin-right: 10px; font-size: 13px; white-space: nowrap; cursor: pointer; }
+.radios input, .chart-switch input { width: 14px; height: 14px; margin: 0; accent-color: #303133; }
+.action-buttons { display: flex; align-items: center; gap: 8px; }
+.calculate, .save { min-width: 86px; height: 32px; padding: 0 22px; border-radius: 5px; font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+.calculate { border: 0; background: #252525; color: #fff; }
+.calculate:hover:not(:disabled) { background: #050505; }
+.calculate:disabled { opacity: .6; cursor: not-allowed; }
+.save { border: 1px solid #252525; background: #fff; color: #252525; }
+.save:hover:not(:disabled) { background: #f5f5f5; }
+.save:disabled { border-color: #d7d7d7; color: #aaa; cursor: not-allowed; }
+.inline-output { margin-top: 14px; }
+.inline-output label { display: block; margin-bottom: 9px; color: #333; font-size: 12px; }
+.inline-output input { display: block; margin-top: 3px; }
+.result-area { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.editable-data-grid, .analysis-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.editable-data-grid :deep(.el-table) { flex: 1; }
+.data-toolbar { min-height: 42px; padding: 0 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-shrink: 0; border-bottom: 1px solid $border; font-size: 14px; font-weight: 600; }
+.chart-switch { min-height: 34px; padding: 0 12px; display: flex; align-items: center; gap: 14px; flex-shrink: 0; font-size: 13px; }
+.chart-switch label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.chart { flex: 1; min-width: 0; min-height: 0; }
+// 底部标签与水侵分析统一：靠左紧凑排列，选中项仅以顶部黄线强调。
+.bottom-tabs { height: 30px; display: flex; justify-content: flex-start; flex-shrink: 0; border-top: 1px solid #e4e7ed; background: #fff; }
+.bottom-tabs button { height: 30px; min-width: 82px; padding: 0 14px; border: 0; border-right: 1px solid #e4e7ed; background: #fff; color: #333; font: inherit; font-size: 13px; white-space: nowrap; cursor: pointer; }
+.bottom-tabs button.active { background: #fff; color: #202020; font-weight: 600; box-shadow: inset 0 3px 0 $yellow; }
+.bottom-tabs button:disabled { color: #c0c4cc; cursor: not-allowed; }
 </style>
