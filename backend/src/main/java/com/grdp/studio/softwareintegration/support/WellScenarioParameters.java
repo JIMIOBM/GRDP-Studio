@@ -7,7 +7,10 @@ public final class WellScenarioParameters {
 
     public static boolean valid(JsonNode value, String modelKind, String runType) {
         if (value == null || value.isNull()) return true;
-        if (!"nodal".equals(runType) || !("basic_gas".equals(modelKind) || "black_oil_liquid".equals(modelKind))) return false;
+        boolean supported = "basic_gas".equals(modelKind)
+                ? ("nodal".equals(runType) || "profile".equals(runType) || "combined".equals(runType))
+                : "black_oil_liquid".equals(modelKind) && "nodal".equals(runType);
+        if (!supported) return false;
         if (!value.isObject() || value.size() != 2 || !value.has("schemaVersion") || !value.has("reservoirPressurePsi")) return false;
         JsonNode pressure = value.get("reservoirPressurePsi");
         return "pipesim-well-parameters/1".equals(value.path("schemaVersion").asText())

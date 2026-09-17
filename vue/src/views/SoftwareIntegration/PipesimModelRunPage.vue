@@ -10,7 +10,7 @@ import PipesimProfileResult from './PipesimProfileResult.vue'
 import PipesimRunHistory from './PipesimRunHistory.vue'
 import EclipseRunResult from './EclipseRunResult.vue'
 import EclipseDataInspectionOverview from './EclipseDataInspectionOverview.vue'
-import { sourceReservoirPressure } from './wellParameterPreview'
+import { sourceReservoirPressure, supportsPressureScenario } from './wellParameterPreview'
 
 const props = defineProps({
   eclipsePresentation: { type: Boolean, default: true }
@@ -433,6 +433,7 @@ const changeVersion = async versionId => {
 }
 const scenarioEnabled = ref(false)
 const scenarioPressure = ref(null)
+const supportsCurrentScenario = computed(() => supportsPressureScenario(activeVersion.value?.modelKind, runType.value))
 const sourcePressure = computed(() => sourceReservoirPressure(activeVersion.value))
 const readingVersionId = ref(null)
 const previewPending = computed(() => readingVersionId.value === activeVersionId.value || ['UPLOADED', 'VALIDATING'].includes(activeVersion.value?.status))
@@ -455,7 +456,7 @@ const readSourceParameters = async () => {
 const useSourcePressure = () => {
   if (!canUseSource.value) return
   const pressure = sourcePressure.value
-  runType.value = 'nodal'
+  if (!supportsCurrentScenario.value) runType.value = 'nodal'
   scenarioPressure.value = pressure
   scenarioEnabled.value = true
 }
@@ -463,19 +464,19 @@ watch([activeVersionId, runType], () => { scenarioEnabled.value = false; scenari
 const scenarioSnapshot = computed(() => selectedRun.value?.parameters?.schemaVersion === 'pipesim-well-parameters/1'
   && Number.isFinite(selectedRun.value.parameters.reservoirPressurePsi) ? selectedRun.value.parameters.reservoirPressurePsi : null)
 const canReuseScenario = computed(() => isWellModel.value && activeVersion.value?.status === 'READY' && !hasActiveRun.value && !submittingRun.value &&
-  selectedRun.value?.modelVersionId === activeVersionId.value && scenarioSnapshot.value > 0 && scenarioSnapshot.value <= 100000)
+  selectedRun.value?.modelVersionId === activeVersionId.value && supportsPressureScenario(activeVersion.value?.modelKind, selectedRun.value?.runType) && scenarioSnapshot.value > 0 && scenarioSnapshot.value <= 100000)
 const reuseScenario = () => {
   if (!canReuseScenario.value) return
   const pressure = scenarioSnapshot.value
-  runType.value = 'nodal'
+  runType.value = selectedRun.value.runType
   scenarioPressure.value = pressure
   scenarioEnabled.value = true
   ElMessage.success('已载入方案参数，可修改后点击运行；不会修改历史记录')
 }
 const submitRun = async () => {
   if (!canRun.value) return
-  if (scenarioEnabled.value && (!isWellModel.value || runType.value !== 'nodal' || !Number.isFinite(scenarioPressure.value) || scenarioPressure.value <= 0 || scenarioPressure.value > 100000)) {
-    ElMessage.error('压力方案仅支持节点分析，请输入大于 0 且不超过 100000 psia 的压力')
+  if (scenarioEnabled.value && (!supportsCurrentScenario.value || !Number.isFinite(scenarioPressure.value) || scenarioPressure.value <= 0 || scenarioPressure.value > 100000)) {
+    ElMessage.error('当前模型或运行类型不支持压力方案，或压力不在大于 0 且不超过 100000 psia 的范围内')
     return
   }
   try {
@@ -608,11 +609,12 @@ defineExpose({ eclipseRunRequest })
         <small>从上传版本的隔离副本读取；重新验证期间暂不可计算，不修改原文件。</small>
         <small v-if="sourcePressure > 100000">原值超出当前方案编辑范围，仅供查看。</small>
       </section>
-      <section v-if="isWellModel && runType === 'nodal'" class="well-scenario" aria-label="井筒压力方案">
+      <section v-if="supportsCurrentScenario" class="well-scenario" aria-label="井筒压力方案">
         <el-checkbox v-model="scenarioEnabled" :disabled="hasActiveRun || submittingRun">使用地层压力方案</el-checkbox>
         <template v-if="scenarioEnabled">
           <label>地层压力 (psia) <el-input-number v-model="scenarioPressure" :min="0.000001" :max="100000" :disabled="hasActiveRun || submittingRun" aria-label="方案地层压力" /></label>
           <span>仅修改本次计算副本；模型单位不匹配或设置失败时停止计算。</span>
+          <span v-if="activeVersion?.modelKind === 'basic_gas' && runType !== 'nodal'">基础气井方案同时将该值用于 PT 入口压力，沿用桌面端计算方式。</span>
           <span v-if="sourcePressure !== null && Number.isFinite(scenarioPressure)" data-testid="pressure-scenario-comparison">原值 {{ sourcePressure }} → 方案值 {{ scenarioPressure }} psia</span>
         </template>
         <span v-else>使用上传模型的原始参数</span>

@@ -1,3 +1,6 @@
+export const supportsPressureScenario = (kind, task) =>
+  kind === 'basic_gas' ? ['nodal', 'profile', 'combined'].includes(task) : kind === 'black_oil_liquid' && task === 'nodal'
+
 export const sourceReservoirPressure = version => {
   if (version?.status !== 'READY' || !['black_oil_liquid', 'basic_gas'].includes(version.modelKind)) return null
   const inspection = version.inspection

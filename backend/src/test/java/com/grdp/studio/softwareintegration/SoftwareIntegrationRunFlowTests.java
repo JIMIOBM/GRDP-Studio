@@ -1012,6 +1012,27 @@ class SoftwareIntegrationRunFlowTests {
     }
 
     @Test
+    void completedProjectDeletionSoftDeletesProjectAndRetainsModelHistory() throws Exception {
+        Seed seed = seed("READY", "models/delete/completed.pips");
+        MockMvc projectMvc = MockMvcBuilders.standaloneSetup(
+                        new SoftwareIntegrationController(softwareIntegrationService, capabilityService))
+                .setControllerAdvice(new SoftwareIntegrationRunExceptionHandler()).build();
+
+        projectMvc.perform(delete("/software-integration/projects/{id}", seed.project().getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        assertThat(projectMapper.selectById(seed.project().getId()).getDeletedAt()).isNotNull();
+        assertThat(softwareIntegrationService.listProjects())
+                .noneMatch(project -> project.id().equals(seed.project().getId()));
+        assertThat(modelMapper.selectById(seed.model().getId()).getDeletedAt()).isNull();
+        assertThat(versionMapper.selectById(seed.version().getId()).getStatus()).isEqualTo("READY");
+        assertThatThrownBy(() -> softwareIntegrationService.getProject(seed.project().getId()))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(error -> assertThat(((BusinessException) error).getCode()).isEqualTo(404));
+    }
+
+    @Test
     void runningNetworkRetainsGlobalSlotBlocksDeletionAndRecoversAsWorkerLost() throws Exception {
         Seed network = seed("READY", "models/network/recovery.pips", "PIPESIM_NETWORK");
         long networkRunId = runService.create(network.version().getId(), request("Network Study", "network")).id();

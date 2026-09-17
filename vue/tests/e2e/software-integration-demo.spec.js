@@ -207,6 +207,24 @@ test('原模型参数显式读取、回填和方案值对照', async ({ page }, 
   await expect(preview.getByRole('button', { name: '以原值创建方案' })).toHaveCount(0)
 })
 
+test('基础气井 PT 压力方案保留运行类型并提交准确快照', async ({ page }) => {
+  const historical = { id: 9010, modelId: 11, modelVersionId: 101, projectId: 1, versionNo: 1, study: 'Base Case', runType: 'profile', status: 'FAILED', parameters: { schemaVersion: 'pipesim-well-parameters/1', reservoirPressurePsi: 3500 }, createdAt: '2026-09-15T10:00:00', cancellable: false, events: [], artifacts: [] }
+  const state = await installMockBackend(page, { wellHistory: [summary(historical)], runs: [historical] })
+  state.models[0].versions[0].modelKind = 'basic_gas'
+  await openWorkspace(page)
+  await activateModel(page, '井筒演示模型')
+  await page.getByRole('button', { name: '载入此方案参数' }).click()
+  await expect(page.getByRole('radio', { name: 'PT 剖面', exact: true })).toBeChecked()
+  await expect(page.getByRole('spinbutton', { name: '方案地层压力' })).toHaveValue('3500')
+  await expect(page.getByText('基础气井方案同时将该值用于 PT 入口压力，沿用桌面端计算方式。')).toBeVisible()
+  await page.locator('.run-type-control').getByText('组合运行', { exact: true }).click()
+  await expect(page.getByRole('checkbox', { name: '使用地层压力方案' })).not.toBeChecked()
+  await page.getByText('使用地层压力方案', { exact: true }).click()
+  await page.getByRole('spinbutton', { name: '方案地层压力' }).fill('4000')
+  await page.getByRole('button', { name: '运行', exact: true }).click()
+  expect(state.createPayloads[0].payload).toEqual({ study: 'Base Case', runType: 'combined', parameters: { schemaVersion: 'pipesim-well-parameters/1', reservoirPressurePsi: 4000 } })
+})
+
 test('井筒压力方案提交精确快照，切换运行类型清空编辑', async ({ page }) => {
   const historical = { id: 9000, modelId: 11, modelVersionId: 101, projectId: 1, versionNo: 1, study: 'Base Case', runType: 'nodal', status: 'FAILED', parameters: { schemaVersion: 'pipesim-well-parameters/1', reservoirPressurePsi: 3500 }, createdAt: '2026-09-15T10:00:00', cancellable: false, events: [], artifacts: [] }
   const state = await installMockBackend(page, { wellHistory: [summary(historical)], runs: [historical] })
@@ -561,6 +579,25 @@ test('PIPESIM Network 组态保持真实数量、设备图例与既有结果访�
   await activateModel(page, '管网演示模型')
 
   await expect(page.getByText('11 个节点 / 10 条连接', { exact: true })).toBeVisible()
+  const overview = page.getByRole('region', { name: '管网支路工况总览' })
+  await expect(overview).toContainText('首点减末点')
+  await overview.getByRole('textbox', { name: '搜索工况支路' }).fill('Comparison')
+  const overviewDownload = page.waitForEvent('download')
+  await overview.getByRole('button', { name: '导出工况 CSV' }).click()
+  const overviewStream = await (await overviewDownload).createReadStream()
+  let overviewCsv = ''
+  for await (const chunk of overviewStream) overviewCsv += chunk.toString('utf8')
+  expect(overviewCsv).toContain('"8501","Network Base","Comparison-branch","bara","3","91","79","12","79","91","0"')
+  await overview.getByRole('button', { name: '查看剖面' }).click()
+  await expect(page.locator('.profile-controls')).toContainText('Comparison-branch')
+  await overview.getByRole('textbox', { name: '搜索工况支路' }).fill('N1-N2')
+  await overview.getByRole('button', { name: '查看剖面' }).click()
+  await overview.getByRole('textbox', { name: '搜索工况支路' }).fill('')
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 1280, height: 720 }]) {
+    await page.setViewportSize(viewport)
+    await overview.scrollIntoViewIfNeeded()
+    await page.screenshot({ path: testInfo.outputPath(`branch-overview-${viewport.width}.png`) })
+  }
   const topologyStats = page.locator('.count-strip[aria-label="管网拓扑统计"]')
   await expect(topologyStats.getByText('节点', { exact: true })).toBeVisible()
   await expect(topologyStats.getByText('11', { exact: true })).toBeVisible()

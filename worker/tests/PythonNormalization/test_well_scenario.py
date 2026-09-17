@@ -8,7 +8,9 @@ class ScenarioTests(unittest.TestCase):
     def test_strict_parameters(self):
         valid = {'schemaVersion': 'pipesim-well-parameters/1', 'reservoirPressurePsi': 4000}
         validate_scenario(valid, 'nodal')
-        for task in ['profile', 'combined', 'network', 'eclipse']:
+        for task in ['profile', 'combined']:
+            validate_scenario(valid, task)
+        for task in ['network', 'eclipse']:
             validate_scenario(None, task)
             with self.assertRaises(AdapterFailure):
                 validate_scenario(valid, task)

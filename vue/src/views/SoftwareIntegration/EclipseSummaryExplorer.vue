@@ -1,6 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
+import { compactChartSlider } from './chartZoomStyle'
 
 const props = defineProps({ series: { type: Array, default: () => [] }, runId: { type: [Number, String], default: '' } })
 const query = ref('')
@@ -60,7 +61,7 @@ const render = async () => {
     grid: { left: 65, right: 25, top: 82, bottom: 85, containLabel: true },
     xAxis: { type: 'value', name: '时间 (天)', nameLocation: 'middle', nameGap: 26 },
     yAxis: { type: 'value', name: selected.value[0]?.unit || '单位未提供', splitLine: { lineStyle: { color: '#e5e7eb' } } },
-    dataZoom: [{ type: 'inside' }, { type: 'slider', bottom: 12, height: 18 }],
+    dataZoom: [{ type: 'inside' }, compactChartSlider(12)],
     series: selected.value.map(item => ({ id: item.key, name: label(item), type: 'line', lineStyle: { type: item.historical ? 'dashed' : 'solid' }, showSymbol: false, connectNulls: false, data: item.points.map(point => [point.timeDays, point.value]) }))
   }, true)
   chart.resize()

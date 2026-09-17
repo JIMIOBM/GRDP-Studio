@@ -84,7 +84,7 @@ public class SoftwareIntegrationRunServiceImpl implements SoftwareIntegrationRun
         SoftwareIntegrationModelVersionEntity version = requireVersion(versionId);
         JsonNode scenario = objectMapper.valueToTree(request.getParameters());
         if (!com.grdp.studio.softwareintegration.support.WellScenarioParameters.valid(scenario, version.getModelKind(), runType)) {
-            throw new RunException(HttpStatus.BAD_REQUEST, "参数方案仅支持已验证井筒的节点分析；地层压力必须为 0 到 100000 psia（不含 0）且不得含未知字段");
+            throw new RunException(HttpStatus.BAD_REQUEST, "参数方案仅支持基础气井的节点分析、PT 剖面、组合运行或黑油井的节点分析；地层压力必须为 0 到 100000 psia（不含 0）且不得含未知字段");
         }
         if (!"READY".equals(version.getStatus())) throw new RunException(HttpStatus.CONFLICT, "只有 READY 模型版本可以创建运行");
         SoftwareIntegrationModelEntity model = modelMapper.selectById(version.getModelId());

@@ -7,7 +7,7 @@ internal static class WellScenarioParameters
     internal static bool Valid(JsonElement value, string task)
     {
         if (value.ValueKind == JsonValueKind.Null) return true;
-        if (task != "nodal" || value.ValueKind != JsonValueKind.Object || value.EnumerateObject().Count() != 2) return false;
+        if (task is not ("nodal" or "profile" or "combined") || value.ValueKind != JsonValueKind.Object || value.EnumerateObject().Count() != 2) return false;
         return value.TryGetProperty("schemaVersion", out var schema) && schema.ValueKind == JsonValueKind.String
             && schema.GetString() == "pipesim-well-parameters/1"
             && value.TryGetProperty("reservoirPressurePsi", out var pressure) && pressure.ValueKind == JsonValueKind.Number

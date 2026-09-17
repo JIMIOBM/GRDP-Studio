@@ -12,9 +12,9 @@ Last verified: 2026-09-16
 
 ## Current Milestone
 
-2026-09-15 well scenario implementation: the approved first parameter is reservoir pressure for nodal analysis of validated black-oil/basic-gas wells. Strict `pipesim-well-parameters/1` contains only `reservoirPressurePsi` (finite, positive, at most 100000; a product guard, not an official physical limit). Spring persists and returns the snapshot, dispatches it unchanged, and Worker writes it to the request artifact and adapter envelope. Python checks the completion descriptor unit is exactly psia, reads the original value, sets the isolated model and verifies readback before running. Null retains every previous baseline task; non-null profile/combined/network/eclipse requests are rejected. Contract review and independent implementation review passed. No source-model writes or result normalization changes were introduced.
+2026-09-16 well scenario extension: reservoir pressure remains the only editable field. It is now supported for nodal/profile/combined runs of validated `basic_gas` wells and nodal runs of `black_oil_liquid`; Network, ECLIPSE, legacy wells and oil profile/combined remain rejected. Strict `pipesim-well-parameters/1` contains only `reservoirPressurePsi` (finite, positive, at most 100000; a product guard, not an official physical limit). Spring persists and returns the snapshot, dispatches it unchanged, and Worker writes it to the request artifact and adapter envelope. Python checks the completion descriptor unit is exactly psia, reads the original value, sets the isolated model and verifies readback before running; for gas PT/profile phases, the same snapshot is also passed as the PT `InletPressure` per Avalonia behavior. Null retains every previous baseline task. No source-model writes or result normalization changes were introduced.
 
-Verification of the scenario package: 116 backend tests, 181 Worker Release tests, 45 Python tests and the earlier 10 frontend E2E tests passed; Vue built successfully. Default packaging hit running backend/Worker file locks; Worker Release build and backend compilation/tests passed without stopping services. The user subsequently reported manual acceptance and directed further page work; this is recorded as user acceptance, not independently captured new simulator evidence. No restart or fresh simulation was performed by this work package. Other parameter fields, PT overrides and live parameter-effect evidence remain outstanding; source-pressure preview is implemented below.
+Verification of the scenario package: 132 backend tests, 193 Worker Release tests, 50 Python tests and 12 frontend E2E tests passed; Vue built successfully. Earlier user acceptance applies to the preceding nodal scenario and result-page package, not to this gas PT extension; it is recorded as user acceptance, not independently captured new simulator evidence. No restart or fresh simulation was performed by this work package. Other parameter fields and live parameter-effect evidence remain outstanding; source-pressure preview is implemented below.
 
 Stage 0 baseline protection, the Demo-01 well workflow, PIPESIM Network and ECLIPSE 100 MVP are implemented. Current priority is deployed browser demonstration and readable real results across all three simulator paths. The PIPESIM workflow is:
 
@@ -38,25 +38,48 @@ The 2026-09-14 requirements clarification separates demo-package acceptance (§0
 
 ## Verified Complete
 
+### Basic-Gas PT Scenario Runs
+
+- The approved reservoir-pressure scenario now covers all three well run types for `basic_gas`. Nodal uses the isolated Completion pressure; PT profile and combined additionally pass the same value as `PTProfileSimulation.InletPressure`, while retaining the existing gas flow-rate controls. Oil remains nodal-only for non-null scenarios; baseline `parameters=null` behavior is unchanged.
+- Model kind is checked again after opening the actual model before any scenario mutation or simulation. Unsupported combinations fail with the existing structured scenario-parameter error; combined PT failure still produces the existing valid partial-result contract.
+- Verification: Python fake execution matrix passed 50/50, Worker Release build/tests passed 193/193, backend tests passed 131/131, frontend units passed 11/11 and mocked E2E passed 12/12. The PT parameter names and `psia` unit were checked against the local official Toolkit example and Avalonia adapter. No real gas scenario run or service restart was performed; real CSW_102 profile/combined scenario acceptance remains required.
+
+### Network Branch Condition Overview
+
+- Network results now include a branch condition table with pressure units, point count, first/last returned pressure, signed endpoint difference, valid range and missing-point count. It supports branch search, missing-data filtering, CSV export and exact jump to the existing branch chart.
+- The view explicitly states that endpoint order is simulator-return order and does not infer physical flow direction. Missing values and unknown units remain unavailable; no interpolation, unit conversion or fabricated endpoint is added.
+- Verification: Network E2E passed 1/1 with exact CSV values and jump behavior; overview unit tests passed 2/2; Vue production build passed. No Network contract, Worker, source model or simulator execution changed.
+
+### Compact Chart Range Sliders
+
+- Software-integration nodal, Network branch and ECLIPSE Summary charts share a 6-pixel neutral-gray range slider with 12-pixel end handles. Removed the data-shadow miniature and additional move bar; native range adjustment, selected-window dragging and inside zoom remain enabled. Existing PT charts have no visible slider and are unchanged.
+- Verification: slider unit test passed; Network, RSM and well historical-comparison browser regressions passed 3/3; Vue production build passed. The 1280-wide RSM fixture screenshot was visually inspected. Only chart presentation changed; no simulator run, service restart or other business-module change.
+
 ### Original Well Parameter Preview
 
 - Supported well validation reads the unique completion's reservoir pressure from the isolated model copy after confirming the official unit is `psia`. The optional `pipesim-well-inspection/1` metadata is persisted per version and exposed only for READY black-oil/basic-gas wells. No source write, new endpoint, schema migration or calculation-contract change is involved.
 - Missing, invalid or unsupported-unit values are unavailable, not guessed or converted; optional preview failure does not invalidate an otherwise supported model. Existing versions require an explicit "重新验证并读取" action. Pending reads immediately disable new calculation, including before the HTTP response arrives. The page shows the original value, can explicitly fill it into a new pressure scenario, and displays original versus edited values without auto-submitting. Source values above the scenario's edit limit remain viewable but cannot be copied into the editor.
 - Verification: backend 131 tests, Worker Release 191 tests and Python 48 tests passed; frontend 9 unit tests and 11 mocked browser tests passed, followed by a passing held-validation-request regression. Vue production build passed. The 1280-wide fixture screenshot was visually checked. Backend packaging compiled but could not replace the running JAR; no service was stopped. Real PTK preview, deployment and real parameter-effect acceptance remain separate outstanding checks.
 
+### Project Soft-Delete Recovery Boundary
+
+- Project deletion now has an explicit regression contract: when no active run exists, the endpoint returns HTTP 200 and marks only the project with `deleted_at`; model versions, completed runs, events, artifacts and source files remain available for the future recycle-bin recovery flow. Active runs continue to return scoped HTTP 409.
+- The deployed 8080 process was an older JAR that stayed resident while a later build replaced the file, which caused the observed 500. The executable JAR was rebuilt with JDK 21 and the lifecycle script restarted the backend; the Vite-proxied create/delete probe then returned 200. Sunday1 (project id 9) is now in the recycle-bin state; its model and run history were not physically removed.
+- Verification: backend Maven tests passed 132/132, including the completed-project soft-delete test; `/actuator/health` returned `UP`; the deployed proxy delete probe returned 200. No active simulator run was interrupted and no source model was modified.
+
 ### Demonstration Pages And Scenario Reuse
 
 - Well history now identifies original-model and reservoir-pressure scenarios. Loading a same-version historical scenario fills the nodal parameter controls without submitting a run or changing the historical snapshot; reuse is disabled during execution, and switching version/task clears the editor.
 - The well combined-result tab follows the Avalonia nodal/profile arrangement: IPR/VLP and pressure/temperature profiles appear together, with existing tables, exports and provenance. Narrow layouts stack the panels; inactive charts are unmounted.
 - ECLIPSE can compare a successful same-version historical RSM result with the current result. Default pairing requires identical keyword, object and explicit unit. Current curves are solid and historical curves dashed; CSV retains each run ID and its original time/value samples. Navigation clears comparison state and ignores late responses. No interpolation or result-contract relaxation was added.
-- Verification: `npm run test:e2e` passed 10/10 (29.2 seconds), covering scenario reuse, combined results, historical RSM exports and navigation races; `npm run build` passed with existing dependency/chunk warnings. Fixture-based screenshots were captured at 1440 and 1280 widths; the combined 1440 and historical RSM 1280 views were visually checked. These are frontend checks, not new real simulator evidence. No services were restarted or source models modified.
+- Verification: `npm run test:e2e` passed 12/12 (43.3 seconds), covering scenario reuse, gas PT task selection, combined results, historical RSM exports and navigation races; `npm run build` passed with existing dependency/chunk warnings. Fixture-based screenshots were captured at 1440 and 1280 widths; the combined 1440 and historical RSM 1280 views were visually checked. These are frontend checks, not new real simulator evidence. No services were restarted or source models modified.
 
 ### Result Interaction And Network Branch Comparison
 
 - CSN_302 display fix (2026-09-15): the frontend incorrectly rejected official empty unit strings and treated `BranchEquipment` strings as numeric profile data. The boundary now preserves empty units and explicitly validates equipment strings/nulls and their point count; unsafe local paths and invalid numeric data are still rejected. Direct read-only checks against persisted Runs 56 and 52 now accept all 12 nodes and 6 profiles; Run 53 remains partial with 20 nodes and 7 profiles. The logged-in localhost browser restored Run 56 successfully, showing topology, the 501-point B_C pressure table, 91 system variables and 25 node variables, with no result-unavailable notice. Seven unit tests, the Network E2E test (including textual equipment with empty units), and Vue build passed. No new simulator run or backend change was needed.
 
 - The user accepted the current result-page changes on 2026-09-15: searchable ECLIPSE RSM vectors with same-unit overlays and CSV/PNG export; well same-version historical curve comparison and exports; Network device search, exact result linkage, per-run browser-local layout persistence and exports. This is user acceptance of the UI package, not evidence of a new simulator calculation.
-- The next bounded addition is Network multi-branch profile comparison. A primary branch can overlay up to four other branches for the selected pressure, temperature, velocity, density or Z-factor variable when returned distance and variable units are explicitly identical. Each branch retains its original distance samples, point order and null gaps; no interpolation, guessed units or offset alignment is applied.
+- Network multi-branch profile comparison is available. A primary branch can overlay up to four other branches for the selected pressure, temperature, velocity, density or Z-factor variable when returned distance and variable units are explicitly identical. Each branch retains its original distance samples, point order and null gaps; no interpolation, guessed units or offset alignment is applied.
 - The combined raw table and CSV identify the branch; CSV also identifies Run and Study. Switching the model/result, primary branch or variable clears comparisons. Unsupported units or malformed comparison arrays disable that branch without hiding the original result.
 - Verification on this worktree: `node --test tests/unit/result-presentation.test.js` passed 5/5; `npm run test:e2e -- --grep 'PIPESIM Network'` passed 1/1, including overlay selection, exact uneven-distance CSV output, model-switch reset and existing topology interactions; `npm run build` passed with existing dependency/chunk warnings. The initial interaction test clicked an input covered by the Element Plus placeholder; targeting the visible placeholder resolved the test failure.
 - No backend, Worker, simulator contract, source model or success gate changed. No service restart or new calculation was performed. The new branch comparison has mocked browser evidence; live multi-branch comparison and its dedicated viewport visual checks remain unverified. Existing earlier calculation evidence remains applicable only to unchanged execution code.
@@ -334,7 +357,7 @@ Avalonia research established the existing Worker envelope for the next mileston
 }
 ```
 
-Baseline runs retain `parameters=null`. The 2026-09-15 approved nodal-only scenario extension permits the strict reservoir-pressure object described above, applied only to the task copy. Source models remain unchanged.
+Baseline runs retain `parameters=null`. The 2026-09-16 approved scenario extension permits the strict reservoir-pressure object for basic-gas nodal/profile/combined and black-oil nodal, applied only to the task copy. For basic-gas PT phases the value is also passed as the PT inlet pressure following Avalonia semantics. Source models remain unchanged.
 
 Expected normalized result payload:
 
@@ -353,7 +376,7 @@ Nodal and combined runs require non-empty IPR/VLP. Profile-only runs require a n
 
 Keep the reviewed simulator implementation and frozen Golden unchanged while completing the next demo-hardening package:
 
-The next bounded functional package is individually verified additional well-parameter contracts, following deployment and real acceptance of the source-pressure preview. Historical ECLIPSE Summary comparison and the combined well result page are implemented above. Only the approved well nodal reservoir-pressure override is now implemented; other parameters and sensitivity execution still require individually verified contracts. The older deployed-smoke checklist below remains an outstanding evidence gap; the user has asked to prioritize additional functional migration instead of repeating the accepted UI checks.
+The next bounded functional package is real serial CSW_102 profile/combined scenario acceptance, followed by one individually verified additional well parameter. The Network branch condition overview, compact chart sliders, source-pressure preview, combined well view and ECLIPSE history comparison are implemented above. Only reservoir pressure is editable; Network parameter editing, ECLIPSE deck editing, other well fields and sensitivity execution still require individually verified contracts. The older deployed-smoke checklist below remains an outstanding evidence gap.
 
 ```text
 perform a deployed real-backend browser smoke pass for project/model activation, Runs 27-32, Run 37 and ECLIPSE Run 49 history restoration and real result display

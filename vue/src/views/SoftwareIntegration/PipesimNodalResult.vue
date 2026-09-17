@@ -1,6 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
+import { compactChartSlider } from './chartZoomStyle'
 import { downloadWellChart, downloadWellCsv, wellComparisonIssue } from './wellResultPresentation'
 
 const props = defineProps({
@@ -84,7 +85,7 @@ const renderChart = async () => {
     },
     dataZoom: [
       { type: 'inside', xAxisIndex: 0 },
-      { type: 'slider', xAxisIndex: 0, height: 18, bottom: 18 }
+      compactChartSlider()
     ],
     series: sources.value.flatMap(source => ['ipr', 'vlp'].map((key, index) => ({
       name: `${source.history ? '对比' : '当前'} · ${source.label} · ${key.toUpperCase()}`,

@@ -9,6 +9,8 @@ public class WellScenarioParametersTests
     [InlineData("null", "combined", true)]
     [InlineData("{}", "nodal", false)]
     [InlineData("{\"schemaVersion\":\"pipesim-well-parameters/1\",\"reservoirPressurePsi\":4000}", "nodal", true)]
+    [InlineData("{\"schemaVersion\":\"pipesim-well-parameters/1\",\"reservoirPressurePsi\":4000}", "profile", true)]
+    [InlineData("{\"schemaVersion\":\"pipesim-well-parameters/1\",\"reservoirPressurePsi\":4000}", "combined", true)]
     [InlineData("{\"schemaVersion\":\"pipesim-well-parameters/1\",\"reservoirPressurePsi\":4000}", "network", false)]
     [InlineData("{\"schemaVersion\":\"pipesim-well-parameters/1\",\"reservoirPressurePsi\":true}", "nodal", false)]
     [InlineData("{\"schemaVersion\":\"pipesim-well-parameters/1\",\"reservoirPressurePsi\":0}", "nodal", false)]

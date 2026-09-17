@@ -1,6 +1,15 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { sourceReservoirPressure } from '../../src/views/SoftwareIntegration/wellParameterPreview.js'
+import { sourceReservoirPressure, supportsPressureScenario } from '../../src/views/SoftwareIntegration/wellParameterPreview.js'
+
+test('gas pressure scenarios support all well tasks, oil remains nodal only', () => {
+  for (const task of ['nodal', 'profile', 'combined']) assert.equal(supportsPressureScenario('basic_gas', task), true)
+  assert.equal(supportsPressureScenario('black_oil_liquid', 'nodal'), true)
+  for (const kind of ['black_oil_liquid', 'legacy_well', 'network', 'eclipse_100']) {
+    for (const task of ['profile', 'combined']) assert.equal(supportsPressureScenario(kind, task), false)
+  }
+  assert.equal(supportsPressureScenario('basic_gas', 'network'), false)
+})
 
 const version = value => ({ status: 'READY', modelKind: 'basic_gas', inspection: {
   schemaVersion: 'pipesim-well-inspection/1', reservoirPressure: { value, unit: 'psia' }

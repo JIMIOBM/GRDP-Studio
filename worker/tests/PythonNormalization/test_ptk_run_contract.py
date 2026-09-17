@@ -107,6 +107,7 @@ def fake_sixgill_modules():
         PTProfileSimulation=types.SimpleNamespace(
             CALCULATEDVARIABLE="calculated_variable",
             FLOWRATETYPE="flow_rate_type",
+            INLETPRESSURE="inlet_pressure",
         ),
     )
     resources = types.ModuleType("sixgill.core.resources")
@@ -120,6 +121,62 @@ def fake_sixgill_modules():
 
 
 class PtkRunContractTests(unittest.TestCase):
+    def test_pressure_scenario_task_matrix_and_profile_boundary(self):
+        for gas in (False, True):
+            for task in ('nodal', 'profile', 'combined'):
+                for scenario in (None, {'schemaVersion': 'pipesim-well-parameters/1', 'reservoirPressurePsi': 4000}):
+                    with self.subTest(gas=gas, task=task, scenario=scenario):
+                        model = FakeModel(gas=gas)
+                        base_get = model.get_value
+                        pressure = [3000]
+                        writes, calls = [], []
+                        model.describe = lambda **kwargs: types.SimpleNamespace(units_symbol='psia')
+                        model.get_value = lambda component, parameter=None: pressure[0] if parameter == 'reservoir_pressure' else base_get(component, parameter)
+                        def write(component, parameter=None, value=None):
+                            writes.append(value)
+                            pressure[0] = value
+                        model.set_value = write
+                        model.tasks.nodalanalysis = Runnable(lambda kwargs: (calls.append(('nodal', pressure[0], kwargs)), NodalResult(gas))[1])
+                        model.tasks.ptprofilesimulation = Runnable(lambda kwargs: (calls.append(('profile', pressure[0], kwargs)), ProfileResult())[1])
+                        envelope, _, _ = self.execute(task, model, scenario)
+                        self.assertTrue(model.closed)
+                        if scenario is not None and not gas and task != 'nodal':
+                            self.assertEqual('INVALID_SCENARIO_PARAMETERS', envelope['error']['code'])
+                            self.assertEqual([], writes)
+                            self.assertEqual([], calls)
+                            continue
+                        self.assertEqual('ok', envelope['status'])
+                        self.assertEqual([] if scenario is None else [4000], writes)
+                        for phase, applied, kwargs in calls:
+                            expected = {'producer': 'Well_1', 'study': 'Study 1'}
+                            if gas and phase == 'profile':
+                                expected['parameters'] = {'calculated_variable': 'flowrate', 'flow_rate_type': 'gasflowrate'}
+                                if scenario is not None:
+                                    expected['parameters']['inlet_pressure'] = 4000
+                            self.assertEqual(expected, kwargs)
+                            self.assertEqual(3000 if scenario is None else 4000, applied)
+
+    def test_gas_scenario_profile_failure_preserves_partial_contract(self):
+        for task in ('profile', 'combined'):
+            model = FakeModel(gas=True, profile_failure=RuntimeError('profile solver failed'))
+            base_get = model.get_value
+            pressure = [3000]
+            model.describe = lambda **kwargs: types.SimpleNamespace(units_symbol='psia')
+            model.get_value = lambda component, parameter=None: pressure[0] if parameter == 'reservoir_pressure' else base_get(component, parameter)
+            model.set_value = lambda component, parameter=None, value=None: pressure.__setitem__(0, value)
+            envelope, _, _ = self.execute(task, model, {'schemaVersion': 'pipesim-well-parameters/1', 'reservoirPressurePsi': 4000})
+            self.assertTrue(model.closed)
+            if task == 'profile':
+                self.assertEqual('error', envelope['status'])
+                self.assertEqual('PROFILE_RUN_FAILED', envelope['error']['code'])
+            else:
+                self.assertEqual('partial', envelope['status'])
+                self.assertEqual('VALID_PARTIAL', envelope['result']['resultContract'])
+                self.assertTrue(envelope['result']['ipr'])
+                self.assertTrue(envelope['result']['vlp'])
+                self.assertEqual([], envelope['result']['profile'])
+                self.assertEqual('PROFILE_RUN_FAILED', envelope['warnings'][0]['code'])
+
     def test_scenario_is_applied_before_nodal_and_failure_closes_without_running(self):
         for unit in ('psia', 'bara'):
             model = FakeModel()

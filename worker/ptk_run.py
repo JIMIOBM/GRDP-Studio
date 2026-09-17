@@ -216,7 +216,7 @@ def _execute_network(model, study, emit_event):
 def validate_scenario(parameters, run_task):
     if parameters is None:
         return
-    if (run_task != 'nodal' or not isinstance(parameters, dict)
+    if (run_task not in ('nodal', 'profile', 'combined') or not isinstance(parameters, dict)
             or set(parameters) != {'schemaVersion', 'reservoirPressurePsi'}
             or parameters['schemaVersion'] != 'pipesim-well-parameters/1'):
         raise AdapterFailure('PROTOCOL', 'INVALID_SCENARIO_PARAMETERS', 'Unsupported well scenario parameters.')
@@ -287,6 +287,9 @@ def execute_request(request, model_factory=None, emit_event=None):
                     "warnings": warnings,
                 }
             components, model_kind = _run_components(model)
+            if request['parameters'] is not None and not (
+                    model_kind == 'basic_gas' or (model_kind == 'black_oil_liquid' and run_task == 'nodal')):
+                raise AdapterFailure('MODEL', 'INVALID_SCENARIO_PARAMETERS', 'The pressure scenario is not supported for this model and task.')
             apply_scenario(model, components['Completion'][0], request['parameters'])
             well_name = components["Well"][0]
         except AdapterFailure:
@@ -324,6 +327,8 @@ def execute_request(request, model_factory=None, emit_event=None):
                         Parameters.PTProfileSimulation.CALCULATEDVARIABLE: Constants.CalculatedVariable.FLOWRATE,
                         Parameters.PTProfileSimulation.FLOWRATETYPE: Constants.FlowRateType.GASFLOWRATE,
                     }
+                    if request['parameters'] is not None:
+                        profile_kwargs["parameters"][Parameters.PTProfileSimulation.INLETPRESSURE] = request['parameters']['reservoirPressurePsi']
                 pt_result = model.tasks.ptprofilesimulation.run(**profile_kwargs)
                 profile = normalize_profile(pt_result.profile)
                 if not profile:

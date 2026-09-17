@@ -1,7 +1,9 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
+import { compactChartSlider } from './chartZoomStyle'
 import PipesimNetworkVariableTable from './PipesimNetworkVariableTable.vue'
+import NetworkBranchOverview from './NetworkBranchOverview.vue'
 import { branchComparison, matchedBranches, networkCsv, nodeResultRows, validatedLayout } from './networkResultInteraction'
 
 const props = defineProps({
@@ -390,7 +392,7 @@ const renderProfileChart = async () => {
     },
     dataZoom: [
       { type: 'inside', xAxisIndex: 0 },
-      { type: 'slider', xAxisIndex: 0, height: 18, bottom: 18 }
+      compactChartSlider()
     ],
     series: displayedProfiles.value.map((profile, index) => ({
       name: profile.branch,
@@ -533,6 +535,7 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
+    <NetworkBranchOverview :profiles="profiles" :run-id="runId" :study="result?.study || ''" @select="branch => { selectedBranch = branch; profileElement?.scrollIntoView({ behavior: 'smooth', block: 'center' }) }" />
     <section class="result-panel profile-panel">
       <div class="panel-heading profile-heading">
         <div><h3>分支剖面</h3><p>TotalDistance 为横轴；空值按曲线间断显示。</p></div>

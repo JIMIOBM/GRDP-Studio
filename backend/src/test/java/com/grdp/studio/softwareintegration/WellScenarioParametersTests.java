@@ -15,6 +15,11 @@ class WellScenarioParametersTests {
         var valid = mapper.readTree("{\"schemaVersion\":\"pipesim-well-parameters/1\",\"reservoirPressurePsi\":4000}");
         assertThat(WellScenarioParameters.valid(valid, "basic_gas", "nodal")).isTrue();
         assertThat(WellScenarioParameters.valid(valid, "network", "nodal")).isFalse();
-        assertThat(WellScenarioParameters.valid(valid, "basic_gas", "combined")).isFalse();
+        for (String task : new String[]{"nodal", "profile", "combined", "network", "eclipse"}) {
+            assertThat(WellScenarioParameters.valid(null, "basic_gas", task)).isTrue();
+            assertThat(WellScenarioParameters.valid(valid, "basic_gas", task)).isEqualTo(java.util.Set.of("nodal", "profile", "combined").contains(task));
+            assertThat(WellScenarioParameters.valid(valid, "black_oil_liquid", task)).isEqualTo("nodal".equals(task));
+            assertThat(WellScenarioParameters.valid(valid, "legacy_well", task)).isFalse();
+        }
     }
 }
