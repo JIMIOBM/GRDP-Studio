@@ -92,13 +92,6 @@ git clone -b violet/feature/software-integration-ui https://github.com/JIMIOBM/G
 cd GRDP-Studio
 ```
 
-如果网络需要代理，可在当前 PowerShell 窗口设置：
-
-```powershell
-$env:HTTP_PROXY='http://127.0.0.1:7897'
-$env:HTTPS_PROXY='http://127.0.0.1:7897'
-```
-
 ### 3. 初始化本机配置
 
 ```powershell
@@ -120,17 +113,18 @@ Copy-Item backend/.env.example backend/.env
 ### 4. 安装前端依赖
 
 ```powershell
+npm install
 cd vue
 npm install
 npm run build
 cd ..
 ```
 
-### 5. 按固定顺序启动
+### 5. 推荐启动方式
 
-建议打开多个 PowerShell 窗口，每个服务单独运行，出现问题时更容易定位日志。
+项目提供了聚合开发命令，页面演示不需要手动维护多个终端：Docker 在后台运行，`npm run dev` 会同时启动 Spring Boot 和 Vue。
 
-**窗口 A：MySQL 和 Redis**
+**基础设施：MySQL 和 Redis**
 
 ```powershell
 docker compose --env-file backend/.env -f backend/compose.yml up -d --wait
@@ -139,26 +133,37 @@ docker ps
 
 应该看到 `grdp-mysql` 和 `grdp-redis`。Docker 数据卷会保留本机数据。
 
-**窗口 B：Spring Boot 后端**
+**页面模式：后端和前端**
 
-确认 `JAVA_HOME` 指向 JDK 21，然后运行：
-
-```powershell
-mvn -f backend/pom.xml spring-boot:run
-```
-
-检查：<http://127.0.0.1:8080/actuator/health>
-
-**窗口 C：Vue 前端**
+确认 `JAVA_HOME` 指向 JDK 21，并确保后端运行参数与 `backend/.env` 一致，然后在项目根目录执行：
 
 ```powershell
-cd vue
-npm run dev -- --host 127.0.0.1
+npm run dev
 ```
 
-浏览器访问：<http://127.0.0.1:5173/login>
+该命令通过 `concurrently` 聚合启动 Spring Boot 和 Vue。浏览器访问：<http://127.0.0.1:5173/login>
 
-**窗口 D：Worker（需要软件集成或真实计算时）**
+后端健康检查：<http://127.0.0.1:8080/actuator/health>
+
+<details>
+<summary>后端无法连接本地数据库时</summary>
+
+在启动聚合命令前，把 `backend/.env` 中的数据库和 Redis 参数配置到当前开发环境，或在 IDE 的运行配置中设置同名环境变量。示例开发值如下：
+
+```text
+MYSQL_URL=jdbc:mysql://127.0.0.1:32000/grdp_studio
+MYSQL_USERNAME=grdp
+MYSQL_PASSWORD=grdp_dev_password
+REDIS_HOST=127.0.0.1
+REDIS_PORT=6379
+REDIS_PASSWORD=grdp_redis_password
+SERVER_PORT=8080
+```
+</details>
+
+**真实计算：按需启动 Worker**
+
+只有执行 PIPESIM 或 ECLIPSE 任务时才需要 Worker。可以在 IDE 的任务配置中启动，也可以按需运行：
 
 ```powershell
 dotnet run --project worker/Grdp.SoftwareIntegration.Worker.csproj
@@ -166,15 +171,15 @@ dotnet run --project worker/Grdp.SoftwareIntegration.Worker.csproj
 
 检查：<http://127.0.0.1:5150/api/health> 和 <http://127.0.0.1:5150/api/capabilities>
 
-启动顺序可以记成：
+启动关系可以记成：
 
 ```text
-Docker Desktop → MySQL/Redis → Spring Boot → Vue → Worker → 模拟器
+Docker Desktop → MySQL/Redis → npm run dev（后端 + 前端）→ Worker（真实计算时）→ 模拟器
 ```
 
 ### 6. 停止服务
 
-停止前端、后端和 Worker 的 PowerShell 窗口后，在项目根目录运行：
+停止 `npm run dev` 和 Worker 后，在项目根目录运行：
 
 ```powershell
 docker compose --env-file backend/.env -f backend/compose.yml down
@@ -190,7 +195,6 @@ docker compose --env-file backend/.env -f backend/compose.yml down
 | `backend/` | Spring Boot API、持久化、运行编排和结果查询 |
 | `worker/` | .NET Worker、进程监督、模拟器调用和结果归一化 |
 | `backend/compose.yml` | 本地 MySQL/Redis 基础设施 |
-| `docs/software-integration/` | 软件集成需求、接口和验收说明 |
 
 ## 常见检查
 
@@ -251,10 +255,6 @@ mvn -f backend/pom.xml test
 
 1. 每次开发前先确认当前分支和工作区：`git status --short --branch`。
 2. 本机配置放在 `.env`、`appsettings*.json` 或用户目录中，不提交密码、许可证、绝对路径和真实业务数据。
-3. 页面、后端、Worker 分窗口启动，按本文档的顺序检查健康接口。
+3. 页面演示统一使用 `npm run dev`；只有真实计算时才额外启动 Worker。
 4. 提交前至少运行受影响层的构建和测试；真实计算要区分“代码构建成功”和“模拟器计算成功”。
 5. 不要用 `docker compose down -v`、删除数据卷或覆盖模型文件来排查普通启动问题。
-
-## 外部资料
-
-- [软件集成需求与验收范围](docs/software-integration/requirements.md)
