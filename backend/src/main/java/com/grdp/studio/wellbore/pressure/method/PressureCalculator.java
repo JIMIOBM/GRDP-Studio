@@ -4,6 +4,7 @@ import com.grdp.studio.common.BusinessException;
 import com.grdp.studio.wellbore.pressure.dto.PressureCalculateRequest;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -67,8 +68,12 @@ public final class PressureCalculator {
         validateDirectInput(request);
 
         List<Double> depths = buildDepths(request.depth, request.step);
+        boolean fromWellhead = "wellhead".equals(request.boundaryPosition);
+        // 温度剖面以用户选择的边界端点为锚点，井底输入时按深度向井口回推。
         List<Double> temperatures = depths.stream()
-                .map(depth -> request.tWh + request.tGrad / 100 * depth)
+                .map(depth -> fromWellhead
+                        ? request.tWh + request.tGrad / 100 * depth
+                        : request.tWh - request.tGrad / 100 * (request.depth - depth))
                 .toList();
 
         return calculate(
@@ -150,10 +155,13 @@ public final class PressureCalculator {
         double area = Math.PI * diameter * diameter / 4;
 
         for (String model : new LinkedHashSet<>(request.models)) {
-            List<Point> points = new ArrayList<>();
-            points.add(new Point(
-                    round(depths.getFirst(), 1),
-                    round(temperatures.getFirst(), 2),
+            boolean fromWellhead = "wellhead".equals(request.boundaryPosition);
+            int boundaryIndex = fromWellhead ? 0 : depths.size() - 1;
+            // 计算方向可以相反，但结果始终按井深升序存放，保持接口和绘图结构不变。
+            List<Point> points = new ArrayList<>(Collections.nCopies(depths.size(), null));
+            points.set(boundaryIndex, new Point(
+                    round(depths.get(boundaryIndex), 1),
+                    round(temperatures.get(boundaryIndex), 2),
                     request.boundaryPressure,
                     null, null, null, null, null, null, null, null,
                     0,
@@ -164,9 +172,11 @@ public final class PressureCalculator {
             int maxIterations = 0;
             int nonconverged = 0;
 
-            for (int index = 1; index < depths.size(); index++) {
-                double segmentLength = depths.get(index) - depths.get(index - 1);
-                double averageTemperature = (temperatures.get(index) + temperatures.get(index - 1)) / 2;
+            for (int offset = 1; offset < depths.size(); offset++) {
+                int index = fromWellhead ? offset : depths.size() - 1 - offset;
+                int previousIndex = fromWellhead ? index - 1 : index + 1;
+                double segmentLength = Math.abs(depths.get(index) - depths.get(previousIndex));
+                double averageTemperature = (temperatures.get(index) + temperatures.get(previousIndex)) / 2;
                 double pressureGuess = pressureStart;
                 boolean converged = false;
                 Properties lastProperties = null;
@@ -203,7 +213,8 @@ public final class PressureCalculator {
                             request
                     );
 
-                    double candidate = pressureStart + gradient * segmentLength;
+                    // 向井底计算累加压降，向井口反算则从井底压力中扣减压降。
+                    double candidate = pressureStart + (fromWellhead ? 1 : -1) * gradient * segmentLength;
                     if (!Double.isFinite(candidate) || candidate <= 0) {
                         fail("压力折算超出有效范围");
                     }
@@ -219,7 +230,7 @@ public final class PressureCalculator {
                 if (!converged) {
                     nonconverged++;
                 }
-                points.add(new Point(
+                points.set(index, new Point(
                         round(depths.get(index), 1),
                         round(temperatures.get(index), 2),
                         round(pressureGuess, 4),

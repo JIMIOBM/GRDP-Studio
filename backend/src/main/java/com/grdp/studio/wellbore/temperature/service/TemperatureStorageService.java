@@ -103,8 +103,8 @@ public class TemperatureStorageService {
         entity.setPropertySource(
                 "PVT".equalsIgnoreCase(request.propertySource) ? "PVT" : "MANUAL"
         );
-        // 井口/井底选项只改变页面名称，算法与现有数据库边界约束均保持井口基准。
-        entity.setBoundaryPosition("wellhead");
+        // 保存本次计算实际采用的井口或井底边界位置。
+        entity.setBoundaryPosition(request.boundaryPosition);
         entity.setStatus("calculated");
         entity.setDepthM(request.depth);
         entity.setStepM(request.step);

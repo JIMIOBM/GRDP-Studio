@@ -28,7 +28,7 @@ public class PressureConversionService {
             String cookie,
             String environment
     ) {
-        // 只在计算开始时读取并校验当前井首条PVT，同时回填气体比重及边界水物性。
+        // 只在计算开始时读取并校验用户所选PVT，同时回填气体比重及边界水物性。
         // 井段迭代沿用原始算法的本地DAK/LGE计算，不能在内层循环逐点调用原平台。
         var session = pvt.open(request, token, cookie, environment);
         return new Calculation(PressureCalculator.calculate(request), session.gasSpecificGravity());

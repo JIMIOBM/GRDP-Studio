@@ -11,9 +11,10 @@ const pressurePages = [
   { type: 'wellbore-pressure', label: '折算方法' },
   { type: 'wellbore-pressure-comparison', label: '结果对比' }
 ]
+const hiddenWellborePageTypes = new Set(['wellbore-pvt-group'])
 
 export function createDefaultWellboreNodes(wellName, wellId) {
-  return wellborePages.map(page => ({
+  return wellborePages.filter(page => !hiddenWellborePageTypes.has(page.type)).map(page => ({
     ...page,
     id: page.type === 'wellbore-pvt-group'
       ? `${wellId || wellName}-${page.type}` : `${page.type}-${wellName}`,

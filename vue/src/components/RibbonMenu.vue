@@ -54,8 +54,8 @@ const defaultTabs = [
       {
         title: '井筒能力',
         columns: [
-          { type: 'checks', items: ['井身结构', 'PVT模型', '温度模型'] },
-          { type: 'checks', items: ['边界条件', '井筒积液', '水合物'] },
+          { type: 'checks', items: ['井身结构', '温度模型','边界条件'] },
+          { type: 'checks', items: ['井筒积液', '水合物'] },
           { type: 'checks', items: ['冲蚀', '出砂'] },
           { type: 'large', label: '压力折算', dropdown: true, dropdownItems: ['折算方法', '结果对比'] }
         ]

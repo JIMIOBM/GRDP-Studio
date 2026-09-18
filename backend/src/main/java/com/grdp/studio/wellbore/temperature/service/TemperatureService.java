@@ -10,7 +10,7 @@ public class TemperatureService {
     public TemperatureService(com.grdp.studio.wellbore.pvt.WellborePvtService pvt) { this.pvt = pvt; }
 
     public TemperatureCalculator.Result calculate(TemperatureCalculateRequest request, String token, String cookie, String environment) {
-        var source = pvt.first(request.projectId, request.gasReservoirId, request.wellName);
+        var source = pvt.selected(request.pvtId, request.projectId, request.gasReservoirId, request.wellName);
         pvt.validateSnapshot(source, request.pvtId, request.pvtSnapshot);
         var session = pvt.open(source, request.projectId, token, cookie, environment, true);
         var water = session.water().apply(request.referencePressure, request.tWh);

@@ -9,14 +9,18 @@ import java.util.Map;
 @RestController
 @RequestMapping("/wellbore/pvt")
 public class WellborePvtController {
-    public record Request(Long projectId, Long gasReservoirId, String wellName, double pressureMpa, double temperatureC) {}
+    public record Request(Long projectId, Long gasReservoirId, String wellName, Long pvtId,
+                          double pressureMpa, double temperatureC) {}
     private final WellborePvtService pvt;
     public WellborePvtController(WellborePvtService pvt) { this.pvt = pvt; }
 
     @GetMapping("/source")
     public ApiResponse<Map<String, Object>> source(@RequestParam Long projectId,
-            @RequestParam Long gasReservoirId, @RequestParam String wellName) {
-        var source = pvt.first(projectId, gasReservoirId, wellName);
+            @RequestParam Long gasReservoirId, @RequestParam String wellName,
+            @RequestParam(required = false) Long pvtId) {
+        var source = pvtId == null
+                ? pvt.first(projectId, gasReservoirId, wellName)
+                : pvt.selected(pvtId, projectId, gasReservoirId, wellName);
         return ApiResponse.success(Map.of("pvtId", source.pvtId(), "pvtSnapshot", source.snapshot(),
                 "gasInput", source.detail().gasInput()));
     }
@@ -27,7 +31,9 @@ public class WellborePvtController {
             @RequestHeader(value="Cookie", required=false) String cookie,
             @RequestHeader(value="Process-Env", required=false) String environment) {
         WellborePvtService.state(request.pressureMpa(), request.temperatureC());
-        var source = pvt.first(request.projectId(), request.gasReservoirId(), request.wellName());
+        var source = request.pvtId() == null
+                ? pvt.first(request.projectId(), request.gasReservoirId(), request.wellName())
+                : pvt.selected(request.pvtId(), request.projectId(), request.gasReservoirId(), request.wellName());
         var session = pvt.open(source, request.projectId(), token, cookie, environment, true);
         var water = session.water().apply(request.pressureMpa(), request.temperatureC());
         Map<String, Object> result = new LinkedHashMap<>();

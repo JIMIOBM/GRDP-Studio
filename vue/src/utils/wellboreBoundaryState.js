@@ -1,7 +1,9 @@
 import { reactive } from 'vue'
 
 const VALUE_FIELDS = ['pressure', 'temperature', 'qGas', 'qLiq']
-const EDITABLE_FIELDS = [...VALUE_FIELDS, 'boundaryPosition']
+// 来源字段与边界值共同在温度模型和压力折算页面间共享，保证两页选择一致。
+const SOURCE_FIELDS = ['productionRecordKey', 'productionDate', 'wellheadChannel', 'pvtId']
+const EDITABLE_FIELDS = [...VALUE_FIELDS, ...SOURCE_FIELDS, 'boundaryPosition']
 const states = new Map()
 
 const contextKey = context => [
@@ -19,6 +21,10 @@ export function getWellboreBoundaryState (context) {
         temperature: null,
         qGas: null,
         qLiq: null,
+        productionRecordKey: null,
+        productionDate: null,
+        wellheadChannel: 'tubing',
+        pvtId: null,
         boundaryPosition: 'wellhead'
       },
       modified: new Set()
@@ -53,7 +59,7 @@ export function commitWellboreBoundaryValues (state, values) {
 }
 
 export function wellboreBoundaryLabels (boundaryPosition) {
-  const inputAtWellhead = boundaryPosition === 'bottomhole'
+  const inputAtWellhead = boundaryPosition === 'wellhead'
   return {
     pressure: inputAtWellhead ? '井口压力 (MPa)' : '井底压力 (MPa)',
     temperature: inputAtWellhead ? '井口温度 (℃)' : '井底温度 (℃)'

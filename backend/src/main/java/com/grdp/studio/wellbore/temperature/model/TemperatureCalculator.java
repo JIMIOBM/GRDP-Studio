@@ -40,26 +40,33 @@ public final class TemperatureCalculator {
         validate(p);
         int segments = (int) Math.ceil(p.depth / p.step);
         List<Double> depths = new ArrayList<>(), formation = new ArrayList<>(), temperatures = new ArrayList<>();
+        boolean fromWellhead = "wellhead".equals(p.boundaryPosition);
+        // 线性初值按所选端点锚定：井口向下递增，井底向上回推。
         for (int i = 0; i <= segments; i++) {
             double d = Math.min(i * p.step, p.depth);
             depths.add(d);
             formation.add(p.tSurf + p.tGrad / 100 * d);
-            temperatures.add(p.tWh + p.tGrad / 100 * d);
+            temperatures.add(fromWellhead
+                    ? p.tWh + p.tGrad / 100 * d
+                    : p.tWh - p.tGrad / 100 * (p.depth - d));
         }
         if ("linear".equalsIgnoreCase(p.tempModel)) {
             List<String> notices = List.of(
-                    "采用原始JS中的井口锚定线性温度模型：T(d)=Twh+Gg·d。",
+                    fromWellhead
+                            ? "采用井口锚定线性温度模型：T(d)=Twh+Gg·d。"
+                            : "采用井底锚定线性温度模型：T(d)=Tbh-Gg·(D-d)。",
                     "当前温度模块独立计算，未启用压力耦合和JT压力项。"
             );
             return new Result("linear", depths, temperatures, formation, null, temperatures.get(segments),
-                    p.tWh, 0, 0, false, notices, "wellhead", p.referencePressure, p.rhoL, null, 0);
+                    temperatures.getFirst(), 0, 0, false, notices, p.boundaryPosition, p.referencePressure, p.rhoL, null, 0);
         }
         Thermal thermal = thermalRelaxation(p);
         double a = thermal.relaxationDistance();
         require(Double.isFinite(a) && a > 0, "热松弛距离无效，请检查产量和传热参数");
         double gravity = 9.80665 * Math.cos(p.angle * Math.PI / 180) / thermal.mixtureHeatCapacity();
         double jtSum = 0;
-        temperatures.set(segments, formation.get(segments));
+        // Alves 原算法沿井底到井口积分；井底模式直接使用用户输入温度作为积分起点。
+        temperatures.set(segments, fromWellhead ? formation.get(segments) : p.tWh);
         for (int i = segments; i > 0; i--) {
             double length = depths.get(i) - depths.get(i - 1);
             double jt = 0; // 独立温度模式明确不接收或推导压力剖面。
@@ -70,20 +77,31 @@ public final class TemperatureCalculator {
             jtSum += jt * length;
         }
         double predictedWellhead = temperatures.get(0);
-        double correction = p.tWh - predictedWellhead;
-        for (int i = 0; i <= segments; i++) {
-            double t = temperatures.get(i) + correction * Math.exp(-depths.get(i) / a);
-            require(Double.isFinite(t) && t > -273.15, "计算温度超出有效范围，请检查输入参数");
-            temperatures.set(i, t);
+        if (fromWellhead) {
+            // 井口模式保留原算法的指数边界校正，使井口点严格等于输入温度。
+            double correction = p.tWh - predictedWellhead;
+            for (int i = 0; i <= segments; i++) {
+                double t = temperatures.get(i) + correction * Math.exp(-depths.get(i) / a);
+                require(Double.isFinite(t) && t > -273.15, "计算温度超出有效范围，请检查输入参数");
+                temperatures.set(i, t);
+            }
+            temperatures.set(0, p.tWh);
+        } else {
+            // 井底模式不再施加井口校正，积分得到的首点即反算井口温度。
+            for (double temperature : temperatures) {
+                require(Double.isFinite(temperature) && temperature > -273.15, "计算温度超出有效范围，请检查输入参数");
+            }
+            predictedWellhead = temperatures.getFirst();
         }
-        temperatures.set(0, p.tWh);
         List<String> notices = new ArrayList<>();
         notices.add("当前温度模块独立计算，未启用压力耦合和JT压力项。");
         notices.add("内部沿用原算法默认值：连续生产时间 30 d、井眼半径 108 mm。地温梯度按测井深度计算。");
-        notices.add("采用生产记录中的井口温度进行井口边界校正。");
+        notices.add(fromWellhead
+                ? "采用生产记录中的井口温度进行井口边界校正。"
+                : "采用用户输入的井底温度沿生产流向反算井口温度。");
         return new Result(p.tempModel, depths, temperatures, formation, thermal, temperatures.get(segments),
                 predictedWellhead, 0, gravity, false, notices,
-                "wellhead", p.referencePressure, p.rhoL, null, 0);
+                p.boundaryPosition, p.referencePressure, p.rhoL, null, 0);
     }
 
     private static void validate(TemperatureCalculateRequest p) {
@@ -95,7 +113,7 @@ public final class TemperatureCalculator {
         );
         range(p.referencePressure, 0.000001, 1000, "参考压力");
         require("alves".equalsIgnoreCase(p.tempModel) || "linear".equalsIgnoreCase(p.tempModel),
-                "温度模型仅支持Alves分段能量平衡或井口锚定线性模型");
+                "温度模型仅支持 Alves 分段能量平衡或边界锚定线性模型");
         range(p.depth, 0.001, 100000, "测井深度");
         range(p.step, 0.001, 100000, "计算步长");
         require(Math.ceil(p.depth / p.step) <= 10000, "计算段数不能超过 10000，请增大步长");
