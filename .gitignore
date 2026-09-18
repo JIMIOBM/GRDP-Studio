@@ -17,9 +17,6 @@ worker/tests/Worker/obj/
 **/__pycache__/
 *.pyc
 
-# Local development files
-AGENTS.md
-.opencode/
 /output/
 backend/*.log
 outputs/
