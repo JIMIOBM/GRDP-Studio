@@ -49,3 +49,5 @@ docs/
 !/backend/sql/productivity_coefficient.sql
 !/backend/sql/README-coefficient.md
 !/backend/src/test/java/com/grdp/studio/coefficient/
+!/backend/src/test/java/com/grdp/studio/storagematerialbalance/
+!/vue/tests/storageMaterialBalance.test.js

@@ -41,6 +41,7 @@ import PipelineCapacityContent from '@/views/PipelineCapacity/PipelineCapacityCo
 import { ensurePipelineNavigation, findPipelinePageNode, pipelinePageForCommand, resolvePipelinePage } from '@/utils/pipelineNavigation'
 import { createDefaultWellboreNodes, ensureWellboreNavigation } from '@/utils/wellboreNavigation'
 import { NODETYPE } from '@/constants/nodeType'
+import { resolveWorkspaceContextId } from '@/constants/workspaceContext'
 import { analyticMethodApi, dataManagementApi, dynamicBalanceApi, materialBalanceApi, nodeApi, notifyApi, parametersApi, projectApi, typicalCurveApi, waterInvasionApi, wellApi } from '@/api/docker'
 import { pvtStorageApi } from '@/api/pvtStorage'
 import { diagnosticCurveApi } from '@/api/diagnosticCurve'
@@ -118,8 +119,8 @@ import {
 } from '@/utils/reservoirGeologicalLossTree'
 
 // 当前工作台所使用的项目和气藏。
-const PROJECT_ID = 7
-const GAS_RESERVOIR_ID = 4
+const PROJECT_ID = resolveWorkspaceContextId(import.meta.env.VITE_WORKSPACE_PROJECT_ID, 7)
+const GAS_RESERVOIR_ID = resolveWorkspaceContextId(import.meta.env.VITE_WORKSPACE_GAS_RESERVOIR_ID, 4)
 const router = useRouter()
 const route = useRoute()
 ensureWorkspaceReservoir({ projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID })

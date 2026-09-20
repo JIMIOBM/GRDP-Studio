@@ -14,6 +14,7 @@ import SurfaceLoss from './LossEvaluation/SurfaceLoss.vue'
 import MultiPeriodComparison from './ProductivityEvaluation/MultiPeriodComparison.vue'
 import MultiMethodComparison from './ProductivityEvaluation/MultiMethodComparison.vue'
 import InjectionProductionComparison from './ProductivityEvaluation/InjectionProductionComparison.vue'
+import MaterialBalance from './InventoryEvaluation/MaterialBalance.vue'
 
 const lossPages = { '微观损耗': MicroscopicLoss, '逸散性损耗': EscapeLoss, '井筒损耗': WellboreLoss, '地面损耗': SurfaceLoss }
 const comparisonPages = { '多周期': MultiPeriodComparison, '多方法': MultiMethodComparison, '注采对比': InjectionProductionComparison }
@@ -44,6 +45,8 @@ const isVentLoss = computed(() =>
 )
 const isPeriodComparison = computed(() => props.command?.group === '产能评价'
   && props.command?.parent === '产能对比' && ['多周期', '多方法', '注采对比'].includes(props.command?.name))
+const isMaterialBalance = computed(() => props.command?.group === '库存评估'
+  && props.command?.parent === '物质平衡法' && props.command?.name === '物质平衡')
 
 // 库级功能有独立的数据范围；入口页不复用单井接口，也不触发计算或保存。
 // 下方组件key同时包含库ID和方法，切库或切方法时重建表单，避免沿用上一库的参数及计算结果。
@@ -66,6 +69,9 @@ const isPeriodComparison = computed(() => props.command?.group === '产能评价
       :project-id="reservoir?.projectId" :gas-reservoir-id="reservoir?.gasReservoirId"
       :storage-id="reservoir?.storageId" :storage-name="reservoirLabel" />
   </section>
+  <MaterialBalance v-else-if="isMaterialBalance"
+    :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-material-balance`"
+    :reservoir="reservoir" />
   <!-- 其他尚未接入的库级功能仍保留占位入口。 -->
   <section v-else class="reservoir-workspace" :aria-label="title">
     <div class="workspace-tabs">

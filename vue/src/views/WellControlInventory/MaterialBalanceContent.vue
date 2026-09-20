@@ -3,21 +3,28 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
 import {analyticMethodApi, materialBalanceApi} from '@/api/docker'
 import {ElMessage} from "element-plus";
+import { formatSourceNumber } from '@/utils/storageMaterialBalanceSource'
 
 const props = defineProps({
   node: Object,
   projectId: [Number, String],
   gasReservoirId: [Number, String],
-  recalculating: Boolean
+  recalculating: Boolean,
+  // 库级来源查看复用本组件的参数、表格、图表；只读模式不触发单井读取或计算。
+  readOnly: Boolean,
+  externalResult: { type: Object, default: null }
 })
 
 const emit = defineEmits(['refresh-tree','recalculate'])
+const displayValue = value => props.readOnly ? formatSourceNumber(value) : value
+const displayCell = (_row, _column, value) => displayValue(value)
 
 const loading = ref(false)
 const resultData = ref(null)
 const activePanelTab = ref('input')
 const activeChartTab = ref(0)
 const activeContentTab = ref('chart')
+const sourceDataPage = ref(1)
 const chartEl = ref(null)
 const chartAreaEl = ref(null)
 const equationGraphicPosition = ref(null)
@@ -45,6 +52,7 @@ const PRODUCTION_TEMPLATE_COLUMNS = [
 ]
 
 let chart = null
+let sourceResizeObserver = null
 let requestSeq = 0
 
 const rawNode = computed(() => props.node?.raw || {})
@@ -190,6 +198,8 @@ const mergeResultWithAverageRow = (result, averageRow, index) => {
 }
 
 const input = computed(() => resultData.value?.input || {})
+const sourceInputRows = computed(() => resultData.value?.inputItems || [])
+const displayedSourceInputRows = computed(() => sourceInputRows.value.slice((sourceDataPage.value - 1) * 50, sourceDataPage.value * 50))
 
 const getChartItems = (value) => {
   const items =
@@ -224,6 +234,7 @@ const output = computed(() => chartTabs.value[activeChartTab.value]?.output || {
 const activeChartItems = computed(() => chartTabs.value[activeChartTab.value]?.chartItems || [])
 
 const toNumber = (value) => {
+  if (props.readOnly && (value === null || value === undefined || value === '')) return null
   const number = Number(value)
   return Number.isFinite(number) ? number : null
 }
@@ -395,7 +406,7 @@ const isRegressionItem = (item, index) => {
 
 const pointChartItem = computed(() =>
     activeChartItems.value.find((item, index) => Array.isArray(item?.data) && item.data.length && !isRegressionItem(item, index)) ||
-    activeChartItems.value.find(item => Array.isArray(item?.data) && item.data.length) ||
+    (!props.readOnly && activeChartItems.value.find(item => Array.isArray(item?.data) && item.data.length)) ||
     null
 )
 
@@ -412,19 +423,23 @@ const chartPoints = computed(() =>
 )
 
 const regression = computed(() => {
+  if (props.readOnly && resultData.value?.validRegression !== true) return null
   const value = output.value || {}
   const slope = toNumber(value.gradient ?? value.slope)
   const intercept = toNumber(value.intercept)
   const r2 = toNumber(value.rsquared ?? value.r2)
 
   if (slope === null || intercept === null) return null
-  return { slope, intercept, r2: r2 ?? 0 }
+  return { slope, intercept, r2: props.readOnly ? r2 : r2 ?? 0 }
 })
 
 const chartXRange = computed(() => {
-  if (!chartPoints.value.length) return { xMin: 0, xMax: 1 }
+  const points = props.readOnly
+      ? [...chartPoints.value, ...regressionChartItems.value.flatMap(item => item.data.map(getPointFromRow).filter(Boolean))]
+      : chartPoints.value
+  if (!points.length) return { xMin: 0, xMax: 1 }
 
-  const xs = chartPoints.value.map(([x]) => x)
+  const xs = points.map(([x]) => x)
   const xMax = Math.max(...xs)
   const xPadding = Math.max(xMax * 0.05, 1)
 
@@ -454,7 +469,7 @@ const regressionLinePoints = computed(() => {
         .filter(Boolean)
   }
 
-  return calculatedRegressionLinePoints.value
+  return props.readOnly ? [] : calculatedRegressionLinePoints.value
 })
 
 const chartTitle = computed(() =>
@@ -494,6 +509,8 @@ const tableRows = computed(() =>
         })
         .filter(Boolean)
 )
+const displayedTableRows = computed(() => props.readOnly
+    ? tableRows.value.slice((sourceDataPage.value - 1) * 50, sourceDataPage.value * 50) : tableRows.value)
 
 const getMethodValue = (methods, key) => {
   const value = input.value?.[key]
@@ -504,7 +521,8 @@ const getMethodValue = (methods, key) => {
 
 const getRegressionEquationText = (reg) => {
   if (!reg) return ''
-  return `Y = ${formatSci(reg.slope)} * X + ${formatSci(reg.intercept)}\nR² = ${Number(reg.r2 || 0).toFixed(4)}`
+  const rSquared = props.readOnly && reg.r2 === null ? '—' : Number(reg.r2 || 0).toFixed(4)
+  return `Y = ${formatSci(reg.slope)} * X + ${formatSci(reg.intercept)}\nR² = ${rSquared}`
 }
 
 const getEquationGraphicPosition = () => {
@@ -630,7 +648,9 @@ const createChartSeries = () => {
       // name: pointChartItem.value?.name || '数据点(Mpa)',
       name: '数据点(Mpa)',
       type: 'scatter',
-      data: chartPoints.value,
+      data: props.readOnly ? primaryPointRows.value.map(row => ({
+        value: getPointFromRow(row), itemStyle: { color: row.isDeleted ? '#aaa' : '#0037b5' }
+      })).filter(point => point.value) : chartPoints.value,
       symbolSize: 11,
       itemStyle: { color: '#0037b5', opacity: 0.85 },
       tooltip: { show: true }
@@ -820,6 +840,18 @@ async function fetchData() {
   await nextTick()
   renderChart()
 
+  if (props.readOnly) {
+    if (requestId !== requestSeq) return
+    loading.value = false
+    resultData.value = props.externalResult
+    activeContentTab.value = 'input'
+    activePanelTab.value = 'input'
+    sourceDataPage.value = 1
+    await nextTick()
+    renderChart()
+    return
+  }
+
   if (!wellName || !props.projectId || !props.gasReservoirId) return
 
   loading.value = true
@@ -960,7 +992,7 @@ const importProductionData = async (event) => {
 }
 
 function handleRecalculate() {
-  if (props.recalculating) return
+  if (props.readOnly || props.recalculating) return
 
   const waterGasRatioLimit = enableWaterGasRatioLimit.value
       ? Number(waterGasRatioLimitValue.value)
@@ -983,10 +1015,18 @@ watch(() => [
   props.projectId,
   props.gasReservoirId,
   props.node?.materialBalanceRefreshKey,
-  props.node?.materialBalanceReservoirType
+  props.node?.materialBalanceReservoirType,
+  props.readOnly,
+  props.externalResult
 ], fetchData, { immediate: true })
 watch(activeChartTab, () => nextTick(renderChart))
-watch(activeContentTab, (tab) => { if (tab === 'chart') nextTick(renderChart)})
+watch(activeContentTab, (tab) => {
+  if (tab === 'chart') {
+    if (props.readOnly) renderChartSoon()
+    else nextTick(renderChart)
+  }
+})
+watch(activeContentTab, () => { sourceDataPage.value = 1 })
 watch([chartPoints, regressionLinePoints], () => nextTick(renderChart), { deep: true })
 //监听计算方式
 watch(input,(value)=>{
@@ -1005,11 +1045,19 @@ watch(input,(value)=>{
 
 onMounted(() => {
   chart = echarts.init(chartEl.value)
+  if (props.readOnly) {
+    sourceResizeObserver = new ResizeObserver(() => {
+      if (chartEl.value?.clientWidth && chartEl.value?.clientHeight) renderChartSoon()
+    })
+    sourceResizeObserver.observe(chartEl.value)
+  }
   window.addEventListener('resize', renderChartSoon)
   renderChartSoon()
 })
 
 onBeforeUnmount(() => {
+  requestSeq++
+  sourceResizeObserver?.disconnect()
   window.removeEventListener('resize', renderChartSoon)
   stopParamsPanelResize()
   stopLegendDrag()
@@ -1070,6 +1118,7 @@ onBeforeUnmount(() => {
                 <label>{{ item.label }}</label>
                 <el-select
                     v-if="item.options"
+                    :disabled="readOnly"
                     size="small"
                     :model-value="item.value"
                     style="width: 100%"
@@ -1081,14 +1130,14 @@ onBeforeUnmount(() => {
                       :value="option.value"
                   />
                 </el-select>
-                <el-input v-else size="small" readonly :model-value="item.value" />
+                <el-input v-else size="small" readonly :model-value="displayValue(item.value)" />
               </div>
             </div>
           </template>
 
           <!--计算条件-->
-          <div class="section-title">计算条件</div>
-          <div class="condition-panel">
+          <div v-if="!readOnly" class="section-title">计算条件</div>
+          <div v-if="!readOnly" class="condition-panel">
 
             <div class="type-row">
               <span class="type-name-label">请选择物质平衡方程类型：</span>
@@ -1115,11 +1164,12 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <div class="section-title">生产数据</div>
-          <div class="btn-row">
+          <div v-if="!readOnly" class="btn-row">
             <el-button size="small" @click="downloadProductionTemplate">模版下载</el-button>
             <el-button size="small" @click="openProductionImport">导入</el-button>
           </div>
 <!--          <input ref="importFileInput" class="hidden-file-input" type="file" accept=".xlsx,.xls" @change="importProductionData"/>-->
+          <div v-if="readOnly" class="empty">智慧气藏已保存数据（只读），请在右侧“生产数据”查看。</div>
         </div>
 
         <div v-show="activePanelTab === 'output'" class="panel-body">
@@ -1127,7 +1177,7 @@ onBeforeUnmount(() => {
           <div class="field-grid">
             <div v-for="item in displayedOutputFields" :key="item.key" class="field">
               <label>{{ item.label }}</label>
-              <el-input size="small" readonly :model-value="item.value" />
+              <el-input size="small" readonly :model-value="displayValue(item.value)" />
             </div>
           </div>
         </div>
@@ -1186,15 +1236,27 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <div v-if="activeContentTab === 'table'" class="data-list-panel">
-        <el-table :data="tableRows" size="small" height="100%" border stripe>
+        <el-table :data="displayedTableRows" size="small" :height="readOnly ? 'calc(100% - 42px)' : '100%'" border stripe>
           <el-table-column prop="index" label="序号" width="70" />
-          <el-table-column prop="gp" label="Gp(10⁸m³)" min-width="150" />
-          <el-table-column prop="pressure" label="Pp(MPa)" min-width="130" />
+          <el-table-column prop="gp" label="Gp(10⁸m³)" min-width="150" :formatter="displayCell" />
+          <el-table-column prop="pressure" label="Pp(MPa)" min-width="130" :formatter="displayCell" />
           <el-table-column prop="selected" label="回归点" min-width="90" />
         </el-table>
+        <el-pagination v-if="readOnly" v-model:current-page="sourceDataPage" :total="tableRows.length" :page-size="50" layout="total, prev, pager, next" />
+      </div>
+      <div v-if="readOnly && activeContentTab === 'input'" class="data-list-panel">
+        <el-table :data="displayedSourceInputRows" size="small" height="calc(100% - 42px)" border stripe empty-text="未保存生产输入数据">
+          <el-table-column prop="date" label="日期" width="120" />
+          <el-table-column prop="pressure" label="地层压力(MPa)" min-width="135" :formatter="displayCell" />
+          <el-table-column prop="gas" label="累产气量(10⁸m³)" min-width="150" :formatter="displayCell" />
+          <el-table-column prop="water" label="累产水量(10⁴m³)" min-width="150" :formatter="displayCell" />
+          <el-table-column label="原平台排除" width="105"><template #default="{ row }">{{ row.deleted ? '是' : '否' }}</template></el-table-column>
+        </el-table>
+        <el-pagination v-model:current-page="sourceDataPage" :total="sourceInputRows.length" :page-size="50" layout="total, prev, pager, next" />
       </div>
 
       <div class="chart-tabs">
+        <button v-if="readOnly" type="button" class="chart-tab" :class="{ active: activeContentTab === 'input' }" @click="activeContentTab = 'input'">生产数据</button>
         <button type="button" class="chart-tab" :class="{ active: activeContentTab === 'table' }" @click="activeContentTab = 'table'">
           数据列表
         </button>
