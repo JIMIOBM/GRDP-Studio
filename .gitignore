@@ -55,6 +55,8 @@ docs/
 !/backend/sql/hydrate-method.md
 !/backend/sql/productivity_coefficient.sql
 !/backend/sql/README-coefficient.md
+!/backend/sql/storage_network.sql
 !/backend/src/test/java/com/grdp/studio/coefficient/
 !/backend/src/test/java/com/grdp/studio/storagematerialbalance/
+!/backend/src/test/java/com/grdp/studio/storagenetwork/
 !/vue/tests/storageMaterialBalance.test.js
