@@ -3,12 +3,14 @@ package com.grdp.studio.wellbore.temperature.dto;
 /** SI conversions occur in the calculator; UI units are documented in docs/wellbore-temperature.md. */
 public class TemperatureCalculateRequest {
     public String tempModel = "alves";
-    /** 独立 Alves 温度算法当前仅接受井口边界。 */
+    /** 温度计算边界位置，支持井口或井底。 */
     public String boundaryPosition = "wellhead";
     public String propertySource = "PVT";
     public java.util.Map<String, Object> pvtSnapshot;
     public Long projectId, gasReservoirId, pvtId;
     public String wellName;
+    /** 所选注采记录来源，仅用于计算快照追溯。 */
+    public String productionRecordKey, productionDate, productionChannel;
     /** 仅作为物性评价与输入快照保存，不构造压力剖面。 */
     public double referencePressure = 3.8;
     public double depth = 3100, step = 50, idTubing = 62, tGrad = 3, angle = 0;

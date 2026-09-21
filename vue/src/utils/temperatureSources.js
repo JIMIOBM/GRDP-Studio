@@ -19,6 +19,45 @@ export const wellRows = (rows, wellName, scoped = false) => rows.filter(row => {
 export const latestRow = rows => [...rows].sort((a, b) =>
   String(read(b, 'date', 'productionDate', 'production_date') ?? '').localeCompare(String(read(a, 'date', 'productionDate', 'production_date') ?? '')))[0]
 
+// 统一接口日期和日期组件值，避免“/”、非补零月份或时间部分导致记录匹配失败。
+export function normalizeProductionDate (value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return [
+      value.getFullYear(),
+      String(value.getMonth() + 1).padStart(2, '0'),
+      String(value.getDate()).padStart(2, '0')
+    ].join('-')
+  }
+  const match = String(value ?? '').trim().match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/)
+  return match
+    ? `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`
+    : ''
+}
+
+export const productionDate = row => normalizeProductionDate(
+  read(row, 'date', 'productionDate', 'production_date')
+)
+
+export const productionRecordKey = (row, index = 0) => String(
+  read(row, 'id', 'productionDataId', 'production_data_id')
+  ?? `${productionDate(row)}:${index}`
+)
+
+// 日历只使用带有效日期的记录，并默认按日期从新到旧排列。
+export const productionRecords = rows => [...rows]
+  .map((row, index) => ({ row, key: productionRecordKey(row, index), date: productionDate(row) }))
+  .filter(item => item.date)
+  .sort((left, right) => right.date.localeCompare(left.date))
+
+export function inferWellheadChannel(flowPath) {
+  const value = String(flowPath ?? '').trim().toLowerCase()
+  const tubing = /油管|tubing/.test(value)
+  const casing = /套管|环空|annulus|casing/.test(value)
+  // 只有明确为套管或环空生产时才默认套管，其余情况保守采用油管。
+  if (casing && !tubing) return 'casing'
+  return 'tubing'
+}
+
 export function deviationValues(response, wellName) {
   const rows = wellRows(rowsOf(response), wellName, true).map(row => ({
     depth: numberOf(read(row, 'measuredDepth', 'measured_depth')),
@@ -44,14 +83,28 @@ export function tubingRows(response, wellName) {
   }))
 }
 
-export function productionValues(row, position, fields = []) {
+export function productionValues(row, position, fields = [], channel = 'tubing') {
   const bottom = position === 'bottomhole'
+  const casing = channel === 'casing'
+  // 井口压力与温度必须取自同一生产通道，避免油压与套温等交叉组合。
   const pressure = bottom
-    ? read(row, 'measuredBottomHolePressure', 'measured_bottom_hole_pressure', 'bottomHolePressure', 'bottom_hole_pressure')
-    : read(row, 'wellHeadTubingPressure', 'well_head_tubing_pressure')
+    ? read(
+        row,
+        'measuredBottomHolePressure',
+        'measured_bottom_hole_pressure',
+        'calculatedBottomHolePressure',
+        'calculated_bottom_hole_pressure',
+        'bottomHolePressure',
+        'bottom_hole_pressure'
+      )
+    : casing
+      ? read(row, 'wellHeadCasingPressure', 'well_head_casing_pressure')
+      : read(row, 'wellHeadTubingPressure', 'well_head_tubing_pressure')
   const temperature = bottom
     ? read(row, 'measuredBottomHoleTemperature', 'measured_bottom_hole_temperature', 'bottomHoleTemperature', 'bottom_hole_temperature')
-    : read(row, 'wellHeadTubingTemperature', 'well_head_tubing_temperature')
+    : casing
+      ? read(row, 'wellHeadCasingTemperature', 'well_head_casing_temperature')
+      : read(row, 'wellHeadTubingTemperature', 'well_head_tubing_temperature')
   let gas = numberOf(read(row, 'dailyGasProduction', 'daily_gas_production'))
   const gasUnit = fields.find(f => ['dailyGasProduction', 'daily_gas_production'].includes(f.name))?.unit_label
   // The project's production table uses 10^4 m³/d. Convert only an explicit plain m³/d source.

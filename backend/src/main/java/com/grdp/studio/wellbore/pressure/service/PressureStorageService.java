@@ -156,14 +156,13 @@ public class PressureStorageService {
         records.insert(entity);
 
         for (PressureCalculator.MethodResult method : output.methods().values()) {
-            saveMethod(entity.getId(), request.boundaryPressure, method);
+            saveMethod(entity.getId(), method);
         }
         return detailByWell(entity.getId(), wellId);
     }
 
     private void saveMethod(
             long pressureId,
-            double boundaryPressure,
             PressureCalculator.MethodResult result
     ) {
         PressureMethodResultEntity method = new PressureMethodResultEntity();
@@ -182,8 +181,9 @@ public class PressureStorageService {
         method.setNonconvergedSegmentCount(result.nonconvergedSegmentCount());
         method.setSegmentCount(result.profile().size() - 1);
         method.setBottomPressureMpa(result.profile().getLast().pressure());
+        // 剖面固定按井深升序保存，因此压差始终定义为井底压力减井口压力。
         method.setPressureDifferenceMpa(
-                result.profile().getLast().pressure() - boundaryPressure
+                result.profile().getLast().pressure() - result.profile().getFirst().pressure()
         );
         method.setResultSummaryJson(write(result));
         methods.insert(method);

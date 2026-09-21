@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { pbkdf2Sync } from 'node:crypto'
 import { fileURLToPath, URL } from 'node:url'
@@ -18,6 +18,21 @@ const getLocalEnvValue = (key) => {
   const value = process.env[key]
   return value ? parseEnvValue(value) : ''
 }
+
+// 实际认证容器与旧前端脚本可能来自不同版本，不能只根据页面脚本猜 Cookie 名。
+// 仅接受已知身份 Cookie（或部署显式指定的名称），并以 whoami 校验后的会话为准。
+const getIdentityCookies = cookieHeader => {
+  const configuredName = getLocalEnvValue('DOCKER_SESSION_COOKIE_NAME')
+  const names = configuredName ? [configuredName] : ['ahksoil_identity_session', 'grdp_identity_session']
+  return names.map(name => getCookiePair(cookieHeader, name))
+    .filter(cookie => cookie && cookie.indexOf('=') < cookie.length - 1).join('; ')
+}
+
+// 仅服务端使用，登录凭据不写入日志或浏览器存储。
+const authFetch = (url, options = {}) => fetch(url, {
+  ...options,
+  signal: AbortSignal.timeout(15000)
+})
 
 const getCookiePair = (cookieHeader, name) => {
   return String(cookieHeader || '')
@@ -79,7 +94,7 @@ const hashDockerPassword = (password, username) =>
 
 const verifyDockerSession = async (cookie, baseUrl) => {
   const sessionPath = getLocalEnvValue('DOCKER_SESSION_CHECK_PATH') || '/services/ory/kratos/sessions/whoami'
-  const response = await fetch(new URL(sessionPath, baseUrl), {
+  const response = await authFetch(new URL(sessionPath, baseUrl), {
     headers: {
       Accept: 'application/json',
       Cookie: cookie
@@ -94,7 +109,7 @@ const verifyDockerSession = async (cookie, baseUrl) => {
   }
 
   const session = await response.json()
-  if (session?.active === false) {
+  if (session?.active !== true || !session?.identity?.id) {
     const error = new Error('原平台会话未激活')
     error.status = 401
     throw error
@@ -105,7 +120,7 @@ const verifyDockerSession = async (cookie, baseUrl) => {
 const initDockerLoginFlow = async () => {
   const baseUrl = getLocalEnvValue('DOCKER_AUTH_BASE_URL') || 'http://127.0.0.1:9919'
   const loginInitPath = getLocalEnvValue('DOCKER_LOGIN_INIT_PATH') || '/services/ory/kratos/self-service/login/browser'
-  const response = await fetch(new URL(loginInitPath, baseUrl), {
+  const response = await authFetch(new URL(loginInitPath, baseUrl), {
     headers: {
       Accept: 'application/json'
     },
@@ -123,13 +138,14 @@ const initDockerLoginFlow = async () => {
     const flowId = new URL(location, baseUrl).searchParams.get('flow')
     if (!flowId) throw new Error('原平台登录初始化未返回 flow')
 
-    const flowResponse = await fetch(
+    const flowResponse = await authFetch(
       new URL(`/services/ory/kratos/self-service/login/flows?id=${encodeURIComponent(flowId)}`, baseUrl),
       {
         headers: {
           Accept: 'application/json',
           ...(initCookie ? { Cookie: initCookie } : {})
-        }
+        },
+        redirect: 'manual'
       }
     )
 
@@ -144,8 +160,10 @@ const initDockerLoginFlow = async () => {
 }
 
 const loginDockerPlatform = async ({ username, password }) => {
-  if (!username || !password) {
-    throw new Error('缺少原平台登录用户名或密码')
+  if (typeof username !== 'string' || !username.trim() || typeof password !== 'string' || !password) {
+    const error = new Error('请输入用户名和密码')
+    error.status = 400
+    throw error
   }
 
   const { flow, initCookie, baseUrl } = await initDockerLoginFlow()
@@ -165,7 +183,7 @@ const loginDockerPlatform = async ({ username, password }) => {
     hashDockerPassword(password, username)
   )
 
-  const response = await fetch(new URL(`${loginPath}?flow=${encodeURIComponent(flowId)}`, baseUrl), {
+  const response = await authFetch(new URL(`${loginPath}?flow=${encodeURIComponent(flowId)}`, baseUrl), {
     method: 'POST',
     headers: {
       Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -190,29 +208,48 @@ const loginDockerPlatform = async ({ username, password }) => {
     throw error
   }
 
-  const cookie = [initCookie, loginCookie].filter(Boolean).join('; ')
-  if (!cookie || !cookie.includes('ahksoil_identity_session')) {
+  const identityCookie = getIdentityCookies(loginCookie)
+  if (!identityCookie) {
     let message = ''
     try {
       message = getFlowErrorMessage(JSON.parse(responseText))
     } catch {
-      // Keep the fallback below when the response is not JSON.
+      // 浏览器表单登录失败也可能返回 303 + 空响应，具体错误保存在登录 flow 中。
     }
-    const error = new Error(message || '原平台用户名或密码不正确')
-    error.status = 401
+    if (!message) {
+      try {
+        const flowResponse = await authFetch(
+          new URL(`/services/ory/kratos/self-service/login/flows?id=${encodeURIComponent(flowId)}`, baseUrl),
+          { headers: { Accept: 'application/json', ...(initCookie ? { Cookie: initCookie } : {}) }, redirect: 'manual' }
+        )
+        if (flowResponse.ok) message = getFlowErrorMessage(await flowResponse.json())
+      } catch {
+        // 无法确认密码错误时，只报告会话获取失败，不能误导用户反复修改密码。
+      }
+    }
+    const error = new Error(message || '旧平台未返回有效登录会话，请检查登录服务配置')
+    error.status = message ? 401 : 502
     throw error
   }
 
-  const session = await verifyDockerSession(cookie, baseUrl)
+  const session = await verifyDockerSession(identityCookie, baseUrl)
   return {
-    cookie,
-    identityCookie: getCookiePair(cookie, 'ahksoil_identity_session'),
-    expiresAt: session?.expires_at || null
+    identityCookie,
+    expiresAt: session.expires_at || null,
+    account: {
+      id: session.identity.id,
+      username,
+      nickname: username
+    }
   }
 }
 
-export default defineConfig(() => {
-  let dockerSessionCookie = ''
+export default defineConfig(({ mode }) => {
+  // Vite 不会自动把 .env.local 的服务端变量填入 process.env。
+  const env = loadEnv(mode, fileURLToPath(new URL('.', import.meta.url)), 'DOCKER_')
+  for (const [key, value] of Object.entries(env)) {
+    if (process.env[key] === undefined) process.env[key] = value
+  }
 
   const logDockerProxyRequest = (proxyReq, req) => {
     if (!/waterinvasionanalysis|common\/notify/.test(req.url || '')) return
@@ -221,7 +258,7 @@ export default defineConfig(() => {
     console.log('[docker-proxy]', req.method, req.url, {
       targetPath: req.url?.replace(/^\/docker-api/, '/api'),
       hasCookie: Boolean(cookie),
-      hasIdentitySession: String(cookie).includes('ahksoil_identity_session'),
+      hasIdentitySession: Boolean(getIdentityCookies(cookie)),
       origin: proxyReq.getHeader('origin'),
       processEnv: proxyReq.getHeader('process-env')
     })
@@ -232,24 +269,21 @@ export default defineConfig(() => {
   const applyDockerHeaders = (proxyReq, req) => {
     alignDockerOrigin(proxyReq)
 
-    // A user may sign in to the original platform again after Vite has cached
-    // an older Kratos session. Prefer the cookie on the current browser request
-    // so an inactive cached session cannot overwrite the newly active one.
-    const browserCookie = req.headers?.cookie || ''
-    if (browserCookie.includes('ahksoil_identity_session')) {
-      proxyReq.setHeader('Cookie', browserCookie)
-    } else if (dockerSessionCookie) {
-      proxyReq.setHeader('Cookie', dockerSessionCookie)
+    // HTTP 与 WebSocket 都只转发当前浏览器的身份会话，禁止全局会话兜底。
+    const identityCookie = getIdentityCookies(req.headers?.cookie)
+    if (identityCookie) {
+      proxyReq.setHeader('Cookie', identityCookie)
     } else {
       proxyReq.removeHeader('Cookie')
     }
   }
   const sendJson = (res, statusCode, data) => {
     res.statusCode = statusCode
+    res.setHeader('Cache-Control', 'no-store')
     res.setHeader('Content-Type', 'application/json; charset=utf-8')
     res.end(JSON.stringify(data))
   }
-  const setBrowserIdentityCookie = (res, identityCookie, expiresAt) => {
+  const setBrowserIdentityCookie = (req, res, identityCookie, expiresAt) => {
     if (!identityCookie) return
     const expiresDate = expiresAt ? new Date(expiresAt) : null
     const expires = expiresDate && !Number.isNaN(expiresDate.getTime())
@@ -257,7 +291,8 @@ export default defineConfig(() => {
       : ''
     res.setHeader(
       'Set-Cookie',
-      `${identityCookie}; Path=/; HttpOnly; SameSite=Lax${expires}`
+      identityCookie.split('; ').map(cookie =>
+        `${cookie}; Path=/; HttpOnly; SameSite=Lax${req.socket.encrypted ? '; Secure' : ''}${expires}`)
     )
   }
   return {
@@ -272,14 +307,32 @@ export default defineConfig(() => {
               return
             }
 
+            // 登录只接受本站 JSON 请求，避免其他站点替用户切换登录账号。
+            const expectedOrigin = `${req.socket.encrypted ? 'https' : 'http'}://${req.headers.host}`
+            if ((req.headers.origin && req.headers.origin !== expectedOrigin)
+                || req.headers['sec-fetch-site'] === 'cross-site') {
+              sendJson(res, 403, { success: false, message: '不允许跨站登录请求' })
+              return
+            }
+            if (!/^application\/json(?:;|$)/i.test(req.headers['content-type'] || '')) {
+              sendJson(res, 415, { success: false, message: '登录请求必须使用 JSON 格式' })
+              return
+            }
+
             try {
               const body = await parseJsonBody(req)
-              const session = await loginDockerPlatform(body)
-              dockerSessionCookie = session.cookie
-              setBrowserIdentityCookie(res, session.identityCookie, session.expiresAt)
-              sendJson(res, 200, { success: true, expiresAt: session.expiresAt })
+              const session = await loginDockerPlatform(body || {})
+              setBrowserIdentityCookie(req, res, session.identityCookie, session.expiresAt)
+              sendJson(res, 200, { success: true, account: session.account, expiresAt: session.expiresAt })
             } catch (error) {
-              sendJson(res, error.status || 500, { success: false, message: error.message || '原平台登录失败' })
+              const timeout = error.name === 'TimeoutError' || error.name === 'AbortError'
+              const networkError = error instanceof TypeError && error.message === 'fetch failed'
+              sendJson(res, error.status || (timeout ? 504 : networkError ? 502 : 500), {
+                success: false,
+                message: timeout ? '登录认证超时，请稍后重试'
+                  : networkError ? '无法连接旧平台认证服务，请确认服务已启动'
+                    : error.message || '登录认证失败'
+              })
             }
           })
         }

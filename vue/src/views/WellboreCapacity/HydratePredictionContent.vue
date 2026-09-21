@@ -259,9 +259,9 @@ watch(() => [props.projectId, props.gasReservoirId, props.node.wellName], () => 
         </div>
 
         <h3 class="subheading">天然气组分</h3>
-        <p class="hint">
-          H₂S、CO₂、N₂来自当前井第一条PVT性质；其余组成需按真实数据补充，单位为摩尔百分数，总和应为100%。灰色组分不参与hydT2计算。
-        </p>
+<!--        <p class="hint">-->
+<!--          H₂S、CO₂、N₂来自当前井第一条PVT性质；其余组成需按真实数据补充，单位为摩尔百分数，总和应为100%。灰色组分不参与hydT2计算。-->
+<!--        </p>-->
 
         <div class="parameter-grid composition">
           <label

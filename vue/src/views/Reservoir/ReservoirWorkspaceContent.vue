@@ -15,6 +15,7 @@ import MultiPeriodComparison from './ProductivityEvaluation/MultiPeriodCompariso
 import MultiMethodComparison from './ProductivityEvaluation/MultiMethodComparison.vue'
 import InjectionProductionComparison from './ProductivityEvaluation/InjectionProductionComparison.vue'
 import MaterialBalance from './InventoryEvaluation/MaterialBalance.vue'
+import GasReservoirDiagnosticCurveContent from './GasReservoirDiagnosticCurveContent.vue'
 
 const lossPages = { '微观损耗': MicroscopicLoss, '逸散性损耗': EscapeLoss, '井筒损耗': WellboreLoss, '地面损耗': SurfaceLoss }
 const comparisonPages = { '多周期': MultiPeriodComparison, '多方法': MultiMethodComparison, '注采对比': InjectionProductionComparison }
@@ -47,16 +48,27 @@ const isPeriodComparison = computed(() => props.command?.group === '产能评价
   && props.command?.parent === '产能对比' && ['多周期', '多方法', '注采对比'].includes(props.command?.name))
 const isMaterialBalance = computed(() => props.command?.group === '库存评估'
   && props.command?.parent === '物质平衡法' && props.command?.name === '物质平衡')
+const isDiagnosticCurve = computed(() =>
+  props.command?.group === '库存评估' && props.command?.name === '诊断曲线'
+)
+const lossComponent = computed(() => props.command?.name ? lossPages[props.command.name] : null)
+const lossKey = computed(() => `${props.reservoir?.projectId}-${props.reservoir?.gasReservoirId}-${props.reservoir?.storageId}-${props.command?.name}`)
 
 // 库级功能有独立的数据范围；入口页不复用单井接口，也不触发计算或保存。
 // 下方组件key同时包含库ID和方法，切库或切方法时重建表单，避免沿用上一库的参数及计算结果。
 </script>
 
 <template>
+  <GasReservoirDiagnosticCurveContent
+    v-if="isDiagnosticCurve"
+    :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-grd-diag`"
+    :reservoir="reservoir"
+  />
+
   <!-- 每个损耗功能都有独立页面；项目、库或功能变化时销毁旧页面状态。 -->
-  <component :is="lossPages[command.name]"
-    v-if="isGeologicalLoss || isVentLoss"
-    :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-${command.name}`"
+  <component :is="lossComponent"
+    v-else-if="isGeologicalLoss || isVentLoss"
+    :key="lossKey"
     :reservoir="reservoir"
   />
   <!-- 与单井页面一致：先显示模块页签，再显示参数栏和右侧分析结果页签。 -->

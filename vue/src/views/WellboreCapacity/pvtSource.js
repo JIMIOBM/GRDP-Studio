@@ -1,5 +1,7 @@
-export async function firstPvtSource (request, context) {
-  const response = await request.get('/wellbore/pvt/source', { params: { ...context } })
+export async function firstPvtSource (request, context, pvtId = null) {
+  const response = await request.get('/wellbore/pvt/source', {
+    params: { ...context, ...(pvtId ? { pvtId: Number(pvtId) } : {}) }
+  })
   return response?.data?.data ?? response?.data ?? response
 }
 
@@ -18,9 +20,29 @@ export function pvtComposition (gas) {
   return Object.fromEntries(Object.entries(values).map(([key, value]) => [key, Number(value)]))
 }
 
-export async function waterProperties (request, context, pressureMpa, temperatureC) {
+export async function waterProperties (request, context, pressureMpa, temperatureC, pvtId = null) {
   const response = await request.post('/wellbore/pvt/water-properties', {
-    ...context, pressureMpa: Number(pressureMpa), temperatureC: Number(temperatureC)
+    ...context,
+    ...(pvtId ? { pvtId: Number(pvtId) } : {}),
+    pressureMpa: Number(pressureMpa),
+    temperatureC: Number(temperatureC)
   }, { timeout: 600000, headers: { 'Process-Env': 'prod' } })
   return response?.data?.data ?? response?.data ?? response
+}
+
+// 有有效边界温压时同步评价水密度和黏度；井底温压尚未填写时先加载PVT身份及气体比重。
+export async function selectedPvtProperties (request, context, pvtId, pressureMpa, temperatureC) {
+  const validState = pressureMpa !== null && pressureMpa !== '' && Number.isFinite(Number(pressureMpa)) &&
+    temperatureC !== null && temperatureC !== '' && Number.isFinite(Number(temperatureC))
+  if (validState) {
+    return waterProperties(request, context, pressureMpa, temperatureC, pvtId)
+  }
+  const source = await firstPvtSource(request, context, pvtId)
+  return {
+    pvtId: source.pvtId,
+    pvtSnapshot: source.pvtSnapshot,
+    gammaG: source.gasInput?.specificGravity ?? null,
+    rhoL: null,
+    muL: null
+  }
 }
