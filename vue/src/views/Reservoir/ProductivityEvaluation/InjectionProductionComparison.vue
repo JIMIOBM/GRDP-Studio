@@ -1,14 +1,11 @@
 <script setup>
 /** 库 → 产能评价 → 产能对比 → 注采对比。本文件包含该页面的参数状态、接口请求、模板和样式。 */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
 import { comparisonMethods, pressureForms } from '@/utils/productivityComparisonChart'
 import { storageCatalogApi } from '@/api/storageCatalog'
 import { storageProductivityComparisonApi } from '@/api/storageProductivityComparison'
-import { buildStoragePeriodChart } from '@/utils/storageProductivityComparisonChart'
-import { buildStorageMethodChart } from '@/utils/storageMethodComparisonChart'
-import { buildStorageDirectionChart } from '@/utils/storageDirectionComparisonChart'
+import PeriodWellChart3D from './PeriodWellChart3D.vue'
 
 const props = defineProps({
   storageId: { type: [Number, String], default: null },
@@ -50,9 +47,7 @@ const endDate = ref('')
 const formationPressure = ref('')
 const injectionPressure = ref('')
 const isMultiMethod = computed(() => methodType === '多方法')
-const isMultiPeriod = computed(() => methodType === '多周期')
 const isDirectionComparison = computed(() => methodType === '注采对比')
-const isComparisonEnabled = computed(() => isMultiMethod.value || isMultiPeriod.value || isDirectionComparison.value)
 const periodMethod = ref('back-pressure')
 const directionMethod = ref('stable')
 const singleMethod = computed({ get: () => isDirectionComparison.value ? directionMethod.value : periodMethod.value,
@@ -76,7 +71,6 @@ const clearResult = () => {
   calculationVersion++
   calculating.value = false
   comparisonResult.value = null
-  if (isComparisonEnabled.value) renderChart()
 }
 const loadStorageWells = async () => {
   const version = ++wellVersion
@@ -98,41 +92,14 @@ const paramsCollapsed = ref(false)
 const panelWidth = ref(238)
 const resultTitle = computed(() => [props.storageName, '产能对比', methodType, '分析结果'].filter(Boolean).join('-'))
 const workspaceEl = ref(null)
-const chartEl = ref(null)
-let chart = null
 let resizeObserver = null
 let resizeFrame = 0
-let lastChartWidth = 0
 const scheduleResize = () => {
   if (resizeFrame) cancelAnimationFrame(resizeFrame)
   resizeFrame = requestAnimationFrame(() => {
     resizeFrame = 0
-    if (chartEl.value?.clientWidth !== lastChartWidth) renderChart(true)
-    chart?.resize()
+    if (panelWidth.value > maxPanelWidth()) setPanelWidth(panelWidth.value)
   })
-}
-const renderChart = (preserveView = false) => {
-  if (!chartEl.value) return
-  if (!chart) {
-    chart = echarts.init(chartEl.value)
-    // 隐藏/恢复图例后重排实际柱位，保留筛选和滚动状态，不重新请求计算。
-    chart.on('legendselectchanged', () => {
-      renderChart(true)
-    })
-  }
-  lastChartWidth = chartEl.value.clientWidth
-  const previous = preserveView ? chart.getOption() : null
-  const builder = isDirectionComparison.value ? buildStorageDirectionChart : isMultiMethod.value ? buildStorageMethodChart : buildStoragePeriodChart
-  const option = builder(comparisonResult.value, pressureMethod.value,
-    calculating.value ? '正在计算…' : '请选择井并计算', lastChartWidth, previous?.legend?.[0]?.selected || {})
-  if (previous?.legend?.[0]?.selected) option.legend.selected = previous.legend[0].selected
-  if (previous?.dataZoom?.[0] && option.dataZoom.length) {
-    const span = option.dataZoom[0].maxValueSpan
-    const start = Math.max(0, Math.min(Number(previous.dataZoom[0].startValue) || 0, option.xAxis.data.length - span - 1))
-    option.dataZoom.forEach(zoom => { zoom.startValue = start; zoom.endValue = start + span })
-  }
-  chart.setOption(option, true)
-  scheduleResize()
 }
 let dragStartX = 0
 let dragStartWidth = 0
@@ -158,7 +125,6 @@ function resizeWithKeyboard(event) {
   event.preventDefault()
   setPanelWidth(event.key === 'Home' ? 238 : event.key === 'End' ? maxPanelWidth() : panelWidth.value + (event.key === 'ArrowRight' ? 20 : -20))
 }
-watch(() => methodType, async () => { await nextTick(); renderChart() })
 // 切换库时重新读取成员；切方法时清空压力与旧结果，不复用其他页面的状态。
 watch(() => [props.projectId, props.gasReservoirId, props.storageId], () => {
   formationPressure.value = ''; injectionPressure.value = ''; wellKeyword.value = ''
@@ -175,15 +141,12 @@ watch(selectedOperation, () => {
   formationPressure.value = ''
   injectionPressure.value = ''
 })
-watch([paramsCollapsed, panelWidth], async () => { await nextTick(); scheduleResize() })
 onMounted(async () => {
   await nextTick()
-  renderChart()
   resizeObserver = new ResizeObserver(() => {
     if (panelWidth.value > maxPanelWidth()) setPanelWidth(panelWidth.value)
     scheduleResize()
   })
-  resizeObserver.observe(chartEl.value)
   resizeObserver.observe(workspaceEl.value)
   window.addEventListener('resize', scheduleResize)
 })
@@ -194,8 +157,6 @@ onBeforeUnmount(() => {
   resizeObserver?.disconnect()
   window.removeEventListener('resize', scheduleResize)
   if (resizeFrame) cancelAnimationFrame(resizeFrame)
-  chart?.dispose()
-  chart = null
 })
 const handleCalculate = async () => {
   if (loadingWells.value || calculating.value) return
@@ -212,7 +173,7 @@ const handleCalculate = async () => {
   if (pressureMethod.value === 'pseudo-pressure' && (hasProduction && pr > 200 || hasInjection && pwf > 200))
     return ElMessage.warning('拟压力接口的计算压力不能超过200 MPa')
   const version = ++calculationVersion
-  calculating.value = true; comparisonResult.value = null; renderChart()
+  calculating.value = true; comparisonResult.value = null
   try {
     const calculate = isDirectionComparison.value ? storageProductivityComparisonApi.compareDirections
       : isMultiMethod.value ? storageProductivityComparisonApi.calculateMethods : storageProductivityComparisonApi.calculate
@@ -226,12 +187,15 @@ const handleCalculate = async () => {
     if (version !== calculationVersion) return
     if (!Array.isArray(result?.periods) || !Array.isArray(result?.wells) || isMultiMethod.value && !Array.isArray(result?.methods))
       throw new Error('库产能对比接口尚未更新，请重启后端服务后重试')
+    if (result.periods.some(period => !period || !Array.isArray(period.wells)
+      || period.wells.some(well => !well || !Array.isArray(isMultiMethod.value ? well.methods : well.directions))))
+      throw new Error('库产能对比接口的分组数据格式不正确，请更新后端服务')
     if (isDirectionComparison.value && result.periods.some(period => !Array.isArray(period.wells)
       || period.wells.some(well => !Array.isArray(well.directions))))
       throw new Error('库注采对比接口返回格式不正确，请更新后端服务')
     comparisonResult.value = result
   } catch (error) { if (version === calculationVersion) ElMessage.error(errorText(error)) }
-  finally { if (version === calculationVersion) { calculating.value = false; renderChart() } }
+  finally { if (version === calculationVersion) calculating.value = false }
 }
 </script>
 
@@ -302,7 +266,7 @@ const handleCalculate = async () => {
     </aside>
     <main class="result-area">
       <div class="result-tabs"><div class="result-tab active" :title="resultTitle">{{ resultTitle }}</div></div>
-      <div class="chart-placeholder" :aria-label="'注采对比' + '产能对比结果分析图'"><div ref="chartEl" class="comparison-chart" /></div>
+      <PeriodWellChart3D comparison-type="direction" :result="comparisonResult" :busy="calculating" :title="resultTitle" />
     </main>
   </div>
 </template>
@@ -362,6 +326,4 @@ button:focus-visible { outline: 2px solid #555; outline-offset: -2px; }
 .result-area { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: #fff; }
 .result-tabs { height: 34px; flex: 0 0 34px; display: flex; align-items: center; border-bottom: 1px solid #e4e7ed; background: #fafafa; }
 .result-tab { height: 34px; line-height: 34px; max-width: min(430px, 100%); padding: 0 12px; border-right: 1px solid #e4e7ed; box-sizing: border-box; background: #f4d000; color: #202020; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.chart-placeholder { flex: 1; min-height: 0; position: relative; overflow: hidden; }
-.comparison-chart { width: 100%; height: 100%; }
 </style>

@@ -20,16 +20,22 @@ public class StorageComparisonService {
 
     public Response calculate(Request request, Map<String, String> headers) {
         validate(request);
-        // 旧多周期接口保留原返回结构；共享逐记录计算与周期划分，避免两套计算口径。
+        // 继续一次返回全部周期，切换三维图的展示周期不需要重复计算或查询数据库。
         var response = calculateMethods(new MultiMethodRequest(request.projectId(), request.gasReservoirId(),
                 request.storageId(), request.wellIds(), List.of(request.method()), request.operationType(),
                 request.pressureMethod(), request.formationPressure(), request.injectionPressure(), request.period()), headers);
         return new Response(request.method(), response.operationType(), response.pressureMethod(),
                 response.formationPressure(), response.injectionPressure(), response.wells(), response.periods().stream()
-                .map(p -> new Period(p.index(), p.startDate(), p.endDate(), p.wells().stream().map(w -> {
-                    var m = w.methods().getFirst();
-                    return new Mean(w.wellId(), w.wellName(), m.averageOpenFlow(), m.recordCount());
-                }).toList())).toList());
+                .map(p -> {
+                    var means = p.wells().stream().map(w -> {
+                        var m = w.methods().getFirst();
+                        return new Mean(w.wellId(), w.wellName(), m.averageOpenFlow(), m.recordCount());
+                    }).toList();
+                    // 使用当前周期的计数，不使用跨周期 WellSummary，也不对均值再次求平均。
+                    int validWells = (int) means.stream().filter(m -> m.averageOpenFlow() != null && m.recordCount() > 0).count();
+                    int records = means.stream().mapToInt(Mean::recordCount).sum();
+                    return new Period(p.index(), p.startDate(), p.endDate(), means, validWells, records);
+                }).toList());
     }
 
     public MultiMethodResponse calculateMethods(MultiMethodRequest request, Map<String, String> headers) {
@@ -55,8 +61,8 @@ public class StorageComparisonService {
                 request.wellIds(), List.of(request.method()), "production", request.pressureMethod(),
                 request.formationPressure(), request.injectionPressure(), request.period()), operations, headers);
         // 不按方向分别推导日期：所有井、两个方向必须使用同一套周期边界。
-        var grouped = data.periods().stream().map(period -> new DirectionPeriod(period.index(), period.startDate(), period.endDate(),
-                data.wells().stream().map(well -> {
+        var grouped = data.periods().stream().map(period -> {
+            var means = data.wells().stream().map(well -> {
                     var rows = data.results().get(well.id()).stream()
                             .filter(r -> ComparisonPeriods.contains(period, r.record().date())).toList();
                     return new WellDirections(well.id(), well.wellName(), operations.stream().map(operation -> {
@@ -64,7 +70,12 @@ public class StorageComparisonService {
                                 .map(Result::openFlowCapacity).toList();
                         return new DirectionMean(operation, mean(values), values.size());
                     }).toList());
-                }).toList())).toList();
+                }).toList();
+            int validWells = (int) means.stream().filter(well -> well.directions().stream()
+                    .anyMatch(m -> m.averageOpenFlow() != null && m.recordCount() > 0)).count();
+            int records = means.stream().flatMap(well -> well.directions().stream()).mapToInt(DirectionMean::recordCount).sum();
+            return new DirectionPeriod(period.index(), period.startDate(), period.endDate(), means, validWells, records);
+        }).toList();
         return new DirectionResponse(request.method(), request.pressureMethod(), request.formationPressure(),
                 request.injectionPressure(), data.summaries(), grouped);
     }
@@ -125,14 +136,19 @@ public class StorageComparisonService {
         var periods = data.periods();
         var results = data.results();
         // 所有方法共用跨井推导的周期，均值严格按“周期 + 井 + 方法”分组。
-        var grouped = periods.stream().map(period -> new MethodPeriod(period.index(), period.startDate(), period.endDate(),
-                wells.stream().map(well -> {
+        var grouped = periods.stream().map(period -> {
+            var means = wells.stream().map(well -> {
                     var rows = results.get(well.id()).stream().filter(r -> ComparisonPeriods.contains(period, r.record().date())).toList();
                     return new WellMethods(well.id(), well.wellName(), request.methods().stream().map(method -> {
                         var values = rows.stream().filter(r -> method.equals(r.record().method())).map(Result::openFlowCapacity).toList();
                         return new MethodMean(method, mean(values), values.size());
                     }).toList());
-                }).toList())).toList();
+                }).toList();
+            int validWells = (int) means.stream().filter(well -> well.methods().stream()
+                    .anyMatch(m -> m.averageOpenFlow() != null && m.recordCount() > 0)).count();
+            int records = means.stream().flatMap(well -> well.methods().stream()).mapToInt(MethodMean::recordCount).sum();
+            return new MethodPeriod(period.index(), period.startDate(), period.endDate(), means, validWells, records);
+        }).toList();
         return new MultiMethodResponse(List.copyOf(request.methods()), request.operationType(), request.pressureMethod(),
                 request.operationType().equals("production") ? request.formationPressure() : null,
                 request.operationType().equals("injection") ? request.injectionPressure() : null,

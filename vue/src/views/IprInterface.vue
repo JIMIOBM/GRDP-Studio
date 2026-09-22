@@ -42,7 +42,8 @@ import { ensurePipelineNavigation, findPipelinePageNode, pipelinePageForCommand,
 import { createDefaultWellboreNodes, ensureWellboreNavigation } from '@/utils/wellboreNavigation'
 import { NODETYPE } from '@/constants/nodeType'
 import { resolveWorkspaceContextId } from '@/constants/workspaceContext'
-import { analyticMethodApi, dataManagementApi, dynamicBalanceApi, materialBalanceApi, nodeApi, notifyApi, parametersApi, projectApi, typicalCurveApi, waterInvasionApi, wellApi } from '@/api/docker'
+import { analyticMethodApi, dataManagementApi, dynamicBalanceApi, materialBalanceApi, nodeApi, notifyApi, parametersApi, projectApi, typicalCurveApi, wellApi } from '@/api/docker'
+import { waterInvasionApi } from '@/api/waterInvasion'
 import { pvtStorageApi } from '@/api/pvtStorage'
 import { diagnosticCurveApi } from '@/api/diagnosticCurve'
 import { productivityCoefficientApi } from '@/api/productivityCoefficient'
@@ -275,11 +276,8 @@ const MATERIAL_BALANCE_LOG_TIMEOUT = 120000
 const flowBalanceRunning = ref(false)
 const dynamicBalanceRunning = ref(false)
 const typicalCurveRunning = ref(false)
-const WATER_INVASION_NOTIFY_MODULE = 'projectanalysis.waterinvasionanalysis'
-const WATER_INVASION_LOG_TIMEOUT = 120000
 const WATER_INVASION_ERROR_PATTERN = /失败|错误|异常|报错|error|fail|exception/i
 const WATER_INVASION_COMPLETE_PATTERN = /完成|分析结束|结束/i
-const WATER_INVASION_FINAL_COMPLETE_PATTERN = /\[\s*水侵动态分析-水体活跃性\s*\]\s*[:：]\s*完成/
 const TYPICAL_CURVE_NOTIFY_MODULE = 'projectanalysis.typicalcurvefitting'
 const TYPICAL_CURVE_LOG_TIMEOUT = 120000
 const ANALYTIC_METHOD_NOTIFY_MODULE_PATTERN = /^projectanalysis\.analysismethods(?:historyfitting|fitting)?$/i
@@ -1908,11 +1906,16 @@ const toPvtEditorRecord = (detail, fallbackGasRows = []) => ({
 })
 
 const refreshWaterInvasionNodes = async (wellName = '') => {  //加载已有水侵分析节点
+  if (!wellName) return
   try {
-    const res = await nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, NODETYPE.NodeType_WaterInvasionAnalysis)
-    applyWaterInvasionNodes(res?.data?.node, wellName)
+    const response = await waterInvasionApi.records({ projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName })
+    const records = response.data || []
+    if (records.length) addAnalysisNode(wellName, {
+      nodeId: `water-invasion-${wellName}`, nodeType: NODETYPE.NodeType_WaterInvasionAnalysis,
+      nodeTitle: '水侵分析', waterInvasionRecordId: records.find(item => item.taskStatus === 'COMPLETED')?.id
+    })
   } catch {
-    // 没有已有水侵分析结果时，保持项目树不变。
+    // 查询失败不删除已有目录；进入页面时展示读取失败原因。
   }
 }
 
@@ -1947,51 +1950,6 @@ const refreshTypicalCurveNodes = async (wellName = '') => {
   } catch {
     // 没有已有典型曲线结果时保持项目树不变。
   }
-}
-
-const pollWaterInvasionNode = async (wellName, maxRetries = 20, intervalMs = 1500) => { //轮询结果
-  for (let i = 0; i < maxRetries; i++) {
-    await new Promise(resolve => setTimeout(resolve, intervalMs))
-
-    const res = await nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, NODETYPE.NodeType_WaterInvasionAnalysis)
-    const node = res?.data?.node
-    const subNodes = node?.subNodes ?? []
-    if (subNodes.some(sub => sub.nodeTitle === wellName || sub.wellName === wellName)) {
-      return node
-    }
-  }
-
-  throw new Error('分析超时，请稍后刷新查看结果')
-}
-
-const getWaterInvasionNodeOnce = async (wellName, delayMs = 1200) => {
-  if (delayMs > 0) {
-    await new Promise(resolve => setTimeout(resolve, delayMs))
-  }
-
-  const res = await nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, NODETYPE.NodeType_WaterInvasionAnalysis)
-  const rootNode = res?.data?.node
-  const resultNode = rootNode?.subNodes?.find(sub => sub.nodeTitle === wellName || sub.wellName === wellName)
-  return { rootNode, resultNode }
-}
-
-const createWaterInvasionLogWaiter = (wellName, timeoutMs = WATER_INVASION_LOG_TIMEOUT) => {
-  return createAnalysisLogWaiter({
-    module: WATER_INVASION_NOTIFY_MODULE,
-    wellName,
-    timeoutMs,
-    timeoutMessage: `${wellName}水侵分析日志超时，未收到完成消息`,
-    fallbackErrorMessage: `${wellName}水侵分析失败`,
-    // 水侵分析的中间步骤可能出现 error；只有最终完成日志才是计算终态。
-    rejectOnError: false,
-    allowGlobalComplete: true,
-    correlateGlobalCompleteByPin: false,
-    completeNoticeNodeTypes: [
-      NODETYPE.NodeType_WaterInvasionAnalysis,
-      NODETYPE.NodeType_WaterInvasionAnalysisActiveness
-    ],
-    isComplete: (payload, logText) => WATER_INVASION_FINAL_COMPLETE_PATTERN.test(logText)
-  })
 }
 
 const matchesNotifyModule = (expectedModule, actualModule) => {
@@ -2811,7 +2769,7 @@ const finalizeAgResult = async (wellName, logPayload, maxRetries = 8, intervalMs
 }
 
 const runWaterInvasionForSelectedWell = async (options = {}) => { //点击水侵分析的操作
-  const targetWellName = selectedWellName.value
+  const targetWellName = options.wellName || selectedWellName.value
 
   if (!targetWellName) {
     ElMessage.warning('请先在左侧选择一口井')
@@ -2821,56 +2779,29 @@ const runWaterInvasionForSelectedWell = async (options = {}) => { //点击水侵
   if (waterInvasionRunning.value) return
 
   waterInvasionRunning.value = true
-  const logWaiter = createWaterInvasionLogWaiter(targetWellName)
   try {
     await ensureWellBelongsToCurrentReservoir(targetWellName)
-    // 启动接口可能在后台计算完成后仍不关闭请求，最终状态统一由 WebSocket 完成日志判定。
-    void waterInvasionApi.analyze({
+    // 只提交后台任务，计算完成判定和落库不依赖当前浏览器页面。
+    const response = await waterInvasionApi.start({
       gasReservoirId: Number(GAS_RESERVOIR_ID),
       projectId: Number(PROJECT_ID),
-      analysisType: 1,
-      wellNames: [targetWellName],
+      wellName: targetWellName,
+      requestId: crypto.randomUUID(),
       isUseActualStaticPressure: options.isUseActualStaticPressure ?? true,
       waterGasRatioLimit: options.waterGasRatioLimit ?? -1
-    }, { silentError: true }).catch(error => {
-      console.warn('水侵分析启动接口异常，继续等待最终完成日志', error)
     })
-
-    ElMessage.info(`${targetWellName} 水侵分析计算中，请稍候...`)
-    await logWaiter.promise
-    let rootNode = null
-    let resultNode = null
-    try {
-      ({ rootNode, resultNode } = await getWaterInvasionNodeOnce(targetWellName, 0))
-    } catch (error) {
-      console.warn('水侵分析已完成，结果节点暂未读取到', error)
-    }
-
-    if (rootNode) applyWaterInvasionNodes(rootNode)
-
-    if (resultNode) {
-      const viewNode = {
-        id: resultNode.nodeId || `wia-${targetWellName}`,
-        label: '水侵分析',
-        type: NODETYPE.NodeType_WaterInvasionAnalysis,
-        wellName: targetWellName,
-        raw: resultNode,
-        waterInvasionRefreshKey: Date.now()
-      }
-
-      activeNodeId.value = viewNode.id
+    const raw = { nodeId: `water-invasion-${targetWellName}`, nodeType: NODETYPE.NodeType_WaterInvasionAnalysis, nodeTitle: '水侵分析' }
+    addAnalysisNode(targetWellName, raw)
+    if (selectedWellName.value === targetWellName) {
+      activeNodeId.value = raw.nodeId
       currentView.value = 'water-invasion'
-      currentViewNode.value = viewNode
-    } else {
-      void refreshWaterInvasionNodes(targetWellName)
+      currentViewNode.value = { id: raw.nodeId, label: '水侵分析', type: raw.nodeType, wellName: targetWellName, raw, waterInvasionRefreshKey: response.data.id }
     }
-    ElMessage.success(`${targetWellName} 水侵分析完成`)
+    ElMessage.info(`${targetWellName} 水侵分析任务已提交，结果保存后自动显示`)
   } catch (error) {
-    logWaiter.cancel()
-    ElMessage.error(error.message || '水侵分析失败')
+    ElMessage.error(error.response?.data?.msg || error.msg || error.message || '水侵分析任务提交失败')
     console.error('水侵分析失败', error)
   } finally {
-    logWaiter.cancel()
     waterInvasionRunning.value = false
   }
 }
@@ -4100,11 +4031,20 @@ const handleDeleteContextNode = async () => {
     }
 
     try {
-      await waterInvasionApi.deleteResult(PROJECT_ID, GAS_RESERVOIR_ID, wellName)
-      removeTreeNode(node)
-      clearCurrentViewAfterDelete(node)
-      ElMessage.success(`${deleteLabel}成功`)
+      const scope = { projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName }
+      const response = await waterInvasionApi.records(scope)
+      const record = (response.data || []).find(item => item.taskStatus === 'COMPLETED')
+      if (!record) { ElMessage.info('新数据库中没有可删除的结果，旧平台数据未改动'); return }
+      await ElMessageBox.confirm('只删除新平台最新一批已保存结果，历史批次和旧平台数据保持不变。', '删除水侵记录', { type: 'warning' })
+      await waterInvasionApi.remove(record.id, scope)
+      if ((response.data || []).length === 1) removeTreeNode(node)
+      if (currentView.value === 'water-invasion' && currentViewNode.value?.wellName === wellName) {
+        currentViewNode.value = { ...currentViewNode.value, waterInvasionRefreshKey: Date.now() }
+      }
+      await refreshWaterInvasionNodes(wellName)
+      ElMessage.success('新平台水侵记录已删除，旧平台数据未改动')
     } catch (error) {
+      if (error === 'cancel' || error === 'close') return
       ElMessage.error(error.response?.data?.message || error.message || `${deleteLabel}失败`)
       console.error(`${deleteLabel}失败`, error)
     }

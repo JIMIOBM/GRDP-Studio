@@ -2,13 +2,14 @@
 /**
  * WaterInvasionContent.vue
  * 水侵动态分析 —— 右侧内容面板
- * 调用真实接口，左侧参数来自 input，右侧图表来自 outputs[].chartItems
+ * 从新数据库读取单井水侵快照；旧算法只由新后端任务调用。
  *
  * 路径：src/views/WellControlInventory/WaterInvasionContent.vue
  */
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import * as echarts from 'echarts'
-import dockerRequest from '@/api/docker'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { waterInvasionApi, isWaterInvasionTaskActive, waterInvasionRecordLabel } from '@/api/waterInvasion'
 
 const props = defineProps({ // 父组件传进来的数据
   node:           Object,           // 包含 wellName 字段
@@ -93,14 +94,39 @@ const hasOutputResults = computed(() => activeTab.value?.hasOutput && outputFiel
 const isWaterActivityTab = computed(() => activeChartIdx.value === 4)
 const hasDataListForActiveTab = computed(() => activeChartIdx.value >= 0 && activeChartIdx.value < 4)
 const isDataListTab = computed(() => activeContentTab.value === 'table')
+const isProductionTab = computed(() => activeContentTab.value === 'production')
 const waterActivityOutput = computed(() => chartTabs.value[4]?.output || {})
 const currentWellName = computed(() => props.node?.wellName || wellData.value?.input?.wellName || '')
-const PRODUCTION_TEMPLATE_COLUMNS = [
-  { label: '日期', unit: '无' },
-  { label: '地层压力', unit: 'MPa' },
-  { label: '累产气量', unit: '10^8m3' },
-  { label: '累产水量', unit: '10^4m3' }
+const PRODUCTION_COLUMNS = [
+  { prop: 'date', label: '日期', unit: '无', minWidth: 150 },
+  // 原接口字段为 pressure，截图与接口对压力的称谓不同，这里不擅自改变物理含义。
+  { prop: 'pressure', label: '压力', unit: 'MPa', minWidth: 145 },
+  { prop: 'dailyGasProduction', label: '气产量', unit: '10⁴m³/d', minWidth: 150 },
+  { prop: 'cumulativeGasProduction', label: '累产气量', unit: '10⁸m³', minWidth: 160 },
+  { prop: 'cumulativeWaterProduction', label: '累产水量', unit: '10⁴m³', minWidth: 160 }
 ]
+// 生产数据来自当前批次的新库快照，不能混用 identifyInputItems 或 outputs 的分析明细。
+const productionItems = computed(() => Array.isArray(wellData.value?.influxInputItems) ? wellData.value.influxInputItems : [])
+const productionPage = ref(1)
+const PRODUCTION_PAGE_SIZE = 100
+const productionPageRows = computed(() => {
+  const offset = (productionPage.value - 1) * PRODUCTION_PAGE_SIZE
+  return productionItems.value.slice(offset, offset + PRODUCTION_PAGE_SIZE).map((row, index) => ({
+    ...row, rowNumber: offset + index + 1
+  }))
+})
+const productionExportRows = computed(() => [
+  PRODUCTION_COLUMNS.map(column => column.label),
+  PRODUCTION_COLUMNS.map(column => column.unit),
+  ...productionItems.value.map(row => PRODUCTION_COLUMNS.map(column => column.prop === 'date'
+    ? String(row?.date ?? '').slice(0, 10) : row?.[column.prop] ?? ''))
+])
+function formatProductionValue(row, column) {
+  const value = row?.[column.prop]
+  if (column.prop === 'date') return String(value ?? '').slice(0, 10)
+  // 缺失值留空，实际 0 显示为 0.0000；仅展示四位小数，不改动存储和导出精度。
+  return hasResultNumber(value) ? Number(value).toFixed(4) : ''
+}
 const chartTabTitle = computed(() =>
     `水侵分析-${currentWellName.value || '当前井'}-分析结果`
 )
@@ -120,13 +146,29 @@ const saveWorkbook = (XLSX, workbook, filename) => {
 const downloadProductionTemplate = async () => {
   const XLSX = await getXlsx()
   const rows = [
-    PRODUCTION_TEMPLATE_COLUMNS.map(column => column.label),
-    PRODUCTION_TEMPLATE_COLUMNS.map(column => column.unit)
+    PRODUCTION_COLUMNS.map(column => column.label),
+    PRODUCTION_COLUMNS.map(column => column.unit)
   ]
   const sheet = XLSX.utils.aoa_to_sheet(rows)
   const workbook = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(workbook, sheet, '生产数据')
   saveWorkbook(XLSX, workbook, `水侵分析生产数据模板-${currentWellName.value || 'well'}.xlsx`)
+}
+
+const downloadProductionData = async () => {
+  if (!productionItems.value.length) return
+  const rows = productionExportRows.value
+  const wellName = currentWellName.value
+  try {
+    const XLSX = await getXlsx()
+    const sheet = XLSX.utils.aoa_to_sheet(rows)
+    sheet['!cols'] = PRODUCTION_COLUMNS.map(() => ({ wch: 20 }))
+    const workbook = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(workbook, sheet, '生产数据')
+    saveWorkbook(XLSX, workbook, `水侵分析生产数据-${wellName || 'well'}.xlsx`)
+  } catch {
+    ElMessage.error('生产数据导出失败，请重试')
+  }
 }
 
 const legendItems = computed(() => {
@@ -192,7 +234,9 @@ watch(input, (value) => {
 }, { immediate: true })
 
 function handleRecalculate() {
+  if (hasRunningTask.value) return
   emit('recalculate', {
+    wellName: props.node?.wellName,
     isUseActualStaticPressure: preferActualStaticPressure.value,
     waterGasRatioLimit: enableWaterGasRatioLimit.value ? Number(waterGasRatioLimitValue.value) : -1
   })
@@ -260,8 +304,13 @@ const chartTabs = computed(() => {
     const hasRows = outputItems.some(row => (ANALYSIS_ROW_KEYS[index] || []).some(key => hasResultField(row, key)))
     const outputKeys = index === 4 ? ACTIVITY_OUTPUT_KEYS : (OUTPUT_FIELD_CONFIGS[index] || []).flatMap(field => field.keys)
     const hasOutput = outputKeys.some(key => hasResultField(output, key))
-    return { label, chartItems, output, outputItems, hasChart, hasRows, hasOutput,
-      available: hasChart || hasRows || hasOutput }
+    const types = ['IDENTIFICATION', 'AQUIFER_SIZE', 'WATER_INFLUX', 'DRIVE_MECHANISM', 'WATER_ACTIVITY']
+    const stored = wellData.value?.storedSections?.find(item => item.result_type === types[index])
+    return { label, chartItems, output, outputItems,
+      hasChart: stored ? Boolean(stored.has_chart) : hasChart,
+      hasRows: stored ? Boolean(stored.has_detail) : hasRows,
+      hasOutput: stored ? Boolean(stored.has_summary) : hasOutput,
+      available: stored ? stored.availability === 'HAS_DATA' : hasChart || hasRows || hasOutput }
   })
 })
 
@@ -690,31 +739,108 @@ function renderChart() {
   }
 }
 
-// ─── API 调用 ───
-async function fetchData() { //请求水侵分析详情
-  const wellName = props.node?.wellName
-  if (!wellName || !props.projectId || !props.gasReservoirId) return
-
-  loading.value        = true
-  activeChartIdx.value = 0
-  activeContentTab.value = 'chart'
-  activeParamTab.value = 'input'
-  wellData.value       = null
-
+// ─── 新平台记录与后台任务 ───
+const records = ref([])
+const selectedRecordId = ref('')
+const loadError = ref('')
+const importing = ref(false)
+const completedRecords = computed(() => records.value.filter(item => item.taskStatus === 'COMPLETED'))
+const hasRunningTask = computed(() => records.value.some(isWaterInvasionTaskActive))
+const latestTask = computed(() => records.value[0])
+const taskMessage = computed(() => {
+  const task = latestTask.value
+  if (!task) return ''
+  if (isWaterInvasionTaskActive(task)) return task.taskStatus === 'SAVING' ? '正在保存结果…' : '后台分析处理中…'
+  if (['FAILED', 'TIMED_OUT'].includes(task.taskStatus)) return task.errorMessage || '本次分析未成功，已保存结果不受影响'
+  return ''
+})
+let contextVersion = 0
+let detailVersion = 0
+let recordsTimer = null
+const scope = () => ({ projectId: props.projectId, gasReservoirId: props.gasReservoirId, wellName: props.node?.wellName })
+const errorText = error => error?.response?.data?.msg || error?.msg || error?.message || '读取水侵记录失败'
+// 只重新读取本次任务的日志和结果，不再次提交旧算法，避免迟到计算与库任务串结果。
+async function checkCalculationStatus() {
+  const version = contextVersion
+  importing.value = true
   try {
-    const res = await dockerRequest.get(
-        `/projectanalysis/waterinvasionanalysis/${props.projectId}/${props.gasReservoirId}/well/${encodeURIComponent(wellName)}`
-    )
-    wellData.value = res.data
+    await waterInvasionApi.reconcile(latestTask.value.id, scope())
+    if (version === contextVersion) await refreshRecords(version)
+  } catch (error) { if (version === contextVersion) loadError.value = errorText(error) }
+  finally { if (version === contextVersion) importing.value = false }
+}
+
+async function selectRecord(id, version = contextVersion) {
+  const serial = ++detailVersion
+  const params = scope()
+  selectedRecordId.value = id
+  productionPage.value = 1
+  wellData.value = null
+  loading.value = true
+  loadError.value = ''
+  try {
+    const response = await waterInvasionApi.detail(id, params)
+    if (version !== contextVersion || serial !== detailVersion) return
+    wellData.value = response.data.result
+    activeChartIdx.value = 0
     await nextTick()
     renderChartSoon()
-    // 数据加载成功后通知父组件刷新左侧树
-    emit('refresh-tree')
-  } catch (e) {
-    console.error('[WaterInvasionContent] 数据加载失败', e)
+  } catch (error) {
+    if (version === contextVersion && serial === detailVersion) loadError.value = errorText(error)
   } finally {
-    loading.value = false
+    if (version === contextVersion && serial === detailVersion) loading.value = false
   }
+}
+
+async function refreshRecords(version = contextVersion) {
+  clearTimeout(recordsTimer)
+  const params = scope()
+  try {
+    const response = await waterInvasionApi.records(params)
+    if (version !== contextVersion) return
+    const previousLatest = completedRecords.value[0]?.id
+    records.value = response.data || []
+    const latest = completedRecords.value[0]
+    if (latest && (!selectedRecordId.value || (selectedRecordId.value === previousLatest && latest.id !== previousLatest))) {
+      await selectRecord(latest.id, version)
+      if (version === contextVersion) emit('refresh-tree')
+    }
+    if (version === contextVersion && hasRunningTask.value) recordsTimer = setTimeout(() => refreshRecords(version), 3000)
+  } catch (error) {
+    if (version === contextVersion) loadError.value = errorText(error)
+  } finally {
+    if (version === contextVersion) loading.value = false
+  }
+}
+
+async function fetchData() {
+  const version = ++contextVersion
+  ++detailVersion
+  clearTimeout(recordsTimer)
+  records.value = []
+  selectedRecordId.value = ''
+  productionPage.value = 1
+  wellData.value = null
+  loadError.value = ''
+  activeChartIdx.value = -1
+  if (!props.node?.wellName || !props.projectId || !props.gasReservoirId) return
+  loading.value = true
+  await refreshRecords(version)
+}
+
+async function importLegacyResult() {
+  if (hasRunningTask.value || importing.value) return
+  const version = contextVersion
+  const params = scope()
+  try {
+    await ElMessageBox.confirm(`将 ${params.wellName} 在旧平台已有的结果导入新数据库，不重新计算。`, '导入旧结果', { type: 'warning' })
+    if (version !== contextVersion) return
+    importing.value = true
+    await waterInvasionApi.importLegacy({ ...params, requestId: crypto.randomUUID() })
+    if (version === contextVersion) await refreshRecords(version)
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close' && version === contextVersion) ElMessage.error(errorText(error))
+  } finally { importing.value = false }
 }
 
 
@@ -724,7 +850,7 @@ watch(() => [
   props.projectId,
   props.gasReservoirId,
   props.node?.waterInvasionRefreshKey
-], fetchData, { immediate: true })
+], () => fetchData(), { immediate: true })
 
 // 重新加载或切换页签时，只保留可用的选中项，并优先展示实际返回的内容。
 watch([chartTabs, activeChartIdx], ([tabs]) => {
@@ -732,7 +858,7 @@ watch([chartTabs, activeChartIdx], ([tabs]) => {
     activeChartIdx.value = tabs.findIndex(tab => tab.available)
   }
   const tab = activeTab.value
-  if (tab?.hasRows && !tab.hasChart) activeContentTab.value = 'table'
+  if (!isProductionTab.value && tab?.hasRows && !tab.hasChart) activeContentTab.value = 'table'
   if (tab?.hasOutput && !tab.hasChart && !tab.hasRows) activeParamTab.value = 'output'
   if (!hasOutputResults.value && activeParamTab.value === 'output') {
     activeParamTab.value = 'input'
@@ -756,6 +882,9 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  ++contextVersion
+  ++detailVersion
+  clearTimeout(recordsTimer)
   window.removeEventListener('resize', onResize)
   stopParamsPanelResize()
   stopLegendDrag()
@@ -899,7 +1028,7 @@ onBeforeUnmount(() => {
                   size="small"
                   :disabled="!enableWaterGasRatioLimit"
               />
-              <el-button size="small" class="condition-recalculate" @click="handleRecalculate">
+              <el-button size="small" class="condition-recalculate" :disabled="hasRunningTask || importing" @click="handleRecalculate">
                 重新计算
               </el-button>
             </div>
@@ -909,7 +1038,7 @@ onBeforeUnmount(() => {
         <div class="sec-label">生产数据</div>
         <div class="btn-row">
           <el-button size="small" @click="downloadProductionTemplate">模版下载</el-button>
-          <el-button size="small">导入</el-button>
+          <el-button size="small" @click="activeContentTab = 'production'">查看数据</el-button>
         </div>
       </div>
       <div v-else-if="!paramsCollapsed && hasOutputResults" class="panel-body">
@@ -948,7 +1077,22 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <div v-if="chartTabs.length" class="chart-tabs">
+      <div class="water-record-toolbar">
+        <label v-if="completedRecords.length">历史记录
+          <select :value="selectedRecordId" @change="selectRecord(Number($event.target.value))">
+            <option v-for="record in completedRecords" :key="record.id" :value="record.id">
+              {{ waterInvasionRecordLabel(record) }}{{ record.resultCompleteness === 'PARTIAL' ? '（部分结果）' : '' }}
+            </option>
+          </select>
+        </label>
+        <span v-else>新数据库暂无已保存结果</span>
+        <el-button v-if="!completedRecords.length" size="small" :loading="importing" :disabled="hasRunningTask" @click="importLegacyResult">导入旧结果</el-button>
+        <el-button v-if="['FAILED','TIMED_OUT'].includes(latestTask?.taskStatus)" size="small" :loading="importing" @click="checkCalculationStatus">检查计算状态</el-button>
+        <el-button size="small" @click="refreshRecords()">刷新</el-button>
+        <span v-if="taskMessage" class="water-task-message">{{ taskMessage }}</span>
+      </div>
+      <div v-if="loadError" class="water-load-error" role="alert">{{ loadError }}</div>
+      <div v-if="!isProductionTab && chartTabs.length" class="chart-tabs">
         <button
             v-for="(tab, i) in chartTabs"
             :key="tab.label"
@@ -960,8 +1104,34 @@ onBeforeUnmount(() => {
             @click="activeChartIdx = i"
         >{{ tab.label }}</button>
       </div>
-      <div v-if="!loading && activeChartIdx === -1" class="analysis-empty">暂无可用的分析结果</div>
+      <div v-if="!isProductionTab && !loading && activeChartIdx === -1" class="analysis-empty">暂无可用的分析结果</div>
       <div v-show="activeContentTab === 'chart' && !isWaterActivityTab" ref="chartEl" class="chart-instance"/>
+
+      <section v-if="isProductionTab" class="production-data-panel" aria-label="生产数据">
+        <div class="production-data-toolbar">
+          <span class="production-data-title">生产数据</span>
+          <span class="production-data-count">共 {{ productionItems.length }} 条</span>
+          <el-button size="small" @click="downloadProductionTemplate">模板下载</el-button>
+          <el-button size="small" :disabled="!productionItems.length" @click="downloadProductionData">导出数据</el-button>
+        </div>
+        <el-table :data="productionPageRows" size="small" height="100%" border class="production-data-table"
+                  empty-text="当前批次暂无生产数据">
+          <el-table-column prop="rowNumber" label="序号" width="64" align="center" />
+          <el-table-column v-for="column in PRODUCTION_COLUMNS" :key="column.prop" :prop="column.prop"
+                           :min-width="column.minWidth" align="center">
+            <template #header>
+              <div class="production-column-name">{{ column.label }}</div>
+              <div class="production-column-unit">{{ column.unit }}</div>
+            </template>
+            <template #default="{ row }">
+              <span :title="String(row[column.prop] ?? '')">{{ formatProductionValue(row, column) }}</span>
+            </template>
+          </el-table-column>
+        </el-table>
+        <el-pagination v-if="productionItems.length > PRODUCTION_PAGE_SIZE" v-model:current-page="productionPage"
+                       :page-size="PRODUCTION_PAGE_SIZE" :total="productionItems.length" small
+                       layout="prev, pager, next, jumper" class="production-data-pagination" />
+      </section>
 
       <div v-if="isDataListTab && hasDataListForActiveTab" class="data-list-panel">
         <el-table :data="dataListRows" size="small" height="100%" border stripe>
@@ -1042,8 +1212,11 @@ onBeforeUnmount(() => {
         </table>
       </div>
 
-      <div v-if="hasDataListForActiveTab" class="bottom-chart-tabs">
+      <div class="bottom-chart-tabs">
+        <button type="button" class="bottom-chart-tab" :class="{ active: isProductionTab }"
+                @click="activeContentTab = 'production'">生产数据</button>
         <button
+          v-if="hasDataListForActiveTab"
           type="button"
           class="bottom-chart-tab"
           :class="{ active: activeContentTab === 'table' }"
@@ -1067,6 +1240,47 @@ onBeforeUnmount(() => {
 </template>
 
 <style lang="scss" scoped>
+.production-data-panel {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0 12px;
+  overflow: hidden;
+}
+.production-data-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 0;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.production-data-title { color: #303133; font-weight: 500; }
+.production-data-count { color: #909399; margin-right: auto; }
+.production-data-table {
+  flex: 1;
+  min-height: 0;
+  :deep(.el-table__cell) { padding: 3px 0; }
+  :deep(th.el-table__cell) { background: #fafafa; color: #303133; font-weight: 400; }
+}
+.production-column-unit { font-size: 12px; color: #606266; font-weight: 400; }
+.production-data-pagination { padding: 8px 0; align-self: flex-end; flex-shrink: 0; }
+.water-record-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 6px 12px;
+  border-bottom: 1px solid #e5e5e5;
+  font-size: 12px;
+  color: #555;
+  label { display: flex; align-items: center; gap: 8px; }
+  select { max-width: 320px; height: 25px; border: 1px solid #dcdcdc; background: #fff; color: #333; }
+}
+.water-task-message { color: #756321; }
+.water-load-error { padding: 6px 12px; color: #a43b32; font-size: 12px; }
 .wia-wrap {
   display: flex;
   height: 100%;
