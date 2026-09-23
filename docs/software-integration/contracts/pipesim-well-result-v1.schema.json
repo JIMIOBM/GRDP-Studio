@@ -1,0 +1,216 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://grdp.local/software-integration/contracts/pipesim-well-result-v1.schema.json",
+  "title": "PIPESIM well result v1",
+  "$comment": "JSON numbers exclude NaN and positive or negative Infinity; producers must reject those values before serialization.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "model_kind",
+    "runTask",
+    "resultContract",
+    "units",
+    "ipr",
+    "vlp",
+    "profile"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "pipesim-well-result/1"
+    },
+    "model_kind": {
+      "enum": ["black_oil_liquid", "basic_gas"]
+    },
+    "runTask": {
+      "enum": ["nodal", "profile", "combined"]
+    },
+    "resultContract": {
+      "enum": [
+        "VALID_FULL",
+        "VALID_PARTIAL",
+        "INVALID_EMPTY_NODAL",
+        "INVALID_EMPTY_PROFILE"
+      ]
+    },
+    "units": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["flow", "pressure", "depth", "temperature"],
+      "properties": {
+        "flow": {"$ref": "#/$defs/unitDescriptor"},
+        "pressure": {"$ref": "#/$defs/unspecifiedUnitDescriptor"},
+        "depth": {"$ref": "#/$defs/unspecifiedUnitDescriptor"},
+        "temperature": {"$ref": "#/$defs/unspecifiedUnitDescriptor"}
+      }
+    },
+    "ipr": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/curvePoint"}
+    },
+    "vlp": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/curvePoint"}
+    },
+    "profile": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/profilePoint"}
+    }
+  },
+  "$defs": {
+    "curvePoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["flow", "pressure"],
+      "properties": {
+        "flow": {"type": "number"},
+        "pressure": {"type": "number"}
+      }
+    },
+    "profilePoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["depth", "pressure", "temperature"],
+      "properties": {
+        "depth": {"type": "number", "minimum": 0},
+        "pressure": {"type": "number"},
+        "temperature": {"type": "number"}
+      }
+    },
+    "unitDescriptor": {
+      "oneOf": [
+        {"$ref": "#/$defs/unspecifiedUnitDescriptor"},
+        {"$ref": "#/$defs/basicGasFlowUnitDescriptor"}
+      ]
+    },
+    "basicGasFlowUnitDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["displayUnit", "semantics"],
+      "properties": {
+        "displayUnit": {"const": "mmscf/d"},
+        "semantics": {"const": "standard_gas_volume_rate"}
+      }
+    },
+    "unspecifiedUnitDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["displayUnit", "semantics"],
+      "properties": {
+        "displayUnit": {"type": "null"},
+        "semantics": {"const": "unspecified"}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"model_kind": {"const": "black_oil_liquid"}},
+        "required": ["model_kind"]
+      },
+      "then": {
+        "properties": {
+          "units": {
+            "properties": {
+              "flow": {"$ref": "#/$defs/unspecifiedUnitDescriptor"}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"model_kind": {"const": "basic_gas"}},
+        "required": ["model_kind"]
+      },
+      "then": {
+        "properties": {
+          "units": {
+            "properties": {
+              "flow": {"$ref": "#/$defs/basicGasFlowUnitDescriptor"}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"runTask": {"const": "nodal"}},
+        "required": ["runTask"]
+      },
+      "then": {
+        "oneOf": [
+          {
+            "properties": {
+              "resultContract": {"const": "VALID_FULL"},
+              "ipr": {"minItems": 1},
+              "vlp": {"minItems": 1}
+            }
+          },
+          {
+            "properties": {"resultContract": {"const": "INVALID_EMPTY_NODAL"}},
+            "anyOf": [
+              {"properties": {"ipr": {"maxItems": 0}}},
+              {"properties": {"vlp": {"maxItems": 0}}}
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {"runTask": {"const": "profile"}},
+        "required": ["runTask"]
+      },
+      "then": {
+        "oneOf": [
+          {
+            "properties": {
+              "resultContract": {"const": "VALID_FULL"},
+              "profile": {"minItems": 1}
+            }
+          },
+          {
+            "properties": {
+              "resultContract": {"const": "INVALID_EMPTY_PROFILE"},
+              "profile": {"maxItems": 0}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {"runTask": {"const": "combined"}},
+        "required": ["runTask"]
+      },
+      "then": {
+        "oneOf": [
+          {
+            "properties": {
+              "resultContract": {"const": "VALID_FULL"},
+              "ipr": {"minItems": 1},
+              "vlp": {"minItems": 1},
+              "profile": {"minItems": 1}
+            }
+          },
+          {
+            "properties": {
+              "resultContract": {"const": "VALID_PARTIAL"},
+              "ipr": {"minItems": 1},
+              "vlp": {"minItems": 1},
+              "profile": {"maxItems": 0}
+            }
+          },
+          {
+            "properties": {"resultContract": {"const": "INVALID_EMPTY_NODAL"}},
+            "anyOf": [
+              {"properties": {"ipr": {"maxItems": 0}}},
+              {"properties": {"vlp": {"maxItems": 0}}}
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

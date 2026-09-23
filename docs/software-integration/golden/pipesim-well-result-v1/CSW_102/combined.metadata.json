@@ -1,0 +1,17 @@
+{
+  "source": {
+    "fileName": "CSW_102_Basic Gas Well.pips",
+    "sha256Before": "71f369bc2ccb0d39317e97a0d38e3cf63f6dfdb9019298e1f645ed506352f3a7",
+    "sha256After": "71f369bc2ccb0d39317e97a0d38e3cf63f6dfdb9019298e1f645ed506352f3a7"
+  },
+  "study": "Study 1",
+  "runType": "combined",
+  "schemaVersion": "pipesim-well-result/1",
+  "avaloniaAdapter": {
+    "revision": "795522dfd96cfdeaf42e6549603bc8def6cdf2b6",
+    "relativePath": "src/UnifiedConsole.Infrastructure/Simulators/Pipesim/ptk_worker.py",
+    "sha256": "bb70fa2a039870e1e7b4b384017587c29ed0217642485baa28c186b4d66f7028"
+  },
+  "generatedAtUtc": "2026-08-30T14:32:05.7420485+00:00",
+  "sanitization": "No absolute paths, license data, credentials, logs, or input model content are included."
+}

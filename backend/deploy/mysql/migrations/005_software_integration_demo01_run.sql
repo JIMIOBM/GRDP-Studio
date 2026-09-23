@@ -1,0 +1,73 @@
+CREATE TABLE IF NOT EXISTS software_integration_run (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  project_id BIGINT NOT NULL,
+  model_id BIGINT NOT NULL,
+  model_version_id BIGINT NOT NULL,
+  study_name VARCHAR(255) NOT NULL,
+  run_type VARCHAR(20) NOT NULL,
+  parameters_json JSON NOT NULL,
+  status VARCHAR(40) NOT NULL,
+  status_version INT NOT NULL DEFAULT 0,
+  timeout_seconds INT NOT NULL,
+  dispatcher_id VARCHAR(64),
+  worker_id VARCHAR(128),
+  generation_id VARCHAR(128),
+  acceptance_uncertain_at DATETIME(3),
+  acceptance_recovery_deadline_at DATETIME(3),
+  last_worker_sequence BIGINT NOT NULL DEFAULT 0,
+  cancellation_reason VARCHAR(20),
+  created_at DATETIME(3) NOT NULL,
+  queued_at DATETIME(3),
+  claimed_at DATETIME(3),
+  started_at DATETIME(3),
+  deadline_at DATETIME(3),
+  finished_at DATETIME(3),
+  elapsed_millis BIGINT,
+  result_contract VARCHAR(64),
+  result_json LONGTEXT,
+  error_category VARCHAR(64),
+  error_code VARCHAR(100),
+  error_json JSON,
+  cleanup_json JSON,
+  artifact_manifest_key VARCHAR(1024),
+  created_by VARCHAR(100) NOT NULL,
+  updated_by VARCHAR(100) NOT NULL,
+  updated_at DATETIME(3) NOT NULL,
+  active_slot TINYINT GENERATED ALWAYS AS (
+    CASE WHEN status IN ('CLAIMED','PREPARING','RUNNING_NODAL','RUNNING_PROFILE','COLLECTING','CANCEL_REQUESTED') THEN 1 ELSE NULL END
+  ) STORED,
+  UNIQUE KEY uk_software_integration_run_active_slot (active_slot),
+  KEY idx_software_integration_run_queue (status, id),
+  KEY idx_software_integration_run_version (model_version_id, id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS software_integration_run_event (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  run_id BIGINT NOT NULL,
+  event_sequence BIGINT NOT NULL,
+  worker_sequence BIGINT,
+  event_type VARCHAR(64) NOT NULL,
+  status VARCHAR(40),
+  message VARCHAR(1000),
+  error_json JSON,
+  occurred_at DATETIME(3) NOT NULL,
+  created_at DATETIME(3) NOT NULL,
+  UNIQUE KEY uk_software_integration_run_event_sequence (run_id, event_sequence),
+  UNIQUE KEY uk_software_integration_run_worker_sequence (run_id, worker_sequence),
+  KEY idx_software_integration_run_event_run (run_id, id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS software_integration_artifact (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  run_id BIGINT NOT NULL,
+  artifact_name VARCHAR(512) NOT NULL,
+  artifact_type VARCHAR(64) NOT NULL,
+  content_type VARCHAR(255),
+  storage_key VARCHAR(1024) NOT NULL,
+  size_bytes BIGINT NOT NULL,
+  sha256 CHAR(64) NOT NULL,
+  created_at DATETIME(3) NOT NULL,
+  expires_at DATETIME(3),
+  UNIQUE KEY uk_software_integration_artifact_name (run_id, artifact_name),
+  KEY idx_software_integration_artifact_run (run_id, id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

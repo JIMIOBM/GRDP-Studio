@@ -1,0 +1,470 @@
+import copy
+import json
+import subprocess
+import sys
+import tempfile
+import types
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from worker import ptk_run
+
+
+ROOT = Path(__file__).resolve().parents[3]
+COMPARATOR = ROOT / "worker/tests/Golden/Compare-RunToGolden.ps1"
+GOLDEN = ROOT / "docs/software-integration/golden/pipesim-well-result-v1/CSW_101/nodal.json"
+
+
+class Named:
+    def __init__(self, name):
+        self.name = name
+
+
+class Catalog:
+    def __init__(self, studies):
+        self.studies = studies
+
+    def lookup_entries_by_class_ids(self, _):
+        return [Named(name) for name in self.studies]
+
+
+class Curve:
+    def __init__(self, data):
+        self.curve_data = data
+
+
+class NodalResult:
+    def __init__(self, gas=False):
+        rate = "GasRate" if gas else "LiquidRate"
+        self.inflow_curves = [Curve([{rate: 2, "Pressure": 20}])]
+        self.outflow_curves = [Curve([{rate: 3, "Pressure": 30}])]
+
+
+class ProfileResult:
+    profile = {"Well_1": [{"MeasuredDepth": -10, "Pressure": 100, "Temperature": 60}]}
+
+
+class EspResult:
+    def __init__(self):
+        curve = {
+            ("Inputs",): {
+                ("Frequency",): {("Value",): 60, ("Unit",): "Hz"},
+                ("Manufacturer",): {("Value",): "REDA", ("Unit",): " "},
+                ("Model",): {("Value",): "J7000N", ("Unit",): " "},
+                ("MinFlowrate",): {("Value",): 4500, ("Unit",): "bbl/d"},
+                ("MaxFlowrate",): {("Value",): 9000, ("Unit",): "bbl/d"},
+                ("BaseStages",): {("Value",): 100, ("Unit",): " "},
+            },
+            ("Speed",): {
+                ("Frequencies",): {
+                    "FREQ= 60.00 Hz": {
+                        ("Flowrate",): {("Values",): [100, 200], ("Unit",): "bbl/d"},
+                        ("Head",): {("Values",): [1000, 800], ("Unit",): "ft"},
+                    }
+                },
+                ("OperatingEnvelope",): {
+                    ("MinCurve",): {("Flowrate",): {("Values",): [100], ("Unit",): "bbl/d"}, ("Head",): {("Values",): [900], ("Unit",): "ft"}},
+                    ("BepCurve",): {("Flowrate",): {("Values",): [150], ("Unit",): "bbl/d"}, ("Head",): {("Values",): [850], ("Unit",): "ft"}},
+                    ("MaxCurve",): {("Flowrate",): {("Values",): [200], ("Unit",): "bbl/d"}, ("Head",): {("Values",): [700], ("Unit",): "ft"}},
+                },
+            },
+        }
+        self.esp_curves = {"Flowrate=100 sbbl/day": {"B-ESP": curve}}
+
+
+class TrajectoryFrame:
+    columns = ["MeasuredDepth", "TrueVerticalDepth", "Inclination", "Azimuth", "MaxDogLegSeverity"]
+
+    def to_dict(self, orient="records"):
+        self.orient = orient
+        return [
+            {"MeasuredDepth": 0.0, "TrueVerticalDepth": 0.0, "Inclination": 0.0, "Azimuth": None, "MaxDogLegSeverity": None},
+            {"MeasuredDepth": 1000.0, "TrueVerticalDepth": 980.0, "Inclination": 25.0, "Azimuth": 90.0, "MaxDogLegSeverity": 1.2},
+        ]
+
+
+class Runnable:
+    def __init__(self, callback):
+        self.callback = callback
+
+    def run(self, **kwargs):
+        return self.callback(kwargs)
+
+
+class FakeModel:
+    def __init__(self, profile_failure=None, nodal_failure=None, studies=None, gas=False):
+        self._catalog = Catalog(studies or ["Study 1"])
+        self.gas = gas
+        self.fluids = types.SimpleNamespace(fluid_type="compositional" if gas else "blackoil")
+        self.closed = False
+        self.tasks = types.SimpleNamespace(
+            nodalanalysis=Runnable(
+                lambda _: (_ for _ in ()).throw(nodal_failure)
+                if nodal_failure is not None
+                else NodalResult(gas)
+            ),
+            ptprofilesimulation=Runnable(
+                lambda _: (_ for _ in ()).throw(profile_failure)
+                if profile_failure is not None
+                else ProfileResult()
+            ),
+        )
+
+    def find(self, component):
+        return {
+            "Well": ["Well_1"],
+            "BlackOilFluid": ["Fluid_1"],
+            "Completion": ["Completion_1"],
+            "Tubing": ["Tubing_1"],
+        }[component]
+
+    def get_value(self, component, parameter=None):
+        if parameter == "geometry":
+            return "vertical"
+        if parameter == "associated_fluid":
+            return "Fluid_1"
+        raise AssertionError("Unexpected model read")
+
+    def set_value(self, *args, **kwargs):
+        raise AssertionError("Demo-01 must never overwrite model parameters")
+
+    def close(self):
+        self.closed = True
+
+
+def fake_sixgill_modules():
+    definitions = types.ModuleType("sixgill.definitions")
+    definitions.Constants = types.SimpleNamespace(
+        FluidType=types.SimpleNamespace(COMPOSITIONAL="compositional", BLACKOIL="blackoil"),
+        CalculatedVariable=types.SimpleNamespace(FLOWRATE="flowrate"),
+        FlowRateType=types.SimpleNamespace(GASFLOWRATE="gasflowrate"),
+    )
+    definitions.Parameters = types.SimpleNamespace(
+        Completion=types.SimpleNamespace(GEOMETRYPROFILETYPE="geometry", RESERVOIRPRESSURE="reservoir_pressure"),
+        Well=types.SimpleNamespace(ASSOCIATEDBLACKOILFLUID="associated_fluid"),
+        Tubing=types.SimpleNamespace(INNERDIAMETER="inner_diameter"),
+        BlackOilFluid=types.SimpleNamespace(WATERCUT="water_cut", GOR="gor"),
+        PTProfileSimulation=types.SimpleNamespace(
+            CALCULATEDVARIABLE="calculated_variable",
+            FLOWRATETYPE="flow_rate_type",
+            INLETPRESSURE="inlet_pressure",
+        ),
+        NodalAnalysisSimulation=types.SimpleNamespace(OUTLETPRESSURE="outlet_pressure"),
+    )
+    definitions.ProfileVariables = types.SimpleNamespace(TEMPERATURE="temperature", PRESSURE="pressure", ELEVATION="elevation", TOTAL_DISTANCE="distance")
+    definitions.SystemVariables = types.SimpleNamespace(
+        PRESSURE="pressure",
+        TEMPERATURE="temperature",
+        VOLUME_FLOWRATE_LIQUID_STOCKTANK="liquid_flow",
+        VOLUME_FLOWRATE_GAS_STOCKTANK="gas_flow",
+    )
+    definitions.EspCurvesVariables = types.SimpleNamespace(
+        INPUTS=("Inputs",), VARIABLESPEEDCURVE=("Speed",), FREQUENCIES=("Frequencies",), OPERATINGENVELOPE=("OperatingEnvelope",),
+        MINCURVE=("MinCurve",), BEPCURVE=("BepCurve",), MAXCURVE=("MaxCurve",), FREQUENCY=("Frequency",), MANUFACTURER=("Manufacturer",),
+        MODEL=("Model",), MINFLOWRATE=("MinFlowrate",), MAXFLOWRATE=("MaxFlowrate",), STAGES=("BaseStages",), FLOWRATE=("Flowrate",),
+        HEAD=("Head",), VALUE=("Value",), VALUES=("Values",), UNIT=("Unit",), VARIABLEPERFORMANCECURVE="Performance",
+    )
+    resources = types.ModuleType("sixgill.core.resources")
+    resources.ModelClasses = types.SimpleNamespace(STUDY="study")
+    return {
+        "sixgill": types.ModuleType("sixgill"),
+        "sixgill.definitions": definitions,
+        "sixgill.core": types.ModuleType("sixgill.core"),
+        "sixgill.core.resources": resources,
+    }
+
+
+class PtkRunContractTests(unittest.TestCase):
+    def test_esp_curves_runs_official_two_task_shape(self):
+        model = FakeModel()
+        model.tasks.ptprofilesimulation = Runnable(lambda _: EspResult())
+        model.tasks.nodalanalysis = Runnable(lambda _: EspResult())
+        envelope, events, _ = self.execute(
+            "esp-curves", model, {"schemaVersion": "pipesim-esp-curves-parameters/1"}
+        )
+        self.assertEqual("ok", envelope["status"])
+        self.assertEqual(["RUNNING_PROFILE", "RUNNING_NODAL", "COLLECTING"], [item[0] for item in events])
+        self.assertEqual("pipesim-esp-curves-result/1", envelope["result"]["schemaVersion"])
+        self.assertEqual("REDA", envelope["result"]["pump"]["inputs"]["manufacturer"])
+        self.assertEqual(1, len(envelope["result"]["pump"]["frequencies"]))
+        self.assertEqual(1, len(envelope["result"]["pump"]["operatingEnvelope"]["bep"]["flowRate"]))
+
+    def test_esp_curves_accepts_official_basic_gas_model_kind(self):
+        model = FakeModel(gas=True)
+        model.tasks.ptprofilesimulation = Runnable(lambda _: EspResult())
+        model.tasks.nodalanalysis = Runnable(lambda _: EspResult())
+        envelope, _, _ = self.execute(
+            "esp-curves", model, {"schemaVersion": "pipesim-esp-curves-parameters/1"}
+        )
+        self.assertEqual("ok", envelope["status"])
+        self.assertEqual("basic_gas", envelope["result"]["model_kind"])
+
+    def test_trajectory_reads_official_dataframe_shape_without_writing_model(self):
+        model = FakeModel()
+        model.get_trajectory = lambda **_: TrajectoryFrame()
+        envelope, events, _ = self.execute(
+            "trajectory", model, {"schemaVersion": "pipesim-well-trajectory-parameters/1"}
+        )
+        self.assertEqual("ok", envelope["status"])
+        self.assertEqual(["READING_TRAJECTORY", "COLLECTING"], [item[0] for item in events])
+        self.assertEqual("pipesim-well-trajectory-result/1", envelope["result"]["schemaVersion"])
+        self.assertEqual("Well_1", envelope["result"]["producer"])
+        self.assertEqual("ft", envelope["result"]["units"]["measuredDepth"])
+        self.assertEqual(2, len(envelope["result"]["points"]))
+        self.assertIsNone(envelope["result"]["points"][0]["azimuth"])
+        self.assertEqual(90.0, envelope["result"]["points"][1]["azimuth"])
+
+    def test_pressure_scenario_task_matrix_and_profile_boundary(self):
+        for gas in (False, True):
+            for task in ('nodal', 'profile', 'combined'):
+                for scenario in (None, {'schemaVersion': 'pipesim-well-parameters/1', 'reservoirPressurePsi': 4000}):
+                    with self.subTest(gas=gas, task=task, scenario=scenario):
+                        model = FakeModel(gas=gas)
+                        base_get = model.get_value
+                        pressure = [3000]
+                        writes, calls = [], []
+                        model.describe = lambda **kwargs: types.SimpleNamespace(units_symbol='psia')
+                        model.get_value = lambda component, parameter=None: pressure[0] if parameter == 'reservoir_pressure' else base_get(component, parameter)
+                        def write(component, parameter=None, value=None):
+                            writes.append(value)
+                            pressure[0] = value
+                        model.set_value = write
+                        model.tasks.nodalanalysis = Runnable(lambda kwargs: (calls.append(('nodal', pressure[0], kwargs)), NodalResult(gas))[1])
+                        model.tasks.ptprofilesimulation = Runnable(lambda kwargs: (calls.append(('profile', pressure[0], kwargs)), ProfileResult())[1])
+                        envelope, _, _ = self.execute(task, model, scenario)
+                        self.assertTrue(model.closed)
+                        if scenario is not None and not gas and task != 'nodal':
+                            self.assertEqual('INVALID_SCENARIO_PARAMETERS', envelope['error']['code'])
+                            self.assertEqual([], writes)
+                            self.assertEqual([], calls)
+                            continue
+                        self.assertEqual('ok', envelope['status'])
+                        self.assertEqual([] if scenario is None else [4000], writes)
+                        for phase, applied, kwargs in calls:
+                            expected = {'producer': 'Well_1', 'study': 'Study 1'}
+                            expected.update({
+                                'system_variables': ['pressure', 'liquid_flow', 'gas_flow'],
+                                'profile_variables': ['temperature', 'pressure', 'elevation', 'distance'],
+                            })
+                            if gas and phase == 'profile':
+                                expected['parameters'] = {'calculated_variable': 'flowrate', 'flow_rate_type': 'gasflowrate'}
+                                if scenario is not None:
+                                    expected['parameters']['inlet_pressure'] = 4000
+                            self.assertEqual(expected, kwargs)
+                            self.assertEqual(3000 if scenario is None else 4000, applied)
+
+    def test_gas_scenario_profile_failure_preserves_partial_contract(self):
+        for task in ('profile', 'combined'):
+            model = FakeModel(gas=True, profile_failure=RuntimeError('profile solver failed'))
+            base_get = model.get_value
+            pressure = [3000]
+            model.describe = lambda **kwargs: types.SimpleNamespace(units_symbol='psia')
+            model.get_value = lambda component, parameter=None: pressure[0] if parameter == 'reservoir_pressure' else base_get(component, parameter)
+            model.set_value = lambda component, parameter=None, value=None: pressure.__setitem__(0, value)
+            envelope, _, _ = self.execute(task, model, {'schemaVersion': 'pipesim-well-parameters/1', 'reservoirPressurePsi': 4000})
+            self.assertTrue(model.closed)
+            if task == 'profile':
+                self.assertEqual('error', envelope['status'])
+                self.assertEqual('PROFILE_RUN_FAILED', envelope['error']['code'])
+            else:
+                self.assertEqual('partial', envelope['status'])
+                self.assertEqual('VALID_PARTIAL', envelope['result']['resultContract'])
+                self.assertTrue(envelope['result']['ipr'])
+                self.assertTrue(envelope['result']['vlp'])
+                self.assertEqual([], envelope['result']['profile'])
+                self.assertEqual('PROFILE_RUN_FAILED', envelope['warnings'][0]['code'])
+
+    def test_scenario_is_applied_before_nodal_and_failure_closes_without_running(self):
+        for unit in ('psia', 'bara'):
+            model = FakeModel()
+            base_get = model.get_value
+            pressure = [3000]
+            calls = []
+            model.describe = lambda **kwargs: types.SimpleNamespace(units_symbol=unit)
+            model.get_value = lambda component, parameter=None: pressure[0] if parameter == 'reservoir_pressure' else base_get(component, parameter)
+            model.set_value = lambda component, parameter=None, value=None: pressure.__setitem__(0, value)
+            model.tasks.nodalanalysis = Runnable(lambda _: (calls.append(pressure[0]), NodalResult())[1])
+            envelope, _, _ = self.execute('nodal', model, {'schemaVersion': 'pipesim-well-parameters/1', 'reservoirPressurePsi': 4000})
+            self.assertTrue(model.closed)
+            self.assertEqual([4000] if unit == 'psia' else [], calls)
+            self.assertEqual('ok' if unit == 'psia' else 'error', envelope['status'])
+
+    def test_sensitivity_runs_real_nodal_cases_and_restores_isolated_model(self):
+        model = FakeModel()
+        state = {"reservoir_pressure": 3000}
+        calls = []
+        run_kwargs = []
+        base_get = model.get_value
+        model.get_value = lambda component, parameter=None: state[parameter] if parameter in state else base_get(component, parameter)
+        model.set_value = lambda component, parameter=None, value=None: state.__setitem__(parameter, value)
+        model.tasks.nodalanalysis = Runnable(
+            lambda kwargs: (run_kwargs.append(kwargs), calls.append(state["reservoir_pressure"]), NodalResult())[2]
+        )
+        model.tasks.nodalanalysis.get_conditions = lambda **_: (
+            {"OutletPressure": 1100.0},
+            {"Completion_1": {"Pressure": 3000.0}},
+        )
+        envelope, events, _ = self.execute(
+            "sensitivity",
+            model,
+            {"schemaVersion": "pipesim-well-sensitivity-parameters/1", "targetVariable": "reservoirPressure", "values": [3000, 4000, 5000]},
+        )
+        self.assertEqual("ok", envelope["status"])
+        self.assertEqual("pipesim-well-sensitivity-result/1", envelope["result"]["schemaVersion"])
+        self.assertEqual([3000, 4000, 5000], calls)
+        self.assertEqual(3000, state["reservoir_pressure"])
+        self.assertEqual([1100.0, 1100.0, 1100.0], [item["parameters"]["outlet_pressure"] for item in run_kwargs])
+        self.assertEqual([3000, 4000, 5000], [item["inlet_conditions"]["Completion_1"]["Pressure"] for item in run_kwargs])
+        self.assertEqual(["RUNNING_NODAL", "COLLECTING"], [item[0] for item in events])
+        self.assertEqual(3, len(envelope["result"]["cases"]))
+
+    def execute(self, run_task, model=None, parameters=None):
+        events = []
+        model = model or FakeModel()
+        with tempfile.NamedTemporaryFile(suffix=".pips") as model_file:
+            with patch.dict(sys.modules, fake_sixgill_modules()):
+                envelope = ptk_run.execute_request(
+                    {
+                        "modelPath": model_file.name,
+                        "study": "Study 1",
+                        "runTask": run_task,
+                        "parameters": parameters,
+                    },
+                    model_factory=lambda _: model,
+                    emit_event=lambda state, message: events.append((state, message)),
+                )
+        return envelope, events, model
+
+    def test_rejects_non_null_parameters_without_opening_model(self):
+        opened = []
+        with tempfile.NamedTemporaryFile(suffix=".pips") as model_file:
+            envelope = ptk_run.execute_request(
+                {
+                    "modelPath": model_file.name,
+                    "study": "Study 1",
+                    "runTask": "nodal",
+                    "parameters": {},
+                },
+                model_factory=lambda _: opened.append(True),
+            )
+        self.assertEqual("error", envelope["status"])
+        self.assertEqual("INVALID_SCENARIO_PARAMETERS", envelope["error"]["code"])
+        self.assertEqual([], opened)
+
+    def test_nodal_contract_and_event_order(self):
+        envelope, events, model = self.execute("nodal")
+        self.assertEqual("ok", envelope["status"])
+        self.assertEqual(["RUNNING_NODAL", "COLLECTING"], [item[0] for item in events])
+        self.assertEqual("VALID_FULL", envelope["result"]["resultContract"])
+        self.assertEqual([], envelope["result"]["profile"])
+        self.assertIsNone(envelope["result"]["units"]["flow"]["displayUnit"])
+        self.assertTrue(model.closed)
+
+    def test_profile_contract_and_event_order(self):
+        envelope, events, _ = self.execute("profile")
+        self.assertEqual("ok", envelope["status"])
+        self.assertEqual(["RUNNING_PROFILE", "COLLECTING"], [item[0] for item in events])
+        self.assertEqual([], envelope["result"]["ipr"])
+        self.assertEqual(10.0, envelope["result"]["profile"][0]["depth"])
+
+    def test_basic_gas_uses_frozen_standard_gas_flow_unit(self):
+        envelope, _, _ = self.execute("nodal", FakeModel(gas=True))
+        self.assertEqual("ok", envelope["status"])
+        self.assertEqual("basic_gas", envelope["result"]["model_kind"])
+        self.assertEqual("mmscf/d", envelope["result"]["units"]["flow"]["displayUnit"])
+        self.assertEqual(
+            "standard_gas_volume_rate",
+            envelope["result"]["units"]["flow"]["semantics"],
+        )
+
+    def test_combined_contract_and_phase_order(self):
+        envelope, events, _ = self.execute("combined")
+        self.assertEqual("ok", envelope["status"])
+        self.assertEqual(
+            ["RUNNING_NODAL", "RUNNING_PROFILE", "COLLECTING"],
+            [item[0] for item in events],
+        )
+        self.assertEqual("VALID_FULL", envelope["result"]["resultContract"])
+
+    def test_combined_profile_failure_preserves_nodal_partial(self):
+        envelope, events, _ = self.execute(
+            "combined", FakeModel(profile_failure=RuntimeError("profile solver failed"))
+        )
+        self.assertEqual("partial", envelope["status"])
+        self.assertEqual("VALID_PARTIAL", envelope["result"]["resultContract"])
+        self.assertTrue(envelope["result"]["ipr"])
+        self.assertTrue(envelope["result"]["vlp"])
+        self.assertEqual([], envelope["result"]["profile"])
+        self.assertEqual("PROFILE_RUN_FAILED", envelope["warnings"][0]["code"])
+        self.assertEqual("COLLECTING", events[-1][0])
+
+    def test_profile_failure_and_license_failure_are_structured(self):
+        profile, _, _ = self.execute("profile", FakeModel(profile_failure=RuntimeError("failed")))
+        licensed, _, _ = self.execute("nodal", FakeModel(nodal_failure=RuntimeError("license checkout failed")))
+        self.assertEqual("PROFILE_RUN_FAILED", profile["error"]["code"])
+        self.assertEqual("LICENSE", licensed["error"]["category"])
+        self.assertEqual("LICENSE_UNAVAILABLE", licensed["error"]["code"])
+        self.assertTrue(licensed["error"]["retryable"])
+
+    def test_requires_an_existing_study(self):
+        envelope, _, _ = self.execute("nodal", FakeModel(studies=["Other Study"]))
+        self.assertEqual("STUDY_NOT_FOUND", envelope["error"]["code"])
+
+
+class GoldenComparatorTests(unittest.TestCase):
+    def run_comparator(self, actual):
+        with tempfile.TemporaryDirectory() as temporary:
+            actual_path = Path(temporary) / "actual.json"
+            actual_path.write_text(json.dumps(actual), encoding="utf-8")
+            return subprocess.run(
+                [
+                    "pwsh",
+                    "-NoProfile",
+                    "-File",
+                    str(COMPARATOR),
+                    "-ActualResult",
+                    str(actual_path),
+                    "-GoldenResult",
+                    str(GOLDEN),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+    def test_comparator_accepts_exact_result(self):
+        actual = json.loads(GOLDEN.read_text(encoding="utf-8"))
+        completed = self.run_comparator(actual)
+        self.assertEqual(0, completed.returncode, completed.stderr)
+
+    def test_comparator_rejects_value_and_order_changes(self):
+        actual = json.loads(GOLDEN.read_text(encoding="utf-8"))
+        changed_value = copy.deepcopy(actual)
+        changed_value["ipr"][0]["flow"] += 0.000001
+        self.assertNotEqual(0, self.run_comparator(changed_value).returncode)
+        changed_order = copy.deepcopy(actual)
+        changed_order["vlp"][0], changed_order["vlp"][1] = changed_order["vlp"][1], changed_order["vlp"][0]
+        self.assertNotEqual(0, self.run_comparator(changed_order).returncode)
+
+    def test_comparator_rejects_schema_category_units_and_length_changes(self):
+        actual = json.loads(GOLDEN.read_text(encoding="utf-8"))
+        changed_schema = copy.deepcopy(actual)
+        changed_schema["schemaVersion"] = "pipesim-well-result/other"
+        self.assertNotEqual(0, self.run_comparator(changed_schema).returncode)
+        changed_category = copy.deepcopy(actual)
+        changed_category["model_kind"] = "basic_gas"
+        self.assertNotEqual(0, self.run_comparator(changed_category).returncode)
+        changed_units = copy.deepcopy(actual)
+        changed_units["units"]["flow"] = {
+            "displayUnit": "mmscf/d",
+            "semantics": "standard_gas_volume_rate",
+        }
+        self.assertNotEqual(0, self.run_comparator(changed_units).returncode)
+        changed_length = copy.deepcopy(actual)
+        changed_length["ipr"].pop()
+        self.assertNotEqual(0, self.run_comparator(changed_length).returncode)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -9,12 +9,13 @@
  * 顶部“单井产能”命令进入独立工作台；左侧目录中的已保存记录则在
  * 当前 /ipr 页面内打开，和其它目录节点保持一致。
  */
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete } from '@element-plus/icons-vue'
 import RibbonMenu from '@/components/RibbonMenu.vue'
 import WorkspaceSidebar from '@/components/WorkspaceSidebar.vue'
+import SoftwareIntegrationWorkspace from '@/views/SoftwareIntegration/SoftwareIntegrationWorkspace.vue'
 import ReservoirWorkspaceContent from '@/views/Reservoir/ReservoirWorkspaceContent.vue'
 import WaterInvasionContent from '@/views/WellControlInventory/WaterInvasionContent.vue'
 import MaterialBalanceContent from '@/views/WellControlInventory/MaterialBalanceContent.vue'
@@ -122,8 +123,19 @@ import {
 // 当前工作台所使用的项目和气藏。
 const PROJECT_ID = resolveWorkspaceContextId(import.meta.env.VITE_WORKSPACE_PROJECT_ID, 6)
 const GAS_RESERVOIR_ID = resolveWorkspaceContextId(import.meta.env.VITE_WORKSPACE_GAS_RESERVOIR_ID, 4)
-const router = useRouter()
+const SOFTWARE_INTEGRATION_WORKSPACE = 'software-integration'
+const SOFTWARE_INTEGRATION_IMPORT_INTENTS = {
+  'software-integration.model.import.pipesim-well': 'import-pipesim-well',
+  'software-integration.model.import.pipesim-network': 'import-pipesim-network',
+  'software-integration.model.import.eclipse-100': 'import-eclipse-100'
+}
+const SOFTWARE_INTEGRATION_IMPORT_ACCEPTS = {
+  'import-pipesim-well': '.pips,.PIPS,.zip,.ZIP',
+  'import-pipesim-network': '.pips,.PIPS,.zip,.ZIP',
+  'import-eclipse-100': '.data,.DATA,.zip,.ZIP'
+}
 const route = useRoute()
+const router = useRouter()
 ensureWorkspaceReservoir({ projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID })
 const FLOW_BALANCE_NODE_TYPE = NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure
 
@@ -228,6 +240,17 @@ const activeNodeId = workspaceActiveNodeId  // 当前左侧树选中的节点 ID
 const activeNode = ref(null)  // 当前选中的完整节点对象
 const currentView = ref(null)  // currentView.value = 'water-invasion'，即确定右侧部分区域所显示的界面
 const currentViewNode = ref(null)  // 传给右侧内容组件的节点对象
+const softwareIntegrationWorkspace = ref(null)
+const softwareIntegrationImportInput = ref(null)
+let pendingSoftwareIntegrationImport = null
+const softwareIntegrationActiveNodeId = ref('')
+const isSoftwareIntegration = computed(
+  () => route.query.workspace === SOFTWARE_INTEGRATION_WORKSPACE
+)
+const activeRibbonTabName = ref(isSoftwareIntegration.value ? '软件集成' : '解析融合')
+const displayedActiveNodeId = computed(
+  () => isSoftwareIntegration.value ? softwareIntegrationActiveNodeId.value : activeNodeId.value
+)
 
 // 库功能用可刷新/可回退的完整地址定位；目录选择本身不改变右侧页面。
 watch([() => route.query, treeData], ([query]) => {
@@ -292,6 +315,101 @@ const projectWellNames = computed(() =>
     .map(item => item.wellName || item.label)
     .filter(Boolean) || []
 )
+
+watch(
+  () => route.query.workspace,
+  workspace => {
+    if (workspace === SOFTWARE_INTEGRATION_WORKSPACE) {
+      activeRibbonTabName.value = '软件集成'
+    } else if (activeRibbonTabName.value === '软件集成') {
+      activeRibbonTabName.value = '解析融合'
+    }
+  }
+)
+
+const handoffSoftwareIntegrationImport = async pendingImport => {
+  await nextTick()
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    if (pendingSoftwareIntegrationImport !== pendingImport) return
+    const workspace = softwareIntegrationWorkspace.value
+    if (workspace?.importExternalFile) {
+      try {
+        await workspace.importExternalFile(pendingImport.file, pendingImport.intent)
+      } catch {
+        ElMessage.error('模型导入失败，请稍后重试')
+      } finally {
+        if (pendingSoftwareIntegrationImport === pendingImport) pendingSoftwareIntegrationImport = null
+      }
+      return
+    }
+    await new Promise(resolve => window.setTimeout(resolve, 50))
+  }
+  if (pendingSoftwareIntegrationImport === pendingImport) {
+    pendingSoftwareIntegrationImport = null
+    ElMessage.error('导入工作区未能打开，请重新选择模型文件')
+  }
+}
+
+const handleSoftwareIntegrationImportFile = async event => {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file) return
+
+  const intent = event.target.dataset.intent
+  if (!SOFTWARE_INTEGRATION_IMPORT_ACCEPTS[intent]) return
+  const pendingImport = { file, intent }
+  pendingSoftwareIntegrationImport = pendingImport
+
+  try {
+    await router.push({
+      name: 'IprInterface',
+      query: {
+        ...route.query,
+        workspace: SOFTWARE_INTEGRATION_WORKSPACE,
+        intent
+      }
+    })
+    await handoffSoftwareIntegrationImport(pendingImport)
+  } catch {
+    if (pendingSoftwareIntegrationImport === pendingImport) pendingSoftwareIntegrationImport = null
+    ElMessage.error('无法打开软件集成工作区，请稍后重试')
+  }
+}
+
+const dispatchSoftwareIntegrationCommand = commandId => {
+  const intent = SOFTWARE_INTEGRATION_IMPORT_INTENTS[commandId]
+  if (!intent) return false
+
+  if (pendingSoftwareIntegrationImport) {
+    ElMessage.warning('当前模型正在导入，请等待完成后再选择文件')
+    return true
+  }
+
+  // The native picker must open in this Ribbon command's trusted click event.
+  const input = softwareIntegrationImportInput.value
+  if (!input) return true
+  input.dataset.intent = intent
+  input.accept = SOFTWARE_INTEGRATION_IMPORT_ACCEPTS[intent]
+  input.value = ''
+  input.click()
+  return true
+}
+
+const handleRibbonTabChange = async tabName => {
+  activeRibbonTabName.value = tabName
+  const query = { ...route.query }
+
+  if (tabName === '软件集成') {
+    query.workspace = SOFTWARE_INTEGRATION_WORKSPACE
+  } else {
+    delete query.workspace
+    delete query.intent
+  }
+
+  const currentWorkspace = route.query.workspace
+  if (query.workspace === currentWorkspace || (!query.workspace && !currentWorkspace)) return
+  await router.push({ name: 'IprInterface', query })
+}
 const treeContextMenu = ref({
   visible: false,
   x: 0,
@@ -3902,6 +4020,8 @@ const closeTreeContextMenu = () => {
 }
 
 const handleNodeContextMenu = (node, event) => {
+  if (isSoftwareIntegration.value) return
+
   if (!isTreeContextMenuNode(node)) {
     closeTreeContextMenu()
     return
@@ -4171,6 +4291,11 @@ const handleDeleteContextNode = async () => {
 const handleSelect = async (node) => { // 点击左侧树节点
   closeTreeContextMenu()
   if (!node || node.disabled) return
+  if (isSoftwareIntegration.value) {
+    softwareIntegrationActiveNodeId.value = node.id || ''
+    return
+  }
+
   if ([COEFFICIENT_GROUP, COEFFICIENT_METHOD].includes(node.type)) return
   if (node.type === COEFFICIENT_RECORD) {
     await router.push(coefficientLocation({ ...node, projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID }))
@@ -4452,7 +4577,24 @@ function openPipelinePage(section) {
   if (node) { activeNodeId.value = node.id; activeNode.value = node }
 }
 
-const handleCommand = async ({ group, name, parent, wellName: commandWellName }) => { // 接收顶部菜单栏的点击事件
+const handleCommand = async ({ group, name, parent, commandId, wellName: commandWellName }) => { // 接收顶部菜单栏的点击事件
+  if (dispatchSoftwareIntegrationCommand(commandId)) return
+
+  if (isSoftwareIntegration.value) {
+    if (commandId === 'software-integration.project.create') {
+      softwareIntegrationWorkspace.value?.openCreateDialog()
+    } else if (commandId === 'software-integration.project.save') {
+      ElMessage.info('软件集成内容已自动保存。')
+    } else if (commandId?.startsWith('software-integration.')) {
+      return
+    } else {
+      ElMessage.info(`${name} 功能正在开发中`)
+    }
+    return
+  }
+
+  if (commandId?.startsWith('software-integration.')) return
+
   if (workspaceRibbonScope.value === 'reservoir') {
     const location = getReservoirCommandLocation({ group, name, parent })
     if (location) await router.push(location)
@@ -4819,6 +4961,10 @@ onMounted(async () => {
   window.addEventListener('click', closeTreeContextMenu)
   window.addEventListener('resize', closeTreeContextMenu)
 
+  // 软件集成工作区拥有独立的项目树和数据接口；不能在挂载共享 Shell 时
+  // 同时初始化解析融合目录，否则原平台未登录会把演示页重定向到登录页。
+  if (isSoftwareIntegration.value) return
+
   try {
     await initTree()
     await Promise.allSettled([
@@ -4870,15 +5016,35 @@ onBeforeUnmount(() => {
     单井产能板块通过 handleCommand 跳转到独立页面；目录中的已保存等时试井在本页渲染。
   -->
   <div class="ipr-container">
+    <input
+      ref="softwareIntegrationImportInput"
+      class="software-integration-import-bridge"
+      type="file"
+      @change="handleSoftwareIntegrationImportFile"
+    />
     <!--    顶部菜单栏目-->
-    <RibbonMenu :scope="workspaceRibbonScope" @scope-change="setWorkspaceRibbonScope" @command="handleCommand" />
+    <RibbonMenu
+      :active-tab-name="activeRibbonTabName"
+      :scope="workspaceRibbonScope"
+      @command="handleCommand"
+      @tab-change="handleRibbonTabChange"
+      @scope-change="setWorkspaceRibbonScope"
+    />
 
 
     <div class="ipr-main">
+      <SoftwareIntegrationWorkspace v-if="isSoftwareIntegration" ref="softwareIntegrationWorkspace" />
+      <template v-else>
       <!-- 公共左侧目录：与单井产能工作台共用 WorkspaceSidebar.vue。 -->
-      <WorkspaceSidebar v-model:keyword="wellKeyword" v-model:collapsed="sideTreeCollapsed" :nodes="filteredTreeData"
-        :active-id="activeNodeId" @select="handleSelect" @expand="handleNodeExpand"
-        @node-contextmenu="handleNodeContextMenu" />
+      <WorkspaceSidebar
+        v-model:keyword="wellKeyword"
+        v-model:collapsed="sideTreeCollapsed"
+        :nodes="filteredTreeData"
+        :active-id="displayedActiveNodeId"
+        @select="handleSelect"
+        @expand="handleNodeExpand"
+        @node-contextmenu="handleNodeContextMenu"
+      />
 
       <!--     右侧的主要内容区域-->
       <main class="content-area" :class="{
@@ -4957,10 +5123,11 @@ onBeforeUnmount(() => {
           :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID"
           @saved="handleDiagnosticSaved" />
       </main>
+      </template>
     </div>
 
     <Teleport to="body">
-      <div v-if="treeContextMenu.visible" class="tree-context-menu"
+      <div v-if="!isSoftwareIntegration && treeContextMenu.visible" class="tree-context-menu"
         :style="{ left: `${treeContextMenu.x}px`, top: `${treeContextMenu.y}px` }" @click.stop @contextmenu.prevent>
         <button v-if="isVentLossRecord(treeContextMenu.node)" class="tree-context-menu-item" type="button"
           @click="handleRenameVentLoss">重命名{{ getVentLossLabel(treeContextMenu.node) }}记录</button>
@@ -4974,6 +5141,10 @@ onBeforeUnmount(() => {
     </Teleport>
   </div>
 </template>
+
+<style scoped>
+.software-integration-import-bridge { display: none; }
+</style>
 
 <style lang="scss" scoped>
 $accent-yellow: #f4d000;
