@@ -26,8 +26,8 @@ class SoftwareIntegrationCapabilityServiceTests {
         assertThat(response.worker().status()).isEqualTo("AVAILABLE");
         assertThat(response.worker().idle()).isTrue();
         assertThat(response.worker().reasonCode()).isNull();
-        assertThat(response.pipesimWell().runTasks()).containsExactly("nodal", "profile", "combined");
-        assertThat(response.pipesimNetwork().runTasks()).containsExactly("network");
+        assertThat(response.pipesimWell().runTasks()).containsExactly("nodal", "profile", "combined", "sensitivity", "gas-lift-performance", "gas-lift-diagnostics", "vfp-tables", "esp-curves", "trajectory");
+        assertThat(response.pipesimNetwork().runTasks()).containsExactly("network", "system-analysis", "network-optimizer");
         assertThat(response.eclipse100().runTasks()).containsExactly("eclipse");
     }
 
@@ -61,7 +61,7 @@ class SoftwareIntegrationCapabilityServiceTests {
     void normalizesMissingFieldsWrongVersionsUnknownStatusesTasksAndTimeouts() {
         client.capabilities = new WorkerCapabilities(true,
                 new WorkerSimulatorCapability(null, "AVAILABLE", null,
-                        List.of("nodal", "profile", "combined"), 600),
+                        List.of("nodal", "profile", "combined", "sensitivity", "gas-lift-performance", "gas-lift-diagnostics", "vfp-tables", "esp-curves", "trajectory"), 600),
                 new WorkerSimulatorCapability("2022.1", "MYSTERY", "private-detail",
                         List.of("network"), 600),
                 new WorkerSimulatorCapability("2024.1", "AVAILABLE", null,
@@ -76,8 +76,8 @@ class SoftwareIntegrationCapabilityServiceTests {
     private static WorkerCapabilities available(boolean idle) {
         return new WorkerCapabilities(idle,
                 new WorkerSimulatorCapability("2022.1", "AVAILABLE", null,
-                        List.of("nodal", "profile", "combined"), 600),
-                new WorkerSimulatorCapability("2022.1", "AVAILABLE", null, List.of("network"), 600),
+                        List.of("nodal", "profile", "combined", "sensitivity", "gas-lift-performance", "gas-lift-diagnostics", "vfp-tables", "esp-curves", "trajectory"), 600),
+                new WorkerSimulatorCapability("2022.1", "AVAILABLE", null, List.of("network", "system-analysis", "network-optimizer"), 600),
                 new WorkerSimulatorCapability("2024.1", "AVAILABLE", null, List.of("eclipse"), 1800));
     }
 

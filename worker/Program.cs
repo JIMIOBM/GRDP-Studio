@@ -52,6 +52,7 @@ builder.Services.AddSingleton<PtkProcessRunner>();
 builder.Services.AddSingleton<PtkRunService>();
 builder.Services.AddSingleton<PtkValidationService>();
 builder.Services.AddSingleton<EclipseLauncher>();
+builder.Services.AddSingleton<EclipseDeckPackageResolver>();
 builder.Services.AddSingleton<EclipseExecutionCoordinator>();
 builder.Services.AddSingleton<EclipseValidationService>();
 builder.Services.AddSingleton<EclipseDataInspectionService>();
@@ -96,7 +97,7 @@ app.MapGet("/api/capabilities", async (WorkerIdentity identity, PtkRunRegistry r
             pythonToolkitFound,
             pythonFound,
             status = installationFound && pythonToolkitFound && pythonFound ? "AVAILABLE" : "UNAVAILABLE",
-            runTasks = new[] { "nodal", "profile", "combined" },
+            runTasks = new[] { "nodal", "profile", "combined", "sensitivity", "gas-lift-performance", "gas-lift-diagnostics", "vfp-tables", "esp-curves", "trajectory" },
             maxTimeoutSeconds = options.MaxRunTimeoutSeconds
         },
         pipesimNetwork = new
@@ -106,7 +107,7 @@ app.MapGet("/api/capabilities", async (WorkerIdentity identity, PtkRunRegistry r
             pythonToolkitFound,
             pythonFound,
             status = installationFound && pythonToolkitFound && pythonFound ? "AVAILABLE" : "UNAVAILABLE",
-            runTasks = new[] { "network" },
+            runTasks = new[] { "network", "system-analysis", "network-optimizer" },
             maxTimeoutSeconds = options.MaxRunTimeoutSeconds
         },
         eclipse100 = new { version = "2024.1", launcherFound = eclipseCapability.LauncherFound,

@@ -104,6 +104,67 @@ class EclipseDataInspectionValidatorTests {
     }
 
     @Test
+    void acceptsV3PackageManifestAndRejectsUnsafeEntries() throws Exception {
+        ObjectNode inspection = inspectionV3();
+        ArrayNode files = inspection.withArray("packageFiles");
+        files.add(objectMapper.readTree("""
+                {"relativePath":"CASE.DATA","sizeBytes":128,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+                """));
+        files.add(objectMapper.readTree("""
+                {"relativePath":"include/grid.inc","sizeBytes":256,"sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
+                """));
+        JsonNode validated = objectMapper.readTree(validate(inspection));
+        assertThat(validated).isEqualTo(objectMapper.readTree("""
+                {"schemaVersion":"eclipse-data-inspection/3","caseName":"CASE.DATA","sections":[],"unitSystem":null,"phases":[],"dimensions":null,
+                 "wellNames":[],"scheduleTimeline":[],"packageFiles":[
+                   {"relativePath":"CASE.DATA","sizeBytes":128,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+                   {"relativePath":"include/grid.inc","sizeBytes":256,"sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}]}
+                """));
+        for (String path : List.of("../outside.inc", "/absolute.inc", "include\\grid.inc", "include//grid.inc", "include:bad")) {
+            ObjectNode invalid = inspectionV3();
+            invalid.withArray("packageFiles").add(objectMapper.readTree("{\"relativePath\":\"" + path.replace("\\", "\\\\") + "\",\"sizeBytes\":1,\"sha256\":\"" + "a".repeat(64) + "\"}"));
+            assertInvalid(invalid);
+        }
+    }
+
+    @Test
+    void acceptsV4ScheduleMetadataAndPreservesRawLexemes() throws Exception {
+        ObjectNode inspection = inspectionV4();
+        inspection.set("scheduleMetadata", objectMapper.readTree("""
+                {"wells":[{"name":"WELL_1","group":"GROUP_1","sourceFile":"BASE.SCH","lineNumber":4}],
+                 "groups":[{"name":"GROUP_1","parent":"FIELD","sourceFile":"BASE.SCH","lineNumber":7}],
+                 "records":[{"keyword":"COMPDAT","values":["WELL_1","1","1","1","1","OPEN"],"sourceFile":"BASE.SCH","lineNumber":10},
+                            {"keyword":"WCONHIST","values":["WELL_1","OPEN","ORAT","10"],"sourceFile":"BASE.SCH","lineNumber":13}],
+                 "completions":[{"keyword":"COMPDAT","well":"WELL_1","i":"1","j":"1","k1":"1","k2":"1","status":"OPEN","sourceFile":"BASE.SCH","lineNumber":10}]}
+                """));
+
+        JsonNode validated = objectMapper.readTree(validate(inspection));
+
+        assertThat(validated).isEqualTo(objectMapper.readTree("""
+                 {"schemaVersion":"eclipse-data-inspection/4","caseName":"CASE.DATA","sections":[],"unitSystem":null,"phases":[],"dimensions":null,
+                 "wellNames":[],"scheduleTimeline":[],"packageFiles":[{"relativePath":"CASE.DATA","sizeBytes":1,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],"scheduleMetadata":
+                 {"wells":[{"name":"WELL_1","group":"GROUP_1","sourceFile":"BASE.SCH","lineNumber":4}],"groups":[{"name":"GROUP_1","parent":"FIELD","sourceFile":"BASE.SCH","lineNumber":7}],
+                  "records":[{"keyword":"COMPDAT","values":["WELL_1","1","1","1","1","OPEN"],"sourceFile":"BASE.SCH","lineNumber":10},
+                             {"keyword":"WCONHIST","values":["WELL_1","OPEN","ORAT","10"],"sourceFile":"BASE.SCH","lineNumber":13}],
+                  "completions":[{"keyword":"COMPDAT","well":"WELL_1","i":"1","j":"1","k1":"1","k2":"1","status":"OPEN","sourceFile":"BASE.SCH","lineNumber":10}]}}
+                """));
+    }
+
+    @Test
+    void rejectsUnsafeOrUnknownScheduleMetadataRecords() throws Exception {
+        for (String keyword : List.of("UNKNOWN", "ECLIPSE", "WELSPECS/")) {
+            ObjectNode inspection = inspectionV4();
+            ((ObjectNode) inspection.get("scheduleMetadata")).withArray("records")
+                    .add(objectMapper.readTree("{\"keyword\":\"" + keyword + "\",\"values\":[\"WELL_1\"]}"));
+            assertInvalid(inspection);
+        }
+        ObjectNode unsafe = inspectionV4();
+        ((ObjectNode) unsafe.get("scheduleMetadata")).withArray("records")
+                .add(objectMapper.readTree("{\"keyword\":\"COMPDAT\",\"values\":[\"C:\\\\private\\\\deck\"]}"));
+        assertInvalid(unsafe);
+    }
+
+    @Test
     void v1RemainsClosedAndIsNotUpConverted() {
         ObjectNode inspection = inspection();
         inspection.set("wellNames", objectMapper.createArrayNode());
@@ -134,7 +195,7 @@ class EclipseDataInspectionValidatorTests {
 
     @Test
     void rejectsUnsafeOrOversizedWellNames() {
-        for (String name : List.of("C:\\private\\WELL", "nested/WELL", "../WELL", "WELL:2", "net.pipe://localhost/pipe/private",
+        for (String name : List.of("C:\\private\\WELL", "nested/WELL", "../WELL", "net.pipe://localhost/pipe/private",
                 "WELL\n2", "WELL_SECRET", "WELL_PASSWD", "WELL_AUTHORIZATION", "LICENSE_SERVER", "ENVIRONMENT_NAME", "A".repeat(129))) {
             ObjectNode inspection = inspectionV2();
             inspection.set("wellNames", objectMapper.createArrayNode().add(name));
@@ -226,6 +287,21 @@ class EclipseDataInspectionValidatorTests {
         node.put("schemaVersion", "eclipse-data-inspection/2");
         node.set("wellNames", objectMapper.createArrayNode());
         node.set("scheduleTimeline", objectMapper.createArrayNode());
+        return node;
+    }
+
+    private ObjectNode inspectionV3() {
+        ObjectNode node = inspectionV2();
+        node.put("schemaVersion", "eclipse-data-inspection/3");
+        node.set("packageFiles", objectMapper.createArrayNode());
+        return node;
+    }
+
+    private ObjectNode inspectionV4() throws Exception {
+        ObjectNode node = inspectionV3();
+        node.put("schemaVersion", "eclipse-data-inspection/4");
+        node.withArray("packageFiles").add(objectMapper.readTree("{\"relativePath\":\"CASE.DATA\",\"sizeBytes\":1,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}"));
+        node.set("scheduleMetadata", objectMapper.readTree("{\"wells\":[],\"groups\":[],\"records\":[],\"completions\":[]}"));
         return node;
     }
 

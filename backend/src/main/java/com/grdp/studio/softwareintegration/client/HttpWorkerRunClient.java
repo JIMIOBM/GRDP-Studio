@@ -88,6 +88,7 @@ public class HttpWorkerRunClient implements WorkerRunClient {
             payload.put("runTask", request.runTask());
             payload.set("parameters", objectMapper.valueToTree(request.parameters()));
             payload.put("timeoutSeconds", request.timeoutSeconds());
+            if (request.expectedPackageFiles() != null) payload.set("expectedPackageFiles", request.expectedPackageFiles());
             String json = objectMapper.writeValueAsString(payload);
             JsonNode body = send(HttpRequest.newBuilder(uri("/api/runs/execute"))
                     .header("Content-Type", "application/json")

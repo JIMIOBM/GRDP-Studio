@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.RegularExpressions;
 using Grdp.SoftwareIntegration.Worker.Contracts;
+using Grdp.SoftwareIntegration.Worker.Execution;
 
 namespace Grdp.SoftwareIntegration.Worker.Inspection;
 
@@ -26,15 +27,16 @@ public static class EclipseDataInspector
         {
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, FileOptions.SequentialScan);
             using var reader = new StreamReader(stream, new UTF8Encoding(false, true), detectEncodingFromByteOrderMarks: false, bufferSize: 64 * 1024);
-            var v1 = new Parser(caseName).Read(reader);
+            var v1 = new Parser(caseName, allowIncludes: false).Read(reader);
             using var scheduleStream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, FileOptions.SequentialScan);
             using var scheduleReader = new StreamReader(scheduleStream, new UTF8Encoding(false, true), detectEncodingFromByteOrderMarks: false, bufferSize: 64 * 1024);
-            var schedule = new ScheduleParser().Read(scheduleReader);
+            var schedule = new ScheduleParser().Read([(caseName, scheduleReader.ReadToEnd())]);
             return v1 with
             {
-                SchemaVersion = "eclipse-data-inspection/2",
+                SchemaVersion = schedule.Metadata is null ? "eclipse-data-inspection/2" : "eclipse-data-inspection/4",
                 WellNames = schedule.WellNames,
-                ScheduleTimeline = schedule.Events
+                ScheduleTimeline = schedule.Events,
+                ScheduleMetadata = schedule.Metadata
             };
         }
         catch (DecoderFallbackException)
@@ -43,7 +45,44 @@ public static class EclipseDataInspector
         }
     }
 
-    private sealed class Parser(string caseName)
+    public static EclipseDataInspection InspectPackage(IReadOnlyList<string> files, string caseName)
+    {
+        var sources = files.Select(file => (
+            SourceFile: Path.GetRelativePath(CommonPackageRoot(files), file).Replace(Path.DirectorySeparatorChar, '/'),
+            Content: EclipseDeckPackageResolver.ReadUtf8(file))).ToArray();
+        var combined = new StringBuilder();
+        foreach (var source in sources) combined.AppendLine(source.Content);
+        using var reader = new StringReader(combined.ToString());
+        var v1 = new Parser(caseName, allowIncludes: true).Read(reader);
+        var schedule = new ScheduleParser().Read(sources);
+        return v1 with
+        {
+            SchemaVersion = schedule.Metadata is null ? "eclipse-data-inspection/2" : "eclipse-data-inspection/4",
+            WellNames = schedule.WellNames,
+            ScheduleTimeline = schedule.Events,
+            ScheduleMetadata = schedule.Metadata
+        };
+    }
+
+    private static string CommonPackageRoot(IReadOnlyList<string> files)
+    {
+        if (files.Count == 0) return Directory.GetCurrentDirectory();
+        var root = Path.GetFullPath(Path.GetDirectoryName(files[0])!);
+        foreach (var file in files.Skip(1))
+        {
+            var full = Path.GetFullPath(file);
+            while (!full.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(full, root, StringComparison.OrdinalIgnoreCase))
+            {
+                var parent = Directory.GetParent(root)?.FullName;
+                if (parent is null || string.Equals(parent, root, StringComparison.OrdinalIgnoreCase)) break;
+                root = parent;
+            }
+        }
+        return root;
+    }
+
+    private sealed class Parser(string caseName, bool allowIncludes)
     {
         private readonly List<string> sections = [];
         private readonly List<string> phases = [];
@@ -224,7 +263,11 @@ public static class EclipseDataInspector
             identifierActive = false;
             var keyword = identifier.ToString().ToUpperInvariant();
             identifier.Clear();
-            if (keyword == "INCLUDE") Fail("ECLIPSE_INCLUDE_UNSUPPORTED", "INCLUDE is unsupported for ECLIPSE 100 MVP.");
+            if (keyword == "INCLUDE")
+            {
+                if (!allowIncludes) Fail("ECLIPSE_INCLUDE_UNSUPPORTED", "INCLUDE is only supported when its package dependency is available.");
+                return;
+            }
             if (firstIdentifierSeen) return;
             firstIdentifierSeen = true;
             AddOrdered(sections, SectionKeywords, keyword);
@@ -288,10 +331,18 @@ public static class EclipseDataInspector
         private const int MaxEvents = 1_000;
         private const int MaxDates = 4_000;
         private const int MaxSteps = 8_000;
+        private const int MaxMetadataRecords = 4_000;
+        private const int MaxMetadataValues = 128;
         private const int MaxNameScalars = 128;
         private readonly List<string> wellNames = [];
         private readonly HashSet<string> wellNameSet = new(StringComparer.Ordinal);
         private readonly List<EclipseScheduleEvent> events = [];
+        private readonly List<EclipseScheduleWell> scheduleWells = [];
+        private readonly Dictionary<string, int> scheduleWellIndexes = new(StringComparer.Ordinal);
+        private readonly List<EclipseScheduleGroup> scheduleGroups = [];
+        private readonly Dictionary<string, int> scheduleGroupIndexes = new(StringComparer.Ordinal);
+        private readonly List<EclipseScheduleKeywordRecord> scheduleRecords = [];
+        private readonly List<EclipseScheduleCompletion> scheduleCompletions = [];
         private readonly List<LexToken> record = [];
         private readonly StringBuilder token = new();
         private static readonly Regex TStepDecimal = new("^[+]?[0-9]+(?:\\.[0-9]+)?(?:[Ee][+-]?[0-9]+)?$", RegexOptions.CultureInvariant);
@@ -311,15 +362,33 @@ public static class EclipseDataInspector
         private bool previousWasCarriageReturn;
         private int acceptedDates;
         private int acceptedSteps;
+        private string sourceFile = "CASE.DATA";
+        private int lineNumber = 1;
+        private string? recordSourceFile;
+        private int recordStartLine;
 
-        public ScheduleResult Read(TextReader reader)
+        public ScheduleResult Read(TextReader reader) => Read([("CASE.DATA", reader.ReadToEnd())]);
+
+        public ScheduleResult Read(IReadOnlyList<(string SourceFile, string Content)> sources)
         {
-            int value;
-            while ((value = reader.Read()) >= 0) Process((char)value);
-            if (quotePending) CloseQuotedToken(closed: false);
-            FinishLine(endOfFile: true);
+            foreach (var source in sources)
+            {
+                sourceFile = source.SourceFile;
+                lineNumber = 1;
+                using var reader = new StringReader(source.Content);
+                int value;
+                while ((value = reader.Read()) >= 0) Process((char)value);
+                if (quotePending) CloseQuotedToken(closed: false);
+                FinishLine(endOfFile: true);
+            }
             // An open candidate is deliberately discarded: no slash means no completed block.
-            return new(wellNames, events);
+            var metadata = scheduleWells.Count == 0 && scheduleGroups.Count == 0 && scheduleRecords.Count == 0 && scheduleCompletions.Count == 0
+                ? null
+                : new EclipseScheduleMetadata(scheduleWells, scheduleGroups, scheduleRecords, scheduleCompletions);
+            IReadOnlyList<EclipseScheduleEvent> timeline = metadata is null
+                ? events.Select(item => item with { SourceFile = null, LineNumber = null }).ToArray()
+                : events;
+            return new(wellNames, timeline, metadata);
         }
 
         private void Process(char value)
@@ -399,7 +468,7 @@ public static class EclipseDataInspector
                 }
                 else if (scheduleSeen)
                 {
-                    candidate = new Candidate(lineToken.ToUpperInvariant());
+                    candidate = new Candidate(lineToken.ToUpperInvariant(), sourceFile, lineNumber);
                 }
             }
             quoted = false;
@@ -413,6 +482,7 @@ public static class EclipseDataInspector
             lineNonSlashTokens = 0;
             lineSlashTokens = 0;
             lineHasSlash = false;
+            if (!endOfFile) lineNumber++;
         }
 
         private bool scheduleSeen;
@@ -446,6 +516,11 @@ public static class EclipseDataInspector
             }
             else
             {
+                if (record.Count == 0)
+                {
+                    recordSourceFile = sourceFile;
+                    recordStartLine = lineNumber;
+                }
                 record.Add(lex);
             }
             token.Clear();
@@ -456,8 +531,10 @@ public static class EclipseDataInspector
 
         private void FinishRecord()
         {
-            candidate!.AddRecord(record);
+            candidate!.AddRecord(record, recordSourceFile ?? candidate.SourceFile, recordStartLine == 0 ? candidate.StartLine : recordStartLine);
             record.Clear();
+            recordSourceFile = null;
+            recordStartLine = 0;
         }
 
         private void FinishCandidate()
@@ -473,6 +550,38 @@ public static class EclipseDataInspector
                     wellNameSet.Add(name);
                     wellNames.Add(name);
                 }
+                foreach (var well in completed.WellEntries) AddWell(well);
+                return;
+            }
+            if (completed.Keyword == "WELSPECL")
+            {
+                foreach (var name in completed.Wells)
+                {
+                    if (wellNameSet.Contains(name)) continue;
+                    if (wellNames.Count == MaxWells) Limit();
+                    wellNameSet.Add(name);
+                    wellNames.Add(name);
+                }
+                foreach (var well in completed.WellEntries) AddWell(well);
+                return;
+            }
+            if (completed.Keyword == "GRUPTREE")
+            {
+                foreach (var group in completed.GroupEntries) AddGroup(group);
+                return;
+            }
+            if (completed.Keyword is "COMPDAT" or "COMPDATM" or "WELOPEN" or "WCONHIST" or "WCONINJE" or "WCONPROD")
+            {
+                foreach (var item in completed.MetadataRecords)
+                {
+                    if (scheduleRecords.Count == MaxMetadataRecords) Limit();
+                    scheduleRecords.Add(item);
+                }
+                foreach (var item in completed.CompletionEntries)
+                {
+                    if (scheduleCompletions.Count == MaxMetadataRecords) Limit();
+                    scheduleCompletions.Add(item);
+                }
                 return;
             }
             if (completed.Dates.Count == 0 && completed.Steps.Count == 0) return;
@@ -481,34 +590,102 @@ public static class EclipseDataInspector
             acceptedDates += completed.Dates.Count;
             acceptedSteps += completed.Steps.Count;
             events.Add(completed.Keyword == "DATES"
-                ? new EclipseScheduleEvent("DATES", completed.Dates)
-                : new EclipseScheduleEvent("TSTEP", Steps: completed.Steps));
+                ? new EclipseScheduleEvent("DATES", completed.Dates, SourceFile: completed.SourceFile, LineNumber: completed.StartLine)
+                : new EclipseScheduleEvent("TSTEP", Steps: completed.Steps, SourceFile: completed.SourceFile, LineNumber: completed.StartLine));
         }
 
         private static bool IsCandidateKeyword(string? value) => value is not null &&
             (value.Equals("SCHEDULE", StringComparison.OrdinalIgnoreCase)
              || value.Equals("WELSPECS", StringComparison.OrdinalIgnoreCase)
+             || value.Equals("WELSPECL", StringComparison.OrdinalIgnoreCase)
+             || value.Equals("GRUPTREE", StringComparison.OrdinalIgnoreCase)
+             || value.Equals("COMPDAT", StringComparison.OrdinalIgnoreCase)
+             || value.Equals("COMPDATM", StringComparison.OrdinalIgnoreCase)
+             || value.Equals("WELOPEN", StringComparison.OrdinalIgnoreCase)
+             || value.Equals("WCONHIST", StringComparison.OrdinalIgnoreCase)
+             || value.Equals("WCONINJE", StringComparison.OrdinalIgnoreCase)
+             || value.Equals("WCONPROD", StringComparison.OrdinalIgnoreCase)
              || value.Equals("DATES", StringComparison.OrdinalIgnoreCase)
              || value.Equals("TSTEP", StringComparison.OrdinalIgnoreCase));
+
+        private void AddWell(EclipseScheduleWell well)
+        {
+            if (scheduleWellIndexes.TryGetValue(well.Name, out var index))
+            {
+                    if (well.Group is not null) scheduleWells[index] = scheduleWells[index] with
+                    {
+                        Group = well.Group,
+                        SourceFile = well.SourceFile,
+                        LineNumber = well.LineNumber
+                    };
+                return;
+            }
+            if (scheduleWells.Count == MaxWells) Limit();
+            scheduleWellIndexes.Add(well.Name, scheduleWells.Count);
+            scheduleWells.Add(well);
+        }
+
+        private void AddGroup(EclipseScheduleGroup group)
+        {
+            if (scheduleGroupIndexes.TryGetValue(group.Name, out var index))
+            {
+                if (group.Parent is not null) scheduleGroups[index] = scheduleGroups[index] with
+                {
+                    Parent = group.Parent,
+                    SourceFile = group.SourceFile,
+                    LineNumber = group.LineNumber
+                };
+                return;
+            }
+            if (scheduleGroups.Count == MaxWells) Limit();
+            scheduleGroupIndexes.Add(group.Name, scheduleGroups.Count);
+            scheduleGroups.Add(group);
+        }
 
         private static void Limit() => Fail("ECLIPSE_DATA_SCHEDULE_LIMIT", "The ECLIPSE .DATA schedule inspection limit was exceeded.");
         private static void Fail(string code, string message) => throw new EclipseDataInspectionException(code, message);
 
-        private sealed class Candidate(string keyword)
+        private sealed class Candidate(string keyword, string sourceFile, int startLine)
         {
             public string Keyword { get; } = keyword;
+            public string SourceFile { get; } = sourceFile;
+            public int StartLine { get; } = startLine;
             public List<string> Wells { get; } = [];
             public HashSet<string> WellSet { get; } = new(StringComparer.Ordinal);
+            public List<EclipseScheduleWell> WellEntries { get; } = [];
+            public List<EclipseScheduleGroup> GroupEntries { get; } = [];
+            public List<EclipseScheduleKeywordRecord> MetadataRecords { get; } = [];
+            public List<EclipseScheduleCompletion> CompletionEntries { get; } = [];
             public List<EclipseScheduleDate> Dates { get; } = [];
             public List<string> Steps { get; } = [];
 
-            public void AddRecord(IReadOnlyList<LexToken> tokens)
+            public void AddRecord(IReadOnlyList<LexToken> tokens, string sourceFile, int lineNumber)
             {
-                if (Keyword == "WELSPECS")
+                if (Keyword is "WELSPECS" or "WELSPECL")
                 {
                     if (tokens.Count == 0 || !TryWellName(tokens[0], out var name) || !WellSet.Add(name)) return;
                     Wells.Add(name);
+                    var group = tokens.Count > 1 && TryGroupName(tokens[1], out var groupName) ? groupName : null;
+                    if (group is not null) WellEntries.Add(new EclipseScheduleWell(name, group, sourceFile, lineNumber));
                     if (Wells.Count > MaxWells) Limit();
+                }
+                else if (Keyword == "GRUPTREE")
+                {
+                    if (tokens.Count >= 2 && TryGroupName(tokens[0], out var name) && TryGroupName(tokens[1], out var parent))
+                    {
+                        GroupEntries.Add(new EclipseScheduleGroup(name, parent, sourceFile, lineNumber));
+                    }
+                }
+                else if (Keyword is "COMPDAT" or "COMPDATM" or "WELOPEN" or "WCONHIST" or "WCONINJE" or "WCONPROD")
+                {
+                    if (tokens.Count is 0 or > MaxMetadataValues || tokens.Any(token => !TryMetadataValue(token))) return;
+                    var values = tokens.Select(token => token.Value).ToArray();
+                    MetadataRecords.Add(new EclipseScheduleKeywordRecord(Keyword, values, sourceFile, lineNumber));
+                    if (Keyword is "COMPDAT" or "COMPDATM" && tokens.Count >= 6 && TryWellName(tokens[0], out var well))
+                    {
+                        CompletionEntries.Add(new EclipseScheduleCompletion(
+                            Keyword, well, values[1], values[2], values[3], values[4], values[5], sourceFile, lineNumber));
+                    }
                 }
                 else if (Keyword == "DATES")
                 {
@@ -536,10 +713,21 @@ public static class EclipseDataInspector
                     && name.Skip(1).All(value => value is >= 'A' and <= 'Z' or >= 'a' and <= 'z' or >= '0' and <= '9' or '_' or '.' or '-');
             }
 
+            private static bool TryGroupName(LexToken token, out string name) => TryWellName(token, out name);
+
+            private static bool TryMetadataValue(LexToken token)
+            {
+                if (token.Value.Length == 0 || token.TooLong || (token.Quoted && !token.ClosedQuote)
+                    || token.Value.EnumerateRunes().Any(Rune.IsControl)) return false;
+                return !token.Value.Contains('/') && !token.Value.Contains('\\') && !token.Value.Contains(':')
+                    && !token.Value.Contains("..", StringComparison.Ordinal)
+                    && !ContainsSensitiveWellNameContent(token.Value);
+            }
+
             private static bool TryDate(IReadOnlyList<LexToken> tokens, out EclipseScheduleDate date)
             {
                 date = default!;
-                if (tokens.Count is < 3 or > 4 || tokens.Any(token => token.Quoted || token.TooLong)) return false;
+                if (tokens.Count is < 3 or > 4 || tokens.Any(token => token.TooLong || token.Quoted && !token.ClosedQuote)) return false;
                 var day = tokens[0].Value;
                 var month = tokens[1].Value.ToUpperInvariant();
                 var year = tokens[2].Value;
@@ -570,7 +758,8 @@ public static class EclipseDataInspector
 
             private static bool ContainsSensitiveWellNameContent(string value)
             {
-                if (value.Contains('/') || value.Contains('\\') || value.Contains(':') || value.Contains("..", StringComparison.Ordinal)) return true;
+                if (value.Contains('/') || value.Contains('\\') || value.Contains("..", StringComparison.Ordinal)
+                    || value.Contains("://", StringComparison.Ordinal)) return true;
                 var normalized = value.ToLowerInvariant();
                 return normalized.Contains("net.pipe", StringComparison.Ordinal)
                     || normalized.Contains("password", StringComparison.Ordinal)
@@ -592,5 +781,8 @@ public static class EclipseDataInspector
         private sealed record LexToken(string Value, bool Quoted, bool ClosedQuote, bool TooLong);
     }
 
-    private sealed record ScheduleResult(IReadOnlyList<string> WellNames, IReadOnlyList<EclipseScheduleEvent> Events);
+    private sealed record ScheduleResult(
+        IReadOnlyList<string> WellNames,
+        IReadOnlyList<EclipseScheduleEvent> Events,
+        EclipseScheduleMetadata? Metadata);
 }

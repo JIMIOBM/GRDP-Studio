@@ -1,15 +1,18 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
+import { softwareIntegrationApi } from '@/api/softwareIntegration'
 import { compactChartSlider } from './chartZoomStyle'
 import PipesimNetworkVariableTable from './PipesimNetworkVariableTable.vue'
 import NetworkBranchOverview from './NetworkBranchOverview.vue'
-import { branchComparison, matchedBranches, networkCsv, nodeResultRows, validatedLayout } from './networkResultInteraction'
+import { branchComparison, matchedBranches, networkCsv, nodeResultRows, qualityLocation, validatedLayout, validatedNetworkComparison } from './networkResultInteraction'
 
 const props = defineProps({
   result: { type: Object, default: null },
   partial: { type: Boolean, default: false },
-  runId: { type: [String, Number], default: null }
+  runId: { type: [String, Number], default: null },
+  history: { type: Array, default: () => [] },
+  run: { type: Object, default: null }
 })
 
 const PROFILE_VARIABLES = [
@@ -35,10 +38,17 @@ const DEVICE_TYPES = [
 
 const topologyElement = ref(null)
 const profileElement = ref(null)
+const profilePanel = ref(null)
 const selectedBranch = ref('')
 const comparedBranches = ref([])
+const historicalRunId = ref(null)
+const historicalRun = ref(null)
+const historicalLoading = ref(false)
+const historicalError = ref('')
 const selectedProfileVariable = ref('Pressure')
 const detailTab = ref('system')
+const profilePage = ref(1)
+const profilePageSize = ref(20)
 const topologyPanel = ref(null)
 const focusedNode = ref('')
 const selectionLabel = ref('')
@@ -50,6 +60,7 @@ const layoutKey = computed(() => props.runId == null ? null : `grdp:network-layo
 let topologyChart
 let profileChart
 let chartResizeObserver
+let historicalComparisonGeneration = 0
 
 const arrayValue = value => Array.isArray(value) ? value : []
 const topologyNodes = computed(() => arrayValue(props.result?.topology?.nodes).filter(node =>
@@ -99,11 +110,32 @@ const comparisonOptions = computed(() => profiles.value.filter(profile => profil
   branch: profile.branch,
   rows: branchComparison(selectedProfile.value, profile, selectedProfileVariable.value)
 })))
+const historicalRunOptions = computed(() => (props.history || []).filter(run =>
+  String(run?.id) !== String(props.runId) && run?.runType === 'network' && run?.status === 'SUCCEEDED' &&
+  run?.resultContract === 'VALID_FULL' && run?.study === props.result?.study))
+const historicalSelectedProfile = computed(() => historicalRun.value?.profiles?.find(profile => profile.branch === selectedBranch.value) || null)
+const historicalRows = computed(() => historicalSelectedProfile.value
+  ? branchComparison(selectedProfile.value, historicalSelectedProfile.value, selectedProfileVariable.value)
+  : null)
+const historicalComparisonMessage = computed(() => historicalError.value ||
+  (historicalRun.value && !historicalRows.value ? '历史运行缺少当前支路、变量或同单位距离点，无法叠加。' : ''))
 const displayedProfiles = computed(() => [
-  { branch: selectedBranch.value, rows: profileRows.value },
-  ...comparisonOptions.value.filter(item => item.rows && comparedBranches.value.includes(item.branch))
+  { branch: selectedBranch.value, rows: profileRows.value, runId: props.runId, kind: 'current' },
+  ...comparisonOptions.value.filter(item => item.rows && comparedBranches.value.includes(item.branch)).map(item => ({ ...item, runId: props.runId, kind: 'branch' })),
+  ...(historicalRows.value && historicalRun.value ? [{
+    branch: `${selectedBranch.value} · 历史运行 #${historicalRun.value.id}`,
+    rows: historicalRows.value,
+    runId: historicalRun.value.id,
+    kind: 'historical'
+  }] : [])
 ])
-const displayedRows = computed(() => displayedProfiles.value.flatMap(profile => profile.rows.map(row => ({ ...row, branch: profile.branch }))))
+const displayedRows = computed(() => displayedProfiles.value.flatMap(profile => profile.rows.map(row => ({
+  ...row, branch: profile.branch, runId: profile.runId
+}))))
+const displayedPageRows = computed(() => {
+  const start = (profilePage.value - 1) * profilePageSize.value
+  return displayedRows.value.slice(start, start + profilePageSize.value)
+})
 const diagnosticGroups = computed(() => [
   { key: 'errors', label: '错误', type: 'danger', items: arrayValue(props.result?.summary?.errors) },
   { key: 'warnings', label: '警告', type: 'warning', items: arrayValue(props.result?.summary?.warnings) },
@@ -113,6 +145,37 @@ const diagnosticGroups = computed(() => [
 const systemResults = computed(() => arrayValue(props.result?.system))
 const nodeResults = computed(() => arrayValue(props.result?.node))
 const qualityItems = computed(() => arrayValue(props.result?.quality))
+const qualityRows = computed(() => qualityItems.value.map(item => ({
+  ...item,
+  location: qualityLocation(item, {
+    nodes: topologyNodes.value,
+    nodeResults: nodeResults.value,
+    systemResults: systemResults.value,
+    profiles: profiles.value
+  })
+})))
+const networkParameterLabels = {
+  pressure: '压力',
+  temperature: '温度',
+  gasFlowRate: '气体流量',
+  liquidFlowRate: '液体流量',
+  massFlowRate: '质量流量'
+}
+const networkScenario = computed(() => {
+  const parameters = props.run?.parameters
+  if (parameters?.schemaVersion === 'pipesim-network-choke-bean-size-parameters/1' &&
+    typeof parameters.choke === 'string' && Number.isFinite(parameters.originalBeanSize) && Number.isFinite(parameters.targetBeanSize)) {
+    return { kind: 'choke', choke: parameters.choke, baselineRunId: parameters.baselineRunId, original: parameters.originalBeanSize, target: parameters.targetBeanSize }
+  }
+  if (parameters?.schemaVersion !== 'pipesim-network-parameters/1' || !Array.isArray(parameters.boundaries) || !parameters.boundaries.length) return null
+  const boundaries = parameters.boundaries.map(boundary => {
+    const field = Object.keys(networkParameterLabels).find(key => Number.isFinite(boundary?.[key]))
+    return field && typeof boundary?.node === 'string'
+      ? { node: boundary.node, field, label: networkParameterLabels[field], value: boundary[field] }
+      : null
+  }).filter(Boolean)
+  return boundaries.length ? { kind: 'boundary', boundaries } : null
+})
 
 const axisName = (name, unit) => unit ? `${name} (${unit})` : name
 const displayValue = value => value === null || value === undefined ? '-' : value
@@ -306,6 +369,16 @@ const selectNode = id => {
     if (point?.every(Number.isFinite)) topologyChart.setOption({ series: [{ center: point }] })
   }
 }
+const locateQuality = row => {
+  const location = row?.location
+  if (location?.kind === 'node') {
+    selectNode(location.id)
+    topologyPanel.value?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  } else if (location?.kind === 'profile') {
+    selectedBranch.value = location.id
+    profilePanel.value?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
+}
 const saveLayout = () => {
   if (!layoutKey.value || !topologyChart) return
   const data = topologyChart.getModel().getSeriesByIndex(0).getData()
@@ -339,13 +412,26 @@ const download = (href, name) => {
   anchor.download = `network-${props.runId ?? 'result'}-${name}`
   anchor.click()
 }
+const exportTopologyCsv = () => {
+  const rows = [
+    ['记录类型', 'ID', '组件类型', '源', '目标', '源端口'],
+    ...topologyNodes.value.map(node => ['节点', node.id, node.componentType, '', '', '']),
+    ...topologyEdges.value.map(edge => ['连接', '', '', edge.source, edge.destination, edge.sourcePort ?? ''])
+  ]
+  const url = URL.createObjectURL(new Blob([networkCsv(rows)], { type: 'text/csv;charset=utf-8' }))
+  download(url, 'topology.csv')
+  setTimeout(() => URL.revokeObjectURL(url), 0)
+}
 const exportImage = chart => {
   if (!chart) return
   download(chart.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: '#fff' }), chart === topologyChart ? 'topology.png' : 'profile.png')
 }
 const exportCsv = () => {
   const rows = [['运行ID', 'Study', '分支', '总距离', '距离单位', '变量', '数值', '变量单位'],
-    ...displayedRows.value.map(row => [props.runId, props.result.study, row.branch, row.distance, distanceVariable.value?.unit, selectedProfileVariable.value, row.value, selectedPrimaryVariable.value?.unit])]
+    ...displayedRows.value.map(row => [row.runId, props.result.study, row.branch, row.distance,
+      row.runId === props.runId ? distanceVariable.value?.unit : historicalSelectedProfile.value?.variables?.find(item => item.variable === 'TotalDistance')?.unit,
+      selectedProfileVariable.value, row.value,
+      row.runId === props.runId ? selectedPrimaryVariable.value?.unit : historicalSelectedProfile.value?.variables?.find(item => item.variable === selectedProfileVariable.value)?.unit])]
   const url = URL.createObjectURL(new Blob([networkCsv(rows)], { type: 'text/csv;charset=utf-8' }))
   download(url, 'profile.csv')
   setTimeout(() => URL.revokeObjectURL(url), 0)
@@ -400,7 +486,7 @@ const renderProfileChart = async () => {
       showSymbol: profile.rows.length <= 80,
       symbolSize: 5,
       connectNulls: false,
-      lineStyle: { width: 2, type: index ? 'dashed' : 'solid' },
+      lineStyle: { width: 2, type: profile.kind === 'historical' ? 'dotted' : index ? 'dashed' : 'solid' },
       data: profile.rows.map(row => [chartValue(row.distance), chartValue(row.value)])
     }))
   }, true)
@@ -446,15 +532,57 @@ watch(() => props.runId, () => {
   selectedNodeRows.value = []
   linkedBranches.value = []
   viewMessage.value = ''
+  profilePage.value = 1
   renderTopologyChart()
 })
 watch(() => props.result, () => {
+  profilePage.value = 1
   renderProfileChart()
   observeChartElements()
 })
-watch([selectedBranch, selectedProfileVariable], renderProfileChart)
-watch([() => props.runId, () => props.result, selectedBranch, selectedProfileVariable], () => { comparedBranches.value = [] })
+watch([selectedBranch, selectedProfileVariable, comparedBranches, historicalRunId, profilePageSize], () => {
+  profilePage.value = 1
+  renderProfileChart()
+})
+watch(() => displayedRows.value.length, total => {
+  const lastPage = Math.max(1, Math.ceil(total / profilePageSize.value))
+  if (profilePage.value > lastPage) profilePage.value = lastPage
+})
+watch([() => props.runId, () => props.result, selectedBranch, selectedProfileVariable], () => {
+  comparedBranches.value = []
+  if (!historicalRunId.value) return
+  if (!historicalRunOptions.value.some(run => String(run.id) === String(historicalRunId.value))) historicalRunId.value = null
+})
 watch(comparedBranches, renderProfileChart)
+watch(historicalRunId, async id => {
+  const generation = ++historicalComparisonGeneration
+  historicalRun.value = null
+  historicalError.value = ''
+  historicalLoading.value = Boolean(id)
+  if (!id) {
+    renderProfileChart()
+    return
+  }
+  try {
+    const response = await softwareIntegrationApi.getRun(id)
+    if (generation !== historicalComparisonGeneration) return
+    const run = response?.data
+    const option = historicalRunOptions.value.find(item => String(item.id) === String(id))
+    const validated = option && run?.id === option.id && run.modelVersionId === option.modelVersionId
+      ? validatedNetworkComparison(run, props.result?.study)
+      : null
+    if (!validated) historicalError.value = '所选历史运行没有可对齐的管网结果。'
+    else historicalRun.value = { id: run.id, system: validated.system, node: validated.node, profiles: validated.profiles }
+  } catch {
+    if (generation === historicalComparisonGeneration) historicalError.value = '历史运行读取失败，请重新选择。'
+  } finally {
+    if (generation === historicalComparisonGeneration) {
+      historicalLoading.value = false
+      renderProfileChart()
+    }
+  }
+})
+onBeforeUnmount(() => { historicalComparisonGeneration++ })
 onMounted(() => {
   window.addEventListener('resize', resizeCharts)
   document.addEventListener('fullscreenchange', onFullscreenChange)
@@ -486,6 +614,33 @@ onBeforeUnmount(() => {
       <el-tag :type="partial ? 'warning' : 'success'">{{ partial ? '部分真实计算结果' : (result.simulationState === 'Completed' ? '仿真完成' : result.simulationState) }}</el-tag>
     </header>
 
+    <section v-if="networkScenario" class="network-scenario-acceptance" aria-label="管网方案验收" data-testid="network-scenario-acceptance">
+      <div class="network-scenario-acceptance-heading">
+        <div>
+          <span class="network-kicker">SCENARIO ACCEPTANCE</span>
+          <h3>{{ networkScenario.kind === 'choke' ? 'Choke Bean Size 方案验收' : '管网边界方案验收' }}</h3>
+          <p v-if="networkScenario.kind === 'choke'">本次在隔离计算副本中调用官方 PIPESIM Toolkit 修改 Choke BeanSize，并完成回读后重新计算；原工程文件不修改。</p>
+          <p v-else>本次只在隔离计算副本覆盖下列边界；未列出的 Study 条件保持不变，原工程文件不修改。</p>
+        </div>
+        <el-tag :type="partial ? 'warning' : 'success'">{{ partial ? '部分结果' : '计算成功' }}</el-tag>
+      </div>
+      <div v-if="networkScenario.kind === 'choke'" class="network-scenario-rows">
+        <div class="network-scenario-row">
+          <strong>{{ networkScenario.choke }}</strong>
+          <span>Bean Size：{{ networkScenario.original }} → {{ networkScenario.target }}</span>
+          <small>基线运行 #{{ networkScenario.baselineRunId }}；单位沿用官方模型</small>
+        </div>
+      </div>
+      <div v-else class="network-scenario-rows">
+        <div v-for="boundary in networkScenario.boundaries" :key="`${boundary.node}-${boundary.field}`" class="network-scenario-row">
+          <strong>{{ boundary.node }}</strong>
+          <span>{{ boundary.label }}：{{ boundary.value }}</span>
+          <small>单位沿用 Study 设置</small>
+        </div>
+      </div>
+      <p class="network-scenario-next-step">下方剖面和系统/节点结果为本次真实返回值；选择“对比历史运行”可与同版本同 Study 的基线逐点核验。</p>
+    </section>
+
     <div class="count-strip" aria-label="管网拓扑统计">
       <div v-for="item in countItems" :key="item.key" class="count-item">
         <span>{{ item.label }}</span>
@@ -507,6 +662,7 @@ onBeforeUnmount(() => {
         </el-select>
         <el-button size="small" :disabled="!layoutKey" @click="saveLayout">保存布局</el-button>
         <el-button size="small" @click="toggleFullscreen">{{ isFullscreen ? '退出全屏' : '全屏' }}</el-button>
+        <el-button size="small" :disabled="!topologyNodes.length && !topologyEdges.length" @click="exportTopologyCsv">导出拓扑 CSV</el-button>
         <el-button size="small" :disabled="!topologyNodes.length" @click="exportImage(topologyChart)">导出拓扑图片</el-button>
         <span role="status">{{ viewMessage }}</span>
       </div>
@@ -536,7 +692,7 @@ onBeforeUnmount(() => {
     </section>
 
     <NetworkBranchOverview :profiles="profiles" :run-id="runId" :study="result?.study || ''" @select="branch => { selectedBranch = branch; profileElement?.scrollIntoView({ behavior: 'smooth', block: 'center' }) }" />
-    <section class="result-panel profile-panel">
+    <section ref="profilePanel" class="result-panel profile-panel">
       <div class="panel-heading profile-heading">
         <div><h3>分支剖面</h3><p>TotalDistance 为横轴；空值按曲线间断显示。</p></div>
         <div class="network-view-tools"><span v-if="selectedProfile">{{ selectedProfile.pointCount }} 个点</span><el-button size="small" :disabled="!hasProfileSeries" @click="exportCsv">导出剖面 CSV</el-button><el-button size="small" :disabled="!hasProfileSeries" @click="exportImage(profileChart)">导出剖面图片</el-button></div>
@@ -567,11 +723,19 @@ onBeforeUnmount(() => {
         </el-select>
         <small>实线为当前支路，虚线为对比支路；各自使用原始距离，不插值、不对齐起点。单位或数据不匹配的支路不可选。</small>
       </div>
+      <div v-if="historicalRunOptions.length" class="branch-comparison historical-comparison">
+        <span>对比历史运行</span>
+        <el-select v-model="historicalRunId" clearable filterable :loading="historicalLoading" placeholder="选择同版本同 Study 的历史运行" aria-label="对比历史管网运行">
+          <el-option v-for="run in historicalRunOptions" :key="run.id" :label="`运行 #${run.id} · ${run.study || '无 Study'}`" :value="run.id" />
+        </el-select>
+        <small>点划线为历史运行；只使用同一分支、同一变量和同一单位的原始返回点，不插值。</small>
+      </div>
+      <p v-if="historicalComparisonMessage" class="profile-unavailable">{{ historicalComparisonMessage }}</p>
       <p v-if="unavailableProfileFields.length" class="profile-unavailable">未返回的剖面字段（不可用）：{{ unavailableProfileFields.join('、') }}</p>
       <div v-if="hasProfileSeries" ref="profileElement" class="profile-chart" />
       <el-empty v-else :description="partial ? '当前部分结果未提供可绘制的距离和变量剖面' : '当前分支没有可绘制的主变量剖面'" :image-size="72" />
-      <el-table v-if="hasProfileSeries" :data="displayedRows" border size="small" max-height="280">
-        <el-table-column type="index" label="#" width="54" align="center" />
+      <el-table v-if="hasProfileSeries" :data="displayedPageRows" border size="small" max-height="280">
+        <el-table-column label="#" width="54" align="center"><template #default="{ $index }">{{ (profilePage - 1) * profilePageSize + $index + 1 }}</template></el-table-column>
         <el-table-column prop="branch" label="支路" min-width="140" />
         <el-table-column :label="axisName('总距离', distanceVariable.unit)" min-width="180">
           <template #default="{ row }"><span :class="{ missing: row.distance === null }">{{ displayValue(row.distance) }}</span></template>
@@ -580,15 +744,25 @@ onBeforeUnmount(() => {
           <template #default="{ row }"><span :class="{ missing: row.value === null }">{{ displayValue(row.value) }}</span></template>
         </el-table-column>
       </el-table>
+      <el-pagination
+        v-if="hasProfileSeries && displayedRows.length > profilePageSize"
+        v-model:current-page="profilePage"
+        v-model:page-size="profilePageSize"
+        class="network-pagination"
+        background
+        layout="total, sizes, prev, pager, next"
+        :page-sizes="[20, 50, 100]"
+        :total="displayedRows.length"
+      />
     </section>
 
     <section class="result-panel detail-panel">
       <el-tabs v-model="detailTab" class="network-detail-tabs">
         <el-tab-pane :label="`系统结果 (${systemResults.length})`" name="system">
-          <PipesimNetworkVariableTable title="系统结果" :entries="systemResults" :empty-text="partial ? '当前部分结果未提供系统结果' : '当前运行没有系统结果'" />
+          <PipesimNetworkVariableTable title="系统结果" :entries="systemResults" :comparison-entries="historicalRun?.system" :comparison-label="historicalRun ? `历史运行 #${historicalRun.id}` : ''" :empty-text="partial ? '当前部分结果未提供系统结果' : '当前运行没有系统结果'" />
         </el-tab-pane>
         <el-tab-pane :label="`节点结果 (${nodeResults.length})`" name="node">
-          <PipesimNetworkVariableTable title="节点结果" :entries="nodeResults" :empty-text="partial ? '当前部分结果未提供节点结果' : '当前运行没有节点结果'" />
+          <PipesimNetworkVariableTable title="节点结果" :entries="nodeResults" :comparison-entries="historicalRun?.node" :comparison-label="historicalRun ? `历史运行 #${historicalRun.id}` : ''" :empty-text="partial ? '当前部分结果未提供节点结果' : '当前运行没有节点结果'" />
         </el-tab-pane>
         <el-tab-pane label="消息与质量" name="diagnostics">
           <div class="diagnostic-grid">
@@ -601,9 +775,21 @@ onBeforeUnmount(() => {
             </article>
           </div>
           <div class="quality-heading"><strong>质量标记</strong><span>{{ qualityItems.length }} 条</span></div>
-          <el-table v-if="qualityItems.length" :data="qualityItems" border size="small" max-height="320">
+          <el-table v-if="qualityRows.length" :data="qualityRows" border size="small" max-height="320">
             <el-table-column prop="path" label="数据路径" min-width="260" show-overflow-tooltip />
             <el-table-column prop="code" label="代码" min-width="180" show-overflow-tooltip />
+            <el-table-column label="定位" width="150">
+              <template #default="{ row }">
+                <el-button
+                  v-if="row.location?.kind === 'node' || row.location?.kind === 'profile'"
+                  link
+                  type="primary"
+                  :aria-label="`定位${row.location.label}`"
+                  @click="locateQuality(row)"
+                >定位{{ row.location.label }}</el-button>
+                <span v-else class="quality-unlocatable">{{ row.location?.label || '无法定位' }}</span>
+              </template>
+            </el-table-column>
           </el-table>
           <el-empty v-else description="没有质量标记" :image-size="64" />
         </el-tab-pane>
@@ -615,6 +801,7 @@ onBeforeUnmount(() => {
 
 <style lang="scss" scoped>
 .branch-comparison { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 12px; }
+.network-pagination { justify-content: flex-end; margin-top: 10px; }
 .branch-comparison .el-select { width: min(480px, 100%); }
 .branch-comparison small { flex-basis: 100%; color: #73777d; line-height: 1.6; }
 .network-view-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; font-size: 12px; }.network-view-tools .el-select { width: 220px; }.network-view-tools .el-button + .el-button { margin-left: 0; }.network-selection { border-top: 1px solid #dcdfe6; padding-top: 8px; font-size: 12px; }.network-selection p, .selection-heading > span { color: #73777d; }.selection-heading { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }.topology-panel:fullscreen { overflow: auto; padding: 16px; background: #fff; }.topology-panel:fullscreen .topology-chart { height: 65vh; }
@@ -623,6 +810,15 @@ onBeforeUnmount(() => {
 .network-kicker { color: #2b6cb3; font-size: 11px; font-weight: 700; letter-spacing: .08em; }
 .network-result-header h2 { margin: 3px 0 0; font-size: 17px; }
 .network-result-header p { margin: 5px 0 0; color: #737a84; font-size: 12px; }
+.network-scenario-acceptance { padding: 14px 16px; border: 1px solid #cfe8cf; background: #f3fbf0; }
+.network-scenario-acceptance-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.network-scenario-acceptance-heading h3 { margin: 3px 0 0; font-size: 15px; color: #315b36; }
+.network-scenario-acceptance-heading p { margin: 5px 0 0; color: #5f7461; font-size: 12px; line-height: 1.6; }
+.network-scenario-rows { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; margin-top: 12px; }
+.network-scenario-row { display: grid; grid-template-columns: minmax(90px, 1fr) minmax(110px, 1fr); gap: 3px 10px; padding: 9px 11px; border: 1px solid #dcefd7; background: #fff; font-size: 12px; }
+.network-scenario-row strong { color: #315b36; }
+.network-scenario-row small { grid-column: 1 / -1; color: #849486; }
+.network-scenario-next-step { margin: 10px 0 0; color: #5f7461; font-size: 12px; }
 .count-strip { display: grid; grid-template-columns: repeat(5, minmax(90px, 1fr)); border: 1px solid #e1e7ef; background: #fff; }
 .count-item { min-width: 0; padding: 13px 16px; border-right: 1px solid #e8edf3; }
 .count-item:last-child { border-right: 0; }
@@ -658,9 +854,10 @@ onBeforeUnmount(() => {
 .diagnostic-group ul { max-height: 170px; margin: 10px 0 0; padding-left: 19px; overflow: auto; color: #606266; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 .quality-heading { display: flex; align-items: center; justify-content: space-between; margin: 18px 0 10px; font-size: 13px; }
 .quality-heading span { color: #909399; font-size: 12px; }
+.quality-unlocatable { color: #909399; font-size: 12px; }
 .missing { color: #a8abb2; }
 @media (max-width: 760px) {
-  .network-result-header, .panel-heading { align-items: flex-start; flex-direction: column; }
+  .network-result-header, .network-scenario-acceptance-heading, .panel-heading { align-items: flex-start; flex-direction: column; }
   .topology-heading-actions { width: 100%; justify-content: space-between; white-space: normal; }
   .count-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .count-item { border-bottom: 1px solid #e8edf3; }

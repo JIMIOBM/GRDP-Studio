@@ -7,6 +7,200 @@ namespace Grdp.SoftwareIntegration.Worker.Tests;
 public sealed class PtkRunEnvelopeTests
 {
     [Fact]
+    public void AcceptsOfficialGasLiftPerformanceResult()
+    {
+        using var document = JsonDocument.Parse("""
+            {
+              "status": "ok",
+              "result": {
+                "schemaVersion": "pipesim-gas-lift-performance-result/1",
+                "model_kind": "black_oil_liquid",
+                "runTask": "gas-lift-performance",
+                "resultContract": "VALID_FULL",
+                "producer": "Well_1",
+                "outletPressurePsi": 151,
+                "surfaceInjectionTemperatureF": 110,
+                "targetInjectionRateMmscfd": 1.1,
+                "reservoirPressurePsi": 1700,
+                "gorScfPerStb": 400,
+                "waterCutPercent": 80,
+                "scanVariable": "gasLiftInjectionRate",
+                "scanUnit": "mmscf/d",
+                "productionUnit": "STB/d",
+                "cases": [
+                  { "caseName": "INJGASRATE=0.55 mmscfd Flowrate=987.4514 sbbl/day", "injectionRateMmscfd": 0.55, "liquidRateStbPerDay": 987.4513984865446 },
+                  { "caseName": "INJGASRATE=0.65 mmscfd Flowrate=1330.814 sbbl/day", "injectionRateMmscfd": 0.65, "liquidRateStbPerDay": 1330.8137384764686 }
+                ]
+              },
+              "warnings": []
+            }
+            """);
+
+        var accepted = PtkRunService.TryReadEnvelope(
+            document.RootElement, "gas-lift-performance", out var status, out var result, out var error, out _);
+
+        Assert.True(accepted);
+        Assert.Equal("ok", status);
+        Assert.Equal("VALID_FULL", result?.GetProperty("resultContract").GetString());
+        Assert.Null(error);
+    }
+
+    [Fact]
+    public void AcceptsOfficialGasLiftDiagnosticsResult()
+    {
+        using var document = JsonDocument.Parse("""
+            {
+              "status": "ok",
+              "result": {
+                "schemaVersion":"pipesim-gas-lift-diagnostics-result/1",
+                "model_kind":"black_oil_liquid",
+                "runTask":"gas-lift-diagnostics",
+                "resultContract":"VALID_FULL",
+                "producer":"Well_1",
+                "outletPressurePsi":151,
+                "surfaceInjectionTemperatureF":110,
+                "targetInjectionRateMmscfd":1.1,
+                "reservoirPressurePsi":1700,
+                "gorScfPerStb":400,
+                "waterCutPercent":80,
+                "diagnosticType":"FIXEDINJECTION",
+                "throttling":"ON",
+                "usePhaseRatio":true,
+                "injectionUnit":"mmscf/d",
+                "liquidRateUnit":"STB/d",
+                "cases":[{
+                  "caseName":"INJGASRATE=0.5 mmscfd Flowrate=986.524 sbbl/day",
+                  "injectionRateMmscfd":0.5,
+                  "liquidRateStbPerDay":986.5239826290447,
+                  "valves":[{
+                    "valveName":"GLI 1","positionStatus":"Open","status":"Throttling",
+                    "gasRateNoThrottlingMmscfd":0.3395,"portDiameterIn":0.1875,"domeTemperatureF":82.97,
+                    "closingPressurePsi":310.0,"openingPressurePsi":281.6,"ptroPsi":342.0,
+                    "dischargeCoefficient":0.65,"portToBellowArea":0.093548,"operationMode":"PPO","portType":"SPRING"
+                  }]
+                }]
+              },
+              "warnings": []
+            }
+            """);
+
+        var accepted = PtkRunService.TryReadEnvelope(
+            document.RootElement, "gas-lift-diagnostics", out var status, out var result, out var error, out _);
+
+        Assert.True(accepted);
+        Assert.Equal("ok", status);
+        Assert.Equal("VALID_FULL", result?.GetProperty("resultContract").GetString());
+        Assert.Null(error);
+    }
+
+    [Fact]
+    public void AcceptsOfficialVfpTablesResult()
+    {
+        using var document = JsonDocument.Parse("""
+            {
+              "status":"ok", "result":{
+                "schemaVersion":"pipesim-vfp-tables-result/1", "model_kind":"black_oil_liquid", "runTask":"vfp-tables", "resultContract":"VALID_FULL", "producer":"Well", "reservoirSimulator":"ECLIPSE", "tableNumber":2, "includeTemperature":true, "bottomHoleDatumDepth":30,
+                "axes":{"liquidRatesStbPerDay":[200,300],"outletPressuresPsi":[250,350],"waterCutFraction":[0.4],"gorMscfPerStb":[0.265],"artificialLiftInjectionDpPsi":[40,50]},
+                "table":{"valueName":"BHP","unit":"psia","rows":[{"liquidRateIndex":1,"waterCutIndex":1,"gorIndex":1,"artificialLiftIndex":1,"values":[1368.283,1568.016]}]},
+                "temperatureTable":{"valueName":"TEMP","unit":"F","rows":[{"liquidRateIndex":1,"waterCutIndex":1,"gorIndex":1,"artificialLiftIndex":1,"values":[81.85878,85.70919]}]},
+                "vfpTableContent":"VFPPROD 2 30.0", "vfpTableWithTemperatureContent":"VFPPROD 2 30.0"
+              }, "warnings":[]
+            }
+            """);
+
+        var accepted = PtkRunService.TryReadEnvelope(document.RootElement, "vfp-tables", out var status, out var result, out var error, out _);
+
+        Assert.True(accepted);
+        Assert.Equal("ok", status);
+        Assert.Equal("VALID_FULL", result?.GetProperty("resultContract").GetString());
+        Assert.Null(error);
+    }
+
+    [Fact]
+    public void AcceptsOfficialWellTrajectoryResult()
+    {
+        using var document = JsonDocument.Parse("""
+            {
+              "status":"ok", "result":{
+                "schemaVersion":"pipesim-well-trajectory-result/1", "model_kind":"black_oil_liquid", "runTask":"trajectory", "resultContract":"VALID_FULL", "producer":"Well_1",
+                "units":{"measuredDepth":"ft","trueVerticalDepth":"ft","inclination":"deg","azimuth":"deg","maxDogLegSeverity":"deg/100ft"},
+                "points":[
+                  {"measuredDepth":0,"trueVerticalDepth":0,"inclination":0,"azimuth":null,"maxDogLegSeverity":null},
+                  {"measuredDepth":1000,"trueVerticalDepth":980,"inclination":25,"azimuth":90,"maxDogLegSeverity":1.2}
+                ]
+              }, "warnings":[]
+            }
+            """);
+
+        var accepted = PtkRunService.TryReadEnvelope(document.RootElement, "trajectory", out var status, out var result, out var error, out _);
+
+        Assert.True(accepted);
+        Assert.Equal("ok", status);
+        Assert.Equal("Well_1", result?.GetProperty("producer").GetString());
+        Assert.Equal(2, result?.GetProperty("points").GetArrayLength());
+        Assert.Null(error);
+    }
+
+    [Fact]
+    public void AcceptsOfficialEspCurvesResultForBasicGasModel()
+    {
+        using var document = JsonDocument.Parse("""
+            {
+              "status":"ok", "result":{
+                "schemaVersion":"pipesim-esp-curves-result/1", "model_kind":"basic_gas", "runTask":"esp-curves", "resultContract":"VALID_FULL", "producer":"Well_1",
+                "pump":{
+                  "pumpName":"B-ESP",
+                  "inputs":{"frequency":60,"frequencyUnit":"Hz","manufacturer":"REDA","model":"J7000N","minFlowRate":100,"maxFlowRate":1000,"stages":120},
+                  "frequencies":[{"frequencyHz":60,"frequencyLabel":"60 Hz","flowRate":[100,500],"flowRateUnit":"bbl/d","head":[1000,800],"headUnit":"ft"}],
+                  "operatingEnvelope":{
+                    "qMin":{"flowRate":[100],"flowRateUnit":"bbl/d","head":[1000],"headUnit":"ft"},
+                    "bep":{"flowRate":[500],"flowRateUnit":"bbl/d","head":[800],"headUnit":"ft"},
+                    "qMax":{"flowRate":[1000],"flowRateUnit":"bbl/d","head":[600],"headUnit":"ft"}
+                  }
+                },
+                "nodalPump":{
+                  "pumpName":"B-ESP",
+                  "inputs":{"frequency":60,"frequencyUnit":"Hz","manufacturer":"REDA","model":"J7000N","minFlowRate":100,"maxFlowRate":1000,"stages":120},
+                  "frequencies":[{"frequencyHz":60,"frequencyLabel":"60 Hz","flowRate":[100,500],"flowRateUnit":"bbl/d","head":[1000,800],"headUnit":"ft"}],
+                  "operatingEnvelope":{
+                    "qMin":{"flowRate":[100],"flowRateUnit":"bbl/d","head":[1000],"headUnit":"ft"},
+                    "bep":{"flowRate":[500],"flowRateUnit":"bbl/d","head":[800],"headUnit":"ft"},
+                    "qMax":{"flowRate":[1000],"flowRateUnit":"bbl/d","head":[600],"headUnit":"ft"}
+                  }
+                }
+              }, "warnings":[]
+            }
+            """);
+
+        var accepted = PtkRunService.TryReadEnvelope(
+            document.RootElement, "esp-curves", out var status, out var result, out var error, out _);
+
+        Assert.True(accepted);
+        Assert.Equal("ok", status);
+        Assert.Equal("basic_gas", result?.GetProperty("model_kind").GetString());
+        Assert.Null(error);
+    }
+
+    [Fact]
+    public void RejectsWellTrajectoryWithNonIncreasingMeasuredDepth()
+    {
+        using var document = JsonDocument.Parse("""
+            {
+              "status":"ok", "result":{
+                "schemaVersion":"pipesim-well-trajectory-result/1", "model_kind":"black_oil_liquid", "runTask":"trajectory", "resultContract":"VALID_FULL", "producer":"Well_1",
+                "units":{"measuredDepth":"ft","trueVerticalDepth":"ft","inclination":"deg","azimuth":"deg","maxDogLegSeverity":"deg/100ft"},
+                "points":[
+                  {"measuredDepth":1000,"trueVerticalDepth":980,"inclination":25,"azimuth":90,"maxDogLegSeverity":1.2},
+                  {"measuredDepth":1000,"trueVerticalDepth":980,"inclination":25,"azimuth":90,"maxDogLegSeverity":1.2}
+                ]
+              }, "warnings":[]
+            }
+            """);
+
+        Assert.False(PtkRunService.TryReadEnvelope(document.RootElement, "trajectory", out _, out _, out _, out _));
+    }
+
+    [Fact]
     public void AcceptsCompletedNetworkPartialWithControlledWarning()
     {
         using var document = JsonDocument.Parse("""
@@ -246,7 +440,7 @@ public sealed class PtkRunEnvelopeTests
         Assert.Equal("partial", status);
         Assert.Equal("NETWORK_RESULT_LIMITED", warning?.Code);
         Assert.Equal("VALID_PARTIAL", result?.GetProperty("resultContract").GetString());
-        Assert.Single(result?.GetProperty("system").EnumerateArray() ?? []);
+        Assert.Equal(2, result?.GetProperty("system").GetArrayLength());
         Assert.Single(result?.GetProperty("profiles").EnumerateArray() ?? []);
     }
 
@@ -346,7 +540,7 @@ public sealed class PtkRunEnvelopeTests
     [Fact]
     public void FullNetworkAcceptsPlainLocalPipePlaceholderAndRun36NullQualityShape()
     {
-        using var document = NetworkEnvelope("ok", """
+        using var document = NetworkEnvelope("ok", $$"""
             "system": [{ "variable": "Pressure", "unit": "psi", "values": [{ "name": "Network", "value": null }] }],
             "node": [],
             "profiles": [{ "branch": "Branch 1", "pointCount": 1, "variables": [{ "variable": "TotalDistance", "unit": "ft", "values": [0] }, { "variable": "Pressure", "unit": "psi", "values": [null] }] }],
@@ -358,6 +552,42 @@ public sealed class PtkRunEnvelopeTests
         Assert.True(PtkRunService.TryReadEnvelope(document.RootElement, "network", out _, out var result, out _, out _));
         Assert.Equal("VALID_FULL", result?.GetProperty("resultContract").GetString());
         Assert.Contains("[local pipe]", result?.GetRawText());
+    }
+
+    [Fact]
+    public void FullNetworkAcceptsOfficialNativeStringAndBooleanNodeValues()
+    {
+        using var document = NetworkEnvelope("ok", $$"""
+            "system": [
+              { "variable": "Route", "unit": "", "values": [{ "name": "Network", "value": "MOLLIER" }] },
+              { "variable": "FlowrateBeyondCurveMaxRate", "unit": "", "values": [{ "name": "Network", "value": false }] }
+            ],
+            "node": [{ "variable": "LimitedBy", "unit": "", "values": [{ "name": "Node 1", "value": "POWER" }] }],
+            "profiles": {{DefaultProfiles}},
+            "summary": { "info": [], "warnings": [], "errors": [] },
+            "messages": [],
+            "quality": []
+            """);
+
+        Assert.True(PtkRunService.TryReadEnvelope(document.RootElement, "network", out _, out var result, out _, out _));
+        Assert.Equal("MOLLIER", result?.GetProperty("system")[0].GetProperty("values")[0].GetProperty("value").GetString());
+        Assert.False(result?.GetProperty("system")[1].GetProperty("values")[0].GetProperty("value").GetBoolean());
+    }
+
+    [Fact]
+    public void FullNetworkAcceptsOfficialDimensionedNetworkUnit()
+    {
+        using var document = NetworkEnvelope("ok", $$"""
+            "system": [{ "variable": "CompressorHead", "unit": "(ft.lbf)[redacted]", "values": [{ "name": "Pmp", "value": 3794.2179840178305 }] }],
+            "node": [],
+            "profiles": {{DefaultProfiles}},
+            "summary": { "info": [], "warnings": [], "errors": [] },
+            "messages": [],
+            "quality": []
+            """);
+
+        Assert.True(PtkRunService.TryReadEnvelope(document.RootElement, "network", out _, out _, out var error, out _));
+        Assert.Null(error);
     }
 
     [Theory]

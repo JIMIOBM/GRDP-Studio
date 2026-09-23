@@ -1,5 +1,7 @@
 package com.grdp.studio.softwareintegration.client;
 
+import tools.jackson.databind.JsonNode;
+
 public record WorkerRunExecuteRequest(
         long runId,
         String modelStorageKey,
@@ -7,5 +9,6 @@ public record WorkerRunExecuteRequest(
         String study,
         String runTask,
         Object parameters,
-        int timeoutSeconds
+        int timeoutSeconds,
+        JsonNode expectedPackageFiles
 ) {}

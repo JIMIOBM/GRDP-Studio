@@ -38,10 +38,18 @@ def inspect_network(model):
         component_type: list(model.find(component=component_type))
         for component_type in ("Well", "Source", "Sink", "Flowline")
     }
+    # Official PIPESIM well case studies may contain internal Flowline/Sink
+    # objects (injection, ESP, riser and lift-design cases).  A real well
+    # model has a Well plus Completion and Tubing components; that structure
+    # must take precedence over the surface-network heuristic below.
+    well_model = bool(components["Well"] and
+                      list(model.find(component="Completion")) and
+                      list(model.find(component="Tubing")))
     connections = list(model.connections())
-    # Single-well models can contain an internal Source, so only surface-network
-    # terminal or flowline components select the Network validation branch.
-    is_candidate = bool(components["Sink"] or components["Flowline"])
+    # A model without the well structure is a Network candidate when it has
+    # terminal/flowline topology.  This preserves Network validation for
+    # models that contain well nodes but no well-engineering components.
+    is_candidate = not well_model and bool(components["Sink"] or components["Flowline"])
     missing = []
     if not components["Source"] and not components["Well"]:
         missing.append("Source/Well")
@@ -53,6 +61,7 @@ def inspect_network(model):
         missing.append("Connection")
     return {
         "candidate": is_candidate,
+        "well_model": well_model,
         "valid": not missing,
         "missing": missing,
         "components": components,
@@ -404,7 +413,7 @@ def _safe_scalar_series(groups):
                 or set(item) != {"name", "value"}
                 or not _safe_text(item.get("name"))
                 or item["name"] in names
-                or not _safe_number(item.get("value"))
+                or not _safe_network_scalar(item.get("value"))
             ):
                 valid = False
                 break
@@ -414,6 +423,31 @@ def _safe_scalar_series(groups):
             variables.add(group["variable"])
             safe_groups.append({"variable": group["variable"], "unit": group["unit"], "values": values})
     return safe_groups
+
+
+def _safe_network_scalar(value):
+    """Validate the native scalar values exposed by official network results.
+
+    PIPESIM uses booleans and descriptive strings for diagnostics such as
+    ``FlowrateBeyondCurveMaxRate``, ``LimitedBy`` and ``Route``.  Numeric
+    strings remain rejected so a value that should be numeric cannot bypass
+    the result-quality contract.
+    """
+    if value is None or isinstance(value, bool):
+        return True
+    if isinstance(value, str):
+        if not _safe_text(value):
+            return False
+        try:
+            numeric = float(value)
+        except ValueError:
+            return True
+        return not math.isfinite(numeric)
+    if isinstance(value, Mapping):
+        return bool(value) and all(_safe_network_scalar(item) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return bool(value) and all(_safe_network_scalar(item) for item in value)
+    return _safe_number(value)
 
 
 def _safe_profiles(profiles):
@@ -537,7 +571,7 @@ def validate_network_result(result, expected_study=None):
             valid_values = False
         data_paths.add(path)
 
-    def validate_numeric(value, path):
+    def validate_numeric(value, path, allow_native_scalars=False):
         nonlocal valid_values
         if value is None:
             add_path(path)
@@ -546,20 +580,44 @@ def validate_network_result(result, expected_study=None):
         elif isinstance(value, Mapping):
             has_numeric_leaf = False
             for key, item in value.items():
-                has_numeric_leaf = validate_numeric(item, "{0}.{1}".format(path, key)) or has_numeric_leaf
+                has_numeric_leaf = validate_numeric(
+                    item, "{0}.{1}".format(path, key), allow_native_scalars
+                ) or has_numeric_leaf
             if not has_numeric_leaf:
                 valid_values = False
             return has_numeric_leaf
         elif isinstance(value, list):
             has_numeric_leaf = False
             for index, item in enumerate(value):
-                has_numeric_leaf = validate_numeric(item, "{0}[{1}]".format(path, index)) or has_numeric_leaf
+                has_numeric_leaf = validate_numeric(
+                    item, "{0}[{1}]".format(path, index), allow_native_scalars
+                ) or has_numeric_leaf
             if not has_numeric_leaf:
                 valid_values = False
             return has_numeric_leaf
         else:
             add_path(path)
-            if isinstance(value, bool) or not isinstance(value, Real) or not math.isfinite(value):
+            if isinstance(value, bool):
+                if not allow_native_scalars:
+                    valid_values = False
+                    return False
+                return True
+            if isinstance(value, str):
+                if (not allow_native_scalars or not value.strip()
+                        or any(ord(character) < 32 for character in value)
+                        or len(value) > 1000):
+                    valid_values = False
+                    return False
+                try:
+                    numeric_text = float(value)
+                except ValueError:
+                    return True
+                if math.isfinite(numeric_text):
+                    valid_values = False
+                    return False
+                valid_values = False
+                return False
+            if not isinstance(value, Real) or not math.isfinite(value):
                 valid_values = False
                 return False
             elif any(math.isclose(value, sentinel, rel_tol=1e-12) for sentinel in _PIPESIM_UNAVAILABLE_SENTINELS):
@@ -606,6 +664,7 @@ def validate_network_result(result, expected_study=None):
                 validate_numeric(
                     item["value"],
                     "{0}.{1}.{2}".format(section, group["variable"], item["name"]),
+                    allow_native_scalars=True,
                 )
 
     branches_seen = set()

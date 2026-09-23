@@ -130,7 +130,7 @@ const SOFTWARE_INTEGRATION_IMPORT_INTENTS = {
 const SOFTWARE_INTEGRATION_IMPORT_ACCEPTS = {
   'import-pipesim-well': '.pips,.PIPS,.zip,.ZIP',
   'import-pipesim-network': '.pips,.PIPS,.zip,.ZIP',
-  'import-eclipse-100': '.data,.DATA'
+  'import-eclipse-100': '.data,.DATA,.zip,.ZIP'
 }
 const route = useRoute()
 const router = useRouter()
@@ -5019,6 +5019,10 @@ const handleRefreshTree = () => {
 onMounted(async () => {
   window.addEventListener('click', closeTreeContextMenu)
   window.addEventListener('resize', closeTreeContextMenu)
+
+  // 软件集成工作区拥有独立的项目树和数据接口；不能在挂载共享 Shell 时
+  // 同时初始化解析融合目录，否则原平台未登录会把演示页重定向到登录页。
+  if (isSoftwareIntegration.value) return
 
   try {
     await initTree()

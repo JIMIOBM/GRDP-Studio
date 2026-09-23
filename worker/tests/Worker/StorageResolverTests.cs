@@ -47,6 +47,31 @@ public sealed class StorageResolverTests : IDisposable
         Assert.Equal(404, error.HttpStatus);
     }
 
+    [Fact]
+    public void IsolatedCopiesPreserveRelativeFilesFromTheModelVersionPackage()
+    {
+        var packageRoot = Path.Combine(root, "models", "7", "3");
+        var sourceDirectory = Path.Combine(packageRoot, "case");
+        Directory.CreateDirectory(sourceDirectory);
+        var sourceModel = Path.Combine(sourceDirectory, "network.pips");
+        var dependency = Path.Combine(sourceDirectory, "network.dep");
+        File.WriteAllText(sourceModel, "MODEL");
+        File.WriteAllText(dependency, "DEPENDENCY");
+
+        var run = resolver.CreateRunDirectories(8123, sourceModel);
+        try
+        {
+            Assert.Equal(Path.Combine(run.Input, "case", "network.pips"), run.ModelCopy);
+            Assert.Equal("MODEL", File.ReadAllText(run.ModelCopy));
+            Assert.Equal("DEPENDENCY", File.ReadAllText(Path.Combine(run.Input, "case", "network.dep")));
+            Assert.Equal("MODEL", File.ReadAllText(sourceModel));
+        }
+        finally
+        {
+            StorageResolver.TryDeleteDirectory(run.Root);
+        }
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(root)) Directory.Delete(root, recursive: true);

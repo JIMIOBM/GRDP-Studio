@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Xml;
+using System.Xml.Linq;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
@@ -18,6 +20,12 @@ public sealed record EclipseSummarySeries(
     [property: JsonPropertyName("objectName")] string? ObjectName,
     [property: JsonPropertyName("unit")] string? Unit,
     [property: JsonPropertyName("points")] IReadOnlyList<EclipseSummaryPoint> Points);
+public sealed record EclipseDiagnosticMessage(
+    [property: JsonPropertyName("category")] string Category,
+    [property: JsonPropertyName("severity")] string Severity,
+    [property: JsonPropertyName("code")] string Code,
+    [property: JsonPropertyName("message")] string Message,
+    [property: JsonPropertyName("retryable")] bool Retryable);
 
 public static partial class EclipseParsers
 {
@@ -29,6 +37,50 @@ public static partial class EclipseParsers
         if (!new[] { "Comments", "Warnings", "Problems", "Errors", "Bugs" }.All(values.ContainsKey)) return false;
         counts = new(values["Comments"], values["Warnings"], values["Problems"], values["Errors"], values["Bugs"]);
         return true;
+    }
+
+    internal static IReadOnlyList<EclipseDiagnosticMessage> ParseDiagnosticMessages(IEnumerable<string> paths, int maximum = 512)
+    {
+        var messages = new List<EclipseDiagnosticMessage>();
+        foreach (var path in paths)
+        {
+            try
+            {
+                var settings = new XmlReaderSettings
+                {
+                    DtdProcessing = DtdProcessing.Prohibit,
+                    MaxCharactersInDocument = 8 * 1024 * 1024,
+                    XmlResolver = null
+                };
+                using var reader = XmlReader.Create(path, settings);
+                var document = XDocument.Load(reader, LoadOptions.None);
+                foreach (var element in document.Descendants())
+                {
+                    var severity = element.Name.LocalName.ToUpperInvariant() switch
+                    {
+                        "ERROR" => "ERROR",
+                        "PROBLEM" => "PROBLEM",
+                        "WARNING" => "WARNING",
+                        _ => null
+                    };
+                    if (severity is null) continue;
+                    var message = NormalizeDiagnosticText(element.Value);
+                    if (message.Length == 0) continue;
+                    messages.Add(new(
+                        "SOLVER",
+                        severity,
+                        $"ECLIPSE_{severity}",
+                        message.Length > 1000 ? message[..1000] : message,
+                        false));
+                    if (messages.Count >= maximum) return messages;
+                }
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or XmlException)
+            {
+                // ECLIPSE diagnostics are advisory; ECLEND remains the authoritative count.
+            }
+        }
+        return messages;
     }
 
     public static IReadOnlyList<EclipseSummarySeries> ParseRsm(string text)
@@ -158,6 +210,8 @@ public static partial class EclipseParsers
         double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out parsed);
     // TIME supplies the x-axis. YEARS remains an excluded RSM summary axis, never a converted time value.
     private static bool IsSummaryAxis(string keyword) => keyword.Equals("TIME", StringComparison.Ordinal) || keyword.Equals("YEARS", StringComparison.Ordinal);
+    private static string NormalizeDiagnosticText(string value) =>
+        string.Join(' ', value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
     private static bool IsSafeKeyword(string value) => SafeKeyword().IsMatch(value) && !ContainsSensitiveText(value);
     private static bool IsSafeObjectName(string? value) => value is null || (SafeObjectName().IsMatch(value) && !ContainsSensitiveText(value));
     private static bool IsSafeUnit(string? value) => value is null || (SafeUnit().IsMatch(value) && !ContainsSensitiveText(value));

@@ -2,6 +2,7 @@ package com.grdp.studio.softwareintegration.controller;
 
 import com.grdp.studio.common.ApiResponse;
 import com.grdp.studio.softwareintegration.dto.SoftwareIntegrationProjectDetailResponse;
+import com.grdp.studio.softwareintegration.dto.SoftwareIntegrationArchiveInspectionResponse;
 import com.grdp.studio.softwareintegration.dto.SoftwareIntegrationCapabilitiesResponse;
 import com.grdp.studio.softwareintegration.dto.SoftwareIntegrationProjectRequest;
 import com.grdp.studio.softwareintegration.dto.SoftwareIntegrationProjectResponse;
@@ -42,6 +43,8 @@ public class SoftwareIntegrationController {
 
     @GetMapping("/projects")
     public ApiResponse<List<SoftwareIntegrationProjectResponse>> listProjects() { return ApiResponse.success(service.listProjects()); }
+    @GetMapping("/recycle-bin/projects")
+    public ApiResponse<List<SoftwareIntegrationProjectResponse>> listDeletedProjects() { return ApiResponse.success(service.listDeletedProjects()); }
     @GetMapping("/projects/{projectId}")
     public ApiResponse<SoftwareIntegrationProjectDetailResponse> getProject(@PathVariable @Min(1) long projectId) { return ApiResponse.success(service.getProject(projectId)); }
     @PostMapping("/projects")
@@ -50,8 +53,26 @@ public class SoftwareIntegrationController {
     public ApiResponse<SoftwareIntegrationProjectResponse> updateProject(@PathVariable @Min(1) long projectId, @Valid @RequestBody SoftwareIntegrationProjectRequest request) { return ApiResponse.success(service.updateProject(projectId, request)); }
     @DeleteMapping("/projects/{projectId}")
     public ApiResponse<Void> deleteProject(@PathVariable @Min(1) long projectId) { service.deleteProject(projectId); return ApiResponse.success(); }
+    @DeleteMapping("/projects/{projectId}/models/{modelId}")
+    public ApiResponse<Void> deleteModel(@PathVariable @Min(1) long projectId, @PathVariable @Min(1) long modelId) {
+        service.deleteModel(projectId, modelId);
+        return ApiResponse.success();
+    }
+    @PostMapping("/recycle-bin/projects/{projectId}/restore")
+    public ApiResponse<SoftwareIntegrationProjectDetailResponse> restoreProject(@PathVariable @Min(1) long projectId) {
+        return ApiResponse.success(service.restoreProject(projectId));
+    }
     @PostMapping(path = "/projects/{projectId}/models", consumes = "multipart/form-data")
-    public ApiResponse<SoftwareIntegrationProjectDetailResponse> uploadModel(@PathVariable @Min(1) long projectId, @RequestPart("file") MultipartFile file) { return ApiResponse.success(service.uploadModel(projectId, file)); }
+    public ApiResponse<SoftwareIntegrationProjectDetailResponse> uploadModel(@PathVariable @Min(1) long projectId,
+                                                                               @RequestPart("file") MultipartFile file,
+                                                                               @RequestPart(value = "mainFile", required = false) String mainFile) {
+        return ApiResponse.success(service.uploadModel(projectId, file, mainFile));
+    }
+    @PostMapping(path = "/projects/{projectId}/model-archives/inspect", consumes = "multipart/form-data")
+    public ApiResponse<SoftwareIntegrationArchiveInspectionResponse> inspectModelArchive(
+            @PathVariable @Min(1) long projectId, @RequestPart("file") MultipartFile file) {
+        return ApiResponse.success(service.inspectModelArchive(projectId, file));
+    }
     @PostMapping("/projects/{projectId}/model-versions/{versionId}/validate")
     public ApiResponse<SoftwareIntegrationProjectDetailResponse> revalidateModel(@PathVariable @Min(1) long projectId, @PathVariable @Min(1) long versionId) { return ApiResponse.success(service.revalidateModel(projectId, versionId)); }
 }

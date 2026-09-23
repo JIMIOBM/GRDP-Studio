@@ -12,7 +12,7 @@ export const SOFTWARE_INTEGRATION_TERMINAL_STATUSES = Object.freeze([
 ])
 
 const terminalStatuses = new Set(SOFTWARE_INTEGRATION_TERMINAL_STATUSES)
-const wellRunTypes = new Set(['nodal', 'profile', 'combined'])
+const wellRunTypes = new Set(['nodal', 'profile', 'combined', 'sensitivity', 'gas-lift-performance', 'gas-lift-diagnostics', 'vfp-tables', 'esp-curves', 'trajectory'])
 const wellModelKinds = new Set(['black_oil_liquid', 'basic_gas', 'legacy_well'])
 export const isTerminalRunStatus = status => terminalStatuses.has(status)
 const isValidationPending = status => status === 'UPLOADED' || status === 'VALIDATING'
@@ -22,7 +22,7 @@ const capabilityReasonCodes = new Set([
   'WORKER_UNREACHABLE', 'WORKER_BUSY', 'PIPESIM_UNAVAILABLE', 'PIPESIM_VERSION_MISMATCH',
   'ECLIPSE_UNAVAILABLE', 'ECLIPSE_VERSION_MISMATCH'
 ])
-const capabilityTasks = new Set(['nodal', 'profile', 'combined', 'network', 'eclipse'])
+const capabilityTasks = new Set(['nodal', 'profile', 'combined', 'sensitivity', 'gas-lift-performance', 'gas-lift-diagnostics', 'vfp-tables', 'esp-curves', 'trajectory', 'network', 'system-analysis', 'network-optimizer', 'eclipse'])
 const unavailableCapability = reasonCode => ({
   version: null,
   status: 'UNAVAILABLE',
@@ -51,6 +51,7 @@ const unavailableCapabilities = () => ({
 
 export const useSoftwareIntegrationStore = defineStore('software-integration', () => {
   const projects = ref([])
+  const recycleBinProjects = ref([])
   const projectDetails = ref({})
   const activeProjectId = ref(null)
   const activeModelId = ref(null)
@@ -107,8 +108,12 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
     return null
   })
   const activeSimulatorAvailable = computed(() => activeSimulatorCapability.value?.status === 'AVAILABLE')
+  const activeRunTaskSupported = computed(() => {
+    const task = isNetworkModel.value || isWellModel.value || isEclipseModel.value ? runType.value : ''
+    return Array.isArray(activeSimulatorCapability.value?.runTasks) && activeSimulatorCapability.value.runTasks.includes(task)
+  })
   const canCreateRunByCapability = computed(() => Boolean(capabilities.value) && !capabilitiesUnavailable.value &&
-    capabilities.value.worker?.status === 'AVAILABLE' && !workerBusy.value && activeSimulatorAvailable.value)
+    capabilities.value.worker?.status === 'AVAILABLE' && !workerBusy.value && activeSimulatorAvailable.value && activeRunTaskSupported.value)
   const activeElapsedMillis = computed(() => {
     if (hasActiveRun.value) {
       return Math.max(0, elapsedBase + elapsedClock.value - elapsedSyncedAt)
@@ -168,10 +173,10 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
 
   const syncRunTypeForModel = () => {
     if (!activeModel.value) return
-    if (isNetworkModel.value) runType.value = 'network'
+    if (isNetworkModel.value && !['network', 'system-analysis', 'network-optimizer'].includes(runType.value)) runType.value = 'network'
     else if (isEclipseModel.value) runType.value = 'eclipse'
     else if (isWellModel.value && !wellRunTypes.has(runType.value)) runType.value = 'nodal'
-    else if (!isWellModel.value) runType.value = ''
+    else if (!isNetworkModel.value && !isWellModel.value && !isEclipseModel.value) runType.value = ''
   }
 
   const loadProjectDetail = async projectId => {
@@ -289,8 +294,38 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
     await loadProjects()
   }
 
-  const uploadModel = async (projectId, file) => {
-    const detail = unwrap(await softwareIntegrationApi.uploadModel(projectId, file))
+  const deleteModel = async (projectId, modelId) => {
+    await softwareIntegrationApi.deleteModel(projectId, modelId)
+    if (activeProjectId.value === projectId && activeModelId.value === modelId) {
+      beginNavigation()
+      activeModelId.value = null
+      activeVersionId.value = null
+      activeRun.value = null
+      selectedRun.value = null
+      runHistory.value = []
+    }
+    await loadProjectDetail(projectId)
+    await loadProjects()
+  }
+
+  const loadRecycleBin = async () => {
+    recycleBinProjects.value = unwrap(await softwareIntegrationApi.listDeletedProjects()) || []
+    return recycleBinProjects.value
+  }
+
+  const restoreProject = async projectId => {
+    const detail = unwrap(await softwareIntegrationApi.restoreProject(projectId))
+    setProjectDetail(detail)
+    recycleBinProjects.value = recycleBinProjects.value.filter(project => project.id !== projectId)
+    await loadProjects()
+    return detail
+  }
+
+  const inspectModelArchive = async (projectId, file) =>
+    unwrap(await softwareIntegrationApi.inspectModelArchive(projectId, file))
+
+  const uploadModel = async (projectId, file, mainFile = null) => {
+    const detail = unwrap(await softwareIntegrationApi.uploadModel(projectId, file, mainFile))
     setProjectDetail(detail)
     await loadProjects()
     scheduleValidationPolling()
@@ -475,7 +510,7 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
     }
     if (!isNetworkModel.value && !isWellModel.value && !isEclipseModel.value) throw new Error('模型版本缺少已验证类型，请重新验证')
     syncRunTypeForModel()
-    const requestedRunType = isNetworkModel.value ? 'network' : (isEclipseModel.value ? 'eclipse' : runType.value)
+    const requestedRunType = isNetworkModel.value ? runType.value : (isEclipseModel.value ? 'eclipse' : runType.value)
     const expectedNavigation = navigationGeneration
     const expectedProjectId = activeProjectId.value
     const expectedModelId = activeModelId.value
@@ -536,6 +571,32 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
     }
   }
 
+  const retryRun = async () => {
+    const original = selectedRun.value
+    if (!original || !['FAILED', 'TIMED_OUT', 'WORKER_LOST'].includes(original.status)) return null
+    const expectedNavigation = navigationGeneration
+    const expectedVersionId = activeVersionId.value
+    const detailRequestGeneration = ++runDetailGeneration
+    submittingRun.value = true
+    try {
+      const summary = unwrap(await softwareIntegrationApi.retryRun(original.id))
+      if (detailRequestGeneration !== runDetailGeneration || !matchesRunContext(expectedNavigation, expectedVersionId) ||
+        summary?.modelVersionId !== expectedVersionId) return null
+      runHistory.value = [summary, ...runHistory.value.filter(run => run.id !== summary.id)]
+      const detail = unwrap(await softwareIntegrationApi.getRun(summary.id))
+      if (detailRequestGeneration !== runDetailGeneration || !matchesRunContext(expectedNavigation, expectedVersionId) ||
+        detail?.id !== summary.id || detail?.modelVersionId !== expectedVersionId) return null
+      activeRun.value = detail
+      selectedRun.value = detail
+      if (capabilities.value?.worker?.status === 'AVAILABLE') capabilities.value.worker.idle = false
+      startRunPolling(detail.id)
+      syncElapsed(detail)
+      return detail
+    } finally {
+      submittingRun.value = false
+    }
+  }
+
   const refreshActiveProject = async () => {
     if (!activeProjectId.value) return null
     const detail = await loadProjectDetail(activeProjectId.value)
@@ -556,6 +617,7 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
 
   return {
     projects,
+    recycleBinProjects,
     projectDetails,
     activeProjectId,
     activeModelId,
@@ -588,6 +650,7 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
     workerBusy,
     activeSimulatorCapability,
     activeSimulatorAvailable,
+    activeRunTaskSupported,
     canCreateRunByCapability,
     activeElapsedMillis,
     loadProjects,
@@ -596,7 +659,11 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
     selectProject,
     createProject,
     deleteProject,
+    deleteModel,
+    loadRecycleBin,
+    restoreProject,
     uploadModel,
+    inspectModelArchive,
     revalidateModel,
     activateModel,
     selectVersion,
@@ -604,6 +671,7 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
     selectRun,
     createRun,
     cancelRun,
+    retryRun,
     refreshActiveProject,
     scheduleValidationPolling,
     cleanup

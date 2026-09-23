@@ -21,7 +21,7 @@ Demo-first 要求：
 
 ### 0.1 当前交付顺序与演示验收
 
-按以下顺序安排当前工作：修复导入、验证、计算、结果与历史链路的阻塞；改善计算入口及结果可读性；补充与本次变更相关的回归保护。ZIP 解包、回收站恢复、Artifact 下载与到期清理等未完成首版要求仍保留，但除非影响本次演示目标或被明确要求，不自动扩展进当前工作包。远程、多节点等后续能力继续遵守阶段 6 边界。
+按以下顺序安排当前工作：修复导入、验证、计算、结果与历史链路的阻塞；改善计算入口及结果可读性；补充与本次变更相关的回归保护。当前代码已经提供 PIPESIM/ECLIPSE ZIP 工程包安全边界、依赖复制、回收站恢复、Artifact 下载与到期清理等公共能力；真实依赖工程仍需在许可证环境中单独验收，不能把单元测试当成现场计算证据。远程、多节点等后续能力继续遵守阶段 6 边界。
 
 每个演示工作包写明用户可观察目标、影响范围和必要验证。宣称某条路径“可现场演示”须在对应部署版本的浏览器中验证：
 
@@ -130,6 +130,9 @@ Avalonia 桌面端只作为行为和结果对照基线，不再承载新功能�
 以下行为必须通过黄金样本测试保护，迁移时不得同时重写或优化：
 
 - ECLIPSE RSM 解析。
+- ECLIPSE SMSPEC/UNSMRY 二进制 Summary 解析。
+- ECLIPSE 仅生成 `S####` 分步 Summary 时，按分步文件顺序读取真实 Summary，不因缺少单一 UNSMRY 而伪造或丢弃结果。
+- ECLIPSE EGRID 网格元数据索引（NX/NY/NZ/活动网格数）；不在 Run JSON 中展开大体场。
 - ECLEND 解析。
 - ECLIPSE 输出新鲜度判断和 License/Fatal 分类。
 - PIPESIM `_clean_number`。
@@ -304,7 +307,7 @@ GRDP-Studio Vue :5173
 ### 8.4 ECLIPSE 100 MVP
 
 - 目标版本为 ECLIPSE 100 2024.1，Worker 通过官方 `eclrun.exe` 调用，不直接以 `eclipse.exe` 作为生产入口。
-- 首版只接受一个 `.DATA` 文件；拒绝 ZIP、目录包和任何包含 `INCLUDE` 指令的 deck。依赖文件包与安全解压属于后续范围。
+- 首版接受单个 `.DATA` 或包含一个主 `.DATA` 的安全 ZIP 工程包。`INCLUDE` 只能引用 ZIP 内、且相对于当前文件的依赖；绝对路径、包外路径、缺失依赖、循环依赖和不安全重解析点必须拒绝。
 - 首版不提供 Study 选择、参数覆盖、模板生成或对输入 deck 的文本替换；一次运行只执行上传版本的隔离副本，浏览器不得构造本机路径或命令。
 - 验证成功的版本使用 `modelKind=eclipse_100` 和 `simulatorType=ECLIPSE_100`；运行类型固定为 `eclipse`，不伪造 PIPESIM Study。
 - 运行成功必须同时满足：`eclrun` 退出码为零、本次生成新鲜 `.ECLEND`、`.ECLEND` 中 Errors/Problems/Bugs 均为零，且受控诊断不含 License 或 Fatal 分类。
@@ -320,13 +323,13 @@ PIPESIM 首版目标类型：
 - 单个 `.pips` 文件。
 - 包含主 `.pips`、可选 `.pipr` 和其他相对依赖的 ZIP 模型包。
 
-当前可计算演示路径使用单 `.pips`；ZIP 解包验证尚未完成时必须明确显示不支持或验证失败，不得标为 READY。ZIP 完整支持仍属于完整首版待交付项。
+当前最稳定的可计算演示路径使用单 `.pips` 或单 `.DATA`。PIPESIM 和 ECLIPSE ZIP 已完成安全解包与完整工程复制；ECLIPSE `INCLUDE` 依赖会在 Worker 中递归校验后以原始相对路径执行。真实含 INCLUDE 的现场模拟器验收仍需单独记录，不得用单元测试冒充现场许可证验收。
 
-ECLIPSE 100 只接受单 `.DATA`，拒绝 ZIP、目录包和包含 `INCLUDE` 的 deck，按第 8.4 节执行。
+ECLIPSE 100 接受单 `.DATA` 或单主 `.DATA` ZIP 包，按第 8.4 节执行。
 
 ZIP 规则：
 
-- 默认只允许一个主 `.pips`。
+- 默认只允许一个主 `.pips` 或一个主 `.DATA`。
 - 拒绝绝对路径、`..` 路径穿越、符号链接和重解析点逃逸。
 - 限制压缩包大小、解压总大小、文件数量和目录深度。
 - 上传文件最大 500MB。
@@ -445,6 +448,9 @@ WORKER_LOST
 - 管网结果展示有向拓扑、节点/连接统计、系统变量、节点变量和全部支路剖面。
 - 管网支路可切换并绘制 PIPESIM 返回的距离、压力、温度、速度、密度和气体 Z 因子等序列。
 - 展示 PIPESIM summary、messages 和结构化 quality 诊断。
+- ECLIPSE 结果页展示 ECLEND、Summary、输出文件清单以及可解析的 EGRID 网格元数据；网格压力/饱和度场必须通过后续分页接口读取，不得塞入当前 Run JSON。
+- ECLIPSE 允许下载 Worker 生成的受控二进制结果 Artifact（EGRID、INIT、UNRST、UNSMRY、SMSPEC 和 S####）；PRT/MSG 等文本诊断只展示安全元数据，不作为原始文件下载。
+- ECLIPSE 结果契约可附带受限二进制场索引：文件、关键字、数据类型、数量、字节范围和 Fortran 数据分段；索引不包含场值，后续分页读取必须按索引范围访问。
 
 ### 12.2 管网结果契约
 
@@ -479,6 +485,8 @@ topology / system / node / profiles / summary / messages / quality
 - 任务参数快照。
 - PIPESIM 在任务目录中新生成的文件。
 - 文件名、大小和 SHA-256 Artifact 清单。
+
+ECLIPSE 例外：二进制结果只按受控文件名和 `application/octet-stream` 发布，下载名统一增加 `eclipse-output-` 前缀；PRT、MSG、RSM、ECLEND 等文本结果不直接发布，以避免泄露本机路径、主机和许可证诊断。
 
 不包括：
 
@@ -548,9 +556,11 @@ GET    /software-integration/runs/{runId}/events
 POST   /software-integration/runs/{runId}/cancel
 POST   /software-integration/runs/{runId}/retry
 GET    /software-integration/runs/{runId}/artifacts
+GET    /software-integration/runs/{runId}/artifacts/{artifactId}/download
+GET    /software-integration/runs/{runId}/artifacts/{artifactId}/range?offset={offset}&length={length}
 ```
 
-实际 URL 可在详细设计中按 GRDP 现有 Controller 规范调整，但资源关系和职责不得混入其他业务 API。
+实际 URL 可在详细设计中按 GRDP 现有 Controller 规范调整，但资源关系和职责不得混入其他业务 API。`range` 仅允许受控 ECLIPSE 二进制 Artifact，服务端限制单次读取长度并返回 206；它不是任意文件读取接口。
 
 ### 14.2 Worker API
 
@@ -650,7 +660,7 @@ ECLIPSE 当前成功样本为官方 `BRILLIG.DATA`，以输入版本校验值、
 
 - 敏感性分析。
 - 模板模型创建。
-- ECLIPSE ZIP 模型包、`INCLUDE` 依赖、参数覆盖和网格/二进制结果解析。
+- ECLIPSE 参数覆盖和网格/二进制结果解析。
 - 多用户权限。
 - 远程或多计算节点。
 - 显式发布结果到解析融合。

@@ -6,7 +6,9 @@ import com.grdp.studio.softwareintegration.entity.SoftwareIntegrationModelEntity
 import com.grdp.studio.softwareintegration.entity.SoftwareIntegrationModelVersionEntity;
 import com.grdp.studio.softwareintegration.mapper.SoftwareIntegrationModelMapper;
 import com.grdp.studio.softwareintegration.mapper.SoftwareIntegrationModelVersionMapper;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Async;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -19,8 +21,12 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 @Component
@@ -31,29 +37,133 @@ public class SoftwareIntegrationValidationDispatcher {
     private final SoftwareIntegrationProperties properties;
     private final ObjectMapper objectMapper;
     private final SoftwareIntegrationStorageKeyNormalizer storageKeyNormalizer;
+    private final SoftwareIntegrationValidationJobStore validationJobStore;
     private final HttpClient httpClient;
+    private final Set<Long> validationInFlight = ConcurrentHashMap.newKeySet();
 
     public SoftwareIntegrationValidationDispatcher(SoftwareIntegrationModelVersionMapper versionMapper,
                                                      SoftwareIntegrationModelMapper modelMapper,
                                                      SoftwareIntegrationProperties properties, ObjectMapper objectMapper,
                                                      SoftwareIntegrationStorageKeyNormalizer storageKeyNormalizer) {
+        this(versionMapper, modelMapper, properties, objectMapper, storageKeyNormalizer, null);
+    }
+
+    @Autowired
+    public SoftwareIntegrationValidationDispatcher(SoftwareIntegrationModelVersionMapper versionMapper,
+                                                     SoftwareIntegrationModelMapper modelMapper,
+                                                     SoftwareIntegrationProperties properties, ObjectMapper objectMapper,
+                                                     SoftwareIntegrationStorageKeyNormalizer storageKeyNormalizer,
+                                                     SoftwareIntegrationValidationJobStore validationJobStore) {
         this.versionMapper = versionMapper;
         this.modelMapper = modelMapper;
         this.properties = properties;
         this.objectMapper = objectMapper;
         this.storageKeyNormalizer = storageKeyNormalizer;
+        this.validationJobStore = validationJobStore;
         this.httpClient = HttpClient.newBuilder().connectTimeout(properties.getWorkerConnectTimeout()).build();
+    }
+
+    /** Enqueues validation durably; the five-argument test/direct constructor keeps legacy immediate behavior. */
+    public void enqueue(long versionId) {
+        if (validationJobStore == null) {
+            validate(versionId);
+            return;
+        }
+        validationJobStore.enqueue(versionId);
+    }
+
+    @Scheduled(
+            fixedDelayString = "${grdp.software-integration.validation-sweep-delay:30000}",
+            initialDelayString = "${grdp.software-integration.validation-sweep-initial-delay:10000}")
+    public void recoverQueuedValidations() {
+        if (!properties.isDispatcherEnabled()) return;
+        if (validationJobStore != null) {
+            recoverDurableJobs();
+            return;
+        }
+        LocalDateTime recoveryCutoff = LocalDateTime.now().minus(properties.getValidationRecoveryAfter());
+        Set<Long> versionIds = new LinkedHashSet<>();
+        versionIds.addAll(versionMapper.selectList(new LambdaQueryWrapper<SoftwareIntegrationModelVersionEntity>()
+                .eq(SoftwareIntegrationModelVersionEntity::getStatus, "UPLOADED")
+                .orderByAsc(SoftwareIntegrationModelVersionEntity::getId)
+                .last("LIMIT 20"))
+                .stream().map(SoftwareIntegrationModelVersionEntity::getId).toList());
+        versionIds.addAll(versionMapper.selectList(new LambdaQueryWrapper<SoftwareIntegrationModelVersionEntity>()
+                .eq(SoftwareIntegrationModelVersionEntity::getStatus, "VALIDATING")
+                .le(SoftwareIntegrationModelVersionEntity::getUpdatedAt, recoveryCutoff)
+                .orderByAsc(SoftwareIntegrationModelVersionEntity::getId)
+                .last("LIMIT 20"))
+                .stream().map(SoftwareIntegrationModelVersionEntity::getId).toList());
+        versionIds.forEach(versionId -> CompletableFuture.runAsync(() -> validate(versionId)));
     }
 
     @Async
     public void validate(long versionId) {
+        executeValidation(versionId, validationJobStore != null);
+    }
+
+    private void recoverDurableJobs() {
+        LocalDateTime now = LocalDateTime.now();
+        validationJobStore.recoverExpiredLeases(now);
+        LocalDateTime recoveryCutoff = now.minus(properties.getValidationRecoveryAfter());
+        versionMapper.selectList(new LambdaQueryWrapper<SoftwareIntegrationModelVersionEntity>()
+                        .eq(SoftwareIntegrationModelVersionEntity::getStatus, "UPLOADED")
+                        .orderByAsc(SoftwareIntegrationModelVersionEntity::getId)
+                        .last("LIMIT 20"))
+                .forEach(version -> validationJobStore.ensureQueued(version.getId()));
+        versionMapper.selectList(new LambdaQueryWrapper<SoftwareIntegrationModelVersionEntity>()
+                        .eq(SoftwareIntegrationModelVersionEntity::getStatus, "VALIDATING")
+                        .le(SoftwareIntegrationModelVersionEntity::getUpdatedAt, recoveryCutoff)
+                        .orderByAsc(SoftwareIntegrationModelVersionEntity::getId)
+                        .last("LIMIT 20"))
+                .forEach(version -> validationJobStore.ensureQueued(version.getId()));
+        validationJobStore.claimDue(20, LocalDateTime.now(), properties.getValidationLease())
+                .forEach(claim -> CompletableFuture.runAsync(() -> executeValidation(claim.versionId(), true)));
+    }
+
+    private void executeValidation(long versionId, boolean durable) {
+        if (!validationInFlight.add(versionId)) return;
+        try {
+            validateVersion(versionId);
+            if (durable) {
+                SoftwareIntegrationModelVersionEntity version = versionMapper.selectById(versionId);
+                SoftwareIntegrationValidationJobStore.Outcome outcome = validationJobStore.complete(
+                        versionId, version == null ? "MISSING" : version.getStatus(),
+                        version == null ? "模型版本不存在" : version.getValidationMessage(),
+                        properties.getValidationMaxAttempts(), properties.getValidationRetryBackoff());
+                if (outcome == SoftwareIntegrationValidationJobStore.Outcome.RETRY_SCHEDULED && version != null) {
+                    update(version, "VALIDATING", "软件集成环境暂时不可用，正在自动重试", null);
+                }
+            }
+        } catch (RuntimeException exception) {
+            if (durable) {
+                SoftwareIntegrationValidationJobStore.Outcome outcome = validationJobStore.complete(
+                        versionId, "ENVIRONMENT_ERROR", "验证任务执行异常",
+                        properties.getValidationMaxAttempts(), properties.getValidationRetryBackoff());
+                if (outcome == SoftwareIntegrationValidationJobStore.Outcome.RETRY_SCHEDULED) {
+                    SoftwareIntegrationModelVersionEntity version = versionMapper.selectById(versionId);
+                    if (version != null) update(version, "VALIDATING", "软件集成环境暂时不可用，正在自动重试", null);
+                }
+            } else {
+                throw exception;
+            }
+        } finally {
+            validationInFlight.remove(versionId);
+        }
+    }
+
+    private void validateVersion(long versionId) {
         SoftwareIntegrationModelVersionEntity version = versionMapper.selectById(versionId);
-        if (version == null || !"UPLOADED".equals(version.getStatus())) return;
+        if (version == null || (!"UPLOADED".equals(version.getStatus())
+                && !"VALIDATING".equals(version.getStatus())
+                && !"ENVIRONMENT_ERROR".equals(version.getStatus()))) return;
         String originalName = version.getOriginalName().toLowerCase(Locale.ROOT);
-        boolean eclipse = originalName.endsWith(".data");
+        String storageName = version.getStorageKey() == null ? "" : version.getStorageKey().toLowerCase(Locale.ROOT);
+        boolean eclipse = originalName.endsWith(".data") || storageName.endsWith(".data");
         update(version, "VALIDATING", eclipse ? "正在验证 ECLIPSE 模型" : "正在读取 PIPESIM 模型和 Study", null);
-        if (!originalName.endsWith(".pips") && !eclipse) {
-            update(version, "INVALID", "ZIP 模型包解压验证将在下一阶段提供，请上传 .pips 主模型", null);
+        boolean pipesim = originalName.endsWith(".pips") || storageName.endsWith(".pips");
+        if (!pipesim && !eclipse) {
+            update(version, "INVALID", "模型包中未找到可验证的 .pips 或 .DATA 主模型", null);
             return;
         }
         try {
@@ -103,6 +213,14 @@ public class SoftwareIntegrationValidationDispatcher {
                 if (PipesimWellInspectionValidator.supports(modelKind)) {
                     inspection = PipesimWellInspectionValidator.validateAndSerialize(payload.get("inspection"), objectMapper);
                 }
+                if (PipesimNetworkInspectionValidator.supports(modelKind)) {
+                    try {
+                        inspection = PipesimNetworkInspectionValidator.validateAndSerialize(payload.get("inspection"), objectMapper);
+                    } catch (IllegalArgumentException exception) {
+                        update(version, "INVALID", "INSPECTION_RESPONSE_INVALID: Worker Network inspection metadata is invalid", null);
+                        return;
+                    }
+                }
                 String readyMessage = payload.path("message").asText("模型验证完成");
                 if (eclipse) readyMessage = SoftwareIntegrationEclipseSanitizer.sanitizeText(readyMessage);
                 if (!persistReady(version, modelKind, simulatorType,
@@ -115,6 +233,8 @@ public class SoftwareIntegrationValidationDispatcher {
                 String code = error.path("code").asText(payload.path("code").asText());
                 String category = error.path("category").asText(payload.path("category").asText());
                 boolean inspectionInputError = eclipse && ("ECLIPSE_INCLUDE_UNSUPPORTED".equals(code)
+                        || "ECLIPSE_MAIN_OUTSIDE_PACKAGE".equals(code)
+                        || (code != null && code.startsWith("ECLIPSE_INCLUDE_"))
                         || (code != null && (code.startsWith("ECLIPSE_DATA_")
                         || code.startsWith("ECLIPSE_RESOURCE_") || code.startsWith("ECLIPSE_ENCODING_"))));
                 boolean environment = !inspectionInputError && (response.statusCode() == 409 || response.statusCode() == 503

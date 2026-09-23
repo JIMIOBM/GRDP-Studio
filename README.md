@@ -184,11 +184,21 @@ npm run dev
 
 该命令通过 `concurrently` 聚合启动 Spring Boot 和 Vue。浏览器访问：<http://127.0.0.1:5173/login>
 
+如果要直接使用 PIPESIM 或 ECLIPSE 的真实计算链路，可用统一启动命令同时启动 Spring Boot、Vue 和本机 Worker：
+
+```powershell
+npm run dev:all
+```
+
+该命令会把 Worker 纳入同一个 `concurrently` 会话；在该会话按 `Ctrl+C` 会同时停止后端、前端和 Worker。原 `npm run dev` 仍保留为不启动 Worker 的页面/API 开发模式。
+
+部署机上的 `start-grdp-ahks.bat` 会在 Worker 健康检查通过后继续检查 `/api/capabilities`，只有 PIPESIM Well、PIPESIM Network 和 ECLIPSE 100 均为 `AVAILABLE` 才会报告启动成功；`stop-grdp-ahks.bat` 在发现活动 Run 时拒绝停止，避免误杀计算。这样展示或交付前可以尽早发现 Toolkit、Python、许可证、`eclrun.exe` 或模型环境不完整的问题。
+
 后端健康检查：<http://127.0.0.1:8080/actuator/health>
 
 **真实计算：按需启动 Worker**
 
-只有执行 PIPESIM 或 ECLIPSE 任务时才需要 Worker。可以在 IDE 的任务配置中启动，也可以按需运行：
+只有执行 PIPESIM 或 ECLIPSE 任务时才需要 Worker。推荐使用上面的 `npm run dev:all` 统一启动；也可以在 IDE 的任务配置中启动，或单独运行：
 
 ```powershell
 dotnet run --project worker/Grdp.SoftwareIntegration.Worker.csproj
@@ -199,12 +209,12 @@ dotnet run --project worker/Grdp.SoftwareIntegration.Worker.csproj
 启动关系可以记成：
 
 ```text
-Docker Desktop → MySQL/Redis → npm run dev（后端 + 前端）→ Worker（真实计算时）→ 模拟器
+Docker Desktop → MySQL/Redis → npm run dev:all（后端 + 前端 + Worker）→ 模拟器
 ```
 
 ### 6. 停止服务
 
-停止 `npm run dev` 和 Worker 后，在项目根目录运行：
+停止 `npm run dev` 或 `npm run dev:all` 后，在项目根目录运行：
 
 ```powershell
 docker compose --env-file backend/.env -f backend/compose.yml down

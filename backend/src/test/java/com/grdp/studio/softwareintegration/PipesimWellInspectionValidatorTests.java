@@ -55,12 +55,20 @@ class PipesimWellInspectionValidatorTests {
             }
         }
         version.setStatus("READY");
-        for (String kind : new String[]{"legacy_well", "network", "eclipse_100", null}) {
+        version.setModelKind("legacy_well");
+        assertThat(SoftwareIntegrationModelVersionResponse.from(version).inspection()).isNotNull();
+        for (String kind : new String[]{"network", "eclipse_100", null}) {
             version.setModelKind(kind);
             assertThat(SoftwareIntegrationModelVersionResponse.from(version).inspection()).isNull();
         }
         version.setModelKind("basic_gas");
         version.setInspectionJson(null);
         assertThat(SoftwareIntegrationModelVersionResponse.from(version).inspection()).isNull();
+    }
+
+    @Test
+    void acceptsV2InspectionWithFrozenPackageManifest() throws Exception {
+        String json = "{\"schemaVersion\":\"pipesim-well-inspection/2\",\"reservoirPressure\":null,\"packageFiles\":[{\"relativePath\":\"model.pips\",\"sizeBytes\":12,\"sha256\":\"" + "a".repeat(64) + "\"}]}";
+        assertThat(PipesimWellInspectionValidator.parsePersisted(json)).isEqualTo(mapper.readTree(json));
     }
 }

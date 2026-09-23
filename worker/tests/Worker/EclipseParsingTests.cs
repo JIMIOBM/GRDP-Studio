@@ -34,6 +34,32 @@ public sealed class EclipseParsingTests
     }
 
     [Fact]
+    public async Task MsgDiagnosticsArePublishedAsBoundedControlledMessages()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".MSG");
+        try
+        {
+            await File.WriteAllTextAsync(path, """
+                <eclipse>
+                  <problem>  WELL PROD NOT CONVERGED IN 1 X 8 ITERATIONS </problem>
+                  <warning> THE RESERVOIR PRESSURE IS TOO LOW </warning>
+                  <message> informational text is intentionally ignored </message>
+                </eclipse>
+                """, TestContext.Current.CancellationToken);
+
+            var messages = EclipseParsers.ParseDiagnosticMessages([path]);
+
+            Assert.Collection(messages,
+                problem => { Assert.Equal("PROBLEM", problem.Severity); Assert.Equal("ECLIPSE_PROBLEM", problem.Code); },
+                warning => { Assert.Equal("WARNING", warning.Severity); Assert.Equal("ECLIPSE_WARNING", warning.Code); });
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void ResultEnvelopeUsesExactLowerCamelNamesRegardlessOfSerializerOptions()
     {
         var summary = EclipseRunService.CreateSummary([
@@ -65,6 +91,17 @@ public sealed class EclipseParsingTests
         Assert.Equal(12.5, points[0].GetProperty("value").GetDouble());
         Assert.Equal(1.5, points[1].GetProperty("timeDays").GetDouble());
         Assert.Equal(11.25, points[1].GetProperty("value").GetDouble());
+    }
+
+    [Fact]
+    public void ResultEnvelopeUsesPartialContractWhenEclEndHasProblems()
+    {
+        var envelope = EclipseRunService.CreateResultEnvelope("CASE.DATA", new(0, 1, 34, 0, 0), null, [], null, [], []);
+        var result = JsonSerializer.SerializeToElement(envelope);
+
+        Assert.Equal("VALID_PARTIAL", result.GetProperty("resultContract").GetString());
+        Assert.Equal(34, result.GetProperty("eclEnd").GetProperty("problems").GetInt32());
+        Assert.Equal(JsonValueKind.Array, result.GetProperty("messages").ValueKind);
     }
 
     [Fact]
@@ -186,6 +223,28 @@ public sealed class EclipseParsingTests
     public void DataStorageKeyRequiresExactCaseInsensitiveDataExtension(string storageKey, bool expected)
     {
         Assert.Equal(expected, EclipseRunRules.IsDataStorageKey(storageKey));
+    }
+
+    [Theory]
+    [InlineData("CASE.EGRID")]
+    [InlineData("CASE.INIT")]
+    [InlineData("CASE.UNRST")]
+    [InlineData("CASE.UNSMRY")]
+    [InlineData("CASE.SMSPEC")]
+    [InlineData("CASE.S0001")]
+    public void ApprovedEclipseBinaryOutputsAreDownloadable(string fileName)
+    {
+        Assert.True(EclipseRunRules.IsApprovedBinaryOutput(fileName));
+    }
+
+    [Theory]
+    [InlineData("CASE.PRT")]
+    [InlineData("CASE.MSG")]
+    [InlineData("CASE.RSM")]
+    [InlineData("CASE.ECLEND")]
+    public void DiagnosticEclipseOutputsAreNotDownloadable(string fileName)
+    {
+        Assert.False(EclipseRunRules.IsApprovedBinaryOutput(fileName));
     }
 
     [Theory]

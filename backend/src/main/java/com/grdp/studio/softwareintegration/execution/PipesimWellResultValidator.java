@@ -14,7 +14,7 @@ public class PipesimWellResultValidator {
     public ValidatedResult validate(String expectedRunTask, JsonNode result) {
         requireObject(result, ROOT_FIELDS, "result");
         requireText(result, "schemaVersion", "pipesim-well-result/1");
-        String modelKind = requireEnum(result, "model_kind", Set.of("black_oil_liquid", "basic_gas"));
+        String modelKind = requireEnum(result, "model_kind", Set.of("black_oil_liquid", "basic_gas", "legacy_well"));
         requireText(result, "runTask", expectedRunTask);
         String contract = requireEnum(result, "resultContract", Set.of(
                 "VALID_FULL", "VALID_PARTIAL", "INVALID_EMPTY_NODAL", "INVALID_EMPTY_PROFILE"));

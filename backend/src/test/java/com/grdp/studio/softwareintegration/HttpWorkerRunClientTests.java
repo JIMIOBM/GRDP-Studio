@@ -66,7 +66,7 @@ class HttpWorkerRunClientTests {
     void usesFrozenRunApiAndAlwaysSerializesExplicitNullParameters() {
         assertThat(client.availability().idle()).isTrue();
         var accepted = client.execute(new WorkerRunExecuteRequest(41, "models/2/3/model.pips", "a".repeat(64),
-                "Study 1", "combined", null, 600));
+                "Study 1", "combined", null, 600, null));
         assertThat(accepted.workerId()).isEqualTo("worker-1");
         JsonNode request = objectMapper.readTree(executeBody.get());
         assertThat(request.size()).isEqualTo(7);
@@ -96,7 +96,7 @@ class HttpWorkerRunClientTests {
     void preservesStructuredWorkerErrorForBusyDecision() {
         executeStatus.set(409);
         assertThatThrownBy(() -> client.execute(new WorkerRunExecuteRequest(
-                41, "models/2/3/model.pips", "a".repeat(64), "Study 1", "nodal", null, 600)))
+                41, "models/2/3/model.pips", "a".repeat(64), "Study 1", "nodal", null, 600, null)))
                 .isInstanceOf(WorkerClientException.class)
                 .satisfies(error -> {
                     WorkerClientException workerError = (WorkerClientException) error;
@@ -115,16 +115,19 @@ class HttpWorkerRunClientTests {
         assertThat(capability.runTasks()).containsExactly("eclipse");
         assertThat(capability.maxTimeoutSeconds()).isEqualTo(1800);
 
+        var packageFiles = objectMapper.readTree("[{\"relativePath\":\"CASE.DATA\",\"sizeBytes\":12,\"sha256\":\"" + "c".repeat(64) + "\"}]");
         client.execute(new WorkerRunExecuteRequest(41, "models/9/1/CASE.DATA", "b".repeat(64),
-                null, "eclipse", null, 1800));
+                null, "eclipse", null, 1800, packageFiles));
         JsonNode request = objectMapper.readTree(executeBody.get());
         assertThat(request.properties()).extracting(java.util.Map.Entry::getKey)
                 .containsExactlyInAnyOrder("runId", "modelStorageKey", "expectedModelSha256", "study",
-                        "runTask", "parameters", "timeoutSeconds");
+                        "runTask", "parameters", "timeoutSeconds", "expectedPackageFiles");
         assertThat(request.path("study").isNull()).isTrue();
         assertThat(request.path("parameters").isNull()).isTrue();
         assertThat(request.path("runTask").asText()).isEqualTo("eclipse");
         assertThat(request.path("timeoutSeconds").asInt()).isEqualTo(1800);
+        assertThat(request.path("expectedPackageFiles").get(0).path("relativePath").asText()).isEqualTo("CASE.DATA");
+        assertThat(request.path("expectedPackageFiles").get(0).path("sha256").asText()).isEqualTo("c".repeat(64));
     }
 
     private static void respond(HttpExchange exchange, int status, String body) throws IOException {

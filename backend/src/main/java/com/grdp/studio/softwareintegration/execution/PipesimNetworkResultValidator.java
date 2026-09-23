@@ -110,7 +110,7 @@ public class PipesimNetworkResultValidator {
                 String valueName = requireSafeText(value, "name", name + " value name");
                 require(value.get("value") != null, name + " named value is missing value");
                 validateNumericValue(value.get("value"), name + "." + variable + "." + valueName,
-                        dataPaths, missingPaths);
+                        dataPaths, missingPaths, true);
             }
         }
     }
@@ -133,7 +133,7 @@ public class PipesimNetworkResultValidator {
                 JsonNode values = requireArray(variable.get("values"), "profile variable values");
                 String path = "profiles." + branch + "." + variableName;
                 if ("BranchEquipment".equals(variableName)) validateTextValue(values, path, dataPaths);
-                else validateNumericValue(values, path, dataPaths, missingPaths);
+                else validateNumericValue(values, path, dataPaths, missingPaths, false);
                 if ("TotalDistance".equals(variableName)) {
                     require(totalDistance == null, "profile contains duplicate TotalDistance");
                     totalDistance = values;
@@ -168,7 +168,7 @@ public class PipesimNetworkResultValidator {
     }
 
     private boolean validateNumericValue(JsonNode value, String path, Set<String> dataPaths,
-                                         Set<String> missingPaths) {
+                                         Set<String> missingPaths, boolean allowNativeScalars) {
         if (value.isNull()) {
             require(dataPaths.add(path), "result contains duplicate data path " + path);
             require(missingPaths.add(path), "result contains duplicate numeric null path " + path);
@@ -178,7 +178,7 @@ public class PipesimNetworkResultValidator {
             boolean hasNumericLeaf = false;
             for (int index = 0; index < value.size(); index++) {
                 hasNumericLeaf |= validateNumericValue(value.get(index), path + "[" + index + "]",
-                        dataPaths, missingPaths);
+                        dataPaths, missingPaths, allowNativeScalars);
             }
             require(hasNumericLeaf, path + " must contain finite numbers or null");
             return true;
@@ -188,12 +188,21 @@ public class PipesimNetworkResultValidator {
             for (var field : value.properties()) {
                 requireSafeText(field.getKey(), path + " field");
                 hasNumericLeaf |= validateNumericValue(field.getValue(), path + "." + field.getKey(),
-                        dataPaths, missingPaths);
+                        dataPaths, missingPaths, allowNativeScalars);
             }
             require(hasNumericLeaf, path + " must contain finite numbers or null");
             return true;
         }
         require(dataPaths.add(path), "result contains duplicate data path " + path);
+        if (allowNativeScalars && value.isBoolean()) return true;
+        if (allowNativeScalars && value.isTextual()) {
+            String text = value.asText();
+            require(!isNumericText(text), path + " must contain finite numbers or null");
+            require(!text.isBlank() && text.length() <= 1000
+                            && SoftwareIntegrationEclipseSanitizer.isSafeIdentifier(text),
+                    path + " must contain a safe native scalar");
+            return true;
+        }
         require(value.isNumber() && Double.isFinite(value.doubleValue()), path + " must contain finite numbers or null");
         double number = value.doubleValue();
         require(!isUnavailableSentinel(number), path + " contains an uncleaned unavailable sentinel");
@@ -215,6 +224,15 @@ public class PipesimNetworkResultValidator {
 
     private static boolean isUnavailableSentinel(double value) {
         return close(value, 1.2345e25) || close(value, -1.0e31);
+    }
+
+    private static boolean isNumericText(String text) {
+        try {
+            double value = Double.parseDouble(text.trim());
+            return Double.isFinite(value);
+        } catch (NumberFormatException exception) {
+            return false;
+        }
     }
 
     private static boolean close(double value, double expected) {

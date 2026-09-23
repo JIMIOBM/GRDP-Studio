@@ -15,6 +15,7 @@ public record SoftwareIntegrationRunSummaryResponse(
         Integer versionNo,
         String study,
         String runType,
+        String resultContract,
         JsonNode parameters,
         String status,
         LocalDateTime createdAt,

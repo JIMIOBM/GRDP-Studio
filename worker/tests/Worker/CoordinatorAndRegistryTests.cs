@@ -71,6 +71,53 @@ public sealed class CoordinatorAndRegistryTests
     }
 
     [Fact]
+    public void RegistryCanReportProgressWithoutChangingTheRunState()
+    {
+        var registry = new PtkRunRegistry(new WorkerIdentity(Options.Create(new WorkerOptions { WorkerId = "test-worker" })));
+        var request = Request(8);
+        Assert.Equal(ClaimStatus.Created, registry.TryClaim(request, "same").Status);
+        registry.Transition(8, "PREPARING", "prepare");
+        registry.Report(8, "PREPARING", "scenario applied");
+
+        var snapshot = registry.GetSnapshot(8, 0)!;
+        Assert.Equal("PREPARING", snapshot.State);
+        Assert.Equal("scenario applied", snapshot.Events.Last().Message);
+    }
+
+    [Fact]
+    public void TrajectoryRunUsesDedicatedReadingPhase()
+    {
+        var registry = Registry();
+        var request = Request(9, "trajectory");
+        Assert.Equal(ClaimStatus.Created, registry.TryClaim(request, "trajectory").Status);
+
+        registry.Transition(9, "PREPARING", "prepare");
+        registry.Transition(9, "READING_TRAJECTORY", "read trajectory");
+        registry.Transition(9, "COLLECTING", "collect");
+
+        Assert.Equal(
+            new[] { "CLAIMED", "PREPARING", "READING_TRAJECTORY", "COLLECTING" },
+            registry.GetSnapshot(9, 0)!.Events.Select(item => item.State));
+    }
+
+    [Fact]
+    public void EspCurveRunUsesProfileThenNodalPhases()
+    {
+        var registry = Registry();
+        var request = Request(10, "esp-curves");
+        Assert.Equal(ClaimStatus.Created, registry.TryClaim(request, "esp-curves").Status);
+
+        registry.Transition(10, "PREPARING", "prepare");
+        registry.Transition(10, "RUNNING_PROFILE", "profile");
+        registry.Transition(10, "RUNNING_NODAL", "nodal");
+        registry.Transition(10, "COLLECTING", "collect");
+
+        Assert.Equal(
+            new[] { "CLAIMED", "PREPARING", "RUNNING_PROFILE", "RUNNING_NODAL", "COLLECTING" },
+            registry.GetSnapshot(10, 0)!.Events.Select(item => item.State));
+    }
+
+    [Fact]
     public void NewWorkerIdentityChangesGeneration()
     {
         var options = Options.Create(new WorkerOptions { WorkerId = "same-worker" });
@@ -211,6 +258,23 @@ public sealed class CoordinatorAndRegistryTests
         Assert.Equal(
             new[] { "CLAIMED", "PREPARING", "RUNNING_NETWORK", "COLLECTING" },
             registry.GetSnapshot(23, 0)!.Events.Select(item => item.State));
+    }
+
+    [Fact]
+    public void SystemAnalysisRunUsesNetworkExecutionPhase()
+    {
+        var registry = Registry();
+        var request = Request(24, "system-analysis");
+        Assert.Equal(ClaimStatus.Created, registry.TryClaim(request, "system-analysis").Status);
+
+        registry.Transition(24, "PREPARING", "prepare");
+        registry.Transition(24, "RUNNING_NETWORK", "system analysis");
+        registry.Report(24, "RUNNING_NETWORK", "system analysis case 2");
+        registry.Transition(24, "COLLECTING", "collect");
+
+        Assert.Equal(
+            new[] { "CLAIMED", "PREPARING", "RUNNING_NETWORK", "RUNNING_NETWORK", "COLLECTING" },
+            registry.GetSnapshot(24, 0)!.Events.Select(item => item.State));
     }
 
     private static PtkRunRegistry Registry() => new(

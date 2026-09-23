@@ -253,6 +253,48 @@ public sealed class ArtifactStoreTests : IDisposable
         Assert.Matches("^[0-9a-f]{64}$", output.GetProperty("sha256").GetString());
     }
 
+    [Fact]
+    public async Task CopiesApprovedEclipseBinaryOutputWithChecksumAndControlledName()
+    {
+        var output = Path.Combine(root, "jobs", "3", "output");
+        var work = Path.Combine(root, "jobs", "3", "work");
+        Directory.CreateDirectory(output);
+        Directory.CreateDirectory(work);
+        var source = Path.Combine(work, "CASE.EGRID");
+        var bytes = Encoding.UTF8.GetBytes("synthetic EGRID bytes");
+        await File.WriteAllBytesAsync(source, bytes, TestContext.Current.CancellationToken);
+        var store = new ArtifactStore(new StorageResolver(Options.Create(new WorkerOptions { StorageRoot = root })));
+
+        var descriptor = await store.CopyEclipseBinaryOutputAsync(output, source, TestContext.Current.CancellationToken);
+
+        var published = Path.Combine(output, "eclipse-output-CASE.EGRID");
+        Assert.True(File.Exists(published));
+        Assert.Equal("jobs/3/output/eclipse-output-CASE.EGRID", descriptor.StorageKey);
+        Assert.Equal(bytes.LongLength, descriptor.Size);
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(bytes)), descriptor.Sha256);
+        Assert.Equal("application/octet-stream", descriptor.ContentType);
+        Assert.Equal(bytes, await File.ReadAllBytesAsync(published, TestContext.Current.CancellationToken));
+    }
+
+    [Theory]
+    [InlineData("CASE.PRT")]
+    [InlineData("CASE.MSG")]
+    [InlineData("CASE.UNSMRY.tmp")]
+    public async Task RejectsUnapprovedEclipseOutputAsDownloadArtifact(string fileName)
+    {
+        var output = Path.Combine(root, "jobs", "4", "output");
+        var work = Path.Combine(root, "jobs", "4", "work");
+        Directory.CreateDirectory(output);
+        Directory.CreateDirectory(work);
+        var source = Path.Combine(work, fileName);
+        await File.WriteAllTextAsync(source, "not a controlled binary artifact", TestContext.Current.CancellationToken);
+        var store = new ArtifactStore(new StorageResolver(Options.Create(new WorkerOptions { StorageRoot = root })));
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => store.CopyEclipseBinaryOutputAsync(
+            output, source, TestContext.Current.CancellationToken));
+        Assert.Empty(Directory.EnumerateFiles(output));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(root)) Directory.Delete(root, recursive: true);

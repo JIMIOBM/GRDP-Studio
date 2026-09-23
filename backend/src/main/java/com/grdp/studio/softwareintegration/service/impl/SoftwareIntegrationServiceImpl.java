@@ -7,6 +7,7 @@ import com.grdp.studio.softwareintegration.dto.SoftwareIntegrationModelResponse;
 import com.grdp.studio.softwareintegration.dto.SoftwareIntegrationProjectDetailResponse;
 import com.grdp.studio.softwareintegration.dto.SoftwareIntegrationProjectRequest;
 import com.grdp.studio.softwareintegration.dto.SoftwareIntegrationProjectResponse;
+import com.grdp.studio.softwareintegration.dto.SoftwareIntegrationArchiveInspectionResponse;
 import com.grdp.studio.softwareintegration.entity.SoftwareIntegrationModelEntity;
 import com.grdp.studio.softwareintegration.entity.SoftwareIntegrationModelVersionEntity;
 import com.grdp.studio.softwareintegration.entity.SoftwareIntegrationProjectEntity;
@@ -17,6 +18,7 @@ import com.grdp.studio.softwareintegration.service.SoftwareIntegrationService;
 import com.grdp.studio.softwareintegration.support.SoftwareIntegrationProperties;
 import com.grdp.studio.softwareintegration.support.SoftwareIntegrationValidationDispatcher;
 import com.grdp.studio.softwareintegration.support.SoftwareIntegrationStorageKeyNormalizer;
+import com.grdp.studio.softwareintegration.support.SoftwareIntegrationModelArchiveExtractor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,10 +29,12 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
+import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
@@ -43,6 +47,7 @@ public class SoftwareIntegrationServiceImpl implements SoftwareIntegrationServic
     private final SoftwareIntegrationProperties properties;
     private final SoftwareIntegrationValidationDispatcher validationDispatcher;
     private final SoftwareIntegrationStorageKeyNormalizer storageKeyNormalizer;
+    private final SoftwareIntegrationModelArchiveExtractor archiveExtractor;
     private final JdbcTemplate jdbcTemplate;
 
     public SoftwareIntegrationServiceImpl(SoftwareIntegrationProjectMapper projectMapper, SoftwareIntegrationModelMapper modelMapper,
@@ -56,6 +61,7 @@ public class SoftwareIntegrationServiceImpl implements SoftwareIntegrationServic
         this.properties = properties;
         this.validationDispatcher = validationDispatcher;
         this.storageKeyNormalizer = storageKeyNormalizer;
+        this.archiveExtractor = new SoftwareIntegrationModelArchiveExtractor(properties, storageKeyNormalizer);
         this.jdbcTemplate = jdbcTemplate;
     }
 
@@ -63,6 +69,14 @@ public class SoftwareIntegrationServiceImpl implements SoftwareIntegrationServic
     public List<SoftwareIntegrationProjectResponse> listProjects() {
         return projectMapper.selectList(new LambdaQueryWrapper<SoftwareIntegrationProjectEntity>()
                         .isNull(SoftwareIntegrationProjectEntity::getDeletedAt).orderByAsc(SoftwareIntegrationProjectEntity::getName))
+                .stream().map(SoftwareIntegrationProjectResponse::from).toList();
+    }
+
+    @Override
+    public List<SoftwareIntegrationProjectResponse> listDeletedProjects() {
+        return projectMapper.selectList(new LambdaQueryWrapper<SoftwareIntegrationProjectEntity>()
+                        .isNotNull(SoftwareIntegrationProjectEntity::getDeletedAt)
+                        .orderByDesc(SoftwareIntegrationProjectEntity::getDeletedAt))
                 .stream().map(SoftwareIntegrationProjectResponse::from).toList();
     }
 
@@ -114,31 +128,125 @@ public class SoftwareIntegrationServiceImpl implements SoftwareIntegrationServic
     }
 
     @Override
+    @Transactional
+    public void deleteModel(long projectId, long modelId) {
+        Boolean projectActive = jdbcTemplate.query(
+                "SELECT deleted_at FROM software_integration_project WHERE id = ? FOR UPDATE",
+                resultSet -> resultSet.next() && resultSet.getTimestamp(1) == null, projectId);
+        if (!Boolean.TRUE.equals(projectActive)) throw new BusinessException(404, "软件集成项目不存在");
+
+        SoftwareIntegrationModelEntity model = modelMapper.selectOne(new LambdaQueryWrapper<SoftwareIntegrationModelEntity>()
+                .eq(SoftwareIntegrationModelEntity::getId, modelId)
+                .eq(SoftwareIntegrationModelEntity::getProjectId, projectId)
+                .isNull(SoftwareIntegrationModelEntity::getDeletedAt));
+        if (model == null) throw new BusinessException(404, "软件集成模型不存在");
+
+        Integer active = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*) FROM software_integration_run
+                WHERE model_id = ? AND status IN ('CLAIMED','PREPARING','RUNNING_NODAL','RUNNING_PROFILE','RUNNING_NETWORK','RUNNING_ECLIPSE','COLLECTING','CANCEL_REQUESTED')
+                """, Integer.class, modelId);
+        if (active != null && active > 0) throw new BusinessException(409, "模型存在活动运行，不能删除");
+
+        List<ModelVersionPath> versions = jdbcTemplate.query("""
+                SELECT model_id, version_no, storage_key
+                FROM software_integration_model_version
+                WHERE model_id = ?
+                """, (resultSet, rowNum) -> new ModelVersionPath(
+                resultSet.getLong("model_id"), resultSet.getInt("version_no"), resultSet.getString("storage_key")), modelId);
+        for (ModelVersionPath version : versions) {
+            if (!deleteVersionDirectory(version)) throw new BusinessException(500, "模型文件清理失败，模型未删除");
+        }
+
+        List<Long> runIds = jdbcTemplate.queryForList(
+                "SELECT id FROM software_integration_run WHERE model_id = ?", Long.class, modelId);
+        for (Long runId : runIds) {
+            if (!deleteArtifactDirectory(runId)) throw new BusinessException(500, "运行结果文件清理失败，模型未删除");
+        }
+        jdbcTemplate.update("DELETE FROM software_integration_artifact WHERE run_id IN (SELECT id FROM software_integration_run WHERE model_id = ?)", modelId);
+        jdbcTemplate.update("DELETE FROM software_integration_run_event WHERE run_id IN (SELECT id FROM software_integration_run WHERE model_id = ?)", modelId);
+        jdbcTemplate.update("DELETE FROM software_integration_run WHERE model_id = ?", modelId);
+        jdbcTemplate.update("DELETE FROM software_integration_validation_job WHERE version_id IN (SELECT id FROM software_integration_model_version WHERE model_id = ?)", modelId);
+        jdbcTemplate.update("DELETE FROM software_integration_model_version WHERE model_id = ?", modelId);
+        modelMapper.deleteById(modelId);
+    }
+
+    @Override
+    @Transactional
+    public SoftwareIntegrationProjectDetailResponse restoreProject(long projectId) {
+        SoftwareIntegrationProjectEntity entity = projectMapper.selectById(projectId);
+        if (entity == null) throw new BusinessException(404, "软件集成项目不存在");
+        if (entity.getDeletedAt() == null) throw new BusinessException(409, "软件集成项目不在回收站");
+        LocalDateTime now = LocalDateTime.now();
+        projectMapper.update(null, new LambdaUpdateWrapper<SoftwareIntegrationProjectEntity>()
+                .eq(SoftwareIntegrationProjectEntity::getId, projectId)
+                .isNotNull(SoftwareIntegrationProjectEntity::getDeletedAt)
+                .set(SoftwareIntegrationProjectEntity::getDeletedAt, null)
+                .set(SoftwareIntegrationProjectEntity::getUpdatedAt, now));
+        return getProject(projectId);
+    }
+
+    @Override
     public SoftwareIntegrationProjectDetailResponse uploadModel(long projectId, MultipartFile file) {
+        return uploadModel(projectId, file, null);
+    }
+
+    @Override
+    public SoftwareIntegrationArchiveInspectionResponse inspectModelArchive(long projectId, MultipartFile file) {
+        requireProject(projectId);
+        if (file == null || file.isEmpty()) throw new BusinessException(400, "请选择 ZIP 模型包");
+        if (file.getSize() > properties.getMaxUploadBytes()) throw new BusinessException(400, "模型文件超过500MB限制");
+        String originalName = file.getOriginalFilename() == null ? "model" : Path.of(file.getOriginalFilename()).getFileName().toString();
+        if (!originalName.toLowerCase(Locale.ROOT).endsWith(".zip")) throw new BusinessException(400, "主模型选择预检仅支持 ZIP 模型包");
+        return SoftwareIntegrationArchiveInspectionResponse.from(archiveExtractor.inspect(file));
+    }
+
+    @Override
+    public SoftwareIntegrationProjectDetailResponse uploadModel(long projectId, MultipartFile file, String mainFile) {
         requireProject(projectId);
         if (file == null || file.isEmpty()) throw new BusinessException(400, "请选择模型文件");
         if (file.getSize() > properties.getMaxUploadBytes()) throw new BusinessException(400, "模型文件超过500MB限制");
         String originalName = file.getOriginalFilename() == null ? "model" : Path.of(file.getOriginalFilename()).getFileName().toString();
         String lowerName = originalName.toLowerCase(Locale.ROOT);
         if (!lowerName.endsWith(".pips") && !lowerName.endsWith(".zip") && !lowerName.endsWith(".data")) throw new BusinessException(400, "仅支持 .pips、.DATA 或 ZIP 模型包");
-
+        SoftwareIntegrationModelArchiveExtractor.ArchiveDescriptor archive = lowerName.endsWith(".zip")
+                ? archiveExtractor.inspect(file) : null;
+        if (archive == null && mainFile != null && !mainFile.isBlank()) throw new BusinessException(400, "非 ZIP 模型不接受主模型选择");
+        String selectedExtension = archive == null ? null : extensionOf(archive.select(mainFile));
         SoftwareIntegrationModelEntity model = findOrCreateModel(projectId, modelName(originalName),
-                lowerName.endsWith(".data") ? "ECLIPSE_100" : "PIPESIM_WELL");
+                archive != null && ".data".equals(selectedExtension) || lowerName.endsWith(".data")
+                        ? "ECLIPSE_100" : "PIPESIM_WELL");
         int nextVersion = versionMapper.selectCount(new LambdaQueryWrapper<SoftwareIntegrationModelVersionEntity>().eq(SoftwareIntegrationModelVersionEntity::getModelId, model.getId())).intValue() + 1;
-        String storageKey = storageKeyNormalizer.normalizeRelative("models/" + model.getId() + "/" + nextVersion + "/" + originalName);
-        Path target = storageKeyNormalizer.resolve(storageKey);
-        Path directory = target.getParent();
+        String versionRootKey = storageKeyNormalizer.normalizeRelative("models/" + model.getId() + "/" + nextVersion);
+        Path target;
+        String storageKey;
         try {
-            Files.createDirectories(directory);
-            try (InputStream input = file.getInputStream()) { Files.copy(input, target, StandardCopyOption.REPLACE_EXISTING); }
+            if (archive != null) {
+                var extracted = archiveExtractor.extract(file, versionRootKey, mainFile);
+                storageKey = extracted.storageKey();
+                target = extracted.path();
+            } else {
+                storageKey = storageKeyNormalizer.normalizeRelative(versionRootKey + "/" + originalName);
+                target = storageKeyNormalizer.resolve(storageKey);
+                Files.createDirectories(target.getParent());
+                try (InputStream input = file.getInputStream()) { Files.copy(input, target, StandardCopyOption.REPLACE_EXISTING); }
+            }
+        } catch (BusinessException exception) {
+            throw exception;
         } catch (IOException exception) { throw new BusinessException(500, "模型文件保存失败"); }
         SoftwareIntegrationModelVersionEntity version = new SoftwareIntegrationModelVersionEntity();
         LocalDateTime now = LocalDateTime.now();
         version.setModelId(model.getId()); version.setVersionNo(nextVersion); version.setOriginalName(originalName);
-        version.setStorageKey(storageKey); version.setSizeBytes(file.getSize()); version.setSha256(sha256(target));
+        version.setStorageKey(storageKey); version.setSizeBytes(fileSize(target)); version.setSha256(sha256(target));
         version.setStatus("UPLOADED"); version.setCreatedAt(now); version.setUpdatedAt(now); versionMapper.insert(version);
-        validationDispatcher.validate(version.getId());
+        validationDispatcher.enqueue(version.getId());
         return getProject(projectId);
+    }
+
+    private static String extensionOf(String path) {
+        String lower = path.toLowerCase(Locale.ROOT);
+        if (lower.endsWith(".data")) return ".data";
+        if (lower.endsWith(".pips")) return ".pips";
+        throw new BusinessException(400, "ZIP 主模型扩展名不受支持");
     }
 
     @Override
@@ -158,7 +266,7 @@ public class SoftwareIntegrationServiceImpl implements SoftwareIntegrationServic
                 .set(SoftwareIntegrationModelVersionEntity::getInspectionJson, null)
                 .set(SoftwareIntegrationModelVersionEntity::getUpdatedAt, now));
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override public void afterCommit() { validationDispatcher.validate(versionId); }
+            @Override public void afterCommit() { validationDispatcher.enqueue(versionId); }
         });
         return getProject(projectId);
     }
@@ -190,6 +298,46 @@ public class SoftwareIntegrationServiceImpl implements SoftwareIntegrationServic
     }
     private String trim(String value) { return value == null ? null : value.trim(); }
     private String modelName(String originalName) { return originalName.replaceFirst("(?i)\\.(pips|data|zip)$", ""); }
+
+    private boolean deleteVersionDirectory(ModelVersionPath version) {
+        final String storageKey;
+        try { storageKey = storageKeyNormalizer.normalizeStoredKey(version.storageKey()); }
+        catch (IllegalArgumentException exception) { return false; }
+        String prefix = "models/" + version.modelId() + "/" + version.versionNo() + "/";
+        if (!storageKey.startsWith(prefix)) return false;
+        return deleteTree(storageKeyNormalizer.resolve("models/" + version.modelId() + "/" + version.versionNo()));
+    }
+
+    private boolean deleteArtifactDirectory(long runId) {
+        return deleteTree(storageKeyNormalizer.resolve("artifacts/" + runId));
+    }
+
+    private boolean deleteTree(Path root) {
+        try {
+            if (!Files.exists(root, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(root)) return !Files.isSymbolicLink(root);
+            Path realRoot = storageKeyNormalizer.root().toRealPath();
+            Path realPath = root.toRealPath();
+            if (!realPath.startsWith(realRoot) || realPath.equals(realRoot)) return false;
+            try (var paths = Files.walk(realPath)) {
+                List<Path> all = paths.toList();
+                if (all.stream().anyMatch(path -> Files.isSymbolicLink(path)
+                        || (!Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS) && !Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)))) {
+                    return false;
+                }
+                all.stream().sorted(Comparator.reverseOrder()).forEach(path -> {
+                    try { Files.deleteIfExists(path); }
+                    catch (IOException exception) { throw new StorageCleanupFailure(exception); }
+                });
+            }
+            return !Files.exists(realPath, LinkOption.NOFOLLOW_LINKS);
+        } catch (IOException | SecurityException | StorageCleanupFailure exception) { return false; }
+    }
+
+    private record ModelVersionPath(long modelId, int versionNo, String storageKey) {}
+    private static final class StorageCleanupFailure extends RuntimeException {
+        private StorageCleanupFailure(IOException cause) { super(cause); }
+    }
+
     private String sha256(Path file) {
         try (InputStream input = Files.newInputStream(file)) {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
@@ -198,5 +346,10 @@ public class SoftwareIntegrationServiceImpl implements SoftwareIntegrationServic
             return HexFormat.of().formatHex(digest.digest());
         }
         catch (Exception exception) { throw new BusinessException(500, "模型校验失败"); }
+    }
+
+    private long fileSize(Path file) {
+        try { return Files.size(file); }
+        catch (IOException exception) { throw new BusinessException(500, "模型校验失败"); }
     }
 }

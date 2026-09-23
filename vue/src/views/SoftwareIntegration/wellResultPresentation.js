@@ -10,6 +10,47 @@ export const wellComparisonIssue = (result, comparison, fields) => {
   return ''
 }
 
+const finite = value => typeof value === 'number' && Number.isFinite(value)
+
+const exactDeltaStats = (currentPoints, comparisonPoints, coordinate, value) => {
+  const grouped = points => {
+    const result = new Map()
+    for (const point of Array.isArray(points) ? points : []) {
+      if (!finite(point?.[coordinate]) || !finite(point?.[value])) continue
+      const entries = result.get(point[coordinate]) || []
+      entries.push(point[value])
+      result.set(point[coordinate], entries)
+    }
+    return result
+  }
+  const current = grouped(currentPoints)
+  const comparison = grouped(comparisonPoints)
+  const deltas = []
+  current.forEach((values, coordinateValue) => {
+    const comparisonValues = comparison.get(coordinateValue)
+    if (values.length !== 1 || comparisonValues?.length !== 1) return
+    deltas.push(values[0] - comparisonValues[0])
+  })
+  if (!deltas.length) return { count: 0, min: null, max: null }
+  return { count: deltas.length, min: Math.min(...deltas), max: Math.max(...deltas) }
+}
+
+export const wellComparisonDeltaRows = (result, comparison) => [
+  { key: 'ipr-pressure', label: 'IPR 压力', coordinateLabel: '流量', coordinateUnit: result?.units?.flow?.displayUnit || '', valueUnit: result?.units?.pressure?.displayUnit || '', ...exactDeltaStats(result?.ipr, comparison?.ipr, 'flow', 'pressure') },
+  { key: 'vlp-pressure', label: 'VLP 压力', coordinateLabel: '流量', coordinateUnit: result?.units?.flow?.displayUnit || '', valueUnit: result?.units?.pressure?.displayUnit || '', ...exactDeltaStats(result?.vlp, comparison?.vlp, 'flow', 'pressure') },
+  { key: 'profile-pressure', label: 'PT 压力', coordinateLabel: '深度', coordinateUnit: result?.units?.depth?.displayUnit || '', valueUnit: result?.units?.pressure?.displayUnit || '', ...exactDeltaStats(result?.profile, comparison?.profile, 'depth', 'pressure') },
+  { key: 'profile-temperature', label: 'PT 温度', coordinateLabel: '深度', coordinateUnit: result?.units?.depth?.displayUnit || '', valueUnit: result?.units?.temperature?.displayUnit || '', ...exactDeltaStats(result?.profile, comparison?.profile, 'depth', 'temperature') }
+]
+
+export const wellScenarioLabel = run => {
+  const parameters = run?.parameters
+  if (!parameters) return '原模型参数（未覆盖）'
+  if (parameters.schemaVersion === 'pipesim-well-parameters/1' && finite(parameters.reservoirPressurePsi)) {
+    return `地层压力方案：${parameters.reservoirPressurePsi} psia`
+  }
+  return '参数快照已保存'
+}
+
 const csvCell = value => {
   const text = value == null ? '' : String(value)
   const safe = typeof value === 'string' && /^[=+\-@\t\r]/.test(text) ? `'${text}` : text

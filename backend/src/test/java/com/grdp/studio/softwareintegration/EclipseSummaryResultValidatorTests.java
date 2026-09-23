@@ -43,13 +43,25 @@ class EclipseSummaryResultValidatorTests {
     }
 
     @Test
-    void rejectsNonZeroProblemsErrorsOrBugs() {
-        for (String field : List.of("problems", "errors", "bugs")) {
+    void acceptsNonZeroProblemsAsPartialButStillRejectsErrorsAndBugs() {
+        ObjectNode partial = (ObjectNode) result("0", "0", "null");
+        partial.put("resultContract", "VALID_PARTIAL");
+        ((ObjectNode) partial.path("eclEnd")).put("problems", 34);
+        var validated = validator.validate("CASE.DATA", partial);
+        assertThat(validated.contract()).isEqualTo("VALID_PARTIAL");
+        assertThat(validated.terminalStatus().name()).isEqualTo("PARTIAL_SUCCEEDED");
+
+        for (String field : List.of("errors", "bugs")) {
             ObjectNode invalid = (ObjectNode) result("0", "0", "null");
             ((ObjectNode) invalid.path("eclEnd")).put(field, 1);
             assertThatThrownBy(() -> validator.validate("CASE.DATA", invalid))
                     .isInstanceOf(EclipseSummaryResultValidator.ResultValidationException.class);
         }
+
+        ObjectNode fullWithProblems = (ObjectNode) result("0", "0", "null");
+        ((ObjectNode) fullWithProblems.path("eclEnd")).put("problems", 1);
+        assertThatThrownBy(() -> validator.validate("CASE.DATA", fullWithProblems))
+                .isInstanceOf(EclipseSummaryResultValidator.ResultValidationException.class);
     }
 
     @Test
@@ -115,6 +127,43 @@ class EclipseSummaryResultValidatorTests {
         ObjectNode malformed = (ObjectNode) result("0", "0", "null");
         ((ObjectNode) malformed.path("outputFiles").get(0)).put("sha256", "g".repeat(64));
         assertInvalid(malformed);
+    }
+
+    @Test
+    void acceptsBoundedEgridMetadataWithoutAcceptingInvalidDimensions() throws Exception {
+        ObjectNode valid = (ObjectNode) result("0", "0", "null");
+        valid.set("grid", objectMapper.readTree("""
+                {"fileName":"CASE.EGRID","nx":2,"ny":3,"nz":4,"activeCells":23}
+                """));
+        assertThat(validator.validate("CASE.DATA", valid).result().path("grid").path("activeCells").asInt())
+                .isEqualTo(23);
+
+        ObjectNode invalid = (ObjectNode) result("0", "0", "null");
+        invalid.set("grid", objectMapper.readTree("""
+                {"fileName":"CASE.EGRID","nx":2,"ny":3,"nz":4,"activeCells":25}
+                """));
+        assertInvalid(invalid);
+    }
+
+    @Test
+    void acceptsBoundedBinaryFieldIndexAndRejectsSegmentsOutsideTheFile() throws Exception {
+        ObjectNode valid = (ObjectNode) result("0", "0", "null");
+        valid.set("fieldIndex", objectMapper.readTree("""
+                {"schemaVersion":"eclipse-binary-field-index/1","files":[
+                  {"name":"CASE.INIT","sizeBytes":100,"byteOrder":"BIG","fields":[
+                    {"keyword":"PRESSURE","dataType":"REAL","count":3,"elementSize":4,"dataBytes":12,"timeStep":7,
+                     "segments":[{"offset":40,"length":12}]}]}]}
+                """));
+        assertThat(validator.validate("CASE.DATA", valid).result().path("fieldIndex").path("files")).hasSize(1);
+
+        ObjectNode invalid = (ObjectNode) result("0", "0", "null");
+        invalid.set("fieldIndex", objectMapper.readTree("""
+                {"schemaVersion":"eclipse-binary-field-index/1","files":[
+                  {"name":"CASE.INIT","sizeBytes":100,"byteOrder":"BIG","fields":[
+                    {"keyword":"PRESSURE","dataType":"REAL","count":3,"elementSize":4,"dataBytes":12,
+                     "segments":[{"offset":95,"length":12}]}]}]}
+                """));
+        assertInvalid(invalid);
     }
 
     @Test

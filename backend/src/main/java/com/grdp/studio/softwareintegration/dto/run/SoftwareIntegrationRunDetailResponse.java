@@ -32,5 +32,7 @@ public record SoftwareIntegrationRunDetailResponse(
         String resultContract,
         JsonNode result,
         List<SoftwareIntegrationRunEventResponse> events,
-        List<SoftwareIntegrationArtifactResponse> artifacts
+        List<SoftwareIntegrationArtifactResponse> artifacts,
+        LocalDateTime resultExpiresAt,
+        boolean resultExpired
 ) {}

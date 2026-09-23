@@ -30,6 +30,7 @@ import java.util.function.Consumer;
 
 @Component
 public class SoftwareIntegrationRunStore {
+    private static final int RESULT_RETENTION_DAYS = 30;
     private static final Set<String> NETWORK_RESULT_REASON_CLASSES = Set.of(
             "schema", "topology", "profile", "quality", "study", "numeric");
     private static final List<String> ACTIVE_STATUSES = List.of(
@@ -58,6 +59,7 @@ public class SoftwareIntegrationRunStore {
     public SoftwareIntegrationRunEntity createQueued(long projectId, long modelId, long versionId,
                                                       String study, String runType, int timeoutSeconds, String parametersJson) {
         return transactions.execute(status -> {
+            if (!lockActiveProject(projectId)) throw new ProjectInactiveException();
             LocalDateTime now = LocalDateTime.now();
             SoftwareIntegrationRunEntity run = new SoftwareIntegrationRunEntity();
             run.setProjectId(projectId);
@@ -101,6 +103,12 @@ public class SoftwareIntegrationRunStore {
         return artifactMapper.selectList(new LambdaQueryWrapper<SoftwareIntegrationArtifactEntity>()
                 .eq(SoftwareIntegrationArtifactEntity::getRunId, runId)
                 .orderByAsc(SoftwareIntegrationArtifactEntity::getId));
+    }
+
+    public SoftwareIntegrationArtifactEntity artifact(long runId, long artifactId) {
+        return artifactMapper.selectOne(new LambdaQueryWrapper<SoftwareIntegrationArtifactEntity>()
+                .eq(SoftwareIntegrationArtifactEntity::getId, artifactId)
+                .eq(SoftwareIntegrationArtifactEntity::getRunId, runId));
     }
 
     public SoftwareIntegrationRunEntity claimOldest(String dispatcherId) {
@@ -310,15 +318,12 @@ public class SoftwareIntegrationRunStore {
             if (current == null) return false;
             SoftwareIntegrationRunStatus from = SoftwareIntegrationRunStatus.valueOf(current.getStatus());
             if (from.isTerminal()) return false;
-            if ("eclipse".equals(current.getRunType())
-                    && terminal == SoftwareIntegrationRunStatus.PARTIAL_SUCCEEDED) {
-                throw new IllegalStateException("ECLIPSE runs cannot be partially successful");
-            }
             SoftwareIntegrationRunStateMachine.requireAllowed(from, terminal);
             LocalDateTime now = LocalDateTime.now();
             SoftwareIntegrationRunEntity patch = statePatch(current, terminal, now);
             patch.setResultContract(resultContract);
             patch.setResultJson(json(result));
+            patch.setResultExpiresAt(result == null ? null : now.plusDays(RESULT_RETENTION_DAYS));
             applyErrorFields(patch, error);
             patch.setCleanupJson(json(cleanup));
             patch.setArtifactManifestKey(published == null ? null : published.manifestKey());
@@ -344,6 +349,20 @@ public class SoftwareIntegrationRunStore {
             return true;
         });
         return Boolean.TRUE.equals(completed);
+    }
+
+    /**
+     * Removes only the materialized result payload after its retention period. Run state, events,
+     * diagnostics, contract and Artifact metadata remain available as long-term audit history.
+     */
+    public int clearExpiredResults(LocalDateTime now) {
+        return runMapper.update(null, new LambdaUpdateWrapper<SoftwareIntegrationRunEntity>()
+                .isNotNull(SoftwareIntegrationRunEntity::getResultJson)
+                .isNotNull(SoftwareIntegrationRunEntity::getResultExpiresAt)
+                .le(SoftwareIntegrationRunEntity::getResultExpiresAt, now)
+                .set(SoftwareIntegrationRunEntity::getResultJson, null)
+                .set(SoftwareIntegrationRunEntity::getUpdatedBy, "system")
+                .set(SoftwareIntegrationRunEntity::getUpdatedAt, now));
     }
 
     public CancelDecision requestCancel(long runId) {
@@ -416,6 +435,10 @@ public class SoftwareIntegrationRunStore {
                 resultSet -> resultSet.next() && resultSet.getTimestamp(1) == null, projectId));
     }
 
+    public static final class ProjectInactiveException extends RuntimeException {
+        public ProjectInactiveException() { super("Software integration project is deleted"); }
+    }
+
     public JsonNode error(String code, String message) {
         var node = objectMapper.createObjectNode();
         node.put("category", errorCategory(code));
@@ -443,7 +466,7 @@ public class SoftwareIntegrationRunStore {
                                                            Consumer<SoftwareIntegrationRunEntity> mutation,
                                                            String message, JsonNode error, LocalDateTime now) {
         SoftwareIntegrationRunStatus from = SoftwareIntegrationRunStatus.valueOf(current.getStatus());
-        SoftwareIntegrationRunStateMachine.requireAllowed(from, target);
+        SoftwareIntegrationRunStateMachine.requireAllowed(from, target, current.getRunType());
         SoftwareIntegrationRunEntity patch = statePatch(current, target, now);
         applyErrorFields(patch, error);
         if (mutation != null) mutation.accept(patch);

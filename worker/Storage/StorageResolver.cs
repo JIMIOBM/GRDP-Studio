@@ -116,9 +116,7 @@ public sealed class StorageResolver
         Directory.CreateDirectory(input);
         Directory.CreateDirectory(work);
         Directory.CreateDirectory(output);
-        var modelCopy = Path.Combine(input, Path.GetFileName(sourceModel));
-        File.Copy(sourceModel, modelCopy, overwrite: false);
-        CopyCompanionDirectory(sourceModel, modelCopy);
+        var modelCopy = CopyModelPackage(sourceModel, input);
         return new RunDirectories(runRoot, input, work, output, modelCopy);
     }
 
@@ -140,10 +138,21 @@ public sealed class StorageResolver
         Directory.CreateDirectory(input);
         Directory.CreateDirectory(work);
         Directory.CreateDirectory(output);
-        var modelCopy = Path.Combine(input, Path.GetFileName(sourceModel));
-        File.Copy(sourceModel, modelCopy, overwrite: false);
-        CopyCompanionDirectory(sourceModel, modelCopy);
+        var modelCopy = CopyModelPackage(sourceModel, input);
         return new RunDirectories(runRoot, input, work, output, modelCopy);
+    }
+
+    public string CopyInputPackageToWork(RunDirectories directories)
+    {
+        CopyDirectoryWithoutReparsePoints(directories.Input, directories.Work);
+        var relativeModel = Path.GetRelativePath(directories.Input, directories.ModelCopy);
+        var modelCopy = Path.GetFullPath(Path.Combine(directories.Work, relativeModel));
+        if (!modelCopy.StartsWith(Path.GetFullPath(directories.Work).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+            || !File.Exists(modelCopy))
+        {
+            throw new StorageException("MODEL_COPY_MISSING", "The isolated ECLIPSE work package does not contain the main model file.");
+        }
+        return modelCopy;
     }
 
     public string ToStorageKey(string path)
@@ -155,6 +164,39 @@ public sealed class StorageResolver
         }
 
         return Path.GetRelativePath(root, fullPath).Replace('\\', '/');
+    }
+
+    public async Task<string> CopyPublishedRestartArtifactToWorkAsync(
+        long historyRunId, string artifactName, string expectedSha256, string workRoot, CancellationToken cancellationToken)
+    {
+        if (historyRunId <= 0 || !IsRestartArtifactName(artifactName) ||
+            expectedSha256 is not { Length: 64 } || expectedSha256.Any(value => value is not (>= 'a' and <= 'f' or >= '0' and <= '9')))
+            throw new StorageException("INVALID_RESTART_ARTIFACT", "The ECLIPSE restart Artifact reference is invalid.");
+        var source = ResolveExistingFile($"artifacts/{historyRunId}/{artifactName}");
+        if (!string.Equals(await ComputeSha256Async(source, cancellationToken), expectedSha256, StringComparison.Ordinal))
+            throw new StorageException("RESTART_ARTIFACT_SHA256_MISMATCH", "The ECLIPSE restart Artifact checksum does not match.");
+        var sourceFileName = artifactName["eclipse-output-".Length..];
+        var targetRoot = Path.GetFullPath(workRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var target = Path.GetFullPath(Path.Combine(targetRoot, sourceFileName));
+        if (!target.StartsWith(targetRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            throw new StorageException("RESTART_ARTIFACT_PATH_INVALID", "The ECLIPSE restart Artifact target is invalid.");
+        RejectReparsePoints(targetRoot);
+        Directory.CreateDirectory(targetRoot);
+        File.Copy(source, target, overwrite: true);
+        return target;
+    }
+
+    public string ResolveModelPackageRoot(string sourceModel)
+    {
+        try { return ResolveModelVersionRoot(sourceModel); }
+        catch (StorageException exception) when (exception.Code == "INVALID_MODEL_STORAGE_KEY")
+        {
+            var directory = Path.GetDirectoryName(Path.GetFullPath(sourceModel));
+            if (string.IsNullOrWhiteSpace(directory) || !directory.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase))
+                throw;
+            RejectReparsePoints(directory);
+            return directory;
+        }
     }
 
     public static bool TryDeleteDirectory(string? path)
@@ -190,12 +232,43 @@ public sealed class StorageResolver
         }
     }
 
-    private static void CopyCompanionDirectory(string sourceModel, string targetModel)
+    private static bool IsRestartArtifactName(string? value)
     {
-        var sourceCompanion = Path.ChangeExtension(sourceModel, ".pipr");
-        if (!Directory.Exists(sourceCompanion)) return;
-        var targetCompanion = Path.ChangeExtension(targetModel, ".pipr");
-        CopyDirectoryWithoutReparsePoints(sourceCompanion, targetCompanion);
+        if (value is null || value.Length is < 20 or > 160 || !value.StartsWith("eclipse-output-", StringComparison.OrdinalIgnoreCase) || !value.EndsWith(".FUNRST", StringComparison.OrdinalIgnoreCase)) return false;
+        return value["eclipse-output-".Length..^7].Length > 0 && value["eclipse-output-".Length..^7].All(character => char.IsLetterOrDigit(character) || character is '.' or '_' or '-' or ' ');
+    }
+
+    private string CopyModelPackage(string sourceModel, string targetRoot)
+    {
+        var packageRoot = ResolveModelVersionRoot(sourceModel);
+        CopyDirectoryWithoutReparsePoints(packageRoot, targetRoot);
+        var relativeModel = Path.GetRelativePath(packageRoot, sourceModel);
+        var modelCopy = Path.GetFullPath(Path.Combine(targetRoot, relativeModel));
+        if (!modelCopy.StartsWith(Path.GetFullPath(targetRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+            || !File.Exists(modelCopy))
+        {
+            throw new StorageException("MODEL_COPY_MISSING", "The isolated model package does not contain the main model file.");
+        }
+        return modelCopy;
+    }
+
+    private string ResolveModelVersionRoot(string sourceModel)
+    {
+        var relative = Path.GetRelativePath(root, sourceModel);
+        var segments = relative.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length < 4 || !segments[0].Equals("models", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new StorageException("INVALID_MODEL_STORAGE_KEY", "Model storage must be contained in a model-version directory.");
+        }
+
+        var packageRoot = Path.GetFullPath(Path.Combine(root, segments[0], segments[1], segments[2]));
+        if (!packageRoot.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase) ||
+            !sourceModel.StartsWith(packageRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new StorageException("STORAGE_ROOT_ESCAPE", "The model package resolves outside the configured storage root.");
+        }
+        RejectReparsePoints(packageRoot);
+        return packageRoot;
     }
 
     private static void CopyDirectoryWithoutReparsePoints(string source, string target)

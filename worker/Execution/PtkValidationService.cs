@@ -33,12 +33,15 @@ public sealed partial class PtkValidationService
             return new(StatusCodes.Status400BadRequest, WorkerApiError.Request("INVALID_EXPECTED_SHA256", "expectedSha256 must be 64 lowercase hexadecimal characters."));
 
         string sourceModel;
+        IReadOnlyList<EclipsePackageFile>? packageFiles = null;
         try
         {
             sourceModel = storage.ResolveExistingModel(request.ModelStorageKey);
             var actualSha = await storage.ComputeSha256Async(sourceModel, cancellationToken);
             if (actualSha != request.ExpectedSha256)
                 return new(StatusCodes.Status422UnprocessableEntity, WorkerApiError.Storage("MODEL_SHA256_MISMATCH", "The source model SHA-256 does not match expectedSha256."));
+            packageFiles = await PipesimPackageIntegrity.DescribeAsync(
+                storage.ResolveModelPackageRoot(sourceModel), cancellationToken);
         }
         catch (StorageException exception)
         {
@@ -79,6 +82,8 @@ public sealed partial class PtkValidationService
             var sourceShaAfter = await storage.ComputeSha256Async(sourceModel, CancellationToken.None);
             if (sourceShaAfter != request.ExpectedSha256)
                 return new(StatusCodes.Status422UnprocessableEntity, WorkerApiError.Storage("SOURCE_MODEL_CHANGED", "The source model SHA-256 changed during validation."));
+            await PipesimPackageIntegrity.VerifyAsync(
+                storage.ResolveModelPackageRoot(sourceModel), packageFiles, CancellationToken.None);
             if (result.Error is not null)
                 return new(StatusCodes.Status503ServiceUnavailable, result.Error);
             if (result.Envelope is null)
@@ -101,8 +106,26 @@ public sealed partial class PtkValidationService
                 }
                 catch (JsonException) { }
             }
+            object? inspection = modelKind == "network"
+                ? NetworkInspectionReader.Read(envelope, status, modelKind)
+                : WellInspectionReader.Read(envelope, status, modelKind);
+            inspection = inspection switch
+            {
+                WellDataInspection wellInspection => wellInspection with
+                {
+                    SchemaVersion = "pipesim-well-inspection/3",
+                    PackageFiles = packageFiles,
+                    Well = well
+                },
+                NetworkDataInspection network => network with
+                {
+                    SchemaVersion = "pipesim-network-inspection/3",
+                    PackageFiles = packageFiles
+                },
+                _ => inspection
+            };
             var response = new ModelValidationResponse(status ?? "INVALID", studies, message ?? "Model validation failed.", modelKind, well, structuredError,
-                WellInspectionReader.Read(envelope, status, modelKind));
+                inspection);
             return status switch
             {
                 "READY" => new(StatusCodes.Status200OK, response),

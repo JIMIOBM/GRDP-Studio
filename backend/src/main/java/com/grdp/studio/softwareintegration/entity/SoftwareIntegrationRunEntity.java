@@ -35,6 +35,7 @@ public class SoftwareIntegrationRunEntity {
     private Long elapsedMillis;
     private String resultContract;
     private String resultJson;
+    private LocalDateTime resultExpiresAt;
     private String errorCategory;
     private String errorCode;
     private String errorJson;
@@ -96,6 +97,8 @@ public class SoftwareIntegrationRunEntity {
     public void setResultContract(String resultContract) { this.resultContract = resultContract; }
     public String getResultJson() { return resultJson; }
     public void setResultJson(String resultJson) { this.resultJson = resultJson; }
+    public LocalDateTime getResultExpiresAt() { return resultExpiresAt; }
+    public void setResultExpiresAt(LocalDateTime resultExpiresAt) { this.resultExpiresAt = resultExpiresAt; }
     public String getErrorCategory() { return errorCategory; }
     public void setErrorCategory(String errorCategory) { this.errorCategory = errorCategory; }
     public String getErrorCode() { return errorCode; }

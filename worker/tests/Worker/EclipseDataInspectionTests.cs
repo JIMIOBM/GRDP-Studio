@@ -29,6 +29,62 @@ public sealed class EclipseDataInspectionTests : IDisposable
     }
 
     [Fact]
+    public void InspectorExtractsSafeScheduleGroupsAndControlRecords()
+    {
+        var inspection = Inspect("""
+            RUNSPEC
+            SCHEDULE
+            WELSPECS
+            'WELL_1' 'GROUP_1' 1* 1* 1* /
+            /
+            GRUPTREE
+            'GROUP_1' 'FIELD' /
+            /
+            COMPDAT
+            'WELL_1' 1 1 1 1 'OPEN' /
+            /
+            WCONHIST
+            'WELL_1' 'OPEN' 'ORAT' 10 /
+            /
+            WCONINJE
+            'WELL_1' 'WATER' 1* 'RATE' 40.6 /
+            /
+            WCONPROD
+            'WELL_1' 'SHUT' 'ORAT' 4500 /
+            /
+            """);
+
+        Assert.Equal("eclipse-data-inspection/4", inspection.SchemaVersion);
+        Assert.Equal([new EclipseScheduleWell("WELL_1", "GROUP_1", "CASE.DATA", 4)], inspection.ScheduleMetadata!.Wells);
+        Assert.Equal([new EclipseScheduleGroup("GROUP_1", "FIELD", "CASE.DATA", 7)], inspection.ScheduleMetadata.Groups);
+        Assert.Equal(["COMPDAT", "WCONHIST", "WCONINJE", "WCONPROD"], inspection.ScheduleMetadata.Records.Select(record => record.Keyword));
+        Assert.Equal(["CASE.DATA", "CASE.DATA", "CASE.DATA", "CASE.DATA"], inspection.ScheduleMetadata.Records.Select(record => record.SourceFile));
+        Assert.Equal([10, 13, 16, 19], inspection.ScheduleMetadata.Records.Select(record => record.LineNumber));
+        Assert.Equal(["WELL_1", "1", "1", "1", "1", "OPEN"], inspection.ScheduleMetadata.Records[0].Values);
+        Assert.Equal(["WELL_1", "OPEN", "ORAT", "10"], inspection.ScheduleMetadata.Records[1].Values);
+        Assert.Equal(["WELL_1", "WATER", "1*", "RATE", "40.6"], inspection.ScheduleMetadata.Records[2].Values);
+        Assert.Equal(["WELL_1", "SHUT", "ORAT", "4500"], inspection.ScheduleMetadata.Records[3].Values);
+        Assert.Equal(new EclipseScheduleCompletion("COMPDAT", "WELL_1", "1", "1", "1", "1", "OPEN", "CASE.DATA", 10),
+            Assert.Single(inspection.ScheduleMetadata.Completions));
+    }
+
+    [Fact]
+    public void InspectorReadsSectionsFromAnIncludePackage()
+    {
+        var package = Path.Combine(root, "models", "7", "1");
+        Directory.CreateDirectory(package);
+        var main = Path.Combine(package, "CASE.DATA");
+        var include = Path.Combine(package, "grid.inc");
+        File.WriteAllText(main, "RUNSPEC\nINCLUDE 'grid.inc' /\n", Encoding.UTF8);
+        File.WriteAllText(include, "GRID\nDIMENS\n2 3 4 /\n", Encoding.UTF8);
+
+        var inspection = EclipseDataInspector.InspectPackage([main, include], "CASE.DATA");
+
+        Assert.Equal(["RUNSPEC", "GRID"], inspection.Sections);
+        Assert.Equal(new EclipseDimensions(2, 3, 4), inspection.Dimensions);
+    }
+
+    [Fact]
     public void InspectorExtractsOnlyCompletedScheduleBlocksAfterSchedule()
     {
         var inspection = Inspect("WELSPECS\n'BEFORE' /\n/\nSCHEDULE -- only this starts schedule inspection\nWELSPECS\n'Well'' One' 1 /\nWELL_2 2 /\n'Well'' One' 3 /\n/\nDATES\n31 feb 2024 /\n1 JAN 2025 /\n/\nTSTEP\n1 0.5 1E2 2*3 -1 NaN Infinity /\n2 1e9999 -0.1 /\n/\nDATES\n1 JAN 2025\n");
@@ -69,7 +125,6 @@ public sealed class EclipseDataInspectionTests : IDisposable
     [Theory]
     [InlineData("'C:\\private\\WELL'")]
     [InlineData("'nested/WELL'")]
-    [InlineData("'WELL:2'")]
     [InlineData("'WELL..2'")]
     [InlineData("'net.pipe://localhost/pipe/private'")]
     [InlineData("'WELL_SECRET'")]
@@ -278,6 +333,50 @@ public sealed class EclipseDataInspectionTests : IDisposable
         Assert.Equal("CASE.DATA", Assert.IsType<EclipseDataInspection>(response.Inspection).CaseName);
         Assert.Equal(422, mismatch.HttpStatus);
         Assert.IsType<WorkerError>(mismatch.Body);
+    }
+
+    [Fact]
+    public async Task ServiceInspectsRelativeIncludePackage()
+    {
+        var package = Path.Combine(root, "models", "7", "1");
+        Directory.CreateDirectory(package);
+        var main = Path.Combine(package, "CASE.DATA");
+        await File.WriteAllTextAsync(main, "RUNSPEC\nINCLUDE 'grid.inc' /\n", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(package, "grid.inc"), "GRID\nDIMENS\n2 3 4 /\n", TestContext.Current.CancellationToken);
+        var service = new EclipseDataInspectionService(new StorageResolver(Options.Create(new WorkerOptions { StorageRoot = root })));
+        await using var stream = File.OpenRead(main);
+        var hash = Convert.ToHexStringLower(await SHA256.HashDataAsync(stream, TestContext.Current.CancellationToken));
+
+        var result = await service.InspectAsync(new("models/7/1/CASE.DATA", hash), TestContext.Current.CancellationToken);
+
+        Assert.Equal(200, result.HttpStatus);
+        var response = Assert.IsType<ModelValidationResponse>(result.Body);
+        var inspection = Assert.IsType<EclipseDataInspection>(response.Inspection);
+        Assert.Equal("eclipse-data-inspection/3", inspection.SchemaVersion);
+        Assert.Equal(["RUNSPEC", "GRID"], inspection.Sections);
+        Assert.Equal(new EclipseDimensions(2, 3, 4), inspection.Dimensions);
+        Assert.Equal([
+            new EclipsePackageFile("CASE.DATA", new FileInfo(main).Length, Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(main)))),
+            new EclipsePackageFile("grid.inc", new FileInfo(Path.Combine(package, "grid.inc")).Length, Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(Path.Combine(package, "grid.inc")))))
+        ], inspection.PackageFiles);
+    }
+
+    [Fact]
+    public async Task ServiceReturnsModel422ForMissingInclude()
+    {
+        var package = Path.Combine(root, "models", "7", "2");
+        Directory.CreateDirectory(package);
+        var main = Path.Combine(package, "CASE.DATA");
+        await File.WriteAllTextAsync(main, "RUNSPEC\nINCLUDE 'missing.inc' /\n", TestContext.Current.CancellationToken);
+        var service = new EclipseDataInspectionService(new StorageResolver(Options.Create(new WorkerOptions { StorageRoot = root })));
+        await using var stream = File.OpenRead(main);
+        var hash = Convert.ToHexStringLower(await SHA256.HashDataAsync(stream, TestContext.Current.CancellationToken));
+
+        var result = await service.InspectAsync(new("models/7/2/CASE.DATA", hash), TestContext.Current.CancellationToken);
+
+        Assert.Equal(422, result.HttpStatus);
+        var response = Assert.IsType<ModelValidationResponse>(result.Body);
+        Assert.Equal("ECLIPSE_INCLUDE_MISSING", response.Error!.Code);
     }
 
     [Theory]

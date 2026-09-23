@@ -15,6 +15,8 @@ import com.grdp.studio.softwareintegration.mapper.SoftwareIntegrationModelVersio
 import com.grdp.studio.softwareintegration.support.SoftwareIntegrationStorageKeyNormalizer;
 import com.grdp.studio.softwareintegration.support.SoftwareIntegrationProperties;
 import com.grdp.studio.softwareintegration.support.SoftwareIntegrationEclipseSanitizer;
+import com.grdp.studio.softwareintegration.support.EclipseHistoryForecastParameters;
+import com.grdp.studio.softwareintegration.support.EclipseDataInspectionValidator;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
@@ -33,7 +35,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @ConditionalOnProperty(prefix = "grdp.software-integration", name = "dispatcher-enabled", havingValue = "true", matchIfMissing = true)
 public class SoftwareIntegrationRunDispatcher {
     private static final Set<String> WORKER_STATES = Set.of(
-            "CLAIMED", "PREPARING", "RUNNING_NODAL", "RUNNING_PROFILE", "RUNNING_NETWORK", "RUNNING_ECLIPSE",
+            "CLAIMED", "PREPARING", "READING_TRAJECTORY", "RUNNING_NODAL", "RUNNING_PROFILE", "RUNNING_NETWORK", "RUNNING_ECLIPSE",
             "COLLECTING", "SUCCEEDED", "PARTIAL_SUCCEEDED", "FAILED", "CANCEL_REQUESTED", "CANCELLED",
             "TIMED_OUT", "WORKER_LOST");
     private final String dispatcherId = UUID.randomUUID().toString();
@@ -132,8 +134,16 @@ public class SoftwareIntegrationRunDispatcher {
         WorkerRunAccepted accepted;
         try {
             JsonNode parameters = objectMapper.readTree(current.getParametersJson());
+            JsonNode expectedPackageFiles = null;
+            if (!"eclipse".equals(current.getRunType())
+                    && version.getInspectionJson() != null) {
+                JsonNode inspection = objectMapper.readTree(version.getInspectionJson());
+                JsonNode packageFiles = inspection.get("packageFiles");
+                if (packageFiles != null && packageFiles.isArray()) expectedPackageFiles = packageFiles;
+            }
             accepted = workerClient.execute(new WorkerRunExecuteRequest(current.getId(), storageKey, version.getSha256(),
-                    current.getStudyName(), current.getRunType(), parameters.isNull() ? null : parameters, current.getTimeoutSeconds()));
+                    current.getStudyName(), current.getRunType(), parameters.isNull() ? null : parameters,
+                    current.getTimeoutSeconds(), expectedPackageFiles));
         } catch (WorkerClientException exception) {
             SoftwareIntegrationRunEntity afterExecute = runStore.find(current.getId());
             if (afterExecute != null
@@ -434,13 +444,7 @@ public class SoftwareIntegrationRunDispatcher {
             case "RUNNING_ECLIPSE" -> phase(run, SoftwareIntegrationRunStatus.RUNNING_ECLIPSE, "Worker 正在执行 ECLIPSE 计算");
             case "COLLECTING" -> phase(run, SoftwareIntegrationRunStatus.COLLECTING, "Worker 正在收集结果");
             case "SUCCEEDED" -> publishResult(runStore.find(run.getId()), snapshot);
-            case "PARTIAL_SUCCEEDED" -> {
-                if ("eclipse".equals(run.getRunType())) {
-                    fail(run.getId(), "RESULT_CONTRACT_INVALID", "ECLIPSE 不允许部分成功结果");
-                } else {
-                    publishResult(runStore.find(run.getId()), snapshot);
-                }
-            }
+            case "PARTIAL_SUCCEEDED" -> publishResult(runStore.find(run.getId()), snapshot);
             case "FAILED" -> finishFailure(runStore.find(run.getId()), snapshot);
             case "CANCELLED" -> finishCancellation(runStore.find(run.getId()), snapshot);
             case "TIMED_OUT" -> finishTimeout(runStore.find(run.getId()), snapshot);
@@ -504,8 +508,17 @@ public class SoftwareIntegrationRunDispatcher {
                 if (version == null) {
                     throw new EclipseSummaryResultValidator.ResultValidationException("Model version is missing");
                 }
+                String expectedCaseName = version.getOriginalName();
+                JsonNode inspection = EclipseDataInspectionValidator.parsePersisted(version.getInspectionJson());
+                if (inspection != null && inspection.path("caseName").isTextual()) {
+                    expectedCaseName = inspection.path("caseName").asText();
+                }
+                JsonNode runParameters = objectMapper.readTree(run.getParametersJson());
+                if (EclipseHistoryForecastParameters.valid(runParameters)) {
+                    expectedCaseName = runParameters.path("forecastDataFile").asText();
+                }
                 EclipseSummaryResultValidator.ValidatedResult validated = eclipseResultValidator.validate(
-                        version.getOriginalName(), snapshot.result());
+                        expectedCaseName, snapshot.result());
                 terminalStatus = validated.terminalStatus();
                 contract = validated.contract();
                 result = validated.result();
@@ -515,7 +528,8 @@ public class SoftwareIntegrationRunDispatcher {
                 terminalStatus = validated.terminalStatus();
                 contract = validated.contract();
                 result = validated.result();
-                requireWorkerResultStatus(snapshot.state(), terminalStatus, "network".equals(run.getRunType()));
+                requireWorkerResultStatus(snapshot.state(), terminalStatus,
+                        Set.of("network", "system-analysis", "network-optimizer").contains(run.getRunType()));
             }
             SoftwareIntegrationRunStatus current = SoftwareIntegrationRunStatus.valueOf(run.getStatus());
             if (current != SoftwareIntegrationRunStatus.CANCEL_REQUESTED && current != SoftwareIntegrationRunStatus.COLLECTING) {
@@ -533,6 +547,8 @@ public class SoftwareIntegrationRunDispatcher {
             if (terminalStatus == SoftwareIntegrationRunStatus.PARTIAL_SUCCEEDED) {
                 error = "network".equals(run.getRunType())
                         ? runStore.error("NETWORK_RESULT_LIMITED", "管网计算已完成，但可展示结果受限")
+                        : "eclipse".equals(run.getRunType())
+                        ? error
                         : error == null ? runStore.error("PROFILE_PARTIAL", "节点分析有效，但 PT 剖面未产生有效结果") : error;
             }
             boolean completed = runStore.complete(run.getId(), terminalStatus, contract,
@@ -549,8 +565,19 @@ public class SoftwareIntegrationRunDispatcher {
                         "Simulator returned data but it was not accepted for display.");
                 return;
             }
-            String schema = "eclipse".equals(run.getRunType()) ? "eclipse-summary-result/1"
-                    : ("network".equals(run.getRunType()) ? "pipesim-network-result/1" : "pipesim-well-result/1");
+            String schema = switch (run.getRunType()) {
+                case "eclipse" -> "eclipse-summary-result/1";
+                case "network" -> "pipesim-network-result/1";
+                case "system-analysis" -> "pipesim-system-analysis-result/1";
+                case "network-optimizer" -> "pipesim-network-optimizer-result/1";
+                case "sensitivity" -> "pipesim-well-sensitivity-result/1";
+                case "gas-lift-performance" -> "pipesim-gas-lift-performance-result/1";
+                case "gas-lift-diagnostics" -> "pipesim-gas-lift-diagnostics-result/1";
+                case "vfp-tables" -> "pipesim-vfp-tables-result/1";
+                case "esp-curves" -> "pipesim-esp-curves-result/1";
+                case "trajectory" -> "pipesim-well-trajectory-result/1";
+                default -> "pipesim-well-result/1";
+            };
             fail(run.getId(), "RESULT_CONTRACT_INVALID", "Worker 结果不符合 " + schema);
         } catch (SoftwareIntegrationArtifactPublisher.ArtifactPublicationException exception) {
             if (published != null) artifactPublisher.discard(published);

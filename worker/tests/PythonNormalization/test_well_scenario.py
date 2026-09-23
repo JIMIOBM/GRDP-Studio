@@ -14,6 +14,17 @@ class ScenarioTests(unittest.TestCase):
             validate_scenario(None, task)
             with self.assertRaises(AdapterFailure):
                 validate_scenario(valid, task)
+        system_analysis = {
+            'schemaVersion': 'pipesim-system-analysis-parameters/1',
+            'producer': 'Well',
+            'branchTerminator': 'FL-2',
+            'outletPressurePsi': 600,
+            'scanVariable': 'liquidFlowRate',
+            'values': [2400, 3000, 3600],
+        }
+        validate_scenario(system_analysis, 'system-analysis')
+        with self.assertRaises(AdapterFailure):
+            validate_scenario(None, 'system-analysis')
         for value in [True, '4000', None, 0, -1, 100001, float('nan'), float('inf')]:
             with self.assertRaises(AdapterFailure):
                 validate_scenario(dict(valid, reservoirPressurePsi=value), 'nodal')

@@ -27,13 +27,55 @@ const statusMeta = {
   RUNNING_ECLIPSE: ['ECLIPSE 计算中', 'primary'],
   COLLECTING: ['收集结果', 'primary']
 }
-const runTypeLabel = { nodal: '节点分析', profile: 'PT 剖面', combined: '组合运行', network: '管网模拟', eclipse: 'ECLIPSE 计算' }
+const runTypeLabel = { nodal: '节点分析', profile: 'PT 剖面', combined: '组合运行', sensitivity: '敏感性分析', 'gas-lift-performance': '气举性能', 'gas-lift-diagnostics': '气举诊断', 'vfp-tables': 'VFP 表生成', 'esp-curves': 'ESP 曲线', trajectory: '井轨迹', network: '管网模拟', 'system-analysis': '系统分析', 'network-optimizer': '网络优化', eclipse: 'ECLIPSE 计算' }
+const networkFieldLabel = { pressure: '压力', temperature: '温度', gasFlowRate: '气体流量', liquidFlowRate: '液体流量', massFlowRate: '质量流量' }
 const rows = computed(() => props.runs || [])
 const formatTime = value => value ? String(value).replace('T', ' ') : '-'
 const formatElapsed = value => {
   const seconds = Math.max(0, Math.floor(Number(value || 0) / 1000))
   const minutes = Math.floor(seconds / 60)
   return `${minutes}:${String(seconds % 60).padStart(2, '0')}`
+}
+const formatParameters = row => {
+  const parameters = row.parameters
+  if (parameters?.schemaVersion === 'pipesim-well-parameters/1' && Number.isFinite(parameters.reservoirPressurePsi)) return `地层压力 ${parameters.reservoirPressurePsi} psia`
+  if (parameters?.schemaVersion === 'pipesim-well-sensitivity-parameters/1') return `${parameters.targetVariable} · ${parameters.values?.join(', ')}`
+  if (parameters?.schemaVersion === 'pipesim-network-parameters/1') {
+    return parameters.boundaries?.map(boundary => {
+      const field = Object.keys(networkFieldLabel).find(key => Number.isFinite(boundary?.[key]))
+      return field ? `${boundary.node} · ${networkFieldLabel[field]} ${boundary[field]}` : boundary.node
+    }).join('；') || '未覆盖边界条件'
+  }
+  if (parameters?.schemaVersion === 'pipesim-network-choke-bean-size-parameters/1') {
+    return `Choke ${parameters.choke || '-'} · Bean Size ${parameters.originalBeanSize} → ${parameters.targetBeanSize} · 基线 #${parameters.baselineRunId || '-'}`
+  }
+  if (parameters?.schemaVersion === 'pipesim-system-analysis-parameters/1') {
+    return 'LiquidFlowRate ' + (parameters.values?.join(', ') || '-') + ' · ' + (parameters.branchTerminator || '-') + ' · 出口 ' + (parameters.outletPressurePsi || '-') + ' psia'
+  }
+  if (parameters?.schemaVersion === 'pipesim-network-optimizer-parameters/1' || parameters?.schemaVersion === 'pipesim-network-optimizer-parameters/2') {
+    return parameters.applyResults ? '官方优化 + 应用到隔离副本' : '官方优化结果展示'
+  }
+  if (parameters?.schemaVersion === 'pipesim-gas-lift-performance-parameters/1') {
+    return `${parameters.producer || '-'} · 注气 ${parameters.valuesMmscfd?.join(', ') || '-'} mmscf/d · 地层压力 ${parameters.reservoirPressurePsi || '-'} psia`
+  }
+  if (parameters?.schemaVersion === 'pipesim-gas-lift-diagnostics-parameters/1') {
+    return `${parameters.producer || '-'} · 目标注气 ${parameters.targetInjectionRateMmscfd || '-'} mmscf/d · 地层压力 ${parameters.reservoirPressurePsi || '-'} psia`
+  }
+  if (parameters?.schemaVersion === 'pipesim-vfp-tables-parameters/1') {
+    return `${parameters.producer || '-'} · VFPPROD #${parameters.tableNumber || '-'} · ${parameters.liquidRatesStbPerDay?.length || 0}×${parameters.outletPressuresPsi?.length || 0} 轴`
+  }
+  if (parameters?.schemaVersion === 'pipesim-esp-curves-parameters/1') return '官方 PT Profile + Nodal · B-ESP 只读曲线'
+  if (parameters?.schemaVersion === 'pipesim-well-trajectory-parameters/1') return '官方 get_trajectory · 只读井轨迹'
+  if (parameters?.schemaVersion === 'eclipse-schedule-parameters/1') {
+    return `WELOPEN ${parameters.well || '-'} · ${parameters.date || '-'} · ${parameters.status || '-'} · 基线 #${parameters.baselineRunId || '-'}`
+  }
+  if (parameters?.schemaVersion === 'eclipse-schedule-parameters/3') {
+    return `WCONINJE ${parameters.well || '-'} · ${parameters.injectionType || '-'} RATE ${parameters.targetInjectionRate || '-'} · ${parameters.date || '-'} · 基线 #${parameters.baselineRunId || '-'}`
+  }
+  if (parameters?.schemaVersion === 'eclipse-schedule-parameters/4') {
+    return `WCONPROD ${parameters.well || '-'} · ${parameters.status || '-'} ORAT ${parameters.targetOilRate || '-'} · 预测初始段 · 基线 #${parameters.baselineRunId || '-'}`
+  }
+  return '原模型参数'
 }
 </script>
 
@@ -50,8 +92,8 @@ const formatElapsed = value => {
     <el-table-column label="版本" width="82"><template #default="{ row }">v{{ row.versionNo }}</template></el-table-column>
     <el-table-column prop="study" label="Study" min-width="150" show-overflow-tooltip><template #default="{ row }">{{ row.study || '-' }}</template></el-table-column>
     <el-table-column label="类型" width="100"><template #default="{ row }">{{ runTypeLabel[row.runType] || row.runType }}</template></el-table-column>
-    <el-table-column v-if="rows.some(row => ['nodal', 'profile', 'combined'].includes(row.runType))" label="参数方案" min-width="190" show-overflow-tooltip>
-      <template #default="{ row }">{{ row.parameters?.schemaVersion === 'pipesim-well-parameters/1' && Number.isFinite(row.parameters.reservoirPressurePsi) ? `地层压力 ${row.parameters.reservoirPressurePsi} psia` : '原模型参数' }}</template>
+    <el-table-column v-if="rows.some(row => ['nodal', 'profile', 'combined', 'sensitivity', 'gas-lift-performance', 'gas-lift-diagnostics', 'vfp-tables', 'esp-curves', 'trajectory', 'network', 'system-analysis', 'network-optimizer', 'eclipse'].includes(row.runType) && row.parameters)" label="参数方案" min-width="260" show-overflow-tooltip>
+      <template #default="{ row }">{{ formatParameters(row) }}</template>
     </el-table-column>
     <el-table-column label="状态" width="120">
       <template #default="{ row }"><el-tag :type="statusMeta[row.status]?.[1] || 'info'">{{ statusMeta[row.status]?.[0] || row.status }}</el-tag></template>

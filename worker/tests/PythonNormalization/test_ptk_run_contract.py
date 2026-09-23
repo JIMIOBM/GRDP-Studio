@@ -45,6 +45,45 @@ class ProfileResult:
     profile = {"Well_1": [{"MeasuredDepth": -10, "Pressure": 100, "Temperature": 60}]}
 
 
+class EspResult:
+    def __init__(self):
+        curve = {
+            ("Inputs",): {
+                ("Frequency",): {("Value",): 60, ("Unit",): "Hz"},
+                ("Manufacturer",): {("Value",): "REDA", ("Unit",): " "},
+                ("Model",): {("Value",): "J7000N", ("Unit",): " "},
+                ("MinFlowrate",): {("Value",): 4500, ("Unit",): "bbl/d"},
+                ("MaxFlowrate",): {("Value",): 9000, ("Unit",): "bbl/d"},
+                ("BaseStages",): {("Value",): 100, ("Unit",): " "},
+            },
+            ("Speed",): {
+                ("Frequencies",): {
+                    "FREQ= 60.00 Hz": {
+                        ("Flowrate",): {("Values",): [100, 200], ("Unit",): "bbl/d"},
+                        ("Head",): {("Values",): [1000, 800], ("Unit",): "ft"},
+                    }
+                },
+                ("OperatingEnvelope",): {
+                    ("MinCurve",): {("Flowrate",): {("Values",): [100], ("Unit",): "bbl/d"}, ("Head",): {("Values",): [900], ("Unit",): "ft"}},
+                    ("BepCurve",): {("Flowrate",): {("Values",): [150], ("Unit",): "bbl/d"}, ("Head",): {("Values",): [850], ("Unit",): "ft"}},
+                    ("MaxCurve",): {("Flowrate",): {("Values",): [200], ("Unit",): "bbl/d"}, ("Head",): {("Values",): [700], ("Unit",): "ft"}},
+                },
+            },
+        }
+        self.esp_curves = {"Flowrate=100 sbbl/day": {"B-ESP": curve}}
+
+
+class TrajectoryFrame:
+    columns = ["MeasuredDepth", "TrueVerticalDepth", "Inclination", "Azimuth", "MaxDogLegSeverity"]
+
+    def to_dict(self, orient="records"):
+        self.orient = orient
+        return [
+            {"MeasuredDepth": 0.0, "TrueVerticalDepth": 0.0, "Inclination": 0.0, "Azimuth": None, "MaxDogLegSeverity": None},
+            {"MeasuredDepth": 1000.0, "TrueVerticalDepth": 980.0, "Inclination": 25.0, "Azimuth": 90.0, "MaxDogLegSeverity": 1.2},
+        ]
+
+
 class Runnable:
     def __init__(self, callback):
         self.callback = callback
@@ -104,11 +143,27 @@ def fake_sixgill_modules():
     definitions.Parameters = types.SimpleNamespace(
         Completion=types.SimpleNamespace(GEOMETRYPROFILETYPE="geometry", RESERVOIRPRESSURE="reservoir_pressure"),
         Well=types.SimpleNamespace(ASSOCIATEDBLACKOILFLUID="associated_fluid"),
+        Tubing=types.SimpleNamespace(INNERDIAMETER="inner_diameter"),
+        BlackOilFluid=types.SimpleNamespace(WATERCUT="water_cut", GOR="gor"),
         PTProfileSimulation=types.SimpleNamespace(
             CALCULATEDVARIABLE="calculated_variable",
             FLOWRATETYPE="flow_rate_type",
             INLETPRESSURE="inlet_pressure",
         ),
+        NodalAnalysisSimulation=types.SimpleNamespace(OUTLETPRESSURE="outlet_pressure"),
+    )
+    definitions.ProfileVariables = types.SimpleNamespace(TEMPERATURE="temperature", PRESSURE="pressure", ELEVATION="elevation", TOTAL_DISTANCE="distance")
+    definitions.SystemVariables = types.SimpleNamespace(
+        PRESSURE="pressure",
+        TEMPERATURE="temperature",
+        VOLUME_FLOWRATE_LIQUID_STOCKTANK="liquid_flow",
+        VOLUME_FLOWRATE_GAS_STOCKTANK="gas_flow",
+    )
+    definitions.EspCurvesVariables = types.SimpleNamespace(
+        INPUTS=("Inputs",), VARIABLESPEEDCURVE=("Speed",), FREQUENCIES=("Frequencies",), OPERATINGENVELOPE=("OperatingEnvelope",),
+        MINCURVE=("MinCurve",), BEPCURVE=("BepCurve",), MAXCURVE=("MaxCurve",), FREQUENCY=("Frequency",), MANUFACTURER=("Manufacturer",),
+        MODEL=("Model",), MINFLOWRATE=("MinFlowrate",), MAXFLOWRATE=("MaxFlowrate",), STAGES=("BaseStages",), FLOWRATE=("Flowrate",),
+        HEAD=("Head",), VALUE=("Value",), VALUES=("Values",), UNIT=("Unit",), VARIABLEPERFORMANCECURVE="Performance",
     )
     resources = types.ModuleType("sixgill.core.resources")
     resources.ModelClasses = types.SimpleNamespace(STUDY="study")
@@ -121,6 +176,45 @@ def fake_sixgill_modules():
 
 
 class PtkRunContractTests(unittest.TestCase):
+    def test_esp_curves_runs_official_two_task_shape(self):
+        model = FakeModel()
+        model.tasks.ptprofilesimulation = Runnable(lambda _: EspResult())
+        model.tasks.nodalanalysis = Runnable(lambda _: EspResult())
+        envelope, events, _ = self.execute(
+            "esp-curves", model, {"schemaVersion": "pipesim-esp-curves-parameters/1"}
+        )
+        self.assertEqual("ok", envelope["status"])
+        self.assertEqual(["RUNNING_PROFILE", "RUNNING_NODAL", "COLLECTING"], [item[0] for item in events])
+        self.assertEqual("pipesim-esp-curves-result/1", envelope["result"]["schemaVersion"])
+        self.assertEqual("REDA", envelope["result"]["pump"]["inputs"]["manufacturer"])
+        self.assertEqual(1, len(envelope["result"]["pump"]["frequencies"]))
+        self.assertEqual(1, len(envelope["result"]["pump"]["operatingEnvelope"]["bep"]["flowRate"]))
+
+    def test_esp_curves_accepts_official_basic_gas_model_kind(self):
+        model = FakeModel(gas=True)
+        model.tasks.ptprofilesimulation = Runnable(lambda _: EspResult())
+        model.tasks.nodalanalysis = Runnable(lambda _: EspResult())
+        envelope, _, _ = self.execute(
+            "esp-curves", model, {"schemaVersion": "pipesim-esp-curves-parameters/1"}
+        )
+        self.assertEqual("ok", envelope["status"])
+        self.assertEqual("basic_gas", envelope["result"]["model_kind"])
+
+    def test_trajectory_reads_official_dataframe_shape_without_writing_model(self):
+        model = FakeModel()
+        model.get_trajectory = lambda **_: TrajectoryFrame()
+        envelope, events, _ = self.execute(
+            "trajectory", model, {"schemaVersion": "pipesim-well-trajectory-parameters/1"}
+        )
+        self.assertEqual("ok", envelope["status"])
+        self.assertEqual(["READING_TRAJECTORY", "COLLECTING"], [item[0] for item in events])
+        self.assertEqual("pipesim-well-trajectory-result/1", envelope["result"]["schemaVersion"])
+        self.assertEqual("Well_1", envelope["result"]["producer"])
+        self.assertEqual("ft", envelope["result"]["units"]["measuredDepth"])
+        self.assertEqual(2, len(envelope["result"]["points"]))
+        self.assertIsNone(envelope["result"]["points"][0]["azimuth"])
+        self.assertEqual(90.0, envelope["result"]["points"][1]["azimuth"])
+
     def test_pressure_scenario_task_matrix_and_profile_boundary(self):
         for gas in (False, True):
             for task in ('nodal', 'profile', 'combined'):
@@ -149,6 +243,10 @@ class PtkRunContractTests(unittest.TestCase):
                         self.assertEqual([] if scenario is None else [4000], writes)
                         for phase, applied, kwargs in calls:
                             expected = {'producer': 'Well_1', 'study': 'Study 1'}
+                            expected.update({
+                                'system_variables': ['pressure', 'liquid_flow', 'gas_flow'],
+                                'profile_variables': ['temperature', 'pressure', 'elevation', 'distance'],
+                            })
                             if gas and phase == 'profile':
                                 expected['parameters'] = {'calculated_variable': 'flowrate', 'flow_rate_type': 'gasflowrate'}
                                 if scenario is not None:
@@ -191,6 +289,35 @@ class PtkRunContractTests(unittest.TestCase):
             self.assertTrue(model.closed)
             self.assertEqual([4000] if unit == 'psia' else [], calls)
             self.assertEqual('ok' if unit == 'psia' else 'error', envelope['status'])
+
+    def test_sensitivity_runs_real_nodal_cases_and_restores_isolated_model(self):
+        model = FakeModel()
+        state = {"reservoir_pressure": 3000}
+        calls = []
+        run_kwargs = []
+        base_get = model.get_value
+        model.get_value = lambda component, parameter=None: state[parameter] if parameter in state else base_get(component, parameter)
+        model.set_value = lambda component, parameter=None, value=None: state.__setitem__(parameter, value)
+        model.tasks.nodalanalysis = Runnable(
+            lambda kwargs: (run_kwargs.append(kwargs), calls.append(state["reservoir_pressure"]), NodalResult())[2]
+        )
+        model.tasks.nodalanalysis.get_conditions = lambda **_: (
+            {"OutletPressure": 1100.0},
+            {"Completion_1": {"Pressure": 3000.0}},
+        )
+        envelope, events, _ = self.execute(
+            "sensitivity",
+            model,
+            {"schemaVersion": "pipesim-well-sensitivity-parameters/1", "targetVariable": "reservoirPressure", "values": [3000, 4000, 5000]},
+        )
+        self.assertEqual("ok", envelope["status"])
+        self.assertEqual("pipesim-well-sensitivity-result/1", envelope["result"]["schemaVersion"])
+        self.assertEqual([3000, 4000, 5000], calls)
+        self.assertEqual(3000, state["reservoir_pressure"])
+        self.assertEqual([1100.0, 1100.0, 1100.0], [item["parameters"]["outlet_pressure"] for item in run_kwargs])
+        self.assertEqual([3000, 4000, 5000], [item["inlet_conditions"]["Completion_1"]["Pressure"] for item in run_kwargs])
+        self.assertEqual(["RUNNING_NODAL", "COLLECTING"], [item[0] for item in events])
+        self.assertEqual(3, len(envelope["result"]["cases"]))
 
     def execute(self, run_task, model=None, parameters=None):
         events = []

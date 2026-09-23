@@ -6,7 +6,7 @@ import types
 import unittest
 from unittest.mock import patch
 
-from worker import ptk_run
+from worker import ptk_run, ptk_validate
 from worker.ptk_network import format_validation_issues, inspect_network, sanitize_message, validate_network_result
 
 
@@ -66,6 +66,19 @@ class NetworkTask:
         self.validate_calls = []
         self.run_calls = []
         self.results = NetworkResults()
+        self.conditions = {
+            "Source-1": {
+                "BoundaryNodeType": "Source",
+                "Pressure": 120.0,
+                "Temperature": 80.0,
+                "FlowRateType": "GasFlowRate",
+                "GasFlowRate": 5.0,
+            },
+            "Sink-1": {
+                "BoundaryNodeType": "Sink",
+                "Pressure": 90.0,
+            },
+        }
 
     def validate(self, **kwargs):
         self.validate_calls.append(kwargs)
@@ -75,11 +88,15 @@ class NetworkTask:
         self.run_calls.append(kwargs)
         return self.results
 
+    def get_conditions(self, **kwargs):
+        return self.conditions
+
 
 class FakeNetworkModel:
-    def __init__(self, include_sink=True):
+    def __init__(self, include_sink=True, include_choke=False):
         self._catalog = Catalog()
         self.closed = False
+        self.bean_size = 2.0
         self.network_task = NetworkTask()
         self.tasks = types.SimpleNamespace(networksimulation=self.network_task)
         self.components = {
@@ -89,9 +106,26 @@ class FakeNetworkModel:
             "Junction": ["Junction-1"],
             "Well": [],
         }
+        if include_choke:
+            self.components["Choke"] = ["Choke"]
 
     def find(self, component):
         return self.components.get(component, [])
+
+    def get_value(self, context, parameter):
+        if parameter != "BeanSize" or context != "Choke":
+            raise AssertionError((context, parameter))
+        return self.bean_size
+
+    def set_value(self, Choke, parameter, value):
+        if parameter != "BeanSize" or Choke != "Choke":
+            raise AssertionError((Choke, parameter))
+        self.bean_size = value
+
+    def describe(self, context, parameter):
+        if parameter != "BeanSize" or context != "Choke":
+            raise AssertionError((context, parameter))
+        return types.SimpleNamespace(units_symbol="in")
 
     def connections(self):
         return [
@@ -105,6 +139,66 @@ class FakeNetworkModel:
         self.closed = True
 
 
+class OptimizerResults:
+    state = "Completed"
+    variable_names = {
+        "OptimizerGas_lift_rate": "Gas lift rate",
+        "OptimizerWell_is_shut_off": "Well is shut off",
+    }
+    units = {"OptimizerGas_lift_rate": "mmscf/d", "OptimizerWell_is_shut_off": " "}
+    summary = {"Info": ["optimizer completed"], "Warning": [], "Error": []}
+    messages = []
+    well_results = {"Well_1": {"OptimizerGas_lift_rate": 0.5663, "OptimizerWell_is_shut_off": False}}
+    flowline_results = {"B_1": {"OptimizerGas_lift_rate": float("nan"), "OptimizerWell_is_shut_off": float("nan")}}
+    sink_results = {"CPF": {"OptimizerGas_lift_rate": float("nan"), "OptimizerWell_is_shut_off": float("nan")}}
+
+
+class OptimizerTask:
+    def __init__(self):
+        self.results = OptimizerResults()
+        self.apply_calls = 0
+
+    def run(self):
+        return self.results
+
+    def apply_results(self):
+        self.apply_calls += 1
+
+
+class FakeOptimizerModel:
+    def __init__(self):
+        self._catalog = Catalog()
+        self.closed = False
+        self.saved = False
+        self.optimizer_task = OptimizerTask()
+        self.tasks = types.SimpleNamespace(networkoptimizersimulation=self.optimizer_task)
+        self.gas_rates = {
+            "Well_1:Tubing_Gas lift injection": 0.4488,
+            "Well_2:Tubing_Gas lift injection": 0.8,
+        }
+
+    def find(self, component):
+        return list(self.gas_rates) if component == "GasLiftInjection" else []
+
+    def get_value(self, context, parameter):
+        self.assert_parameter(parameter)
+        return self.gas_rates[context]
+
+    def describe(self, context, parameter):
+        self.assert_parameter(parameter)
+        return types.SimpleNamespace(units_symbol="mmscf/d")
+
+    def assert_parameter(self, parameter):
+        if parameter != "GasRate":
+            raise AssertionError(parameter)
+
+    def close(self):
+        self.closed = True
+
+    def save(self):
+        self.saved = True
+
+
 def fake_sixgill_modules():
     definitions = types.ModuleType("sixgill.definitions")
     definitions.ProfileVariables = types.SimpleNamespace(
@@ -114,6 +208,10 @@ def fake_sixgill_modules():
         MEAN_VELOCITY_FLUID="MeanVelocityFluid",
         DENSITY_FLUID_INSITU="DensityFluidInSitu",
         Z_FACTOR_GAS_INSITU="ZFactorGasInSitu",
+    )
+    definitions.Parameters = types.SimpleNamespace(
+        GasLiftInjection=types.SimpleNamespace(GASRATE="GasRate"),
+        Choke=types.SimpleNamespace(BEANSIZE="BeanSize"),
     )
     resources = types.ModuleType("sixgill.core.resources")
     resources.ModelClasses = types.SimpleNamespace(STUDY="study")
@@ -126,7 +224,51 @@ def fake_sixgill_modules():
 
 
 class PtkNetworkContractTests(unittest.TestCase):
-    def execute(self, model):
+    def test_network_inspection_contains_only_display_safe_study_boundaries(self):
+        model = FakeNetworkModel(include_choke=True)
+        with patch.dict(sys.modules, fake_sixgill_modules()):
+            inspection = ptk_validate._network_inspection(model, ["Study 1"])
+        self.assertEqual("pipesim-network-inspection/3", inspection["schemaVersion"])
+        self.assertEqual([{"name": "Choke", "beanSize": 2.0, "unit": "in"}], inspection["chokes"])
+        boundaries = inspection["studies"][0]["boundaries"]
+        self.assertEqual(["Sink-1", "Source-1"], [item["node"] for item in boundaries])
+        source = boundaries[1]
+        self.assertEqual("GasFlowRate", source["flowRateType"])
+        self.assertEqual(5.0, source["gasFlowRate"])
+        self.assertEqual(120.0, source["pressure"])
+
+    def test_network_choke_bean_size_parameters_apply_and_record_readback(self):
+        model = FakeNetworkModel(include_choke=True)
+        envelope, events = self.execute(model, {
+            "schemaVersion": "pipesim-network-choke-bean-size-parameters/1",
+            "baselineRunId": 1001,
+            "choke": "Choke",
+            "originalBeanSize": 2.0,
+            "targetBeanSize": 3.0,
+        })
+
+        self.assertEqual("ok", envelope["status"])
+        self.assertEqual("VALID_FULL", envelope["result"]["resultContract"])
+        self.assertEqual(3.0, model.bean_size)
+        self.assertIn("Applied Network Choke BeanSize Choke 2.0->3.0 in.", envelope["result"]["messages"])
+        self.assertEqual(["RUNNING_NETWORK", "COLLECTING"], [item[0] for item in events])
+
+    def test_network_choke_bean_size_rejects_original_value_mismatch(self):
+        model = FakeNetworkModel(include_choke=True)
+        envelope, _ = self.execute(model, {
+            "schemaVersion": "pipesim-network-choke-bean-size-parameters/1",
+            "baselineRunId": 1001,
+            "choke": "Choke",
+            "originalBeanSize": 2.5,
+            "targetBeanSize": 3.0,
+        })
+
+        self.assertEqual("error", envelope["status"])
+        self.assertEqual("NETWORK_CHOKE_ORIGINAL_VALUE_MISMATCH", envelope["error"]["code"])
+        self.assertEqual(2.0, model.bean_size)
+        self.assertEqual([], model.network_task.run_calls)
+
+    def execute(self, model, parameters=None):
         events = []
         with tempfile.NamedTemporaryFile(suffix=".pips") as model_file:
             with patch.dict(sys.modules, fake_sixgill_modules()):
@@ -135,7 +277,7 @@ class PtkNetworkContractTests(unittest.TestCase):
                         "modelPath": model_file.name,
                         "study": "Study 1",
                         "runTask": "network",
-                        "parameters": None,
+                        "parameters": parameters,
                     },
                     model_factory=lambda _: model,
                     emit_event=lambda state, message: events.append((state, message)),
@@ -162,6 +304,51 @@ class PtkNetworkContractTests(unittest.TestCase):
         self.assertIsNone(result["profiles"][1]["variables"][2]["values"][1])
         self.assertEqual("Study 1", model.network_task.validate_calls[0]["study"])
         self.assertEqual(6, len(model.network_task.run_calls[0]["profile_variables"]))
+
+    def test_network_run_preserves_native_boolean_and_enum_scalars(self):
+        model = FakeNetworkModel()
+        model.network_task.results.node["IsInjectingIntoCompletion"] = {
+            "Unit": "",
+            "Sink-1": False,
+        }
+        model.network_task.results.node["LimitedBy"] = {
+            "Unit": "",
+            "Sink-1": "SPEED",
+        }
+
+        envelope, _ = self.execute(model)
+
+        self.assertEqual("ok", envelope["status"])
+        self.assertEqual("VALID_FULL", envelope["result"]["resultContract"])
+        values = {
+            group["variable"]: group["values"][0]["value"]
+            for group in envelope["result"]["node"]
+            if group["variable"] in {"IsInjectingIntoCompletion", "LimitedBy"}
+        }
+        self.assertFalse(values["IsInjectingIntoCompletion"])
+        self.assertEqual("SPEED", values["LimitedBy"])
+
+    def test_network_parameters_override_only_selected_boundaries(self):
+        model = FakeNetworkModel()
+        envelope, _ = self.execute(model, {
+            "schemaVersion": "pipesim-network-parameters/1",
+            "boundaries": [{"node": "Source-1", "pressure": 1500, "temperature": 130}],
+        })
+        self.assertEqual("ok", envelope["status"])
+        self.assertEqual(
+            {"Source-1": {"Pressure": 1500, "Temperature": 130}},
+            model.network_task.run_calls[0]["boundaries"],
+        )
+
+    def test_network_parameters_reject_unknown_boundary_node(self):
+        model = FakeNetworkModel()
+        envelope, _ = self.execute(model, {
+            "schemaVersion": "pipesim-network-parameters/1",
+            "boundaries": [{"node": "Missing", "pressure": 1500}],
+        })
+        self.assertEqual("error", envelope["status"])
+        self.assertEqual("NETWORK_BOUNDARY_NOT_FOUND", envelope["error"]["code"])
+        self.assertEqual([], model.network_task.run_calls)
         self.assertTrue(model.closed)
 
     def test_network_run_cleans_finite_sentinels_and_local_paths(self):
@@ -230,6 +417,19 @@ class PtkNetworkContractTests(unittest.TestCase):
             envelope["warnings"][0],
         )
         json.dumps(envelope, allow_nan=False)
+
+    def test_network_partial_result_preserves_official_native_boolean_and_text_values(self):
+        model = FakeNetworkModel()
+        model.network_task.results.system["Route"] = {"Unit": "", "Network": "MOLLIER"}
+        model.network_task.results.node["LimitedBy"] = {"Unit": "", "Node-1": "POWER"}
+        model.network_task.results.node["FlowrateBeyondCurveMaxRate"] = {"Unit": "", "Node-1": False}
+
+        envelope, _ = self.execute(model)
+
+        self.assertEqual("ok", envelope["status"])
+        self.assertEqual("MOLLIER", next(item for item in envelope["result"]["system"] if item["variable"] == "Route")["values"][0]["value"])
+        self.assertEqual("POWER", next(item for item in envelope["result"]["node"] if item["variable"] == "LimitedBy")["values"][0]["value"])
+        self.assertFalse(next(item for item in envelope["result"]["node"] if item["variable"] == "FlowrateBeyondCurveMaxRate")["values"][0]["value"])
 
     def test_partial_network_result_omits_raw_simulator_diagnostics(self):
         model = FakeNetworkModel()
@@ -308,6 +508,34 @@ class PtkNetworkContractTests(unittest.TestCase):
         self.assertEqual("UNSUPPORTED_NETWORK_MODEL", envelope["error"]["code"])
         self.assertEqual([], events)
 
+    def test_network_optimizer_apply_results_returns_isolated_audit(self):
+        model = FakeOptimizerModel()
+        events = []
+        with tempfile.NamedTemporaryFile(suffix=".pips") as model_file:
+            with patch.dict(sys.modules, fake_sixgill_modules()):
+                envelope = ptk_run.execute_request(
+                    {
+                        "modelPath": model_file.name,
+                        "study": "Study 1",
+                        "runTask": "network-optimizer",
+                        "parameters": {
+                            "schemaVersion": "pipesim-network-optimizer-parameters/2",
+                            "applyResults": True,
+                        },
+                    },
+                    model_factory=lambda _: model,
+                    emit_event=lambda state, message: events.append((state, message)),
+                )
+
+        self.assertEqual("ok", envelope["status"])
+        self.assertEqual("pipesim-network-optimizer-result/2", envelope["result"]["schemaVersion"])
+        self.assertEqual("isolated-model-copy", envelope["result"]["application"]["scope"])
+        self.assertEqual(2, len(envelope["result"]["application"]["changes"]))
+        self.assertEqual(1, model.optimizer_task.apply_calls)
+        self.assertTrue(model.saved)
+        self.assertTrue(model.closed)
+        self.assertEqual(["RUNNING_NETWORK", "COLLECTING"], [item[0] for item in events])
+
     def test_single_well_internal_source_does_not_select_network_validation(self):
         model = FakeNetworkModel(include_sink=False)
         model.components["Flowline"] = []
@@ -316,6 +544,19 @@ class PtkNetworkContractTests(unittest.TestCase):
 
         self.assertFalse(inspection["candidate"])
         self.assertFalse(inspection["valid"])
+
+    def test_well_completion_and_tubing_take_precedence_over_internal_surface_objects(self):
+        model = FakeNetworkModel(include_sink=True)
+        model.components.update({
+            "Well": ["Well_1"],
+            "Completion": ["Well_1:Completion"],
+            "Tubing": ["Well_1:Tubing"],
+        })
+
+        inspection = inspect_network(model)
+
+        self.assertTrue(inspection["well_model"])
+        self.assertFalse(inspection["candidate"])
 
 
 if __name__ == "__main__":

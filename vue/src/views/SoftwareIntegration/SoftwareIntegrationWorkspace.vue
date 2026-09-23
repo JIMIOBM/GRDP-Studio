@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRoute } from 'vue-router'
-import { Document, DocumentAdd, Folder, UploadFilled } from '@element-plus/icons-vue'
+import { Delete, Document, DocumentAdd, Folder, UploadFilled } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useSoftwareIntegrationStore } from '@/stores/softwareIntegration'
 import PipesimModelRunPage from './PipesimModelRunPage.vue'
@@ -11,6 +11,7 @@ const store = useSoftwareIntegrationStore()
 const route = useRoute()
 const {
   projects,
+  recycleBinProjects,
   projectDetails,
   activeProject,
   activeProjectDetail,
@@ -26,6 +27,8 @@ const projectDescription = ref('')
 const fileInput = ref()
 const uploading = ref(false)
 const createDialogVisible = ref(false)
+const recycleBinVisible = ref(false)
+const recycleBinLoading = ref(false)
 const treeKeyword = ref('')
 const treeCollapsed = ref(false)
 const activeTreeId = ref('')
@@ -38,23 +41,23 @@ const safeRequestMessage = fallback => fallback
 const importIntents = {
   'import-pipesim-well': {
     action: '导入 PIPESIM 井筒模型',
-    guidance: '.pips 文件可在当前版本验证并运行；ZIP 可上传保存，但当前版本不能验证或运行。',
+    guidance: '.pips 文件或仅包含一个主 .pips 的 ZIP 包可验证并运行；ZIP 内的相对依赖会保留在隔离版本目录。',
     accept: '.pips,.PIPS,.zip,.ZIP'
   },
   'import-pipesim-network': {
     action: '导入 PIPESIM 管网模型',
-    guidance: '.pips 文件可在当前版本验证并运行；ZIP 可上传保存，但当前版本不能验证或运行。',
+    guidance: '.pips 文件或仅包含一个主 .pips 的 ZIP 包可验证并运行；ZIP 内的相对依赖会保留在隔离版本目录。',
     accept: '.pips,.PIPS,.zip,.ZIP'
   },
   'import-eclipse-100': {
-    action: '导入 ECLIPSE 100 DATA 文件',
-    guidance: '仅选择一个 .DATA 文件。ECLIPSE MVP 不支持 INCLUDE 指令或 ZIP 依赖包，Worker 将验证文件。',
-    accept: '.data,.DATA'
+    action: '导入 ECLIPSE 100 模型',
+    guidance: '.DATA 文件或 ZIP 模型包可验证；ZIP 内的 INCLUDE 依赖会保留，若包含多个 .DATA/.pips 会先要求明确选择主模型入口。',
+    accept: '.data,.DATA,.zip,.ZIP'
   }
 }
 const importIntent = computed(() => importIntents[route.query.intent] || null)
 const importActionLabel = computed(() => importIntent.value?.action || '导入模型')
-const importGuidance = computed(() => importIntent.value?.guidance || 'PIPESIM .pips 可验证并运行；ZIP 可上传保存，但当前版本不能验证或运行。ECLIPSE 仅支持单个 .DATA 文件。')
+const importGuidance = computed(() => importIntent.value?.guidance || 'PIPESIM .pips 或单主模型 ZIP 可验证并运行；ECLIPSE 支持 .DATA 或单主模型 ZIP。')
 const fileAccept = computed(() => importIntent.value?.accept || '.pips,.PIPS,.data,.DATA,.zip,.ZIP')
 
 const activeModels = computed(() => activeProjectDetail.value?.models || [])
@@ -203,6 +206,46 @@ const removeProject = async () => {
   }
 }
 
+const removeModel = async model => {
+  if (!activeProject.value || !model?.id) return
+  await ElMessageBox.confirm(
+    `模型“${model.name}”及其版本、运行历史和结果文件将永久删除，是否继续？`,
+    '删除软件模型',
+    { type: 'warning' }
+  )
+  try {
+    await store.deleteModel(activeProject.value.id, model.id)
+    if (selectedModelId.value === model.id) {
+      selectedModelId.value = ''
+      activeTreeId.value = `project-${activeProject.value.id}`
+    }
+    ElMessage.success('模型及其历史记录已删除')
+  } catch (error) {
+    if (error?.code === 409) ElMessage.error('模型存在活动运行，请等待运行结束后再删除')
+    else ElMessage.error(safeRequestMessage('软件模型删除失败，请稍后重试'))
+  }
+}
+
+const openRecycleBin = async () => {
+  recycleBinVisible.value = true
+  recycleBinLoading.value = true
+  try { await store.loadRecycleBin() }
+  catch { ElMessage.error('回收站加载失败，请稍后重试') }
+  finally { recycleBinLoading.value = false }
+}
+
+const restoreDeletedProject = async project => {
+  if (!project?.id) return
+  recycleBinLoading.value = true
+  try {
+    await store.restoreProject(project.id)
+    recycleBinVisible.value = false
+    await store.selectProject(project.id)
+    ElMessage.success('项目已恢复，模型版本和运行历史保持不变')
+  } catch { ElMessage.error('项目恢复失败，请稍后重试') }
+  finally { recycleBinLoading.value = false }
+}
+
 const chooseModel = () => fileInput.value?.click()
 const openCreateDialog = () => {
   createError.value = ''
@@ -232,8 +275,8 @@ const revalidateModel = async (versionId) => {
 }
 const uploadFile = async (file, intent = route.query.intent) => {
   if (!file) return false
-  const accepted = intent === 'import-eclipse-100' ? /\.data$/i : /\.(pips|zip)$/i
-  const acceptedLabel = intent === 'import-eclipse-100' ? '.DATA' : '.pips 或 ZIP'
+  const accepted = intent === 'import-eclipse-100' ? /\.(data|zip)$/i : /\.(pips|zip)$/i
+  const acceptedLabel = intent === 'import-eclipse-100' ? '.DATA 或 ZIP' : '.pips 或 ZIP'
   if (!accepted.test(file.name)) {
     ElMessage.error(`当前入口仅支持 ${acceptedLabel} 文件`)
     return false
@@ -249,7 +292,31 @@ const uploadFile = async (file, intent = route.query.intent) => {
   uploading.value = true
   const projectId = activeProject.value.id
   try {
-    const detail = await store.uploadModel(projectId, file)
+    let mainFile = null
+    if (/\.zip$/i.test(file.name)) {
+      const inspection = await store.inspectModelArchive(projectId, file)
+      const candidates = Array.isArray(inspection?.mainCandidates) ? inspection.mainCandidates : []
+      if (candidates.length > 1) {
+        const choices = candidates.map(candidate => `${candidate.path} (${candidate.extension})`).join('\n')
+        try {
+          const response = await ElMessageBox.prompt(
+            `这个 ZIP 包包含多个可作为主模型的文件，请输入要运行的主模型相对路径：\n\n${choices}`,
+            '选择主模型入口',
+            {
+              inputValue: candidates[0].path,
+              inputPlaceholder: '例如 EX3_PRED.DATA 或 case/model.pips',
+              inputValidator: value => candidates.some(candidate => candidate.path === String(value || '').trim())
+                ? true : '必须填写候选列表中的完整相对路径',
+              inputErrorMessage: '主模型路径不在 ZIP 预检候选列表中'
+            }
+          )
+          mainFile = String(response.value || '').trim()
+        } catch {
+          return false
+        }
+      }
+    }
+    const detail = await store.uploadModel(projectId, file, mainFile)
     if (activeProjectId.value === projectId) activeTreeId.value = `project-${detail.project.id}`
     ElMessage.success('模型已保存，等待 Worker 异步验证')
   } catch (error) {
@@ -343,6 +410,7 @@ defineExpose({ openCreateDialog, openImportModel, importExternalFile })
          <p class="description">模型版本、验证状态、计算与结果在同一工作台追踪。</p>
       </div>
       <div class="header-actions">
+        <el-button plain @click="openRecycleBin"><el-icon><Delete /></el-icon>回收站</el-button>
         <el-button :disabled="!activeProject" type="danger" plain @click="removeProject">删除项目</el-button>
       </div>
      </header>
@@ -379,6 +447,7 @@ defineExpose({ openCreateDialog, openImportModel, importExternalFile })
                @click.stop="activateResource({ type: 'model', id: `model-${row.id}`, projectId: activeProject.id, modelId: row.id })"
              >进入计算</el-button>
               <el-button v-if="latestVersion(row)?.status !== 'READY'" link type="primary" @click.stop="revalidateModel(latestVersion(row).id)">重新验证</el-button>
+              <el-button link type="danger" @click.stop="removeModel(row)">删除</el-button>
             </template>
         </el-table-column>
       </el-table>
@@ -392,6 +461,19 @@ defineExpose({ openCreateDialog, openImportModel, importExternalFile })
         <el-form-item label="项目说明"><el-input v-model="projectDescription" maxlength="500" type="textarea" :rows="3" /></el-form-item>
       </el-form>
       <template #footer><el-button @click="createDialogVisible = false">取消</el-button><el-button :loading="creating" type="primary" @click="createProject">创建</el-button></template>
+    </el-dialog>
+    <el-dialog v-model="recycleBinVisible" title="软件项目回收站" width="680px">
+      <div v-loading="recycleBinLoading">
+        <el-table v-if="recycleBinProjects.length" :data="recycleBinProjects" row-key="id">
+          <el-table-column prop="name" label="项目名称" min-width="180" />
+          <el-table-column prop="description" label="说明" min-width="180" show-overflow-tooltip />
+          <el-table-column prop="updatedAt" label="移入时间" min-width="180" />
+          <el-table-column label="操作" width="100">
+            <template #default="{ row }"><el-button link type="primary" @click="restoreDeletedProject(row)">恢复</el-button></template>
+          </el-table-column>
+        </el-table>
+        <el-empty v-else description="回收站为空" :image-size="64" />
+      </div>
     </el-dialog>
   </section>
 </template>

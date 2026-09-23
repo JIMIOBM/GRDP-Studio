@@ -101,18 +101,33 @@ public sealed class PtkRunRegistry
         }
     }
 
+    public void Report(long runId, string state, string message, DateTimeOffset? occurredAt = null)
+    {
+        lock (gate)
+        {
+            var entry = entries[runId];
+            if (TerminalStates.Contains(entry.State)) return;
+            if (!string.Equals(entry.State, state, StringComparison.Ordinal))
+                throw new InvalidOperationException($"Cannot report Worker state {state} while run is {entry.State}.");
+            entry.AddEvent(state, occurredAt ?? DateTimeOffset.UtcNow, message);
+        }
+    }
+
     private static bool IsAllowedTransition(Entry entry, string next) => entry.State switch
     {
         "CLAIMED" => next == "PREPARING",
         "PREPARING" => entry.Request.RunTask switch
         {
             "profile" => next == "RUNNING_PROFILE",
-            "network" => next == "RUNNING_NETWORK",
+            "esp-curves" => next == "RUNNING_PROFILE",
+            "trajectory" => next == "READING_TRAJECTORY",
+            "network" or "system-analysis" or "network-optimizer" => next == "RUNNING_NETWORK",
             "eclipse" => next == "RUNNING_ECLIPSE",
             _ => next == "RUNNING_NODAL"
         },
         "RUNNING_NODAL" => entry.Request.RunTask == "combined" ? next == "RUNNING_PROFILE" : next == "COLLECTING",
-        "RUNNING_PROFILE" => next == "COLLECTING",
+        "RUNNING_PROFILE" => entry.Request.RunTask == "esp-curves" ? next == "RUNNING_NODAL" : next == "COLLECTING",
+        "READING_TRAJECTORY" => next == "COLLECTING",
         "RUNNING_NETWORK" => next == "COLLECTING",
         "RUNNING_ECLIPSE" => next == "COLLECTING",
         _ => false

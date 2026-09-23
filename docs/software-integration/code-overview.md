@@ -40,8 +40,8 @@ Spring Boot 保存结果
 用户在软件集成工作台创建项目，然后上传文件：
 
 - PIPESIM 当前演示主路径：单个 `.pips`。
-- ECLIPSE 当前路径：单个 `.DATA`，拒绝 ZIP、目录包和 `INCLUDE`。
-- ZIP 模型包的完整解包验证属于后续范围。
+- ECLIPSE 当前路径：单个 `.DATA` 或单主 `.DATA` ZIP 工程包；Worker 递归校验包内相对 `INCLUDE` 并在隔离 work 目录保留相对路径执行。
+- ZIP 仍受主文件唯一性、路径越界、重解析点、文件数、目录深度和展开大小限制。
 
 浏览器把文件作为 `multipart/form-data` 发给 Spring Boot：
 
@@ -171,7 +171,7 @@ backend/src/main/java/com/grdp/studio/softwareintegration/
 - `execution/SoftwareIntegrationRunDispatcher.java`：把持久 Run 交给 Worker 执行。
 - `execution/SoftwareIntegrationRunStore.java`：Run 状态、事件和结果的保存。
 - `client/HttpWorkerRunClient.java`：Spring Boot 到 Worker 的调用和响应转换。
-- `execution/PipesimWellResultValidator.java`、`PipesimNetworkResultValidator.java`、`EclipseSummaryResultValidator.java`：防止不符合合同的结果进入页面。
+- `execution/PipesimWellResultValidator.java`、`PipesimNetworkResultValidator.java`、`EclipseSummaryResultValidator.java`：防止不符合合同的结果进入页面；ECLIPSE 结果中的 EGRID 只接受受限的网格元数据。
 
 数据库迁移在：
 
@@ -288,6 +288,8 @@ vue/src/
 
 前端的 `PipesimNodalResult.vue` 读取 `ipr` 和 `vlp`，`PipesimProfileResult.vue` 读取 `profile`。如果数组为空、字段不合法或合同与 Run 不匹配，页面不会强行绘图。
 
+选择同版本历史 Run 后，`PipesimWellComparisonSummary.vue` 会保留两次 Run 的参数快照，并对 IPR/VLP/PT 的完全相同流量或深度坐标计算“当前−对比”差值范围；没有相同坐标时明确显示不可对齐，不插值。
+
 ### 4.3 PIPESIM Network 结果
 
 Network 结果使用 `pipesim-network-result/1`，包括：
@@ -297,6 +299,10 @@ Network 结果使用 `pipesim-network-result/1`，包括：
 - `node`：节点变量。
 - `profiles`：每条返回支路的距离、压力、温度等序列。
 - `summary`、`messages`、`quality`：诊断和缺失值说明。
+- 支路总览、系统/节点变量和剖面明细支持分页；CSV 导出不受当前页限制，仍保留筛选后的完整返回点。
+- 拓扑可导出 CSV，包含返回节点的 ID/组件类型，以及返回连接的源、目标和源端口；导出不从图形布局推断流向。
+- 选择同 Study 历史 Network Run 后，系统变量和节点变量表按变量、对象、单位对齐显示当前值、历史值和差值；不匹配时只显示明确警告，不插值或猜单位。
+- 质量表按 Worker 返回的路径合同提供精确定位：节点路径定位到拓扑节点，支路 profile 路径定位到支路剖面；不能唯一匹配的路径和系统级路径只显示说明，不做模糊推断。
 
 `VALID_FULL` 表示完整结果合同通过；`VALID_PARTIAL` 表示只保留了经过安全校验的真实部分结果。页面会显示“部分真实计算结果”，不会补造缺失拓扑或数值。
 
@@ -305,12 +311,20 @@ Network 结果使用 `pipesim-network-result/1`，包括：
 ECLIPSE 页面主要展示：
 
 - DATA 文件的静态检查信息。
+- ECLIPSE DATA 检查 v3 还展示 Worker 解析出的包内主 DATA/INCLUDE 相对路径、文件大小和 SHA-256；页面不展示本机绝对路径，后端只接受受控的相对路径清单。创建 ECLIPSE Run 时，Spring 将该清单绑定到请求，Worker 在输入副本和工作副本启动前再次逐文件核验，避免检查后依赖被替换。
 - ECLEND 的 Comments、Warnings、Problems、Errors、Bugs。
 - 受控诊断。
 - 输出文件的大小、SHA-256 和 Artifact 元数据。
+- EGRID、INIT、UNRST、UNSMRY、SMSPEC 和 S#### 通过受控二进制 Artifact 下载；PRT/MSG/RSM/ECLEND 等文本输出不直接发布。
+- ECLIPSE 结果可附带受限二进制场索引，记录关键字、类型、数量和分段偏移；它只做索引，不把网格场值展开到 Run JSON。
+- 结果页按索引调用受控 Artifact Range 接口，可按 200 个值分页读取选定二进制字段；字段目录可按文件、时间步和关键字筛选并分页，且对网格尺寸严格匹配的字段读取二维层切片。UNRST 字段显示 Worker 从真实 SEQNUM 读取的时间步，场索引和切片面板共享同一个时间步状态并双向联动；切片按动态时间步筛选，同时保留可复用的静态字段，每次只读取对应的真实字节范围；选定层还会按实际返回值显示最小/最大范围和基础色标。领域专用色标和井网格定位仍需后续工程化。
+- 结果页按索引调用受控 Artifact Range 接口，可按 200 个值分页读取选定二进制字段；字段目录可按文件、时间步和关键字筛选并分页，且对网格尺寸严格匹配的字段读取二维层切片。UNRST 字段显示 Worker 从真实 SEQNUM 读取的时间步，场索引和切片面板共享同一个时间步状态并双向联动；切片按动态时间步筛选，同时保留可复用的静态字段，每次只读取对应的真实字节范围；选定层还会按实际返回值显示最小/最大范围和基础色标，并可导出当前层的原始值与 I/J 坐标 CSV。领域专用色标和井网格定位仍需后续工程化。
 - 本次真实 RSM 解析出的 Summary 序列。
+- 若 ECLIPSE 没有单一 UNSMRY，Worker 会按 `S####` 文件名顺序读取分步 Summary；仍使用同一 Summary 结果合同，不改变点顺序和单位。
 
 ECLIPSE 没有 PIPESIM Study。没有可用 RSM 时，页面明确显示“未返回可用 Summary”，不会用示例曲线代替。
+
+PIPESIM 敏感性结果保留 Worker 返回的严格递增工况和 IPR/VLP 原始点；页面只做工况选择、分页和全量 CSV 导出，不重采样、不换算单位。
 
 ## 5. 一次请求在代码中如何追踪
 
@@ -369,7 +383,7 @@ PIPESIM Network：CSN_302
 ECLIPSE 100：BRILLIG.DATA
 ```
 
-当前仍有一些完整产品功能没有做完，例如 ZIP 解包验证、Artifact 下载、回收站恢复、到期清理、持久验证队列和多计算节点。这些不会改变已经实现的主调用链，也不应在阅读当前代码时误认为已经完成。
+当前已经落地的公共能力还包括 PIPESIM/ECLIPSE ZIP 安全解包与完整工程复制、PIPESIM 井筒与 Network 工程包依赖清单及运行前后完整性校验、ECLIPSE `INCLUDE` 依赖图校验、受限 EGRID 元数据索引、ECLIPSE 二进制结果受控 Artifact 下载、Artifact 受控下载与到期清理、项目回收站恢复、结果保留清理、持久验证任务恢复、模型删除和手动重试。PIPESIM v2 inspection 中的 `packageFiles` 是验证时冻结的相对路径、文件大小和 SHA-256；旧 v1 inspection 仍可读取，但新版本会在“工程包”页签展示并在派发时传给 Worker。仍未完成或未做现场验收的范围包括含 INCLUDE 的真实许可证计算验收、EGRID/UNRST 等大型工程场数据分页、多计算节点，以及真实运行中的取消/超时验收；这些边界不能在页面上伪装成已完成现场验收。
 
 阅读代码时优先关注：
 

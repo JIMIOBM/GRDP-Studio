@@ -30,6 +30,10 @@ class SoftwareIntegrationRunStateMachineTests {
                 SoftwareIntegrationRunStatus.CANCEL_REQUESTED, SoftwareIntegrationRunStatus.SUCCEEDED)).isFalse();
         assertThat(SoftwareIntegrationRunStateMachine.allows(
                 SoftwareIntegrationRunStatus.CANCEL_REQUESTED, SoftwareIntegrationRunStatus.PARTIAL_SUCCEEDED)).isFalse();
+        assertThat(SoftwareIntegrationRunStateMachine.allows(
+                SoftwareIntegrationRunStatus.RUNNING_PROFILE, SoftwareIntegrationRunStatus.RUNNING_NODAL, "esp-curves")).isTrue();
+        assertThat(SoftwareIntegrationRunStateMachine.allows(
+                SoftwareIntegrationRunStatus.RUNNING_PROFILE, SoftwareIntegrationRunStatus.RUNNING_NODAL, "profile")).isFalse();
         assertThatThrownBy(() -> SoftwareIntegrationRunStateMachine.requireAllowed(
                 SoftwareIntegrationRunStatus.SUCCEEDED, SoftwareIntegrationRunStatus.FAILED))
                 .isInstanceOf(IllegalStateException.class);

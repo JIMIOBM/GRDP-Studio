@@ -1,15 +1,15 @@
-# ECLIPSE 100 MVP Architecture Contract
+# ECLIPSE 100 Software-Integration Contract
 
 ## Scope
 
 This document freezes the ECLIPSE 100 MVP selected by the user. It applies only to the software-integration module.
 
 - Simulator: ECLIPSE 100 2024.1.
-- Input: one uploaded `.DATA` file only.
-- Rejected input: ZIP, directory packages, `INCLUDE` directives, browser-supplied paths, executable arguments, parameter overrides and deck rewriting.
+- Input: one uploaded `.DATA` file or one ZIP containing exactly one main `.DATA` and its relative dependencies.
+- Rejected input: directory packages, absolute or package-escaping `INCLUDE` paths, missing/cyclic dependencies, browser-supplied paths, executable arguments, parameter overrides and deck rewriting.
 - Execution: one immutable model-version copy per run.
-- Output: ECLEND counts, controlled diagnostics, fresh output Artifact metadata and optional RSM Summary series.
-- Excluded: parameter studies, model editing, grid/result binary parsing, ECLIPSE ZIP packages and any derived engineering formulas.
+- Output: ECLEND counts, controlled diagnostics, fresh output Artifact metadata, optional RSM Summary series and bounded EGRID metadata.
+- Excluded: parameter studies, model editing, grid field/value paging and any derived engineering formulas.
 
 ## Verified Environment
 
@@ -43,21 +43,21 @@ The existing validation request continues to contain only `modelStorageKey` and 
 
 1. Require a `.DATA` original filename and verify the storage key and SHA-256.
 2. Create and hash-check an isolated validation copy.
-3. Reject any deck containing an `INCLUDE` instruction using the frozen lexical rule below, with a stable non-retryable `MODEL / ECLIPSE_INCLUDE_UNSUPPORTED` error.
+3. Resolve every `INCLUDE` instruction from the isolated package using a relative path, and reject missing, escaping, cyclic, oversized or reparse-point dependencies with stable non-retryable `MODEL / ECLIPSE_INCLUDE_*` errors.
 4. Verify the configured launcher through `eclrun --report-versions eclipse` and require version `2024.1`.
 5. Return `READY`, `modelKind=eclipse_100`, an empty Study list and a controlled validation message. Do not run the deck to validate it.
 
 Unavailable launcher or a failed version query is retryable `ENVIRONMENT / ECLIPSE_UNAVAILABLE`. License probing must not print or persist environment variables.
 
-#### Frozen INCLUDE lexical rule
+#### INCLUDE dependency rule
 
-The Worker scans the `.DATA` text as a character stream before ECLIPSE starts. It must:
+The Worker scans each package text as a character stream before ECLIPSE starts. It must:
 
 1. Treat `--` outside a quoted literal as a comment through the next `\r` or `\n`; comment text is ignored.
 2. Treat text between single quotes as a literal; a doubled single quote inside a literal is an escaped quote. Literal text is ignored.
 3. In remaining text, recognize `INCLUDE` case-insensitively only when both neighbors are absent or are not ASCII letters, digits or `_`.
-4. Reject on the first recognized token. `INCLUDE`, `include`, `"INCLUDE"` and whitespace-delimited variants are rejected; `'INCLUDE'`, `-- INCLUDE`, `FOOINCLUDE` and `INCLUDE_FILE` are not tokens under this MVP rule. Double quotes have no special meaning in this scanner.
-5. Never resolve, read or disclose a referenced path. A rejected deck has no ECLIPSE process, no work Artifact and no generated result.
+4. Read the following quoted or unquoted relative path and resolve it from the including file's directory. The normalized target must stay inside the isolated package.
+5. Track the dependency graph with bounded depth and file count, reject cycles and validate UTF-8/reparse-point/file-size safety before ECLIPSE starts.
 
 ### Execution
 
@@ -135,12 +135,12 @@ Only a real successful run may return `eclipse-summary-result/1`.
 - ECLIPSE run creation accepts only `runType=eclipse`, requires `study=null`, and rejects every non-null parameter object. PIPESIM keeps its current Study requirement unchanged.
 - Add `RUNNING_ECLIPSE` to the active-slot migration, Java state machine, Worker-event mapping and UI status map.
 - The existing global active-run slot remains in effect for MVP, so one simulator operation is active at a time. The ECLIPSE Worker mutex remains distinct for cross-process safety.
-- The browser groups `eclipse_100` under `ECLIPSE 模型`, exposes one `ECLIPSE 计算` action, and renders only ECLEND counts, Summary charts/tables when present, Artifact metadata, cleanup state and structured errors.
+- The browser groups `eclipse_100` under `ECLIPSE 模型`, exposes one `ECLIPSE 计算` action, and renders ECLEND counts, Summary charts/tables when present, bounded EGRID metadata, Artifact metadata, cleanup state and structured errors.
 - Browser API responses, events and Artifacts apply the existing recursive diagnostic sanitizer. Local paths, private pipes and license values never cross the Worker boundary.
 
 ## Work Packages
 
-1. Architect, serialized shared contract: approve this document; define lexical `INCLUDE` detection; freeze migration changes, API nullability and result JSON schema.
+1. Architect, serialized shared contract: approve this document; define package-relative `INCLUDE` resolution; freeze migration changes, API nullability and result JSON schema.
 2. Executor A, serialized migration/backend: model type compatibility, nullable ECLIPSE study contract, `RUNNING_ECLIPSE`, result validator, dispatcher mappings and JUnit tests.
 3. Executor B, Worker: options/capability discovery, ECLRUN runner, output snapshot/ECLEND/RSM parser, coordinator, cleanup, Artifact integration and xUnit tests. This package must not touch Vue or database migrations.
 4. Executor C, Vue: ECLIPSE tree/category/upload hints, run controls, status stage and result components. It starts after the response schema is frozen.
@@ -148,8 +148,8 @@ Only a real successful run may return `eclipse-summary-result/1`.
 
 ## Acceptance Matrix
 
-- Unit: ECLEND count parser; License/Fatal classifier; fresh/stale output behavior; RSM parser; INCLUDE rejection; zero-exit with Errors/Problems failure; null Study compatibility; ECLIPSE result validator.
+- Unit: ECLEND count parser; License/Fatal classifier; fresh/stale output behavior; RSM parser; INCLUDE path/dependency safety; zero-exit with Errors/Problems failure; null Study compatibility; ECLIPSE result validator.
 - Worker integration: launcher unavailable; version mismatch; nonzero exit; fresh clean ECLEND; stale ECLEND; cancellation `kill -> check`; timeout `check`; unconfirmed cleanup; source SHA unchanged.
 - Backend: model-version type isolation; rejected PIPESIM/ECLIPSE task combinations; state transitions; sanitized result/event/Artifact publication.
-- Vue: ECLIPSE model classification; no Study selector; only ECLIPSE action; no Summary curve when `summary=null`; error and ECLEND count rendering.
-- Real acceptance: one user-approved standalone `.DATA` deck that has no `INCLUDE` and completes with fresh zero-count ECLEND. Record source SHA, launcher version, Artifact hashes, Worker cleanup and returned Summary dimensions. A failing deck is valid evidence only for failure classification, never for success.
+- Vue: ECLIPSE model classification; no Study selector; only ECLIPSE action; no Summary curve when `summary=null`; EGRID metadata rendering; error and ECLEND count rendering.
+- Real acceptance: one user-approved standalone `.DATA` deck and one user-approved INCLUDE package, each completing with fresh zero-count ECLEND. Record source SHA, launcher version, dependency set, Artifact hashes, Worker cleanup and returned Summary dimensions. A failing deck is valid evidence only for failure classification, never for success.

@@ -28,7 +28,13 @@ const sources = computed(() => [
   ...(props.comparisonResult && !comparisonIssue.value ? [{ result: props.comparisonResult, label: props.comparisonLabel, history: true }] : [])
 ])
 const selectedTable = ref('ipr')
+const tablePage = ref(1)
+const tablePageSize = ref(20)
 const tableRows = computed(() => sources.value.flatMap(source => (source.result?.[selectedTable.value] || []).map(point => ({ ...point, source: source.label }))))
+const displayedTableRows = computed(() => {
+  const start = (tablePage.value - 1) * tablePageSize.value
+  return tableRows.value.slice(start, start + tablePageSize.value)
+})
 const exportCsv = () => downloadWellCsv([
   ['来源', '曲线', axisName('流量', flowUnit.value), axisName('压力', pressureUnit.value)],
   ...sources.value.flatMap(source => ['ipr', 'vlp'].flatMap(key => (source.result?.[key] || []).map(point => [source.label, key.toUpperCase(), point.flow, point.pressure])))
@@ -103,6 +109,10 @@ const renderChart = async () => {
 const resizeChart = () => chart?.resize()
 
 watch(() => [props.result, props.comparisonResult, props.sourceLabel, props.comparisonLabel], renderChart, { deep: true })
+watch([selectedTable, tablePageSize, () => props.result, () => props.comparisonResult], () => { tablePage.value = 1 })
+watch(() => tableRows.value.length, total => {
+  tablePage.value = Math.min(tablePage.value, Math.max(1, Math.ceil(total / tablePageSize.value)))
+})
 onMounted(() => {
   resizeObserver = new ResizeObserver(resizeChart)
   window.addEventListener('resize', resizeChart)
@@ -131,12 +141,13 @@ onBeforeUnmount(() => {
         <el-radio-button value="ipr">IPR 数据</el-radio-button>
         <el-radio-button value="vlp">VLP 数据</el-radio-button>
       </el-radio-group>
-      <el-table :data="tableRows" border size="small" max-height="260">
+      <el-table :data="displayedTableRows" border size="small" max-height="260">
         <el-table-column type="index" label="#" width="54" align="center" />
         <el-table-column prop="source" label="来源" min-width="170" />
         <el-table-column prop="flow" :label="axisName('流量', flowUnit)" min-width="130" />
         <el-table-column prop="pressure" :label="axisName('压力', pressureUnit)" min-width="130" />
       </el-table>
+      <el-pagination v-if="tableRows.length > tablePageSize" class="curve-pagination" small background layout="total, prev, pager, next" :current-page="tablePage" :page-size="tablePageSize" :total="tableRows.length" @current-change="tablePage = $event" />
     </div>
   </section>
 </template>
@@ -145,6 +156,7 @@ onBeforeUnmount(() => {
 .nodal-result { min-height: 0; display: flex; flex-direction: column; gap: 14px; }
 .result-chart { height: 410px; min-height: 300px; border: 1px solid #e4e9f0; background: #fff; }
 .curve-tables { display: flex; flex-direction: column; gap: 8px; }
+.curve-pagination { justify-content: flex-end; }
 .result-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: #666; font-size: 13px; }
 .result-tools > span { margin-right: auto; }
 .result-tools :deep(.el-button + .el-button) { margin-left: 0; }

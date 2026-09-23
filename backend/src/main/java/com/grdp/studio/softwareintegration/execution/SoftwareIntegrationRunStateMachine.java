@@ -42,8 +42,19 @@ public final class SoftwareIntegrationRunStateMachine {
         return ALLOWED.getOrDefault(from, Set.of()).contains(to);
     }
 
+    public static boolean allows(SoftwareIntegrationRunStatus from, SoftwareIntegrationRunStatus to, String runType) {
+        return ("esp-curves".equals(runType)
+                && from == SoftwareIntegrationRunStatus.RUNNING_PROFILE
+                && to == SoftwareIntegrationRunStatus.RUNNING_NODAL)
+                || allows(from, to);
+    }
+
     public static void requireAllowed(SoftwareIntegrationRunStatus from, SoftwareIntegrationRunStatus to) {
         if (!allows(from, to)) throw new IllegalStateException("Disallowed run transition " + from + " -> " + to);
+    }
+
+    public static void requireAllowed(SoftwareIntegrationRunStatus from, SoftwareIntegrationRunStatus to, String runType) {
+        if (!allows(from, to, runType)) throw new IllegalStateException("Disallowed run transition " + from + " -> " + to);
     }
 
     private static void allow(SoftwareIntegrationRunStatus from, SoftwareIntegrationRunStatus... targets) {

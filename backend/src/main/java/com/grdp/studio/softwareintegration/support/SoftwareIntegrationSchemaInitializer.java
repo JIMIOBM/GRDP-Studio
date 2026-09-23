@@ -40,6 +40,16 @@ public class SoftwareIntegrationSchemaInitializer implements ApplicationRunner {
                   UNIQUE KEY uk_software_integration_model_version (model_id, version_no), KEY idx_software_integration_model_version_model (model_id)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """.formatted(h2InspectionType()));
+        jdbcTemplate.execute("""
+                CREATE TABLE IF NOT EXISTS software_integration_validation_job (
+                  id BIGINT AUTO_INCREMENT PRIMARY KEY, version_id BIGINT NOT NULL,
+                  status VARCHAR(20) NOT NULL, attempt_count INT NOT NULL DEFAULT 0,
+                  next_attempt_at DATETIME(3), lease_until DATETIME(3),
+                  last_error VARCHAR(1000), created_at DATETIME(3) NOT NULL, updated_at DATETIME(3) NOT NULL,
+                  UNIQUE KEY uk_software_integration_validation_job_version (version_id),
+                  KEY idx_software_integration_validation_job_due (status, next_attempt_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """);
         ensureModelVersionKindColumn();
         ensureModelVersionInspectionColumn();
         backfillModelVersionKinds();
@@ -59,7 +69,7 @@ public class SoftwareIntegrationSchemaInitializer implements ApplicationRunner {
                   generation_id VARCHAR(128), acceptance_uncertain_at DATETIME(3), acceptance_recovery_deadline_at DATETIME(3),
                   last_worker_sequence BIGINT NOT NULL DEFAULT 0, cancellation_reason VARCHAR(20),
                   created_at DATETIME(3) NOT NULL, queued_at DATETIME(3), claimed_at DATETIME(3), started_at DATETIME(3), deadline_at DATETIME(3),
-                  finished_at DATETIME(3), elapsed_millis BIGINT, result_contract VARCHAR(64), result_json %s, error_category VARCHAR(64), error_code VARCHAR(100),
+                  finished_at DATETIME(3), elapsed_millis BIGINT, result_contract VARCHAR(64), result_json %s, result_expires_at DATETIME(3), error_category VARCHAR(64), error_code VARCHAR(100),
                   error_json %s, cleanup_json %s, artifact_manifest_key VARCHAR(1024), created_by VARCHAR(100) NOT NULL,
                   updated_by VARCHAR(100) NOT NULL, updated_at DATETIME(3) NOT NULL, active_slot TINYINT %s,
                   UNIQUE KEY uk_software_integration_run_active_slot (active_slot), KEY idx_software_integration_run_queue (status, id),
@@ -70,6 +80,8 @@ public class SoftwareIntegrationSchemaInitializer implements ApplicationRunner {
                 "ALTER TABLE software_integration_run ADD COLUMN acceptance_uncertain_at DATETIME(3) NULL");
         ensureRunColumn("acceptance_recovery_deadline_at",
                 "ALTER TABLE software_integration_run ADD COLUMN acceptance_recovery_deadline_at DATETIME(3) NULL");
+        ensureRunColumn("result_expires_at",
+                "ALTER TABLE software_integration_run ADD COLUMN result_expires_at DATETIME(3) NULL");
         ensureResultJsonTextType(h2);
         ensureEclipseRunContract(h2);
         jdbcTemplate.execute("""

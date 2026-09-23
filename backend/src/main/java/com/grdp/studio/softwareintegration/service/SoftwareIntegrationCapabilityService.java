@@ -26,9 +26,9 @@ public class SoftwareIntegrationCapabilityService {
             WorkerCapabilities capabilities = workerClient.capabilities();
             boolean idle = Boolean.TRUE.equals(capabilities.idle());
             return response("AVAILABLE", idle, idle ? null : "WORKER_BUSY",
-                    normalize(capabilities.pipesimWell(), "2022.1", List.of("nodal", "profile", "combined"),
+                    normalize(capabilities.pipesimWell(), "2022.1", List.of("nodal", "profile", "combined", "sensitivity", "gas-lift-performance", "gas-lift-diagnostics", "vfp-tables", "esp-curves", "trajectory"),
                             "PIPESIM_UNAVAILABLE", "PIPESIM_VERSION_MISMATCH"),
-                    normalize(capabilities.pipesimNetwork(), "2022.1", List.of("network"),
+                    normalize(capabilities.pipesimNetwork(), "2022.1", List.of("network", "system-analysis", "network-optimizer"),
                             "PIPESIM_UNAVAILABLE", "PIPESIM_VERSION_MISMATCH"),
                     normalize(capabilities.eclipse100(), "2024.1", List.of("eclipse"),
                             "ECLIPSE_UNAVAILABLE", "ECLIPSE_VERSION_MISMATCH"));

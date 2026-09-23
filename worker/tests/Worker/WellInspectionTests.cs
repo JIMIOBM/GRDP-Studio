@@ -44,5 +44,32 @@ public sealed class WellInspectionTests
         Assert.Null(Read("null", kind: "network"));
         Assert.Null(Read("null", kind: "eclipse_100"));
         Assert.NotNull(Read("null", kind: "black_oil_liquid"));
+        Assert.NotNull(Read("null", kind: "legacy_well"));
+    }
+
+    [Fact]
+    public void AcceptsV2PackageManifest()
+    {
+        using var document = JsonDocument.Parse("{\"inspection\":{\"schemaVersion\":\"pipesim-well-inspection/2\",\"reservoirPressure\":null,\"packageFiles\":[{\"relativePath\":\"model.pips\",\"sizeBytes\":12,\"sha256\":\"" + new string('a', 64) + "\"}]}}");
+        var inspection = WellInspectionReader.Read(document.RootElement, "READY", "basic_gas");
+
+        Assert.Equal("pipesim-well-inspection/2", inspection!.SchemaVersion);
+        Assert.Single(inspection.PackageFiles!);
+    }
+
+    [Fact]
+    public void PreservesValidatedWellNameInV3Inspection()
+    {
+        using var document = JsonDocument.Parse("{\"well\":\"Well_1\",\"inspection\":{\"schemaVersion\":\"pipesim-well-inspection/1\",\"reservoirPressure\":null}}");
+        var inspection = WellInspectionReader.Read(document.RootElement, "READY", "black_oil_liquid");
+        var persisted = inspection! with
+        {
+            SchemaVersion = "pipesim-well-inspection/3",
+            PackageFiles = [new EclipsePackageFile("model.pips", 12, new string('a', 64))],
+            Well = document.RootElement.GetProperty("well").GetString()
+        };
+
+        Assert.Equal("Well_1", persisted.Well);
+        Assert.Equal("pipesim-well-inspection/3", persisted.SchemaVersion);
     }
 }

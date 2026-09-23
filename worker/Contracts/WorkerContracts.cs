@@ -14,8 +14,31 @@ public sealed record ModelValidationResponse(
     WorkerError? Error = null,
     object? Inspection = null);
 
-public sealed record WellDataInspection(string SchemaVersion, WellPressureInspection? ReservoirPressure);
+public sealed record WellDataInspection(
+    string SchemaVersion,
+    WellPressureInspection? ReservoirPressure,
+    IReadOnlyList<EclipsePackageFile>? PackageFiles = null,
+    string? Well = null);
 public sealed record WellPressureInspection(double Value, string Unit);
+
+public sealed record NetworkDataInspection(
+    string SchemaVersion,
+    IReadOnlyList<NetworkStudyInspection> Studies,
+    IReadOnlyList<NetworkChokeInspection>? Chokes = null,
+    IReadOnlyList<EclipsePackageFile>? PackageFiles = null);
+public sealed record NetworkStudyInspection(string Study, IReadOnlyList<NetworkBoundaryInspection> Boundaries);
+public sealed record NetworkChokeInspection(string Name, double BeanSize, string Unit);
+public sealed record NetworkBoundaryInspection(
+    string Node,
+    string BoundaryNodeType,
+    bool IsActive,
+    bool IsSurfaceCondition,
+    string? FlowRateType,
+    double? Pressure,
+    double? Temperature,
+    double? GasFlowRate,
+    double? LiquidFlowRate,
+    double? MassFlowRate);
 
 public sealed record EclipseDataInspection(
     string SchemaVersion,
@@ -25,7 +48,12 @@ public sealed record EclipseDataInspection(
     IReadOnlyList<string> Phases,
     EclipseDimensions? Dimensions,
     IReadOnlyList<string>? WellNames = null,
-    IReadOnlyList<EclipseScheduleEvent>? ScheduleTimeline = null);
+    IReadOnlyList<EclipseScheduleEvent>? ScheduleTimeline = null,
+    IReadOnlyList<EclipsePackageFile>? PackageFiles = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    EclipseScheduleMetadata? ScheduleMetadata = null);
+
+public sealed record EclipsePackageFile(string RelativePath, long SizeBytes, string Sha256);
 
 public sealed record EclipseDimensions(int Nx, int Ny, int Nz);
 
@@ -34,9 +62,36 @@ public sealed record EclipseScheduleEvent(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     IReadOnlyList<EclipseScheduleDate>? Records = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    IReadOnlyList<string>? Steps = null);
+    IReadOnlyList<string>? Steps = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? SourceFile = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? LineNumber = null);
 
 public sealed record EclipseScheduleDate(string Day, string Month, string Year, string? Time = null);
+
+public sealed record EclipseScheduleMetadata(
+    IReadOnlyList<EclipseScheduleWell> Wells,
+    IReadOnlyList<EclipseScheduleGroup> Groups,
+    IReadOnlyList<EclipseScheduleKeywordRecord> Records,
+    IReadOnlyList<EclipseScheduleCompletion> Completions);
+
+public sealed record EclipseScheduleWell(string Name, string? Group = null, string? SourceFile = null, int? LineNumber = null);
+
+public sealed record EclipseScheduleGroup(string Name, string? Parent = null, string? SourceFile = null, int? LineNumber = null);
+
+public sealed record EclipseScheduleKeywordRecord(string Keyword, IReadOnlyList<string> Values, string? SourceFile = null, int? LineNumber = null);
+
+public sealed record EclipseScheduleCompletion(
+    string Keyword,
+    string Well,
+    string I,
+    string J,
+    string K1,
+    string K2,
+    string Status,
+    string SourceFile,
+    int LineNumber);
 
 public sealed record RunExecuteRequest(
     long RunId,
@@ -45,7 +100,8 @@ public sealed record RunExecuteRequest(
     string? Study,
     string? RunTask,
     JsonElement Parameters,
-    int TimeoutSeconds);
+    int TimeoutSeconds,
+    IReadOnlyList<EclipsePackageFile>? ExpectedPackageFiles = null);
 
 public sealed record RunAcceptedResponse(
     long RunId,

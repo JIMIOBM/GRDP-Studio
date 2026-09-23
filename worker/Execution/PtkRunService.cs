@@ -149,6 +149,8 @@ public sealed partial class PtkRunService : IDisposable
             {
                 throw new StorageException("SOURCE_MODEL_CHANGED", "The source model changed before task preparation.", StatusCodes.Status422UnprocessableEntity);
             }
+            await PipesimPackageIntegrity.VerifyAsync(
+                storage.ResolveModelPackageRoot(sourceModel), request.ExpectedPackageFiles, CancellationToken.None);
 
             directories = storage.CreateRunDirectories(request.RunId, sourceModel);
             var copySha = await storage.ComputeSha256Async(directories.ModelCopy, CancellationToken.None);
@@ -156,6 +158,8 @@ public sealed partial class PtkRunService : IDisposable
             {
                 throw new StorageException("MODEL_COPY_SHA256_MISMATCH", "The task model copy failed SHA-256 verification.");
             }
+            await PipesimPackageIntegrity.VerifyAsync(
+                directories.Input, request.ExpectedPackageFiles, CancellationToken.None);
 
             var requestArtifact = new
             {
@@ -192,7 +196,14 @@ public sealed partial class PtkRunService : IDisposable
                 (state, message) =>
                 {
                     var controlledMessage = ControlledPhaseMessage(state);
-                    registry.Transition(request.RunId, state, controlledMessage);
+                    if (string.Equals(registry.GetState(request.RunId), state, StringComparison.Ordinal))
+                    {
+                        registry.Report(request.RunId, state, controlledMessage);
+                    }
+                    else
+                    {
+                        registry.Transition(request.RunId, state, controlledMessage);
+                    }
                     lock (log) log.Add(state + " " + controlledMessage);
                 });
             processTreeConfirmed = adapter.ProcessTreeExitConfirmed;
@@ -256,6 +267,14 @@ public sealed partial class PtkRunService : IDisposable
 
             result = parsedResult!.Value.Clone();
             descriptors.Add(await artifacts.WriteJsonElementAsync(directories.Output, "normalized-result.json", result.Value));
+            if (request.RunTask == "network-optimizer" && NetworkOptimizerApplyRequested(request.Parameters))
+            {
+                // Python has closed the PTK model before the copy is published. The
+                // artifact is therefore the persisted isolated model copy, never the
+                // uploaded source model.
+                descriptors.Add(await artifacts.CopyPipesimAppliedModelAsync(
+                    directories.Output, directories.ModelCopy, CancellationToken.None));
+            }
             terminalState = envelopeStatus == "partial" ? "PARTIAL_SUCCEEDED" : "SUCCEEDED";
             terminalError = envelopeStatus == "partial" ? parsedWarning : null;
             terminalMessage = CompletionMessage(terminalState, request.RunTask!);
@@ -268,14 +287,29 @@ public sealed partial class PtkRunService : IDisposable
                 terminalError = new WorkerError("STORAGE", "SOURCE_MODEL_CHANGED", "The source model SHA-256 changed during execution.", false);
                 terminalMessage = terminalError.Message;
             }
+            if (terminalState is "SUCCEEDED" or "PARTIAL_SUCCEEDED")
+            {
+                await PipesimPackageIntegrity.VerifyAsync(
+                    storage.ResolveModelPackageRoot(sourceModel), request.ExpectedPackageFiles, CancellationToken.None);
+            }
         }
         catch (StorageException exception)
         {
+            if (terminalState is "SUCCEEDED" or "PARTIAL_SUCCEEDED")
+            {
+                terminalState = "FAILED";
+                result = null;
+            }
             terminalError = new WorkerError("STORAGE", exception.Code, exception.Message, false);
             terminalMessage = exception.Message;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
+            if (terminalState is "SUCCEEDED" or "PARTIAL_SUCCEEDED")
+            {
+                terminalState = "FAILED";
+                result = null;
+            }
             terminalError = new WorkerError("STORAGE", "STORAGE_IO_ERROR", "Worker storage could not be read or written.", true);
             terminalMessage = terminalError.Message;
         }
@@ -306,6 +340,22 @@ public sealed partial class PtkRunService : IDisposable
                     result = null;
                     terminalError = new WorkerError("STORAGE", "SOURCE_MODEL_RECHECK_FAILED", "The source model could not be rechecked after execution.", false);
                     terminalMessage = terminalError.Message;
+                }
+
+                if (terminalState is "SUCCEEDED" or "PARTIAL_SUCCEEDED")
+                {
+                    try
+                    {
+                        await PipesimPackageIntegrity.VerifyAsync(
+                            storage.ResolveModelPackageRoot(sourceModel), request.ExpectedPackageFiles, CancellationToken.None);
+                    }
+                    catch (StorageException exception)
+                    {
+                        terminalState = "FAILED";
+                        result = null;
+                        terminalError = new WorkerError("STORAGE", exception.Code, exception.Message, false);
+                        terminalMessage = terminalError.Message;
+                    }
                 }
 
                 if (directories is not null)
@@ -424,22 +474,48 @@ public sealed partial class PtkRunService : IDisposable
             return WorkerApiError.Request("INVALID_EXPECTED_SHA256", "expectedModelSha256 must be 64 lowercase hexadecimal characters.");
         if (string.IsNullOrWhiteSpace(request.Study) || request.Study.Length > 256 || request.Study.Any(char.IsControl))
             return WorkerApiError.Request("INVALID_STUDY", "study is required and must be a controlled model Study name.");
-        if (request.RunTask is not ("nodal" or "profile" or "combined" or "network"))
-            return WorkerApiError.Request("INVALID_RUN_TASK", "runTask must be nodal, profile, combined, or network.");
+        if (request.RunTask is not ("nodal" or "profile" or "combined" or "sensitivity" or "network" or "system-analysis" or "network-optimizer" or "gas-lift-performance" or "gas-lift-diagnostics" or "vfp-tables" or "esp-curves" or "trajectory"))
+            return WorkerApiError.Request("INVALID_RUN_TASK", "runTask must be nodal, profile, combined, sensitivity, network, system-analysis, network-optimizer, gas-lift-performance, gas-lift-diagnostics, vfp-tables, esp-curves, or trajectory.");
         if (!WellScenarioParameters.Valid(request.Parameters, request.RunTask))
-            return WorkerApiError.Request("INVALID_SCENARIO_PARAMETERS", "Only validated nodal reservoir-pressure scenarios or explicit null parameters are supported.");
+            return WorkerApiError.Request("INVALID_SCENARIO_PARAMETERS", "Only validated well/network scenarios, sensitivity parameters, or explicit null parameters are supported.");
         if (request.TimeoutSeconds <= 0 || request.TimeoutSeconds > options.MaxRunTimeoutSeconds)
             return WorkerApiError.Request("INVALID_TIMEOUT", $"timeoutSeconds must be between 1 and {options.MaxRunTimeoutSeconds}.");
+        if (request.ExpectedPackageFiles is not null && !PipesimPackageIntegrity.IsValidManifest(request.ExpectedPackageFiles))
+            return WorkerApiError.Request("INVALID_PACKAGE_MANIFEST", "The persisted PIPESIM package manifest is invalid.");
         return null;
     }
 
+    private static bool NetworkOptimizerApplyRequested(JsonElement parameters) =>
+        parameters.ValueKind == JsonValueKind.Object &&
+        parameters.TryGetProperty("schemaVersion", out var schema) &&
+        schema.ValueKind == JsonValueKind.String &&
+        schema.GetString() == "pipesim-network-optimizer-parameters/2" &&
+        parameters.TryGetProperty("applyResults", out var applyResults) &&
+        applyResults.ValueKind == JsonValueKind.True;
+
     internal static string CompletionMessage(string terminalState, string runTask) =>
         terminalState == "PARTIAL_SUCCEEDED"
-            ? runTask == "network"
+                ? runTask == "system-analysis"
+                ? "PIPESIM System Analysis completed with a limited display result."
+            : runTask is "network" or "network-optimizer"
                 ? "PIPESIM Network calculation completed with a limited display result."
                 : "Nodal result succeeded; profile failed and was retained as an empty partial result."
-            : runTask == "network"
+            : runTask == "system-analysis"
+                ? "PIPESIM System Analysis result completed successfully."
+            : runTask is "network" or "network-optimizer"
                 ? "PIPESIM Network result completed successfully."
+            : runTask == "sensitivity"
+                    ? "PIPESIM sensitivity calculation completed successfully."
+                : runTask == "gas-lift-performance"
+                    ? "PIPESIM Gas Lift Performance calculation completed successfully."
+                : runTask == "gas-lift-diagnostics"
+                    ? "PIPESIM Gas Lift Diagnostics calculation completed successfully."
+                : runTask == "vfp-tables"
+                    ? "PIPESIM VFP Tables calculation completed successfully."
+                : runTask == "esp-curves"
+                    ? "PIPESIM ESP curve calculation completed successfully."
+                : runTask == "trajectory"
+                    ? "PIPESIM well trajectory read completed successfully."
                 : "PIPESIM result completed successfully.";
 
     internal static bool TryReadEnvelope(
@@ -468,6 +544,12 @@ public sealed partial class PtkRunService : IDisposable
         }
 
         if (status is not ("ok" or "partial") || !envelope.TryGetProperty("result", out var resultElement) || resultElement.ValueKind != JsonValueKind.Object) return false;
+        if (expectedRunTask == "network-optimizer")
+        {
+            if (status != "ok" || !HasValidNetworkOptimizerResult(resultElement)) return false;
+            result = resultElement.Clone();
+            return true;
+        }
         if (expectedRunTask == "network")
         {
             if (!resultElement.TryGetProperty("schemaVersion", out var networkSchema) || networkSchema.GetString() != "pipesim-network-result/1" ||
@@ -501,6 +583,48 @@ public sealed partial class PtkRunService : IDisposable
             result = resultElement.Clone();
             return true;
         }
+        if (expectedRunTask == "sensitivity")
+        {
+            if (status != "ok" || !HasValidSensitivityResult(resultElement)) return false;
+            result = resultElement.Clone();
+            return true;
+        }
+        if (expectedRunTask == "system-analysis")
+        {
+            if (status != "ok" || !HasValidSystemAnalysisResult(resultElement)) return false;
+            result = resultElement.Clone();
+            return true;
+        }
+        if (expectedRunTask == "gas-lift-performance")
+        {
+            if (status != "ok" || !HasValidGasLiftPerformanceResult(resultElement)) return false;
+            result = resultElement.Clone();
+            return true;
+        }
+        if (expectedRunTask == "gas-lift-diagnostics")
+        {
+            if (status != "ok" || !HasValidGasLiftDiagnosticsResult(resultElement)) return false;
+            result = resultElement.Clone();
+            return true;
+        }
+        if (expectedRunTask == "vfp-tables")
+        {
+            if (status != "ok" || !HasValidVfpTablesResult(resultElement)) return false;
+            result = resultElement.Clone();
+            return true;
+        }
+        if (expectedRunTask == "esp-curves")
+        {
+            if (status != "ok" || !HasValidEspCurvesResult(resultElement)) return false;
+            result = resultElement.Clone();
+            return true;
+        }
+        if (expectedRunTask == "trajectory")
+        {
+            if (status != "ok" || !HasValidTrajectoryResult(resultElement)) return false;
+            result = resultElement.Clone();
+            return true;
+        }
         if (!resultElement.TryGetProperty("schemaVersion", out var schema) || schema.GetString() != "pipesim-well-result/1" ||
             !resultElement.TryGetProperty("runTask", out var runTask) || runTask.GetString() != expectedRunTask ||
             !resultElement.TryGetProperty("resultContract", out var contract)) return false;
@@ -521,6 +645,121 @@ public sealed partial class PtkRunService : IDisposable
             if (warning is null) return false;
         }
         result = resultElement.Clone();
+        return true;
+    }
+
+    private static bool HasValidNetworkOptimizerResult(JsonElement result)
+    {
+        if (result.ValueKind != JsonValueKind.Object ||
+            !result.TryGetProperty("schemaVersion", out var schemaVersion) ||
+            schemaVersion.ValueKind != JsonValueKind.String) return false;
+        var schema = schemaVersion.GetString();
+        var applied = schema == "pipesim-network-optimizer-result/2";
+        if (!applied && schema != "pipesim-network-optimizer-result/1") return false;
+        var fields = applied
+            ? new[] { "schemaVersion", "model_kind", "runTask", "resultContract", "simulationState",
+                "summary", "messages", "variables", "wells", "flowlines", "sinks", "quality", "application" }
+            : new[] { "schemaVersion", "model_kind", "runTask", "resultContract", "simulationState",
+                "summary", "messages", "variables", "wells", "flowlines", "sinks", "quality" };
+        if (result.ValueKind != JsonValueKind.Object ||
+            !HasExactlyProperties(result, fields) ||
+            !IsSafeTextProperty(result, "schemaVersion", false) ||
+            !IsSafeTextProperty(result, "model_kind", false) || result.GetProperty("model_kind").GetString() != "network" ||
+            !IsSafeTextProperty(result, "runTask", false) || result.GetProperty("runTask").GetString() != "network-optimizer" ||
+            !IsSafeTextProperty(result, "resultContract", false) || result.GetProperty("resultContract").GetString() != "VALID_FULL" ||
+            !IsSafeTextProperty(result, "simulationState", false) || result.GetProperty("simulationState").GetString() != "Completed") return false;
+        if (!HasValidOptimizerSummary(result.GetProperty("summary")) || !HasSafeTextArray(result.GetProperty("messages"))) return false;
+        var variables = result.GetProperty("variables");
+        if (variables.ValueKind != JsonValueKind.Array || variables.GetArrayLength() == 0 || variables.GetArrayLength() > 128) return false;
+        var keys = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var variable in variables.EnumerateArray())
+        {
+            if (variable.ValueKind != JsonValueKind.Object || !HasExactlyProperties(variable, "key", "label", "unit") ||
+                !IsSafeTextProperty(variable, "key", false) || !IsSafeTextProperty(variable, "label", false) ||
+                !IsSafeTextProperty(variable, "unit", true) || !keys.Add(variable.GetProperty("key").GetString()!)) return false;
+        }
+        var missing = new HashSet<string>(StringComparer.Ordinal);
+        var data = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var group in new[] { "wells", "flowlines", "sinks" })
+        {
+            if (!HasValidOptimizerGroups(result.GetProperty(group), group, keys, data, missing)) return false;
+        }
+        if (!result.GetProperty("quality").ValueKind.Equals(JsonValueKind.Array)) return false;
+        var quality = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var item in result.GetProperty("quality").EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object || !HasExactlyProperties(item, "path", "code") ||
+                !IsSafeTextProperty(item, "path", false) || !IsSafeTextProperty(item, "code", false) ||
+                item.GetProperty("code").GetString() != "UNAVAILABLE" || !quality.Add(item.GetProperty("path").GetString()!)) return false;
+        }
+        return quality.SetEquals(missing) && (!applied || HasValidOptimizerApplication(result.GetProperty("application")));
+    }
+
+    private static bool HasValidOptimizerApplication(JsonElement application)
+    {
+        if (application.ValueKind != JsonValueKind.Object ||
+            !HasExactlyProperties(application, "requested", "applied", "scope", "sourceModelUnchanged", "artifactName", "changes") ||
+            application.GetProperty("requested").ValueKind != JsonValueKind.True ||
+            application.GetProperty("applied").ValueKind != JsonValueKind.True ||
+            !IsSafeTextProperty(application, "scope", false) || application.GetProperty("scope").GetString() != "isolated-model-copy" ||
+            application.GetProperty("sourceModelUnchanged").ValueKind != JsonValueKind.True ||
+            !IsSafeTextProperty(application, "artifactName", false) ||
+            application.GetProperty("artifactName").GetString() != "pipesim-network-optimizer-applied.pips") return false;
+        var changes = application.GetProperty("changes");
+        if (changes.ValueKind != JsonValueKind.Array || changes.GetArrayLength() > 256) return false;
+        foreach (var change in changes.EnumerateArray())
+        {
+            if (change.ValueKind != JsonValueKind.Object ||
+                !HasExactlyProperties(change, "context", "parameter", "unit", "before", "after") ||
+                !IsSafeTextProperty(change, "context", false) ||
+                !IsSafeTextProperty(change, "parameter", false) || change.GetProperty("parameter").GetString() != "GasRate" ||
+                !IsSafeTextProperty(change, "unit", true) ||
+                !FiniteNumber(change.GetProperty("before")) || !FiniteNumber(change.GetProperty("after"))) return false;
+        }
+        return true;
+    }
+
+    private static bool HasValidOptimizerSummary(JsonElement summary)
+    {
+        if (summary.ValueKind != JsonValueKind.Object || !HasExactlyProperties(summary, "info", "warnings", "errors")) return false;
+        return new[] { "info", "warnings", "errors" }.All(field => HasSafeTextArray(summary.GetProperty(field)));
+    }
+
+    private static bool HasSafeTextArray(JsonElement values) =>
+        values.ValueKind == JsonValueKind.Array && values.GetArrayLength() <= 256 && values.EnumerateArray().All(value => IsSafeTextValue(value, true));
+
+    private static bool HasValidOptimizerGroups(JsonElement groups, string groupName, HashSet<string> keys,
+                                                HashSet<string> data, HashSet<string> missing)
+    {
+        if (groups.ValueKind != JsonValueKind.Array || groups.GetArrayLength() == 0 || groups.GetArrayLength() > 256) return false;
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var group in groups.EnumerateArray())
+        {
+            if (group.ValueKind != JsonValueKind.Object || !HasExactlyProperties(group, "name", "values") ||
+                !IsSafeTextProperty(group, "name", false) || !names.Add(group.GetProperty("name").GetString()!)) return false;
+            var values = group.GetProperty("values");
+            if (values.ValueKind != JsonValueKind.Array || values.GetArrayLength() > 128) return false;
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var value in values.EnumerateArray())
+            {
+                if (value.ValueKind != JsonValueKind.Object || !HasExactlyProperties(value, "key", "value") ||
+                    !IsSafeTextProperty(value, "key", false)) return false;
+                var key = value.GetProperty("key").GetString()!;
+                if (!keys.Contains(key) || !seen.Add(key)) return false;
+                var path = groupName + "." + group.GetProperty("name").GetString() + "." + key;
+                if (!data.Add(path)) return false;
+                var scalar = value.GetProperty("value");
+                if (scalar.ValueKind == JsonValueKind.Null)
+                {
+                    if (!missing.Add(path)) return false;
+                }
+                else if (scalar.ValueKind == JsonValueKind.Number)
+                {
+                    if (!FiniteNumber(scalar)) return false;
+                }
+                else if (scalar.ValueKind != JsonValueKind.True && scalar.ValueKind != JsonValueKind.False) return false;
+            }
+        }
         return true;
     }
 
@@ -605,15 +844,483 @@ public sealed partial class PtkRunService : IDisposable
     {
         foreach (var section in new[] { "system", "node" })
         {
-            if (result.TryGetProperty(section, out var groups) &&
-                (groups.ValueKind != JsonValueKind.Array || !groups.EnumerateArray().All(IsSafeScalarSeries))) return false;
+            if (result.TryGetProperty(section, out var groups))
+            {
+                if (groups.ValueKind != JsonValueKind.Array) return false;
+                foreach (var group in groups.EnumerateArray())
+                {
+                    if (!IsSafeScalarSeries(group)) return false;
+                }
+            }
         }
-        if (result.TryGetProperty("profiles", out var profiles) &&
-            (profiles.ValueKind != JsonValueKind.Array || !profiles.EnumerateArray().All(IsSafeProfile))) return false;
-        return result.TryGetProperty("summary", out var summary) && IsSafeNetworkSummary(summary) &&
-               result.TryGetProperty("messages", out var messages) && IsSafeTextArray(messages) &&
-               result.TryGetProperty("quality", out var quality) && IsSafeNetworkQuality(quality);
+        if (result.TryGetProperty("profiles", out var profiles))
+        {
+            if (profiles.ValueKind != JsonValueKind.Array) return false;
+            foreach (var profile in profiles.EnumerateArray())
+            {
+                if (!IsSafeProfile(profile)) return false;
+            }
+        }
+        if (!result.TryGetProperty("summary", out var summary) || !IsSafeNetworkSummary(summary)) return false;
+        if (!result.TryGetProperty("messages", out var messages) || !IsSafeTextArray(messages)) return false;
+        if (!result.TryGetProperty("quality", out var quality) || !IsSafeNetworkQuality(quality)) return false;
+        return true;
     }
+
+    private static bool HasValidSensitivityResult(JsonElement result)
+    {
+        if (result.ValueKind != JsonValueKind.Object ||
+            !HasExactlyProperties(result, "schemaVersion", "model_kind", "runTask", "resultContract", "targetVariable", "units", "cases") ||
+            result.GetProperty("schemaVersion").GetString() != "pipesim-well-sensitivity-result/1" ||
+            result.GetProperty("model_kind").GetString() is not ("black_oil_liquid" or "basic_gas") ||
+            result.GetProperty("runTask").GetString() != "sensitivity" ||
+            result.GetProperty("resultContract").GetString() != "VALID_FULL" ||
+            !IsSafeTextValue(result.GetProperty("targetVariable"), false)) return false;
+
+        var modelKind = result.GetProperty("model_kind").GetString()!;
+        var target = result.GetProperty("targetVariable").GetString();
+        if (target is not ("reservoirPressure" or "waterCut" or "gor" or "tubingInnerDiameter") ||
+            (modelKind == "basic_gas" && target is "waterCut" or "gor") ||
+            !HasValidSensitivityUnits(result.GetProperty("units"), modelKind)) return false;
+        if (!result.TryGetProperty("cases", out var cases) || cases.ValueKind != JsonValueKind.Array ||
+            cases.GetArrayLength() < 2 || cases.GetArrayLength() > 12) return false;
+
+        var previous = double.NegativeInfinity;
+        foreach (var item in cases.EnumerateArray())
+        {
+            if (!IsSafeSensitivityCase(item) || item.GetProperty("value").GetDouble() <= previous) return false;
+            previous = item.GetProperty("value").GetDouble();
+        }
+        return true;
+    }
+
+    private static bool HasValidSensitivityUnits(JsonElement units, string modelKind) =>
+        units.ValueKind == JsonValueKind.Object && HasExactlyProperties(units, "flow", "pressure", "depth", "temperature") &&
+        HasUnit(units.GetProperty("flow"), modelKind == "basic_gas" ? "mmscf/d" : null,
+            modelKind == "basic_gas" ? "standard_gas_volume_rate" : "unspecified") &&
+        HasUnit(units.GetProperty("pressure"), null, "unspecified") &&
+        HasUnit(units.GetProperty("depth"), null, "unspecified") &&
+        HasUnit(units.GetProperty("temperature"), null, "unspecified");
+
+    private static bool HasUnit(JsonElement unit, string? displayUnit, string semantics) =>
+        unit.ValueKind == JsonValueKind.Object && HasExactlyProperties(unit, "displayUnit", "semantics") &&
+        ((displayUnit is null && unit.GetProperty("displayUnit").ValueKind == JsonValueKind.Null) ||
+         (displayUnit is not null && unit.GetProperty("displayUnit").ValueKind == JsonValueKind.String && unit.GetProperty("displayUnit").GetString() == displayUnit)) &&
+        IsSafeTextValue(unit.GetProperty("semantics"), false) && unit.GetProperty("semantics").GetString() == semantics;
+
+    private static bool HasValidSystemAnalysisResult(JsonElement result)
+    {
+        if (result.ValueKind != JsonValueKind.Object ||
+            !HasExactlyProperties(result, "schemaVersion", "model_kind", "runTask", "resultContract", "study",
+                "producer", "branchTerminator", "outletPressurePsi", "scanVariable", "cases") ||
+            result.GetProperty("schemaVersion").GetString() != "pipesim-system-analysis-result/1" ||
+            result.GetProperty("model_kind").GetString() != "network" ||
+            result.GetProperty("runTask").GetString() != "system-analysis" ||
+            result.GetProperty("resultContract").GetString() != "VALID_FULL" ||
+            !IsSafeTextValue(result.GetProperty("study"), false) ||
+            !IsSafeTextValue(result.GetProperty("producer"), false) ||
+            result.GetProperty("producer").GetString() != "Well" ||
+            !IsSafeTextValue(result.GetProperty("branchTerminator"), false) ||
+            !IsSafeTextValue(result.GetProperty("scanVariable"), false) ||
+            result.GetProperty("scanVariable").GetString() != "liquidFlowRate" ||
+            result.GetProperty("outletPressurePsi").ValueKind != JsonValueKind.Number ||
+            !result.GetProperty("outletPressurePsi").TryGetDouble(out var outletPressure) ||
+            !double.IsFinite(outletPressure) || outletPressure <= 0 || outletPressure > 100000)
+        {
+            return false;
+        }
+
+        var cases = result.GetProperty("cases");
+        if (cases.ValueKind != JsonValueKind.Array || cases.GetArrayLength() is < 2 or > 8) return false;
+        var previous = double.NegativeInfinity;
+        foreach (var item in cases.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object ||
+                !HasExactlyProperties(item, "caseName", "scanValue", "system", "node", "profile") ||
+                !IsSafeTextValue(item.GetProperty("caseName"), false) ||
+                item.GetProperty("scanValue").ValueKind != JsonValueKind.Number ||
+                !item.GetProperty("scanValue").TryGetDouble(out var scanValue) ||
+                !double.IsFinite(scanValue) || scanValue <= 0 || scanValue <= previous ||
+                !IsSafeSystemSeries(item.GetProperty("system")) ||
+                !IsSafeSystemNodes(item.GetProperty("node")) ||
+                !IsSafeSystemProfile(item.GetProperty("profile")))
+            {
+                return false;
+            }
+            previous = scanValue;
+        }
+        return true;
+    }
+
+    private static bool HasValidGasLiftPerformanceResult(JsonElement result)
+    {
+        if (result.ValueKind != JsonValueKind.Object ||
+            !HasExactlyProperties(result, "schemaVersion", "model_kind", "runTask", "resultContract", "producer",
+                "outletPressurePsi", "surfaceInjectionTemperatureF", "targetInjectionRateMmscfd",
+                "reservoirPressurePsi", "gorScfPerStb", "waterCutPercent", "scanVariable", "scanUnit",
+                "productionUnit", "cases") ||
+            result.GetProperty("schemaVersion").GetString() != "pipesim-gas-lift-performance-result/1" ||
+            result.GetProperty("model_kind").GetString() != "black_oil_liquid" ||
+            result.GetProperty("runTask").GetString() != "gas-lift-performance" ||
+            result.GetProperty("resultContract").GetString() != "VALID_FULL" ||
+            !IsSafeTextValue(result.GetProperty("producer"), false) ||
+            !FiniteInRange(result.GetProperty("outletPressurePsi"), 0, 100000) ||
+            !FiniteInRange(result.GetProperty("surfaceInjectionTemperatureF"), -1000, 100000) ||
+            !FiniteInRange(result.GetProperty("targetInjectionRateMmscfd"), 0, 100000) ||
+            !FiniteInRange(result.GetProperty("reservoirPressurePsi"), 0, 100000) ||
+            !FiniteInRange(result.GetProperty("gorScfPerStb"), 0, 1000000) ||
+            !FiniteInRange(result.GetProperty("waterCutPercent"), 0, 100) ||
+            result.GetProperty("scanVariable").GetString() != "gasLiftInjectionRate" ||
+            result.GetProperty("scanUnit").GetString() != "mmscf/d" ||
+            result.GetProperty("productionUnit").GetString() != "STB/d")
+        {
+            return false;
+        }
+        var cases = result.GetProperty("cases");
+        if (cases.ValueKind != JsonValueKind.Array || cases.GetArrayLength() is < 2 or > 16) return false;
+        var previous = double.NegativeInfinity;
+        foreach (var item in cases.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object ||
+                !HasExactlyProperties(item, "caseName", "injectionRateMmscfd", "liquidRateStbPerDay") ||
+                !IsSafeTextValue(item.GetProperty("caseName"), false) ||
+                !FiniteInRange(item.GetProperty("injectionRateMmscfd"), 0, 100000) ||
+                !FiniteNumber(item.GetProperty("liquidRateStbPerDay")) ||
+                item.GetProperty("injectionRateMmscfd").GetDouble() <= previous)
+            {
+                return false;
+            }
+            previous = item.GetProperty("injectionRateMmscfd").GetDouble();
+        }
+        return true;
+    }
+
+    private static bool HasValidGasLiftDiagnosticsResult(JsonElement result)
+    {
+        if (result.ValueKind != JsonValueKind.Object ||
+            !HasExactlyProperties(result, "schemaVersion", "model_kind", "runTask", "resultContract", "producer",
+                "outletPressurePsi", "surfaceInjectionTemperatureF", "targetInjectionRateMmscfd",
+                "reservoirPressurePsi", "gorScfPerStb", "waterCutPercent", "diagnosticType", "throttling",
+                "usePhaseRatio", "injectionUnit", "liquidRateUnit", "cases") ||
+            result.GetProperty("schemaVersion").GetString() != "pipesim-gas-lift-diagnostics-result/1" ||
+            result.GetProperty("model_kind").GetString() != "black_oil_liquid" ||
+            result.GetProperty("runTask").GetString() != "gas-lift-diagnostics" ||
+            result.GetProperty("resultContract").GetString() != "VALID_FULL" ||
+            !IsSafeTextValue(result.GetProperty("producer"), false) ||
+            !FiniteInRange(result.GetProperty("outletPressurePsi"), 0, 100000) ||
+            !FiniteInRange(result.GetProperty("surfaceInjectionTemperatureF"), -1000, 100000) ||
+            !FiniteInRange(result.GetProperty("targetInjectionRateMmscfd"), 0, 100000) ||
+            !FiniteInRange(result.GetProperty("reservoirPressurePsi"), 0, 100000) ||
+            !FiniteInRange(result.GetProperty("gorScfPerStb"), 0, 1000000) ||
+            !FiniteInRange(result.GetProperty("waterCutPercent"), 0, 100) ||
+            result.GetProperty("diagnosticType").GetString() != "FIXEDINJECTION" ||
+            result.GetProperty("throttling").GetString() != "ON" ||
+            result.GetProperty("usePhaseRatio").ValueKind != JsonValueKind.True ||
+            result.GetProperty("injectionUnit").GetString() != "mmscf/d" ||
+            result.GetProperty("liquidRateUnit").GetString() != "STB/d")
+        {
+            return false;
+        }
+
+        var cases = result.GetProperty("cases");
+        if (cases.ValueKind != JsonValueKind.Array || cases.GetArrayLength() is < 1 or > 32) return false;
+        var previous = double.NegativeInfinity;
+        var valveCount = -1;
+        foreach (var item in cases.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object ||
+                !HasExactlyProperties(item, "caseName", "injectionRateMmscfd", "liquidRateStbPerDay", "valves") ||
+                !IsSafeTextValue(item.GetProperty("caseName"), false) ||
+                !FiniteInRange(item.GetProperty("injectionRateMmscfd"), 0, 100000) ||
+                !FiniteNumber(item.GetProperty("liquidRateStbPerDay")) ||
+                item.GetProperty("injectionRateMmscfd").GetDouble() <= previous)
+            {
+                return false;
+            }
+            previous = item.GetProperty("injectionRateMmscfd").GetDouble();
+            var valves = item.GetProperty("valves");
+            if (valves.ValueKind != JsonValueKind.Array || valves.GetArrayLength() is < 1 or > 64) return false;
+            valveCount = valveCount < 0 ? valves.GetArrayLength() : valveCount;
+            if (valves.GetArrayLength() != valveCount || !valves.EnumerateArray().All(IsSafeGasLiftValve)) return false;
+        }
+        return true;
+    }
+
+    private static bool IsSafeGasLiftValve(JsonElement valve)
+    {
+        if (valve.ValueKind != JsonValueKind.Object ||
+            !HasExactlyProperties(valve, "valveName", "positionStatus", "status", "gasRateNoThrottlingMmscfd",
+                "portDiameterIn", "domeTemperatureF", "closingPressurePsi", "openingPressurePsi", "ptroPsi",
+                "dischargeCoefficient", "portToBellowArea", "operationMode", "portType") ||
+            !IsSafeTextValue(valve.GetProperty("valveName"), false) ||
+            !IsSafeTextValue(valve.GetProperty("positionStatus"), false) ||
+            !IsSafeTextValue(valve.GetProperty("status")) ||
+            !IsSafeTextValue(valve.GetProperty("operationMode")) ||
+            !IsSafeTextValue(valve.GetProperty("portType"))) return false;
+
+        return IsOptionalFiniteNumber(valve.GetProperty("gasRateNoThrottlingMmscfd")) &&
+               IsOptionalFiniteNumber(valve.GetProperty("portDiameterIn")) &&
+               IsOptionalFiniteNumber(valve.GetProperty("domeTemperatureF")) &&
+               IsOptionalFiniteNumber(valve.GetProperty("closingPressurePsi")) &&
+               IsOptionalFiniteNumber(valve.GetProperty("openingPressurePsi")) &&
+               IsOptionalFiniteNumber(valve.GetProperty("ptroPsi")) &&
+               IsOptionalFiniteNumber(valve.GetProperty("dischargeCoefficient")) &&
+               IsOptionalFiniteNumber(valve.GetProperty("portToBellowArea"));
+    }
+
+    private static bool HasValidVfpTablesResult(JsonElement result)
+    {
+        if (result.ValueKind != JsonValueKind.Object ||
+            !HasExactlyProperties(result, "schemaVersion", "model_kind", "runTask", "resultContract", "producer",
+                "reservoirSimulator", "tableNumber", "includeTemperature", "bottomHoleDatumDepth", "axes", "table",
+                "temperatureTable", "vfpTableContent", "vfpTableWithTemperatureContent") ||
+            result.GetProperty("schemaVersion").GetString() != "pipesim-vfp-tables-result/1" ||
+            result.GetProperty("model_kind").GetString() != "black_oil_liquid" ||
+            result.GetProperty("runTask").GetString() != "vfp-tables" ||
+            result.GetProperty("resultContract").GetString() != "VALID_FULL" ||
+            !IsSafeTextValue(result.GetProperty("producer"), false) ||
+            result.GetProperty("reservoirSimulator").GetString() != "ECLIPSE" ||
+            result.GetProperty("tableNumber").ValueKind != JsonValueKind.Number ||
+            !result.GetProperty("tableNumber").TryGetInt32(out var tableNumber) || tableNumber <= 0 ||
+            result.GetProperty("includeTemperature").ValueKind is not (JsonValueKind.True or JsonValueKind.False) ||
+            !FiniteInRange(result.GetProperty("bottomHoleDatumDepth"), 0, 100000) ||
+            !IsSafeVfpAxes(result.GetProperty("axes")) ||
+            !IsSafeVfpTable(result.GetProperty("table"), "BHP", "psia", result.GetProperty("axes"), false) ||
+            !IsSafeVfpTable(result.GetProperty("temperatureTable"), "TEMP", "F", result.GetProperty("axes"), result.GetProperty("includeTemperature").ValueKind == JsonValueKind.False) ||
+            !IsSafeVfpContent(result.GetProperty("vfpTableContent")) ||
+            !IsSafeVfpContent(result.GetProperty("vfpTableWithTemperatureContent"))) return false;
+        return true;
+    }
+
+    private static bool HasValidEspCurvesResult(JsonElement result)
+    {
+        if (result.ValueKind != JsonValueKind.Object ||
+            !HasExactlyProperties(result, "schemaVersion", "model_kind", "runTask", "resultContract", "producer", "pump", "nodalPump") ||
+            result.GetProperty("schemaVersion").GetString() != "pipesim-esp-curves-result/1" ||
+            result.GetProperty("model_kind").GetString() is not ("black_oil_liquid" or "basic_gas") ||
+            result.GetProperty("runTask").GetString() != "esp-curves" ||
+            result.GetProperty("resultContract").GetString() != "VALID_FULL" ||
+            !IsSafeTextValue(result.GetProperty("producer"), false) ||
+            !IsSafeEspPump(result.GetProperty("pump")) ||
+            !IsSafeEspPump(result.GetProperty("nodalPump"))) return false;
+        return true;
+    }
+
+    private static bool HasValidTrajectoryResult(JsonElement result)
+    {
+        if (result.ValueKind != JsonValueKind.Object ||
+            !HasExactlyProperties(result, "schemaVersion", "model_kind", "runTask", "resultContract", "producer", "units", "points") ||
+            result.GetProperty("schemaVersion").GetString() != "pipesim-well-trajectory-result/1" ||
+            result.GetProperty("model_kind").GetString() is not ("black_oil_liquid" or "basic_gas" or "legacy_well") ||
+            result.GetProperty("runTask").GetString() != "trajectory" ||
+            result.GetProperty("resultContract").GetString() != "VALID_FULL" ||
+            !IsSafeTextValue(result.GetProperty("producer"), false) ||
+            !HasValidTrajectoryUnits(result.GetProperty("units"))) return false;
+        var points = result.GetProperty("points");
+        if (points.ValueKind != JsonValueKind.Array || points.GetArrayLength() is < 2 or > 4096) return false;
+        var previousDepth = -1D;
+        foreach (var point in points.EnumerateArray())
+        {
+            if (!IsSafeTrajectoryPoint(point) || point.GetProperty("measuredDepth").GetDouble() <= previousDepth) return false;
+            previousDepth = point.GetProperty("measuredDepth").GetDouble();
+        }
+        return true;
+    }
+
+    private static bool HasValidTrajectoryUnits(JsonElement units) =>
+        units.ValueKind == JsonValueKind.Object && HasExactlyProperties(units, "measuredDepth", "trueVerticalDepth", "inclination", "azimuth", "maxDogLegSeverity") &&
+        IsSafeTextValue(units.GetProperty("measuredDepth"), false) &&
+        IsSafeTextValue(units.GetProperty("trueVerticalDepth"), false) &&
+        IsSafeTextValue(units.GetProperty("inclination"), false) &&
+        IsSafeTextValue(units.GetProperty("azimuth"), false) &&
+        IsSafeTextValue(units.GetProperty("maxDogLegSeverity"), false);
+
+    private static bool IsSafeTrajectoryPoint(JsonElement point)
+    {
+        if (point.ValueKind != JsonValueKind.Object ||
+            !HasExactlyProperties(point, "measuredDepth", "trueVerticalDepth", "inclination", "azimuth", "maxDogLegSeverity") ||
+            !FiniteInRange(point.GetProperty("measuredDepth"), 0, 1000000) ||
+            !FiniteInRange(point.GetProperty("trueVerticalDepth"), 0, 1000000) ||
+            !FiniteInRange(point.GetProperty("inclination"), 0, 180) ||
+            !IsOptionalFiniteNumber(point.GetProperty("azimuth")) ||
+            !IsOptionalFiniteNumber(point.GetProperty("maxDogLegSeverity"))) return false;
+        return true;
+    }
+
+    private static bool IsSafeEspPump(JsonElement pump)
+    {
+        if (pump.ValueKind != JsonValueKind.Object || !HasExactlyProperties(pump, "pumpName", "inputs", "frequencies", "operatingEnvelope") ||
+            !IsSafeTextValue(pump.GetProperty("pumpName"), false) || pump.GetProperty("pumpName").GetString() != "B-ESP") return false;
+        var inputs = pump.GetProperty("inputs");
+        if (inputs.ValueKind != JsonValueKind.Object || !HasExactlyProperties(inputs, "frequency", "frequencyUnit", "manufacturer", "model", "minFlowRate", "maxFlowRate", "stages") ||
+            !FiniteInRange(inputs.GetProperty("frequency"), 0, 200) || !IsSafeTextValue(inputs.GetProperty("frequencyUnit"), true) ||
+            !IsSafeTextValue(inputs.GetProperty("manufacturer"), false) || !IsSafeTextValue(inputs.GetProperty("model"), false) ||
+            !FiniteInRange(inputs.GetProperty("minFlowRate"), 0, 1000000) || !FiniteInRange(inputs.GetProperty("maxFlowRate"), 0, 1000000) ||
+            !FiniteInRange(inputs.GetProperty("stages"), 0, 100000) || inputs.GetProperty("maxFlowRate").GetDouble() <= inputs.GetProperty("minFlowRate").GetDouble()) return false;
+        var frequencies = pump.GetProperty("frequencies");
+        if (frequencies.ValueKind != JsonValueKind.Array || frequencies.GetArrayLength() is < 1 or > 64 ||
+            !frequencies.EnumerateArray().All(IsSafeEspFrequency)) return false;
+        var envelope = pump.GetProperty("operatingEnvelope");
+        return envelope.ValueKind == JsonValueKind.Object && HasExactlyProperties(envelope, "qMin", "bep", "qMax") &&
+               IsSafeEspCurve(envelope.GetProperty("qMin")) && IsSafeEspCurve(envelope.GetProperty("bep")) && IsSafeEspCurve(envelope.GetProperty("qMax"));
+    }
+
+    private static bool IsSafeEspFrequency(JsonElement frequency)
+    {
+        if (frequency.ValueKind != JsonValueKind.Object || !HasExactlyProperties(frequency, "frequencyHz", "frequencyLabel", "flowRate", "flowRateUnit", "head", "headUnit") ||
+            !FiniteInRange(frequency.GetProperty("frequencyHz"), 0, 200) || !IsSafeTextValue(frequency.GetProperty("frequencyLabel"), false) ||
+            !IsSafeTextValue(frequency.GetProperty("flowRateUnit"), true) || !IsSafeTextValue(frequency.GetProperty("headUnit"), true)) return false;
+        return IsSafeMatchingEspArrays(frequency.GetProperty("flowRate"), frequency.GetProperty("head"));
+    }
+
+    private static bool IsSafeEspCurve(JsonElement curve) =>
+        curve.ValueKind == JsonValueKind.Object && HasExactlyProperties(curve, "flowRate", "flowRateUnit", "head", "headUnit") &&
+        IsSafeTextValue(curve.GetProperty("flowRateUnit"), true) && IsSafeTextValue(curve.GetProperty("headUnit"), true) &&
+        IsSafeMatchingEspArrays(curve.GetProperty("flowRate"), curve.GetProperty("head"));
+
+    private static bool IsSafeMatchingEspArrays(JsonElement flowRate, JsonElement head)
+    {
+        if (flowRate.ValueKind != JsonValueKind.Array || head.ValueKind != JsonValueKind.Array ||
+            flowRate.GetArrayLength() < 1 || flowRate.GetArrayLength() > 512 || flowRate.GetArrayLength() != head.GetArrayLength()) return false;
+        return flowRate.EnumerateArray().All(value => FiniteInRange(value, -1000000, 100000000)) &&
+               head.EnumerateArray().All(value => FiniteInRange(value, -1000000, 100000000));
+    }
+
+    private static bool IsSafeVfpAxes(JsonElement axes)
+    {
+        if (axes.ValueKind != JsonValueKind.Object ||
+            !HasExactlyProperties(axes, "liquidRatesStbPerDay", "outletPressuresPsi", "waterCutFraction", "gorMscfPerStb", "artificialLiftInjectionDpPsi")) return false;
+        return IsStrictFiniteArray(axes.GetProperty("liquidRatesStbPerDay"), 1, 16) &&
+               IsStrictFiniteArray(axes.GetProperty("outletPressuresPsi"), 1, 16) &&
+               IsStrictFiniteArray(axes.GetProperty("waterCutFraction"), 1, 16) &&
+               IsStrictFiniteArray(axes.GetProperty("gorMscfPerStb"), 1, 16) &&
+               IsStrictFiniteArray(axes.GetProperty("artificialLiftInjectionDpPsi"), 1, 16);
+    }
+
+    private static bool IsStrictFiniteArray(JsonElement values, int minLength, int maxLength)
+    {
+        if (values.ValueKind != JsonValueKind.Array || values.GetArrayLength() < minLength || values.GetArrayLength() > maxLength) return false;
+        var previous = double.NegativeInfinity;
+        foreach (var value in values.EnumerateArray())
+        {
+            if (!FiniteNumber(value) || value.GetDouble() <= previous) return false;
+            previous = value.GetDouble();
+        }
+        return true;
+    }
+
+    private static bool IsSafeVfpTable(JsonElement table, string valueName, string unit, JsonElement axes, bool allowEmpty)
+    {
+        if (table.ValueKind != JsonValueKind.Object || !HasExactlyProperties(table, "valueName", "unit", "rows") ||
+            table.GetProperty("valueName").GetString() != valueName || table.GetProperty("unit").GetString() != unit) return false;
+        var rows = table.GetProperty("rows");
+        if (rows.ValueKind != JsonValueKind.Array || rows.GetArrayLength() > 65536 || (!allowEmpty && rows.GetArrayLength() < 1)) return false;
+        if (rows.GetArrayLength() == 0) return true;
+        var valueCount = axes.GetProperty("outletPressuresPsi").GetArrayLength();
+        foreach (var row in rows.EnumerateArray())
+        {
+            if (row.ValueKind != JsonValueKind.Object || !HasExactlyProperties(row, "liquidRateIndex", "waterCutIndex", "gorIndex", "artificialLiftIndex", "values") ||
+                !PositiveIndex(row.GetProperty("liquidRateIndex")) ||
+                !PositiveIndex(row.GetProperty("waterCutIndex")) || !PositiveIndex(row.GetProperty("gorIndex")) || !PositiveIndex(row.GetProperty("artificialLiftIndex"))) return false;
+            var values = row.GetProperty("values");
+            if (values.ValueKind != JsonValueKind.Array || values.GetArrayLength() != valueCount || !values.EnumerateArray().All(FiniteNumber)) return false;
+        }
+        return true;
+    }
+
+    private static bool PositiveIndex(JsonElement value) => value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var number) && number > 0;
+
+    private static bool IsSafeVfpContent(JsonElement value) => value.ValueKind == JsonValueKind.String &&
+        value.GetString()!.Length <= 500000 && !value.GetString()!.Contains('\0');
+
+    private static bool IsOptionalFiniteNumber(JsonElement value) => value.ValueKind == JsonValueKind.Null || FiniteNumber(value);
+
+    private static bool FiniteNumber(JsonElement value) => value.ValueKind == JsonValueKind.Number
+        && value.TryGetDouble(out var number) && double.IsFinite(number);
+
+    private static bool FiniteInRange(JsonElement value, double lowerInclusive, double upperInclusive) =>
+        FiniteNumber(value) && value.GetDouble() >= lowerInclusive && value.GetDouble() <= upperInclusive;
+
+    private static bool IsSafeSystemSeries(JsonElement values)
+    {
+        if (values.ValueKind != JsonValueKind.Array || values.GetArrayLength() == 0) return false;
+        foreach (var item in values.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object ||
+                !HasExactlyProperties(item, "variable", "unit", "value") ||
+                !IsSafeTextValue(item.GetProperty("variable"), false) ||
+                !IsSafeOptionalUnit(item.GetProperty("unit")) ||
+                !HasSafeFiniteNumber(item.GetProperty("value"))) return false;
+        }
+        return true;
+    }
+
+    private static bool IsSafeSystemNodes(JsonElement nodes)
+    {
+        if (nodes.ValueKind != JsonValueKind.Array || nodes.GetArrayLength() == 0) return false;
+        foreach (var node in nodes.EnumerateArray())
+        {
+            if (node.ValueKind != JsonValueKind.Object ||
+                !HasExactlyProperties(node, "node", "variables") ||
+                !IsSafeTextValue(node.GetProperty("node"), false) ||
+                !IsSafeSystemSeries(node.GetProperty("variables"))) return false;
+        }
+        return true;
+    }
+
+    private static bool IsSafeSystemProfile(JsonElement profile)
+    {
+        if (profile.ValueKind != JsonValueKind.Object ||
+            !HasExactlyProperties(profile, "pointCount", "variables") ||
+            !profile.GetProperty("pointCount").TryGetInt32(out var pointCount) ||
+            pointCount <= 0 || pointCount > 100000 ||
+            profile.GetProperty("variables").ValueKind != JsonValueKind.Array ||
+            profile.GetProperty("variables").GetArrayLength() == 0) return false;
+
+        JsonElement? distance = null;
+        JsonElement? pressure = null;
+        foreach (var variable in profile.GetProperty("variables").EnumerateArray())
+        {
+            if (variable.ValueKind != JsonValueKind.Object ||
+                !HasExactlyProperties(variable, "variable", "unit", "values") ||
+                !IsSafeTextValue(variable.GetProperty("variable"), false) ||
+                !IsSafeOptionalUnit(variable.GetProperty("unit")) ||
+                variable.GetProperty("values").ValueKind != JsonValueKind.Array ||
+                variable.GetProperty("values").GetArrayLength() != pointCount) return false;
+
+            var name = variable.GetProperty("variable").GetString();
+            foreach (var value in variable.GetProperty("values").EnumerateArray())
+            {
+                var safe = name == "BranchEquipment"
+                    ? value.ValueKind == JsonValueKind.Null || IsSafeTextValue(value, true)
+                    : HasSafeFiniteNumber(value);
+                if (!safe) return false;
+            }
+            if (name == "TotalDistance") distance = variable.GetProperty("values");
+            if (name == "Pressure") pressure = variable.GetProperty("values");
+        }
+        return distance is { } distanceValues && pressure is { } pressureValues
+            && distanceValues.GetArrayLength() == pressureValues.GetArrayLength();
+    }
+
+    private static bool IsSafeOptionalUnit(JsonElement value) =>
+        value.ValueKind == JsonValueKind.Null || IsSafeTextValue(value, true);
+
+    private static bool HasSafeFiniteNumber(JsonElement value) =>
+        value.ValueKind == JsonValueKind.Number && value.TryGetDouble(out var number) && double.IsFinite(number);
+
+    private static bool IsSafeSensitivityCase(JsonElement item) =>
+        item.ValueKind == JsonValueKind.Object && HasExactlyProperties(item, "value", "ipr", "vlp") &&
+        item.TryGetProperty("value", out var value) && value.ValueKind == JsonValueKind.Number &&
+        value.TryGetDouble(out var number) && double.IsFinite(number) && number > 0 &&
+        IsSafeSensitivityCurve(item.GetProperty("ipr")) && IsSafeSensitivityCurve(item.GetProperty("vlp"));
+
+    private static bool IsSafeSensitivityCurve(JsonElement curve) =>
+        curve.ValueKind == JsonValueKind.Array && curve.GetArrayLength() > 0 &&
+        curve.EnumerateArray().All(point => point.ValueKind == JsonValueKind.Object && HasExactlyProperties(point, "flow", "pressure") &&
+            point.GetProperty("flow").ValueKind == JsonValueKind.Number && point.GetProperty("pressure").ValueKind == JsonValueKind.Number &&
+            point.GetProperty("flow").TryGetDouble(out var flow) && double.IsFinite(flow) &&
+            point.GetProperty("pressure").TryGetDouble(out var pressure) && double.IsFinite(pressure));
 
     private static bool IsSafeNetworkSummary(JsonElement summary) =>
         summary.ValueKind == JsonValueKind.Object &&
@@ -661,10 +1368,18 @@ public sealed partial class PtkRunService : IDisposable
 
     private static bool IsSafeScalarSeries(JsonElement group) =>
         group.ValueKind == JsonValueKind.Object && HasExactlyProperties(group, "variable", "unit", "values") &&
-        IsSafeTextProperty(group, "variable", false) && IsSafeTextProperty(group, "unit", true) &&
+        IsSafeTextProperty(group, "variable", false) && IsSafeNetworkUnitProperty(group, "unit") &&
         group.TryGetProperty("values", out var values) && values.ValueKind == JsonValueKind.Array && values.GetArrayLength() > 0 &&
         values.EnumerateArray().All(item => item.ValueKind == JsonValueKind.Object && HasExactlyProperties(item, "name", "value") &&
-            IsSafeTextProperty(item, "name", false) && item.TryGetProperty("value", out var value) && HasSafeNumericLeaves(value));
+            IsSafeTextProperty(item, "name", false) && item.TryGetProperty("value", out var value) && HasSafeNetworkScalarLeaves(value));
+
+    private static bool IsSafeNetworkUnitProperty(JsonElement value, string property) =>
+        value.TryGetProperty(property, out var unit) && IsSafeNetworkUnit(unit);
+
+    private static bool IsSafeNetworkUnit(JsonElement value) =>
+        value.ValueKind == JsonValueKind.String &&
+        (value.GetString()?.Length ?? 0) <= 128 &&
+        !HasControlCharacter(value.GetString()!);
 
     private static bool IsSafeProfile(JsonElement profile)
     {
@@ -713,6 +1428,19 @@ public sealed partial class PtkRunService : IDisposable
         _ => false
     };
 
+    private static bool HasSafeNetworkScalarLeaves(JsonElement value) => HasSafeNetworkScalarLeaves(value, true);
+
+    private static bool HasSafeNetworkScalarLeaves(JsonElement value, bool allowNativeScalar) => value.ValueKind switch
+    {
+        JsonValueKind.Null => true,
+        JsonValueKind.Number => value.TryGetDouble(out var number) && double.IsFinite(number),
+        JsonValueKind.True or JsonValueKind.False => allowNativeScalar,
+        JsonValueKind.String => allowNativeScalar && IsSafeTextValue(value, false) && !double.TryParse(value.GetString(), out _),
+        JsonValueKind.Array => value.GetArrayLength() > 0 && value.EnumerateArray().All(item => HasSafeNetworkScalarLeaves(item, allowNativeScalar)),
+        JsonValueKind.Object => value.EnumerateObject().Any() && value.EnumerateObject().All(property => HasSafeNetworkScalarLeaves(property.Value, false)),
+        _ => false
+    };
+
     private static bool IsSafeTextValue(JsonElement value) => value.ValueKind == JsonValueKind.Null ||
         IsSafeTextValue(value, false);
 
@@ -756,6 +1484,7 @@ public sealed partial class PtkRunService : IDisposable
         "RUNNING_NODAL" => "Running the selected Study nodal analysis.",
         "RUNNING_PROFILE" => "Running the selected Study pressure-temperature profile.",
         "RUNNING_NETWORK" => "Running the selected Study network simulation.",
+        "READING_TRAJECTORY" => "Reading the official PIPESIM well trajectory.",
         "COLLECTING" => "Collecting and normalizing PIPESIM result arrays.",
         _ => throw new InvalidOperationException("The PIPESIM adapter emitted an unknown phase state.")
     };

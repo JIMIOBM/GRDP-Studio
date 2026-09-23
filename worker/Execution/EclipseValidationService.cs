@@ -6,8 +6,8 @@ namespace Grdp.SoftwareIntegration.Worker.Execution;
 
 public sealed class EclipseValidationService
 {
-    private readonly StorageResolver storage; private readonly EclipseLauncher launcher; private readonly WorkerOptions options;
-    public EclipseValidationService(StorageResolver storage, EclipseLauncher launcher, IOptions<WorkerOptions> options) => (this.storage, this.launcher, this.options) = (storage, launcher, options.Value);
+    private readonly StorageResolver storage; private readonly EclipseLauncher launcher; private readonly EclipseDeckPackageResolver packages; private readonly WorkerOptions options;
+    public EclipseValidationService(StorageResolver storage, EclipseLauncher launcher, EclipseDeckPackageResolver packages, IOptions<WorkerOptions> options) => (this.storage, this.launcher, this.packages, this.options) = (storage, launcher, packages, options.Value);
     public async Task<ApiOutcome> ValidateAsync(ModelValidationRequest request, CancellationToken cancellationToken)
     {
         if (!EclipseRunRules.IsDataStorageKey(request.ModelStorageKey) || string.IsNullOrWhiteSpace(request.ExpectedSha256) || request.ExpectedSha256.Length != 64 || request.ExpectedSha256.Any(value => value is not (>= '0' and <= '9' or >= 'a' and <= 'f')))
@@ -20,13 +20,16 @@ public sealed class EclipseValidationService
             try
             {
                 if (await storage.ComputeSha256Async(directories.ModelCopy, cancellationToken) != request.ExpectedSha256) return new(422, WorkerApiError.Storage("MODEL_COPY_SHA256_MISMATCH", "The validation model copy failed SHA-256 verification."));
-                using var reader = File.OpenText(directories.ModelCopy);
-                if (EclipseDeckScanner.ContainsInclude(reader)) return new(422, new ModelValidationResponse("INVALID", [], "INCLUDE is unsupported for ECLIPSE 100 MVP.", Error: new WorkerError("MODEL", "ECLIPSE_INCLUDE_UNSUPPORTED", "INCLUDE is unsupported for ECLIPSE 100 MVP.", false)));
+                packages.Resolve(directories.ModelCopy, directories.Input);
                 var capability = await launcher.GetCapabilityAsync(cancellationToken);
                 return capability.Available ? new(200, new ModelValidationResponse("READY", [], "ECLIPSE 100 deck validated.", "eclipse_100")) : new(503, new ModelValidationResponse("ENVIRONMENT_ERROR", [], "ECLIPSE launcher is unavailable.", Error: new WorkerError("ENVIRONMENT", "ECLIPSE_UNAVAILABLE", "ECLIPSE launcher is unavailable.", true)));
             }
             finally { StorageResolver.TryDeleteDirectory(directories.Root); }
         }
+        catch (EclipseDeckPackageException error) { return Invalid(error.Code, error.Message); }
         catch (StorageException error) { return new(error.HttpStatus, WorkerApiError.Storage(error.Code, error.Message)); }
     }
+
+    private static ApiOutcome Invalid(string code, string message) => new(StatusCodes.Status422UnprocessableEntity,
+        new ModelValidationResponse("INVALID", [], message, Error: new WorkerError("MODEL", code, message, false)));
 }

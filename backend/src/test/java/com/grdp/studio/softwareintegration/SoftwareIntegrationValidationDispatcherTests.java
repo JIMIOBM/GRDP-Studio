@@ -9,6 +9,7 @@ import com.grdp.studio.softwareintegration.mapper.SoftwareIntegrationProjectMapp
 import com.grdp.studio.softwareintegration.service.SoftwareIntegrationService;
 import com.grdp.studio.softwareintegration.support.SoftwareIntegrationProperties;
 import com.grdp.studio.softwareintegration.support.SoftwareIntegrationStorageKeyNormalizer;
+import com.grdp.studio.softwareintegration.support.SoftwareIntegrationValidationJobStore;
 import com.grdp.studio.softwareintegration.support.SoftwareIntegrationValidationDispatcher;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
@@ -29,6 +30,7 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
+import java.time.Duration;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -36,7 +38,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @ActiveProfiles("test")
-@SpringBootTest(properties = "grdp.software-integration.dispatcher-enabled=false")
+@SpringBootTest(properties = {
+        "grdp.software-integration.dispatcher-enabled=false",
+        "grdp.software-integration.validation-sweep-initial-delay=1h"
+})
 class SoftwareIntegrationValidationDispatcherTests {
     private static final AtomicReference<String> RESPONSE = new AtomicReference<>();
     private static final AtomicReference<String> REQUEST = new AtomicReference<>();
@@ -49,6 +54,7 @@ class SoftwareIntegrationValidationDispatcherTests {
     @Autowired SoftwareIntegrationModelMapper modelMapper;
     @Autowired SoftwareIntegrationModelVersionMapper versionMapper;
     @Autowired SoftwareIntegrationService softwareIntegrationService;
+    @Autowired SoftwareIntegrationValidationJobStore validationJobStore;
     @Autowired ObjectMapper objectMapper;
 
     @BeforeAll
@@ -75,6 +81,7 @@ class SoftwareIntegrationValidationDispatcherTests {
         jdbcTemplate.execute("DELETE FROM software_integration_artifact");
         jdbcTemplate.execute("DELETE FROM software_integration_run_event");
         jdbcTemplate.execute("DELETE FROM software_integration_run");
+        jdbcTemplate.execute("DELETE FROM software_integration_validation_job");
         jdbcTemplate.execute("DELETE FROM software_integration_model_version");
         jdbcTemplate.execute("DELETE FROM software_integration_model");
         jdbcTemplate.execute("DELETE FROM software_integration_project");
@@ -324,6 +331,162 @@ class SoftwareIntegrationValidationDispatcherTests {
         assertThat(versionMapper.selectById(seed.versionId()).getInspectionJson()).isNull();
     }
 
+    @Test
+    void recoverySweepResumesStaleValidatingVersionAfterProcessInterruption() {
+        Seed seed = seed();
+        RESPONSE.set("""
+                {"status":"READY","studies":["Study 1"],"message":"模型验证完成","modelKind":"black_oil_liquid"}
+                """);
+        SoftwareIntegrationModelVersionEntity version = versionMapper.selectById(seed.versionId());
+        version.setStatus("VALIDATING");
+        version.setUpdatedAt(LocalDateTime.now().minusMinutes(20));
+        versionMapper.updateById(version);
+
+        SoftwareIntegrationValidationDispatcher dispatcher = dispatcher();
+        dispatcher.recoverQueuedValidations();
+        awaitTerminalValidation(seed.versionId());
+
+        assertThat(versionMapper.selectById(seed.versionId()).getStatus()).isEqualTo("READY");
+        assertThat(REQUEST.get()).contains("models/validation/model.pips");
+    }
+
+    @Test
+    void durableValidationJobIsClaimedAndCompletedByRecoverySweep() {
+        Seed seed = seed();
+        RESPONSE.set("""
+                {"status":"READY","studies":["Study 1"],"message":"模型验证完成","modelKind":"black_oil_liquid"}
+                """);
+        SoftwareIntegrationProperties properties = new SoftwareIntegrationProperties();
+        properties.setWorkerBaseUrl("http://127.0.0.1:" + server.getAddress().getPort());
+        properties.setValidationLease(Duration.ofSeconds(10));
+        SoftwareIntegrationValidationDispatcher dispatcher = new SoftwareIntegrationValidationDispatcher(
+                versionMapper, modelMapper, properties, objectMapper,
+                new SoftwareIntegrationStorageKeyNormalizer(properties), validationJobStore);
+
+        validationJobStore.enqueue(seed.versionId());
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM software_integration_validation_job WHERE version_id = ?", String.class,
+                seed.versionId())).isEqualTo("QUEUED");
+        dispatcher.recoverQueuedValidations();
+        awaitTerminalValidation(seed.versionId());
+        awaitTerminalJob(seed.versionId());
+
+        assertThat(versionMapper.selectById(seed.versionId()).getStatus()).isEqualTo("READY");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM software_integration_validation_job WHERE version_id = ?", String.class,
+                seed.versionId())).isEqualTo("SUCCEEDED");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT attempt_count FROM software_integration_validation_job WHERE version_id = ?", Integer.class,
+                seed.versionId())).isEqualTo(1);
+    }
+
+    @Test
+    void durableSweepBackfillsAnUploadedVersionCreatedBeforeTheJobTable() {
+        Seed seed = seed();
+        RESPONSE.set("""
+                {"status":"READY","studies":["Study 1"],"message":"模型验证完成","modelKind":"black_oil_liquid"}
+                """);
+        SoftwareIntegrationProperties properties = new SoftwareIntegrationProperties();
+        properties.setWorkerBaseUrl("http://127.0.0.1:" + server.getAddress().getPort());
+        SoftwareIntegrationValidationDispatcher dispatcher = new SoftwareIntegrationValidationDispatcher(
+                versionMapper, modelMapper, properties, objectMapper,
+                new SoftwareIntegrationStorageKeyNormalizer(properties), validationJobStore);
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM software_integration_validation_job WHERE version_id = ?", Integer.class,
+                seed.versionId())).isZero();
+        dispatcher.recoverQueuedValidations();
+        awaitTerminalValidation(seed.versionId());
+        awaitTerminalJob(seed.versionId());
+
+        assertThat(versionMapper.selectById(seed.versionId()).getStatus()).isEqualTo("READY");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM software_integration_validation_job WHERE version_id = ?", String.class,
+                seed.versionId())).isEqualTo("SUCCEEDED");
+    }
+
+    @Test
+    void explicitEnqueueDoesNotStealAnActiveValidationLease() {
+        Seed seed = seed();
+        validationJobStore.enqueue(seed.versionId());
+        assertThat(validationJobStore.claimDue(1, LocalDateTime.now(), Duration.ofMinutes(5))).hasSize(1);
+
+        validationJobStore.enqueue(seed.versionId());
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM software_integration_validation_job WHERE version_id = ?", String.class,
+                seed.versionId())).isEqualTo("RUNNING");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT attempt_count FROM software_integration_validation_job WHERE version_id = ?", Integer.class,
+                seed.versionId())).isEqualTo(1);
+    }
+
+    @Test
+    void durableEnvironmentFailureUsesRetryBackoffAndStopsAtConfiguredAttemptLimit() {
+        Seed seed = seed();
+        RESPONSE_STATUS.set(503);
+        RESPONSE.set("""
+                {"status":"ENVIRONMENT_ERROR","error":{"category":"ENVIRONMENT","code":"WORKER_BUSY","message":"worker unavailable","retryable":true}}
+                """);
+        SoftwareIntegrationProperties properties = new SoftwareIntegrationProperties();
+        properties.setWorkerBaseUrl("http://127.0.0.1:" + server.getAddress().getPort());
+        properties.setValidationMaxAttempts(1);
+        properties.setValidationRetryBackoff(Duration.ZERO);
+        SoftwareIntegrationValidationDispatcher dispatcher = new SoftwareIntegrationValidationDispatcher(
+                versionMapper, modelMapper, properties, objectMapper,
+                new SoftwareIntegrationStorageKeyNormalizer(properties), validationJobStore);
+
+        validationJobStore.enqueue(seed.versionId());
+        dispatcher.recoverQueuedValidations();
+        awaitTerminalValidation(seed.versionId());
+        awaitTerminalJob(seed.versionId());
+
+        assertThat(versionMapper.selectById(seed.versionId()).getStatus()).isEqualTo("ENVIRONMENT_ERROR");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM software_integration_validation_job WHERE version_id = ?", String.class,
+                seed.versionId())).isEqualTo("FAILED");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT attempt_count FROM software_integration_validation_job WHERE version_id = ?", Integer.class,
+                seed.versionId())).isEqualTo(1);
+    }
+
+    @Test
+    void durableEnvironmentFailureIsActuallyRetriedAndCanRecover() {
+        Seed seed = seed();
+        RESPONSE_STATUS.set(503);
+        RESPONSE.set("""
+                {"status":"ENVIRONMENT_ERROR","error":{"category":"ENVIRONMENT","code":"WORKER_BUSY","message":"worker unavailable","retryable":true}}
+                """);
+        SoftwareIntegrationProperties properties = new SoftwareIntegrationProperties();
+        properties.setWorkerBaseUrl("http://127.0.0.1:" + server.getAddress().getPort());
+        properties.setValidationMaxAttempts(2);
+        properties.setValidationRetryBackoff(Duration.ZERO);
+        SoftwareIntegrationValidationDispatcher dispatcher = new SoftwareIntegrationValidationDispatcher(
+                versionMapper, modelMapper, properties, objectMapper,
+                new SoftwareIntegrationStorageKeyNormalizer(properties), validationJobStore);
+
+        validationJobStore.enqueue(seed.versionId());
+        dispatcher.recoverQueuedValidations();
+        awaitJobStatus(seed.versionId(), "QUEUED");
+        assertThat(versionMapper.selectById(seed.versionId()).getStatus()).isEqualTo("VALIDATING");
+
+        RESPONSE_STATUS.set(200);
+        RESPONSE.set("""
+                {"status":"READY","studies":["Study 1"],"message":"模型验证完成","modelKind":"black_oil_liquid"}
+                """);
+        dispatcher.recoverQueuedValidations();
+        awaitTerminalValidation(seed.versionId());
+        awaitTerminalJob(seed.versionId());
+
+        assertThat(versionMapper.selectById(seed.versionId()).getStatus()).isEqualTo("READY");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM software_integration_validation_job WHERE version_id = ?", String.class,
+                seed.versionId())).isEqualTo("SUCCEEDED");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT attempt_count FROM software_integration_validation_job WHERE version_id = ?", Integer.class,
+                seed.versionId())).isEqualTo(2);
+    }
+
     private void awaitTerminalValidation(long versionId) {
         long deadline = System.currentTimeMillis() + 5000;
         while (System.currentTimeMillis() < deadline) {
@@ -331,6 +494,28 @@ class SoftwareIntegrationValidationDispatcherTests {
             if (version == null || (!"UPLOADED".equals(version.getStatus()) && !"VALIDATING".equals(version.getStatus()))) {
                 return;
             }
+            try { Thread.sleep(10); } catch (InterruptedException exception) { Thread.currentThread().interrupt(); return; }
+        }
+    }
+
+    private void awaitTerminalJob(long versionId) {
+        long deadline = System.currentTimeMillis() + 5000;
+        while (System.currentTimeMillis() < deadline) {
+            String status = jdbcTemplate.queryForObject(
+                    "SELECT status FROM software_integration_validation_job WHERE version_id = ?", String.class,
+                    versionId);
+            if (status == null || "SUCCEEDED".equals(status) || "FAILED".equals(status)) return;
+            try { Thread.sleep(10); } catch (InterruptedException exception) { Thread.currentThread().interrupt(); return; }
+        }
+    }
+
+    private void awaitJobStatus(long versionId, String expected) {
+        long deadline = System.currentTimeMillis() + 5000;
+        while (System.currentTimeMillis() < deadline) {
+            String status = jdbcTemplate.queryForObject(
+                    "SELECT status FROM software_integration_validation_job WHERE version_id = ?", String.class,
+                    versionId);
+            if (expected.equals(status)) return;
             try { Thread.sleep(10); } catch (InterruptedException exception) { Thread.currentThread().interrupt(); return; }
         }
     }

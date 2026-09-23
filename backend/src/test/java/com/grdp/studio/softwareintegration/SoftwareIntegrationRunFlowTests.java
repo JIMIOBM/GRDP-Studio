@@ -1,5 +1,7 @@
 package com.grdp.studio.softwareintegration;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.grdp.studio.common.BusinessException;
 import com.grdp.studio.softwareintegration.artifact.SoftwareIntegrationArtifactPublisher;
 import com.grdp.studio.softwareintegration.client.HttpWorkerRunClient.WorkerClientException;
@@ -17,6 +19,7 @@ import com.grdp.studio.softwareintegration.dto.run.SoftwareIntegrationCreateRunR
 import com.grdp.studio.softwareintegration.entity.SoftwareIntegrationModelEntity;
 import com.grdp.studio.softwareintegration.entity.SoftwareIntegrationModelVersionEntity;
 import com.grdp.studio.softwareintegration.entity.SoftwareIntegrationProjectEntity;
+import com.grdp.studio.softwareintegration.entity.SoftwareIntegrationRunEntity;
 import com.grdp.studio.softwareintegration.execution.PipesimWellResultValidator;
 import com.grdp.studio.softwareintegration.execution.PipesimResultValidator;
 import com.grdp.studio.softwareintegration.execution.EclipseSummaryResultValidator;
@@ -32,6 +35,9 @@ import com.grdp.studio.softwareintegration.service.SoftwareIntegrationService;
 import com.grdp.studio.softwareintegration.service.SoftwareIntegrationCapabilityService;
 import com.grdp.studio.softwareintegration.service.impl.SoftwareIntegrationServiceImpl;
 import com.grdp.studio.softwareintegration.support.SoftwareIntegrationProperties;
+import com.grdp.studio.softwareintegration.support.SoftwareIntegrationArtifactCleanup;
+import com.grdp.studio.softwareintegration.support.SoftwareIntegrationProjectCleanup;
+import com.grdp.studio.softwareintegration.support.SoftwareIntegrationResultCleanup;
 import com.grdp.studio.softwareintegration.support.SoftwareIntegrationRunExceptionHandler;
 import com.grdp.studio.softwareintegration.support.SoftwareIntegrationRunExceptionHandler.RunException;
 import com.grdp.studio.softwareintegration.support.SoftwareIntegrationStorageKeyNormalizer;
@@ -62,6 +68,7 @@ import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
 import java.io.IOException;
+import java.io.ByteArrayOutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
@@ -73,6 +80,8 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.function.LongConsumer;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -80,6 +89,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @ActiveProfiles("test")
@@ -111,6 +122,9 @@ class SoftwareIntegrationRunFlowTests {
     @Autowired PipesimResultValidator resultValidator;
     @Autowired EclipseSummaryResultValidator eclipseResultValidator;
     @Autowired SoftwareIntegrationArtifactPublisher artifactPublisher;
+    @Autowired SoftwareIntegrationArtifactCleanup artifactCleanup;
+    @Autowired SoftwareIntegrationResultCleanup resultCleanup;
+    @Autowired SoftwareIntegrationProjectCleanup projectCleanup;
     @Autowired SoftwareIntegrationCapabilityService capabilityService;
     @Autowired ObjectMapper objectMapper;
     @Autowired FakeWorkerRunClient fakeWorker;
@@ -165,6 +179,95 @@ class SoftwareIntegrationRunFlowTests {
         assertThatThrownBy(() -> runService.create(seed.version().getId(), request("Study 1", "combined")))
                 .isInstanceOf(RunException.class).satisfies(error ->
                         assertThat(((RunException) error).status()).isEqualTo(HttpStatus.CONFLICT));
+    }
+
+    @Test
+    void retryCreatesNewQueuedRunAndPreservesOriginalAuditRecord() throws IOException {
+        Seed seed = seed("READY", "models/retry/model.pips");
+        var request = request("Study 1", "nodal");
+        request.setParameters(java.util.Map.of("schemaVersion", "pipesim-well-parameters/1", "reservoirPressurePsi", 4200));
+        var original = runService.create(seed.version().getId(), request);
+        assertThat(runStore.claimOldest("retry-test").getId()).isEqualTo(original.id());
+        JsonNode workerUnavailable = runStore.error("WORKER_UNREACHABLE", "Worker unavailable");
+        runStore.transition(original.id(), SoftwareIntegrationRunStatus.FAILED, patch -> {
+            patch.setErrorCode("WORKER_UNREACHABLE");
+            patch.setErrorJson(workerUnavailable.toString());
+        }, "Worker unavailable", workerUnavailable);
+
+        var retried = runService.retry(original.id());
+
+        assertThat(retried.id()).isNotEqualTo(original.id());
+        assertThat(retried.status()).isEqualTo("QUEUED");
+        assertThat(retried.modelVersionId()).isEqualTo(original.modelVersionId());
+        assertThat(retried.study()).isEqualTo(original.study());
+        assertThat(retried.runType()).isEqualTo(original.runType());
+        assertThat(retried.parameters()).isEqualTo(original.parameters());
+        assertThat(runStore.find(original.id()).getStatus()).isEqualTo("FAILED");
+        assertThat(runStore.find(original.id()).getErrorCode()).isEqualTo("WORKER_UNREACHABLE");
+    }
+
+    @Test
+    void workerLostRunCanBeRetriedWithoutMutatingOriginalHistory() throws IOException {
+        Seed seed = seed("READY", "models/retry-terminal-states/model.pips");
+        var original = runService.create(seed.version().getId(), request("Study 1", "profile"));
+        assertThat(runStore.claimOldest("retry-terminal-state").getId()).isEqualTo(original.id());
+        JsonNode terminalError = runStore.error("WORKER_LOST", "Worker 状态已丢失");
+        runStore.transition(original.id(), SoftwareIntegrationRunStatus.WORKER_LOST, patch -> {
+            patch.setErrorCode("WORKER_LOST");
+            patch.setErrorJson(terminalError.toString());
+        }, "Worker 状态已丢失", terminalError);
+
+        var retried = runService.retry(original.id());
+
+        assertThat(retried.id()).isNotEqualTo(original.id());
+        assertThat(retried.status()).isEqualTo("QUEUED");
+        assertThat(retried.modelVersionId()).isEqualTo(original.modelVersionId());
+        assertThat(retried.study()).isEqualTo(original.study());
+        assertThat(retried.runType()).isEqualTo(original.runType());
+        assertThat(runStore.find(original.id()).getStatus()).isEqualTo("WORKER_LOST");
+        assertThat(runStore.find(original.id()).getErrorCode()).isEqualTo("WORKER_LOST");
+    }
+
+    @Test
+    void timedOutRunCanBeRetriedAfterWorkerCleanupConfirmation() throws Exception {
+        Seed seed = seed("READY", "models/retry-timeout/model.pips");
+        var original = runService.create(seed.version().getId(), request("Study 1", "profile"));
+        SoftwareIntegrationRunDispatcher dispatcher = dispatcher();
+        dispatcher.dispatch();
+        runMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<com.grdp.studio.softwareintegration.entity.SoftwareIntegrationRunEntity>()
+                .eq(com.grdp.studio.softwareintegration.entity.SoftwareIntegrationRunEntity::getId, original.id())
+                .set(com.grdp.studio.softwareintegration.entity.SoftwareIntegrationRunEntity::getDeadlineAt, LocalDateTime.now().minusSeconds(1)));
+        dispatcher.poll();
+        assertThat(runStore.find(original.id()).getStatus()).isEqualTo("CANCEL_REQUESTED");
+        fakeWorker.snapshot = new WorkerRunSnapshot(original.id(), "TIMED_OUT", 1, "worker-1", "generation-1",
+                List.of(new WorkerRunEvent(1, "TIMED_OUT", Instant.now(), "cleanup complete")), null,
+                runStore.error("TIMEOUT", "运行已超时"), List.of(),
+                objectMapper.readTree("{\"processTreeExitConfirmed\":true}"));
+        dispatcher.poll();
+
+        var retried = runService.retry(original.id());
+
+        assertThat(runStore.find(original.id()).getStatus()).isEqualTo("TIMED_OUT");
+        assertThat(retried.id()).isNotEqualTo(original.id());
+        assertThat(retried.status()).isEqualTo("QUEUED");
+        assertThat(retried.modelVersionId()).isEqualTo(original.modelVersionId());
+        assertThat(retried.runType()).isEqualTo(original.runType());
+    }
+
+    @Test
+    void retryRejectsNonRetryableFailure() throws IOException {
+        Seed seed = seed("READY", "models/non-retryable/model.pips");
+        var original = runService.create(seed.version().getId(), request("Study 1", "nodal"));
+        assertThat(runStore.claimOldest("retry-test").getId()).isEqualTo(original.id());
+        JsonNode invalidResult = runStore.error("RESULT_CONTRACT_INVALID", "Result contract invalid");
+        runStore.transition(original.id(), SoftwareIntegrationRunStatus.FAILED, patch -> {
+            patch.setErrorCode("RESULT_CONTRACT_INVALID");
+            patch.setErrorJson(invalidResult.toString());
+        }, "Result contract invalid", invalidResult);
+
+        assertThatThrownBy(() -> runService.retry(original.id()))
+                .isInstanceOf(RunException.class)
+                .satisfies(error -> assertThat(((RunException) error).status()).isEqualTo(HttpStatus.CONFLICT));
     }
 
     @Test
@@ -339,6 +442,64 @@ class SoftwareIntegrationRunFlowTests {
     }
 
     @Test
+    void zipUploadExtractsAndPersistsTheSingleMainModelForWorkerValidation() throws Exception {
+        SoftwareIntegrationValidationDispatcher validationDispatcher =
+                org.mockito.Mockito.mock(SoftwareIntegrationValidationDispatcher.class);
+        SoftwareIntegrationService uploadService = new SoftwareIntegrationServiceImpl(
+                projectMapper, modelMapper, versionMapper, integrationProperties, validationDispatcher,
+                normalizer, jdbcTemplate);
+        SoftwareIntegrationProjectEntity project = new SoftwareIntegrationProjectEntity();
+        project.setName("zip-upload-" + UUID.randomUUID());
+        project.setCreatedBy("administrator");
+        project.setCreatedAt(LocalDateTime.now());
+        project.setUpdatedAt(LocalDateTime.now());
+        projectMapper.insert(project);
+
+        uploadService.uploadModel(project.getId(), new MockMultipartFile(
+                "file", "NETWORK.zip", "application/zip", zipBytes(
+                        new String[]{"case/network.pips", "case/include.inc"},
+                        new String[]{"MODEL", "INCLUDE"})));
+
+        var version = versionMapper.selectList(new LambdaQueryWrapper<SoftwareIntegrationModelVersionEntity>())
+                .stream().findFirst().orElseThrow();
+        assertThat(version.getOriginalName()).isEqualTo("NETWORK.zip");
+        assertThat(version.getStorageKey()).isEqualTo("models/" + version.getModelId() + "/1/case/network.pips");
+        assertThat(version.getSizeBytes()).isEqualTo(5);
+        assertThat(Files.readString(normalizer.resolve(version.getStorageKey()))).isEqualTo("MODEL");
+        assertThat(version.getStatus()).isEqualTo("UPLOADED");
+    }
+
+    @Test
+    void eclipseZipUploadPersistsTheCompleteIncludeProjectPackage() throws Exception {
+        SoftwareIntegrationValidationDispatcher validationDispatcher =
+                org.mockito.Mockito.mock(SoftwareIntegrationValidationDispatcher.class);
+        SoftwareIntegrationService uploadService = new SoftwareIntegrationServiceImpl(
+                projectMapper, modelMapper, versionMapper, integrationProperties, validationDispatcher,
+                normalizer, jdbcTemplate);
+        SoftwareIntegrationProjectEntity project = new SoftwareIntegrationProjectEntity();
+        project.setName("eclipse-zip-boundary-" + UUID.randomUUID());
+        project.setCreatedBy("administrator");
+        project.setCreatedAt(LocalDateTime.now());
+        project.setUpdatedAt(LocalDateTime.now());
+        projectMapper.insert(project);
+
+        uploadService.uploadModel(project.getId(), new MockMultipartFile(
+                "file", "CASE.zip", "application/zip", zipBytes(
+                        new String[]{"CASE.DATA", "GRID.EGRID", "grid.inc"},
+                        new String[]{"RUNSPEC\nINCLUDE 'grid.inc' /\n", "grid", "GRID\n"})));
+        var detail = uploadService.getProject(project.getId());
+        assertThat(detail.models()).hasSize(1);
+        var model = detail.models().get(0);
+        assertThat(model.simulatorType()).isEqualTo("ECLIPSE_100");
+        assertThat(model.versions()).hasSize(1);
+        var version = model.versions().get(0);
+        assertThat(version.originalName()).isEqualTo("CASE.zip");
+        assertThat(Files.exists(normalizer.resolve("models/" + model.id() + "/1/CASE.DATA"))).isTrue();
+        assertThat(Files.readString(normalizer.resolve("models/" + model.id() + "/1/grid.inc"))).contains("GRID");
+        org.mockito.Mockito.verify(validationDispatcher).enqueue(version.id());
+    }
+
+    @Test
     void runTypeMustMatchPersistedSimulatorType() throws Exception {
         Seed well = seed("READY", "models/well/1/model.pips");
         assertThatThrownBy(() -> runService.create(well.version().getId(), request("Study 1", "network")))
@@ -469,6 +630,19 @@ class SoftwareIntegrationRunFlowTests {
             assertThat(artifact.getStorageKey()).isEqualTo("artifacts/" + runId + "/raw.json");
             assertThat(artifact.getSha256()).isEqualTo(sha256Unchecked(output));
         });
+        var rawArtifact = runStore.artifacts(runId).stream()
+                .filter(artifact -> artifact.getArtifactName().equals("raw.json"))
+                .findFirst().orElseThrow();
+        mockMvc.perform(get("/software-integration/runs/{runId}/artifacts/{artifactId}/download", runId, rawArtifact.getId()))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Disposition", org.hamcrest.Matchers.containsString("raw.json")))
+                .andExpect(content().contentTypeCompatibleWith("application/json"))
+                .andExpect(content().string("real worker artifact"));
+        jdbcTemplate.update("UPDATE software_integration_artifact SET expires_at = ? WHERE id = ?",
+                LocalDateTime.now().minusMinutes(1), rawArtifact.getId());
+        artifactCleanup.cleanupExpiredArtifacts();
+        assertThat(Files.exists(normalizer.resolve(rawArtifact.getStorageKey()))).isFalse();
+        assertThat(runStore.artifacts(runId)).noneMatch(artifact -> artifact.getId().equals(rawArtifact.getId()));
         assertThat(fakeWorker.transactionActiveDuringHttp).isFalse();
     }
 
@@ -764,6 +938,33 @@ class SoftwareIntegrationRunFlowTests {
     }
 
     @Test
+    void expiredResultPayloadIsHiddenAndCleanedWhileRunAuditRemains() throws Exception {
+        Seed seed = seed("READY", "models/1/1/model.pips");
+        long runId = runService.create(seed.version().getId(), request("Study 1", "nodal")).id();
+        assertThat(runStore.claimOldest("retention-dispatcher").getId()).isEqualTo(runId);
+        runStore.acceptWorker(runId, "worker-1", "generation-1");
+        runStore.transition(runId, SoftwareIntegrationRunStatus.PREPARING, null, "preparing", null);
+        runStore.transition(runId, SoftwareIntegrationRunStatus.COLLECTING, null, "collecting", null);
+        JsonNode result = objectMapper.readTree("{\"schemaVersion\":\"pipesim-well-result/1\",\"ipr\":[{\"flow\":1.0}]}" );
+        assertThat(runStore.complete(runId, SoftwareIntegrationRunStatus.SUCCEEDED, "VALID_COMPLETE", result,
+                null, objectMapper.readTree("{\"processTreeExitConfirmed\":true}"), null)).isTrue();
+
+        runMapper.update(null, new LambdaUpdateWrapper<SoftwareIntegrationRunEntity>()
+                .eq(SoftwareIntegrationRunEntity::getId, runId)
+                .set(SoftwareIntegrationRunEntity::getResultExpiresAt, LocalDateTime.now().minusSeconds(1)));
+
+        var expired = runService.get(runId);
+        assertThat(expired.resultExpired()).isTrue();
+        assertThat(expired.result()).isNull();
+        assertThat(expired.resultContract()).isEqualTo("VALID_COMPLETE");
+
+        resultCleanup.cleanupExpiredResults();
+        assertThat(runStore.find(runId).getResultJson()).isNull();
+        assertThat(runStore.find(runId).getStatus()).isEqualTo("SUCCEEDED");
+        assertThat(runStore.events(runId)).isNotEmpty();
+    }
+
+    @Test
     void rejectedBeforeAcceptanceAndLostAfterAcceptanceHaveDistinctTerminalSemantics() throws Exception {
         Seed seed = seed("READY", "models/1/1/model.pips");
         long before = runService.create(seed.version().getId(), request("Study 1", "nodal")).id();
@@ -1030,6 +1231,110 @@ class SoftwareIntegrationRunFlowTests {
         assertThatThrownBy(() -> softwareIntegrationService.getProject(seed.project().getId()))
                 .isInstanceOf(BusinessException.class)
                 .satisfies(error -> assertThat(((BusinessException) error).getCode()).isEqualTo(404));
+
+        projectMvc.perform(get("/software-integration/recycle-bin/projects"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].id").value(seed.project().getId()));
+        projectMvc.perform(post("/software-integration/recycle-bin/projects/{id}/restore", seed.project().getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.project.id").value(seed.project().getId()))
+                .andExpect(jsonPath("$.data.models[0].versions[0].status").value("READY"));
+        assertThat(softwareIntegrationService.listProjects())
+                .anyMatch(project -> project.id().equals(seed.project().getId()));
+        assertThat(softwareIntegrationService.getProject(seed.project().getId()).models()).hasSize(1);
+    }
+
+    @Test
+    void modelDeletionRemovesOwnedHistoryAndStorageButKeepsProject() throws Exception {
+        Seed seed = seed("READY", "models/model-delete/1/model.pips");
+        String versionRootKey = "models/" + seed.model().getId() + "/1";
+        String modelStorageKey = versionRootKey + "/model.pips";
+        versionMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<SoftwareIntegrationModelVersionEntity>()
+                .eq(SoftwareIntegrationModelVersionEntity::getId, seed.version().getId())
+                .set(SoftwareIntegrationModelVersionEntity::getStorageKey, modelStorageKey));
+        Path versionRoot = normalizer.resolve(versionRootKey);
+        Files.createDirectories(versionRoot);
+        Files.writeString(versionRoot.resolve("model.pips"), "model");
+        long runId = runService.create(seed.version().getId(), request("Study 1", "nodal")).id();
+        runService.cancel(runId);
+        Path artifactRoot = normalizer.resolve("artifacts/" + runId);
+        Files.createDirectories(artifactRoot);
+        Files.writeString(artifactRoot.resolve("result.json"), "artifact");
+        MockMvc projectMvc = MockMvcBuilders.standaloneSetup(
+                        new SoftwareIntegrationController(softwareIntegrationService, capabilityService))
+                .setControllerAdvice(new SoftwareIntegrationRunExceptionHandler()).build();
+
+        projectMvc.perform(delete("/software-integration/projects/{projectId}/models/{modelId}",
+                        seed.project().getId(), seed.model().getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        assertThat(projectMapper.selectById(seed.project().getId())).isNotNull();
+        assertThat(modelMapper.selectById(seed.model().getId())).isNull();
+        assertThat(versionMapper.selectById(seed.version().getId())).isNull();
+        assertThat(runMapper.selectById(runId)).isNull();
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM software_integration_run_event WHERE run_id = ?", Integer.class, runId)).isZero();
+        assertThat(Files.exists(versionRoot)).isFalse();
+        assertThat(Files.exists(artifactRoot)).isFalse();
+        assertThat(softwareIntegrationService.getProject(seed.project().getId()).models()).isEmpty();
+    }
+
+    @Test
+    void activeRunBlocksModelDeletionWithScoped409() throws Exception {
+        Seed seed = seed("READY", "models/model-delete-active/1/model.pips");
+        long runId = runService.create(seed.version().getId(), request("Study 1", "nodal")).id();
+        assertThat(runStore.claimOldest("model-delete-dispatcher").getId()).isEqualTo(runId);
+        MockMvc projectMvc = MockMvcBuilders.standaloneSetup(
+                        new SoftwareIntegrationController(softwareIntegrationService, capabilityService))
+                .setControllerAdvice(new SoftwareIntegrationRunExceptionHandler()).build();
+
+        projectMvc.perform(delete("/software-integration/projects/{projectId}/models/{modelId}",
+                        seed.project().getId(), seed.model().getId()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(409));
+        assertThat(modelMapper.selectById(seed.model().getId())).isNotNull();
+        assertThat(runStore.find(runId).getStatus()).isEqualTo("CLAIMED");
+    }
+
+    @Test
+    void modelDeletionRefusesStorageKeyOutsideItsOwnedVersionRoot() throws Exception {
+        Seed seed = seed("READY", "models/not-owned/1/model.pips");
+        assertThatThrownBy(() -> softwareIntegrationService.deleteModel(seed.project().getId(), seed.model().getId()))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(error -> assertThat(((BusinessException) error).getCode()).isEqualTo(500));
+        assertThat(modelMapper.selectById(seed.model().getId())).isNotNull();
+        assertThat(versionMapper.selectById(seed.version().getId())).isNotNull();
+    }
+
+    @Test
+    void expiredProjectCleanupRemovesOnlyOwnedModelAndRunStorage() throws Exception {
+        Seed seed = seed("READY", "models/cleanup/placeholder.pips");
+        String versionRootKey = "models/" + seed.model().getId() + "/" + seed.version().getVersionNo();
+        String modelKey = versionRootKey + "/model.pips";
+        versionMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<SoftwareIntegrationModelVersionEntity>()
+                .eq(SoftwareIntegrationModelVersionEntity::getId, seed.version().getId())
+                .set(SoftwareIntegrationModelVersionEntity::getStorageKey, modelKey));
+        Path versionRoot = normalizer.resolve(versionRootKey);
+        Files.createDirectories(versionRoot);
+        Files.writeString(versionRoot.resolve("model.pips"), "model");
+
+        long runId = runService.create(seed.version().getId(), request("Study 1", "nodal")).id();
+        runService.cancel(runId);
+        Path artifactRoot = normalizer.resolve("artifacts/" + runId);
+        Files.createDirectories(artifactRoot);
+        Files.writeString(artifactRoot.resolve("result.json"), "artifact");
+
+        softwareIntegrationService.deleteProject(seed.project().getId());
+        jdbcTemplate.update("UPDATE software_integration_project SET deleted_at = ? WHERE id = ?",
+                LocalDateTime.now().minusDays(31), seed.project().getId());
+
+        assertThat(projectCleanup.cleanupExpiredProjectCount()).isEqualTo(1);
+        assertThat(projectMapper.selectById(seed.project().getId())).isNull();
+        assertThat(modelMapper.selectById(seed.model().getId())).isNull();
+        assertThat(versionMapper.selectById(seed.version().getId())).isNull();
+        assertThat(runMapper.selectById(runId)).isNull();
+        assertThat(Files.exists(versionRoot)).isFalse();
+        assertThat(Files.exists(artifactRoot)).isFalse();
     }
 
     @Test
@@ -1074,9 +1379,6 @@ class SoftwareIntegrationRunFlowTests {
         projectMvc.perform(delete("/software-integration/projects/{id}", eclipse.project().getId()))
                 .andExpect(status().isConflict());
         runStore.transition(eclipseRunId, SoftwareIntegrationRunStatus.COLLECTING, null, "collecting", null);
-        assertThatThrownBy(() -> runStore.complete(eclipseRunId, SoftwareIntegrationRunStatus.PARTIAL_SUCCEEDED,
-                "VALID_PARTIAL", eclipseResult(8, "a".repeat(64)), null, null, null))
-                .isInstanceOf(IllegalStateException.class);
 
         runStore.recoverOnStartup();
 
@@ -1358,7 +1660,9 @@ class SoftwareIntegrationRunFlowTests {
                    "edges":[{"source":"Source 1","destination":"Sink 1","sourcePort":"OUTLET"}],
                    "counts":{"nodes":2,"edges":1,"sources":1,"sinks":1,"flowlines":1}},
                    "system":[{"variable":"Pressure","unit":"bar","values":[{"name":"Network","value":{"average":100.0}}]}],
-                 "node":[{"variable":"Pressure","unit":"bar","values":[{"name":"Sink 1","value":null}]}],
+                 "node":[{"variable":"Pressure","unit":"bar","values":[{"name":"Sink 1","value":null}]},
+                   {"variable":"IsInjectingIntoCompletion","unit":"","values":[{"name":"Sink 1","value":false}]},
+                   {"variable":"LimitedBy","unit":"","values":[{"name":"Sink 1","value":"SPEED"}]}],
                  "profiles":[{"branch":"Source 1 -> Sink 1","pointCount":2,"variables":[
                    {"variable":"TotalDistance","unit":"m","values":[0.0,100.0]},
                    {"variable":"Pressure","unit":"bar","values":[100.0,null]},
@@ -1392,6 +1696,20 @@ class SoftwareIntegrationRunFlowTests {
 
     private static String sha256(Path file) throws Exception {
         return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(file)));
+    }
+
+    private static byte[] zipBytes(String[] names, String[] contents) {
+        try {
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            try (ZipOutputStream zip = new ZipOutputStream(bytes)) {
+                for (int index = 0; index < names.length; index++) {
+                    zip.putNextEntry(new ZipEntry(names[index]));
+                    zip.write(contents[index].getBytes(StandardCharsets.UTF_8));
+                    zip.closeEntry();
+                }
+            }
+            return bytes.toByteArray();
+        } catch (IOException exception) { throw new AssertionError(exception); }
     }
 
     private static String sha256Unchecked(Path file) {
@@ -1459,9 +1777,9 @@ class SoftwareIntegrationRunFlowTests {
             observeTransaction();
             if (capabilityError != null) throw capabilityError;
             var well = new com.grdp.studio.softwareintegration.client.WorkerSimulatorCapability(
-                    "2022.1", "AVAILABLE", null, List.of("nodal", "profile", "combined"), 600);
+                    "2022.1", "AVAILABLE", null, List.of("nodal", "profile", "combined", "sensitivity", "gas-lift-performance", "gas-lift-diagnostics", "vfp-tables", "esp-curves", "trajectory"), 600);
             var network = new com.grdp.studio.softwareintegration.client.WorkerSimulatorCapability(
-                    "2022.1", "AVAILABLE", null, List.of("network"), 600);
+                    "2022.1", "AVAILABLE", null, List.of("network", "system-analysis", "network-optimizer"), 600);
             var eclipse = new com.grdp.studio.softwareintegration.client.WorkerSimulatorCapability(
                     eclipseCapability.version(), eclipseCapability.status(), eclipseCapability.reasonCode(),
                     eclipseCapability.runTasks(), eclipseCapability.maxTimeoutSeconds());

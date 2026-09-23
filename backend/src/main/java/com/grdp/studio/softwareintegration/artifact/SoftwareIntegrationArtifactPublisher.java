@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 @Component
 public class SoftwareIntegrationArtifactPublisher {
@@ -31,6 +32,9 @@ public class SoftwareIntegrationArtifactPublisher {
             "normalized-result.json", "application/json",
             "run.log", "text/plain",
             "manifest.json", "application/json");
+    private static final Pattern ECLIPSE_BINARY_OUTPUT = Pattern.compile(
+            "^eclipse-output-[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\\.(?:EGRID|INIT|UNRST|UNSMRY|SMSPEC|FUNRST|S\\d{4,5})$",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
     private final SoftwareIntegrationStorageKeyNormalizer normalizer;
     private final SoftwareIntegrationProperties properties;
     private final ObjectMapper objectMapper;
@@ -71,9 +75,7 @@ public class SoftwareIntegrationArtifactPublisher {
                 String workerName = sourceKey.substring(requiredPrefix.length());
                 String name = normalizer.normalizeRelative("artifact-name-root/" + required(workerName, "artifact name"))
                         .substring("artifact-name-root/".length());
-                if (eclipseMetadata && (!SoftwareIntegrationEclipseSanitizer.isSafeIdentifier(name)
-                        || !ECLIPSE_ARTIFACTS.containsKey(name)
-                        || !ECLIPSE_ARTIFACTS.get(name).equals(artifact.contentType()))) {
+                if (eclipseMetadata && !isAllowedEclipseArtifact(name, artifact.contentType())) {
                     throw new ArtifactPublicationException("ECLIPSE Artifact metadata contains sensitive content");
                 }
                 if (!names.add(name)) throw new ArtifactPublicationException("Duplicate artifact name");
@@ -150,6 +152,12 @@ public class SoftwareIntegrationArtifactPublisher {
             case "run.log" -> "log";
             default -> "output";
         };
+    }
+
+    private static boolean isAllowedEclipseArtifact(String name, String contentType) {
+        if (!SoftwareIntegrationEclipseSanitizer.isSafeIdentifier(name)) return false;
+        if (ECLIPSE_ARTIFACTS.containsKey(name)) return ECLIPSE_ARTIFACTS.get(name).equals(contentType);
+        return ECLIPSE_BINARY_OUTPUT.matcher(name).matches() && "application/octet-stream".equals(contentType);
     }
 
     private void validateWorkerManifest(long runId, String requiredPrefix,

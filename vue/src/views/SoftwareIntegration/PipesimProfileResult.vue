@@ -26,6 +26,12 @@ const sources = computed(() => [
   ...(props.comparisonResult && !comparisonIssue.value ? [{ result: props.comparisonResult, label: props.comparisonLabel, history: true }] : [])
 ])
 const tableRows = computed(() => sources.value.flatMap(source => (source.result?.profile || []).map(point => ({ ...point, source: source.label }))))
+const tablePage = ref(1)
+const tablePageSize = ref(20)
+const displayedTableRows = computed(() => {
+  const start = (tablePage.value - 1) * tablePageSize.value
+  return tableRows.value.slice(start, start + tablePageSize.value)
+})
 const exportCsv = () => downloadWellCsv([
   ['来源', axisName('深度', unit('depth')), axisName('压力', unit('pressure')), axisName('温度', unit('temperature'))],
   ...tableRows.value.map(point => [point.source, point.depth, point.pressure, point.temperature])
@@ -103,6 +109,10 @@ const renderChart = async () => {
 const resizeChart = () => chart?.resize()
 
 watch(() => [props.result, props.comparisonResult, props.sourceLabel, props.comparisonLabel], renderChart, { deep: true })
+watch([tablePageSize, () => props.result, () => props.comparisonResult], () => { tablePage.value = 1 })
+watch(() => tableRows.value.length, total => {
+  tablePage.value = Math.min(tablePage.value, Math.max(1, Math.ceil(total / tablePageSize.value)))
+})
 onMounted(() => {
   resizeObserver = new ResizeObserver(resizeChart)
   window.addEventListener('resize', resizeChart)
@@ -128,18 +138,20 @@ onBeforeUnmount(() => {
       sub-title="节点分析结果已保留；本次组合运行没有有效的 PT 剖面数据。"
     />
     <el-empty v-else description="当前运行没有有效的 PT 剖面结果" :image-size="72" />
-    <el-table v-if="hasData" :data="tableRows" border size="small" max-height="300">
+    <el-table v-if="hasData" :data="displayedTableRows" border size="small" max-height="300">
       <el-table-column type="index" label="#" width="54" align="center" />
       <el-table-column prop="source" label="来源" min-width="180" />
       <el-table-column prop="depth" :label="axisName('深度', unit('depth'))" min-width="140" />
       <el-table-column prop="pressure" :label="axisName('压力', unit('pressure'))" min-width="140" />
       <el-table-column prop="temperature" :label="axisName('温度', unit('temperature'))" min-width="140" />
     </el-table>
+    <el-pagination v-if="tableRows.length > tablePageSize" class="profile-pagination" small background layout="total, prev, pager, next" :current-page="tablePage" :page-size="tablePageSize" :total="tableRows.length" @current-change="tablePage = $event" />
   </section>
 </template>
 
 <style lang="scss" scoped>
 .result-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }.result-tools > span { margin-right: auto; }.comparison-note { margin: 0; color: #986319; font-size: 12px; }
+.profile-pagination { justify-content: flex-end; }
 .profile-result { min-height: 0; display: flex; flex-direction: column; gap: 14px; }
 .result-chart { height: 430px; min-height: 310px; border: 1px solid #e4e9f0; background: #fff; }
 @media (max-width: 900px) { .result-chart { height: 350px; } }

@@ -20,6 +20,7 @@ public sealed class ArtifactStore
     private static readonly Regex TokenCredential = new(@"(?<prefix>\b(?:access[-_ ]?token|refresh[-_ ]?token|token)\s*[:=]\s*)(?:\""[^\""\r\n]*\""|'[^'\r\n]*'|[^\s,;\""']+)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly Regex CookieCredential = new(@"(?<prefix>\b(?:set-cookie|cookie)\s*[:=]\s*)[^\r\n]*", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly Regex SensitiveKeyValueCredential = new(@"(?<prefix>\b(?:password|passwd|pwd|secret|private[-_ ]?key)\s*[:=]\s*)[^\s,;\""']+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex EclipseBinaryOutputName = new(@"^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\.(?:EGRID|INIT|UNRST|UNSMRY|SMSPEC|FUNRST|S\d{4,5})$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -64,8 +65,9 @@ public sealed class ArtifactStore
         return await WriteJsonAsync(outputDirectory, "manifest.json", manifest, cancellationToken);
     }
 
-    // ECLIPSE text and binary outputs can expose paths, host details, and license diagnostics.
-    // Publish only their fresh-file metadata; normalized results retain the supported summary data.
+    // ECLIPSE text outputs can expose paths, host details, and license diagnostics.
+    // Keep those as metadata only; selected binary result families are copied to a
+    // controlled artifact name so the browser can download the real result package.
     public async Task<IReadOnlyList<EclipseOutputMetadata>> DescribeEclipseOutputsAsync(IEnumerable<string> files, CancellationToken cancellationToken = default)
     {
         var outputFiles = new List<EclipseOutputMetadata>();
@@ -75,6 +77,69 @@ public sealed class ArtifactStore
             outputFiles.Add(new(Path.GetFileName(file), info.Length, await ComputeFileSha256Async(file, cancellationToken)));
         }
         return outputFiles.OrderBy(file => file.Filename, StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    public async Task<ArtifactDescriptor> CopyEclipseBinaryOutputAsync(
+        string outputDirectory,
+        string sourcePath,
+        CancellationToken cancellationToken = default)
+    {
+        var sourceName = Path.GetFileName(sourcePath);
+        if (string.IsNullOrWhiteSpace(sourceName) || !EclipseBinaryOutputName.IsMatch(sourceName))
+            throw new InvalidDataException("The ECLIPSE output is not an approved binary result family.");
+        var targetName = "eclipse-output-" + sourceName;
+        var targetPath = Path.Combine(outputDirectory, targetName);
+        var temporaryPath = targetPath + ".tmp-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            await using (var source = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read,
+                1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan))
+            await using (var target = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None,
+                1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan))
+            {
+                await source.CopyToAsync(target, cancellationToken);
+            }
+            File.Move(temporaryPath, targetPath, overwrite: false);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+        }
+
+        var info = new FileInfo(targetPath);
+        return new ArtifactDescriptor(storage.ToStorageKey(targetPath), info.Length,
+            await ComputeFileSha256Async(targetPath, cancellationToken), "application/octet-stream");
+    }
+
+    public async Task<ArtifactDescriptor> CopyPipesimAppliedModelAsync(
+        string outputDirectory,
+        string sourcePath,
+        CancellationToken cancellationToken = default)
+    {
+        if (!File.Exists(sourcePath) || !string.Equals(Path.GetExtension(sourcePath), ".pips", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("The applied PIPESIM model copy is unavailable.");
+        const string name = "pipesim-network-optimizer-applied.pips";
+        var targetPath = Path.Combine(outputDirectory, name);
+        var temporaryPath = targetPath + ".tmp-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            await using (var source = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read,
+                1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan))
+            await using (var target = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None,
+                1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan))
+            {
+                await source.CopyToAsync(target, cancellationToken);
+            }
+            File.Move(temporaryPath, targetPath, overwrite: false);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+        }
+
+        var info = new FileInfo(targetPath);
+        return new ArtifactDescriptor(storage.ToStorageKey(targetPath), info.Length,
+            await ComputeFileSha256Async(targetPath, cancellationToken), "application/octet-stream");
     }
 
     private async Task<ArtifactDescriptor> WriteBytesAsync(

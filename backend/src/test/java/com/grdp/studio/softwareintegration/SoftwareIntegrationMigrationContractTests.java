@@ -93,6 +93,18 @@ class SoftwareIntegrationMigrationContractTests {
     }
 
     @Test
+    void resultRetentionMigrationIsAdditiveAndRepeatable() throws Exception {
+        Path backend = Path.of("").toAbsolutePath().normalize();
+        if (!backend.getFileName().toString().equalsIgnoreCase("backend")) backend = backend.resolve("backend");
+        String sql = Files.readString(backend.resolve(
+                "deploy/mysql/migrations/011_software_integration_result_retention.sql"));
+        assertThat(sql).contains("information_schema.columns", "table_schema = DATABASE()",
+                "column_name = 'result_expires_at'", "ADD COLUMN result_expires_at DATETIME(3) NULL",
+                "AFTER result_json", "PREPARE grdp_result_retention_column", "EXECUTE grdp_result_retention_column");
+        assertThat(sql.toUpperCase()).doesNotContain("DROP ", "DELETE ", "UPDATE ", "CREATE TABLE");
+    }
+
+    @Test
     void schemaInitializerRepeatablyUpgradesAnExistingRunTable() {
         DriverManagerDataSource dataSource = new DriverManagerDataSource(
                 "jdbc:h2:mem:acceptance-upgrade;MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1", "sa", "");
