@@ -1,12 +1,6 @@
 <script setup>
 /**
  * 库级诊断曲线
- *
- * 与单井版不同的是：
- * - 没有"选择数据表 / 本地导入 Excel"
- * - 后端自动读取项目+气藏下全部井的 CALCULATED 单井诊断方案
- * - 按时间求和形成库级注采序列，再复用 DiagnosticCurveService
- * - 前端只提交 projectId + gasReservoirId + pvtId + 压力上下限
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
@@ -28,17 +22,12 @@ const reservoirLabel = computed(() => props.reservoir?.label || '未选择库')
 
 const unwrap = response => response?.data?.data ?? response?.data ?? response ?? {}
 
-/* ==================== 井覆盖状态 ==================== */
+/* ==================== 井选择 ==================== */
 
-const totalWellCount = ref(0)
-const readyWellCount = ref(0)
-const missingWellNames = ref([])
+const wellOptions = ref([])
+const selectedWellIds = ref([])
 
-const coverageStatus = computed(() => {
-  if (totalWellCount.value === 0) return 'loading'
-  if (missingWellNames.value.length === 0) return 'ready'
-  return 'partial'
-})
+const selectedWellCount = computed(() => selectedWellIds.value.length)
 
 /* ==================== PVT ==================== */
 
@@ -75,9 +64,10 @@ const loadContext = async () => {
       gasReservoirId.value,
       storageId.value  
     ))
-    totalWellCount.value = res.totalWellCount ?? 0
-    readyWellCount.value = res.readyWellCount ?? 0
-    missingWellNames.value = res.missingWellNames ?? []
+    wellOptions.value = Array.isArray(res.wells) ? res.wells : []
+    selectedWellIds.value = wellOptions.value
+      .filter(w => w.available)
+      .map(w => Number(w.wellId))
     pvtOptions.value = res.pvtOptions ?? []
     if (pvtOptions.value.length) {
       selectedPvtId.value = String(pvtOptions.value[0].pvtId)
@@ -101,6 +91,7 @@ watch(
   () => {
     result.value = null
     summaryRows.value = []
+    selectedWellIds.value = []
     activePanel.value = 'data'
     loadContext()
   },
@@ -121,8 +112,8 @@ const handleCalculate = async () => {
     return
   }
 
-  if (coverageStatus.value === 'partial') {
-    ElMessage.warning(`以下井缺少单井诊断方案：${missingWellNames.value.join('、')}`)
+  if (!selectedWellIds.value.length) {
+    ElMessage.warning('请至少选择一口井')
     return
   }
 
@@ -147,6 +138,7 @@ const handleCalculate = async () => {
         projectId: projectId.value,
         gasReservoirId: gasReservoirId.value,
         storageId: storageId.value,
+        wellIds: selectedWellIds.value.map(Number),
         pvtId: Number(selectedPvtId.value),
         upperLimit: up,
         lowerLimit: lo
@@ -156,8 +148,7 @@ const handleCalculate = async () => {
     /*
      * 后端返回：
      * {
-     *   totalWellCount,
-     *   readyWellCount,
+     *   selectedWellCount,
      *   aggregatedRows,
      *   result: {
      *     cycleCurves,
@@ -508,22 +499,26 @@ onBeforeUnmount(() => {
         参数设置
       </div>
       <div class="panel-body">
-        <!-- 井覆盖状态 -->
-        <label class="field">
-          <span>井覆盖状态</span>
-          <div class="coverage-status">
-            <el-tag v-if="coverageStatus === 'ready'" type="success" size="small">
-              全部就绪 {{ readyWellCount }}/{{ totalWellCount }}
-            </el-tag>
-            <el-tag v-else-if="coverageStatus === 'partial'" type="danger" size="small">
-              部分就绪 {{ readyWellCount }}/{{ totalWellCount }}
-            </el-tag>
-            <el-tag v-else type="info" size="small">加载中...</el-tag>
-          </div>
-          <small v-if="missingWellNames.length" class="missing-hint">
-            缺少：{{ missingWellNames.join('、') }}
+        <!-- 井选择 -->
+        <div class="field">
+          <span>参与计算的井（已选 {{ selectedWellCount }} 口）</span>
+          <el-checkbox-group v-model="selectedWellIds" class="well-checkbox-list">
+            <el-checkbox
+              v-for="well in wellOptions"
+              :key="well.wellId"
+              :label="Number(well.wellId)"
+              :disabled="!well.available"
+            >
+              {{ well.wellName }}
+              <small v-if="!well.available" class="unavailable-hint">
+                （无可用诊断数据）
+              </small>
+            </el-checkbox>
+          </el-checkbox-group>
+          <small v-if="!wellOptions.length" class="missing-hint">
+            当前储气库暂无关联井
           </small>
-        </label>
+        </div>
 
         <!-- PVT选择 -->
         <label class="field">
@@ -563,7 +558,7 @@ onBeforeUnmount(() => {
           <button
             type="button"
             class="calculate"
-            :disabled="calculating || coverageStatus === 'partial'"
+            :disabled="calculating || selectedWellIds.length === 0"
             @click="handleCalculate"
           >
             {{ calculating ? '计算中…' : '计算' }}
@@ -603,7 +598,7 @@ onBeforeUnmount(() => {
       <!-- 图表分析 -->
       <div v-show="activePanel === 'analysis'" class="analysis-view">
         <div v-if="!result" class="chart-placeholder">
-          请选择 PVT 表并点击"计算"查看库诊断曲线
+          请选择参与计算的井和 PVT 表，然后点击"计算"查看库诊断曲线
         </div>
         <div v-show="result" ref="chartEl" class="chart"></div>
       </div>
@@ -692,8 +687,24 @@ onBeforeUnmount(() => {
   border-color: #888;
 }
 
-.coverage-status {
-  margin-bottom: 4px;
+.well-checkbox-list {
+  max-height: 210px;
+  overflow-y: auto;
+  padding: 6px 8px;
+  border: 1px solid #dcdfe6;
+  border-radius: 3px;
+  background: #fff;
+}
+
+.well-checkbox-list :deep(.el-checkbox) {
+  display: flex;
+  margin-right: 0;
+  min-height: 28px;
+}
+
+.unavailable-hint {
+  color: #909399;
+  font-size: 11px;
 }
 
 .missing-hint {

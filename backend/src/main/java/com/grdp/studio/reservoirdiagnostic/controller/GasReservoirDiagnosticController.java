@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
  * 储气库级诊断曲线接口。
  *
  * <p>库级页面不再上传 productionData。后端会自动读取当前储气库内
- * 所有井的最新 CALCULATED 单井诊断方案，将 input 按时间汇总后，
+ * 所选井的最新 CALCULATED 单井诊断方案，将 input 按时间汇总后，
  * 复用现有 DiagnosticCurveService 完成库存量、P/Z、理论线和周期曲线计算。</p>
  */
 @RestController
@@ -33,10 +33,8 @@ public class GasReservoirDiagnosticController {
 
     /**
      * 页面初始化：
-     * 1. 库内井总数；
-     * 2. 已具备可用 CALCULATED 诊断输入的井数；
-     * 3. 缺失井；
-     * 4. 可作为库级代表 PVT 的快照选项。
+     * 1. 库内井列表及是否具备可用诊断输入；
+     * 2. 可作为库级代表 PVT 的快照选项。
      */
     @GetMapping("/context")
     public ApiResponse<GasReservoirDiagnosticModels.ContextResponse> getContext(
@@ -52,8 +50,8 @@ public class GasReservoirDiagnosticController {
     /**
      * 计算库级诊断曲线。
      *
-     * <p>请求只需要项目、气藏、代表 PVT 和压力上下限；
-     * 注采明细由后端从各井诊断 input 自动读取并按时间求和。</p>
+     * <p>请求包含项目、气藏、所选井、代表 PVT 和压力上下限；
+     * 注采明细由后端从所选井诊断 input 自动读取并按时间求和。</p>
      */
     @PostMapping("/calculate")
     public ApiResponse<GasReservoirDiagnosticModels.CalculateResponse> calculate(
