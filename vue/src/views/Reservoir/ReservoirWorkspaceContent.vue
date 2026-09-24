@@ -14,6 +14,7 @@ import SurfaceLoss from './LossEvaluation/SurfaceLoss.vue'
 import MultiPeriodComparison from './ProductivityEvaluation/MultiPeriodComparison.vue'
 import MultiMethodComparison from './ProductivityEvaluation/MultiMethodComparison.vue'
 import InjectionProductionComparison from './ProductivityEvaluation/InjectionProductionComparison.vue'
+import CapacityDesign from './CapacityDesign/CapacityDesign.vue'
 import MaterialBalance from './InventoryEvaluation/MaterialBalance.vue'
 import WaterInvasion from './InventoryEvaluation/WaterInvasion.vue'
 import GasReservoirDiagnosticCurveContent from './GasReservoirDiagnosticCurveContent.vue'
@@ -47,6 +48,10 @@ const isVentLoss = computed(() =>
 )
 const isPeriodComparison = computed(() => props.command?.group === '产能评价'
   && props.command?.parent === '产能对比' && ['多周期', '多方法', '注采对比'].includes(props.command?.name))
+// 库容设计：本次只接入「运行压力」与「库容参数」两部分，两者共用同一个界面。
+// 「孔隙体积」暂未实现，必须排除在外让它继续走占位分支，否则会出现一个空界面。
+const isCapacityDesign = computed(() => props.command?.group === '库容设计'
+  && props.command?.name !== '孔隙体积')
 const isMaterialBalance = computed(() => props.command?.group === '库存评估'
   && props.command?.parent === '物质平衡法' && props.command?.name === '物质平衡')
 const isWaterInvasion = computed(() => props.command?.group === '库存评估'
@@ -90,6 +95,13 @@ const lossKey = computed(() => `${props.reservoir?.projectId}-${props.reservoir?
   <WaterInvasion v-else-if="isWaterInvasion"
     :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-water-invasion`"
     :reservoir="reservoir" />
+  <!-- 库容设计的运行压力与库容参数共用一个界面（截图要求"合成一个界面"）。
+       key 只跟库范围绑定：同一库内切换这几个菜单项不重建表单，未保存的编辑不会丢；
+       进入不同菜单项时由页面自身把对应字段滚动定位并高亮。
+       「孔隙体积」不在本分支内，继续落到下方占位页面。 -->
+  <CapacityDesign v-else-if="isCapacityDesign"
+    :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}`"
+    :reservoir="reservoir" :command="command" />
   <!-- 其他尚未接入的库级功能仍保留占位入口。 -->
   <section v-else class="reservoir-workspace" :aria-label="title">
     <div class="workspace-tabs">

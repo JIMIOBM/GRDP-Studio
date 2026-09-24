@@ -1,4 +1,4 @@
-﻿﻿<script setup>
+<script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
@@ -141,6 +141,20 @@ const getInputValue = (keys, fallback = '') => {
   return formatNumber(fallback)
 }
 
+// 参数面板中部分字段按需求收敛小数位：默认保留两位小数；
+// 若四舍五入后变成 0（如地层水压缩系数是 1e-4 量级），说明按小数位截断会抹掉
+// 有效信息，此时改用两位有效数字（0.000374451276333 → 0.00037）。
+const formatRoundedInput = (value) => {
+  if (value === undefined || value === null || value === '') return ''
+  const num = Number(value)
+  if (!Number.isFinite(num)) return value
+  const twoDecimals = num.toFixed(2).replace(/\.?0+$/, '')
+  if (num !== 0 && Number(twoDecimals) === 0) return String(Number(num.toPrecision(2)))
+  return twoDecimals
+}
+
+const getRoundedInputValue = (keys, fallback = '') => formatRoundedInput(getInputValue(keys, fallback))
+
 const getMethodValue = (key, legacyKey, options) => {
   const value = inputParams.value?.[key] ?? inputParams.value?.[legacyKey]
   if (value === undefined || value === null || value === '') return ''
@@ -238,9 +252,9 @@ const otherData = computed(() => [
   { key: 'dataSize', label: fieldLabels.samplingPoints, value: getInputValue(['dataSize', 'samplingPoints']), type: 'number', hasSwitch: true, switchValue: Number(inputParams.value?.dataSize) > 0 },
   { key: 'waterGasRatioLimit', label: fieldLabels.waterGasRatioLimit, value: getInputValue('waterGasRatioLimit'), type: 'number', hasSwitch: true, switchValue: Number(inputParams.value?.waterGasRatioLimit) >= 0 },
   { key: 'reservoirOriginalGasVolume', label: fieldLabels.gasReservoirVolume, value: getInputValue(['reservoirOriginalGasVolume', 'gasReservoirVolume']), type: 'number' },
-  { key: 'waterSaturation', label: fieldLabels.connateWaterSaturation, value: getInputValue(['waterSaturation', 'connateWaterSaturation']), type: 'number' },
+  { key: 'waterSaturation', label: fieldLabels.connateWaterSaturation, value: getRoundedInputValue(['waterSaturation', 'connateWaterSaturation']), type: 'number' },
   { key: 'rockCompressionCoefficient', label: fieldLabels.rockCompressibility, value: getInputValue(['rockCompressionCoefficient', 'rockCompressibility']), type: 'number' },
-  { key: 'waterCompressionCoefficient', label: fieldLabels.waterCompressibility, value: getInputValue(['waterCompressionCoefficient', 'waterCompressibility']), type: 'number' }
+  { key: 'waterCompressionCoefficient', label: fieldLabels.waterCompressibility, value: getRoundedInputValue(['waterCompressionCoefficient', 'waterCompressibility']), type: 'number' }
 ])
 
 const findChartItem = (fields) => {

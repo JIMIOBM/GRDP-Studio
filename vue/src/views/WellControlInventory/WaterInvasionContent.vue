@@ -336,6 +336,20 @@ const formatDecimalValue = (value, digits) => {
   return num.toFixed(digits).replace(/\.?0+$/, '')
 }
 
+// 参数面板的少数输入项按需求收敛小数位：默认保留两位小数；
+// 若四舍五入后变成 0（如地层水压缩系数是 1e-4 量级），说明按小数位截断会抹掉
+// 有效信息，此时改用两位有效数字（0.000374451276333 → 0.00037）。
+const formatRoundedInput = (value) => {
+  if (value === undefined || value === null || value === '') return ''
+  const num = Number(value)
+  if (!Number.isFinite(num)) return value
+  const twoDecimals = formatDecimalValue(num, 2)
+  if (num !== 0 && Number(twoDecimals) === 0) return String(Number(num.toPrecision(2)))
+  return twoDecimals
+}
+
+const getRoundedInputValue = (keys, fallback = '') => formatRoundedInput(getInputValue(keys, fallback))
+
 const dataListColumns = computed(() => DATA_LIST_COLUMN_CONFIGS[activeChartIdx.value] || [])
 
 const YES_TEXT = '是'
@@ -982,7 +996,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="field">
             <label>束缚水饱和度(%)</label>
-            <el-input size="small" readonly :model-value="getInputValue(['waterSaturation'])" />
+            <el-input size="small" readonly :model-value="getRoundedInputValue(['waterSaturation'])" />
           </div>
           <div class="field">
             <label>储层岩石压缩系数(MPa⁻¹)</label>
@@ -990,15 +1004,15 @@ onBeforeUnmount(() => {
           </div>
           <div class="field">
             <label>地层水压缩系数(MPa⁻¹)</label>
-            <el-input size="small" readonly :model-value="getInputValue(['waterCompressionCoefficient'])" />
+            <el-input size="small" readonly :model-value="getRoundedInputValue(['waterCompressionCoefficient'])" />
           </div>
           <div class="field">
             <label>地层水体积系数(dless)</label>
-            <el-input size="small" readonly :model-value="getInputValue(['waterVolumeCoefficient'])" />
+            <el-input size="small" readonly :model-value="getRoundedInputValue(['waterVolumeCoefficient'])" />
           </div>
           <div class="field">
             <label>当前累产气量(10⁸m³)</label>
-            <el-input size="small" readonly :model-value="getInputValue(['currCumulativeGasProduction'])" />
+            <el-input size="small" readonly :model-value="getRoundedInputValue(['currCumulativeGasProduction'])" />
           </div>
           <div class="field">
             <label>气藏废弃压力(MPa)</label>
