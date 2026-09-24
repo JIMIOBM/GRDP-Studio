@@ -17,6 +17,7 @@ import InjectionProductionComparison from './ProductivityEvaluation/InjectionPro
 import CapacityDesign from './CapacityDesign/CapacityDesign.vue'
 import MaterialBalance from './InventoryEvaluation/MaterialBalance.vue'
 import WaterInvasion from './InventoryEvaluation/WaterInvasion.vue'
+import InterwellComparison from './WellboreConversion/InterwellComparison.vue'
 import GasReservoirDiagnosticCurveContent from './GasReservoirDiagnosticCurveContent.vue'
 
 const lossPages = { '微观损耗': MicroscopicLoss, '逸散性损耗': EscapeLoss, '井筒损耗': WellboreLoss, '地面损耗': SurfaceLoss }
@@ -59,6 +60,10 @@ const isWaterInvasion = computed(() => props.command?.group === '库存评估'
 const isDiagnosticCurve = computed(() =>
   props.command?.group === '库存评估' && props.command?.name === '诊断曲线'
 )
+// 井筒折算：本次只接入「井间对比」，其他菜单项继续走占位分支。
+const isWellboreComparison = computed(() =>
+  props.command?.group === '井筒折算' && props.command?.name === '井间对比'
+)
 const lossComponent = computed(() => props.command?.name ? lossPages[props.command.name] : null)
 const lossKey = computed(() => `${props.reservoir?.projectId}-${props.reservoir?.gasReservoirId}-${props.reservoir?.storageId}-${props.command?.name}`)
 
@@ -85,6 +90,16 @@ const lossKey = computed(() => `${props.reservoir?.projectId}-${props.reservoir?
       <div class="comparison-module-tab"><span>产能对比-{{ command.name }}</span></div>
     </div>
     <component :is="comparisonPages[command.name]"
+      :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-${command.name}`"
+      :project-id="reservoir?.projectId" :gas-reservoir-id="reservoir?.gasReservoirId"
+      :storage-id="reservoir?.storageId" :storage-name="reservoirLabel" />
+  </section>
+  <!-- 井筒折算-井间对比与产能对比共用同一页签条样式；参数栏和对比图由页面自身管理。 -->
+  <section v-else-if="isWellboreComparison" class="storage-comparison-page" :aria-label="`库井筒折算-${command.name}`">
+    <div class="comparison-module-tabs">
+      <div class="comparison-module-tab"><span>井筒折算-{{ command.name }}</span></div>
+    </div>
+    <InterwellComparison
       :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-${command.name}`"
       :project-id="reservoir?.projectId" :gas-reservoir-id="reservoir?.gasReservoirId"
       :storage-id="reservoir?.storageId" :storage-name="reservoirLabel" />
