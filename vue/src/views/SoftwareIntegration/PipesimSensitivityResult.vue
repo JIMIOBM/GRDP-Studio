@@ -71,8 +71,8 @@ const renderChart = async () => {
     yAxis: { type: 'value', name: pressureUnit.value ? `压力 (${pressureUnit.value})` : '压力', nameLocation: 'middle', nameGap: 52 },
     dataZoom: [{ type: 'inside', xAxisIndex: 0 }, { type: 'slider', xAxisIndex: 0, bottom: 18 }],
     series: cases.value.flatMap(item => [
-      { name: `${item.value} · IPR`, type: 'line', showSymbol: false, data: item.ipr.map(point => [point.flow, point.pressure]) },
-      { name: `${item.value} · VLP`, type: 'line', showSymbol: false, lineStyle: { type: 'dashed' }, data: item.vlp.map(point => [point.flow, point.pressure]) }
+      { name: `${item.value} · IPR`, type: 'line', showSymbol: false, data: [...item.ipr].sort((left, right) => left.flow - right.flow).map(point => [point.flow, point.pressure]) },
+      { name: `${item.value} · VLP`, type: 'line', showSymbol: false, lineStyle: { type: 'dashed' }, data: [...item.vlp].sort((left, right) => left.flow - right.flow).map(point => [point.flow, point.pressure]) }
     ])
   }, true)
   chart.resize()

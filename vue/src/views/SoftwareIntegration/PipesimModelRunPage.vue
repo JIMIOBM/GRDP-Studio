@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { softwareIntegrationApi } from '@/api/softwareIntegration'
 import { storeToRefs } from 'pinia'
 import { ElMessage } from 'element-plus'
@@ -212,7 +212,7 @@ const validateEspCurvesRun = run => {
   const validCurve = curve => curve && typeof curve === 'object' && Array.isArray(curve.flowRate) && Array.isArray(curve.head) &&
     curve.flowRate.length === curve.head.length && validArray(curve.flowRate) && validArray(curve.head) &&
     typeof curve.flowRateUnit === 'string' && typeof curve.headUnit === 'string'
-  const validPump = pump => pump?.pumpName === 'B-ESP' && pump.inputs && finite(pump.inputs.frequency) && typeof pump.inputs.frequencyUnit === 'string' &&
+  const validPump = pump => typeof pump?.pumpName === 'string' && pump.pumpName.trim() && pump.inputs && finite(pump.inputs.frequency) && typeof pump.inputs.frequencyUnit === 'string' &&
     typeof pump.inputs.manufacturer === 'string' && typeof pump.inputs.model === 'string' && finite(pump.inputs.minFlowRate) &&
     finite(pump.inputs.maxFlowRate) && pump.inputs.maxFlowRate > pump.inputs.minFlowRate && finite(pump.inputs.stages) &&
     Array.isArray(pump.frequencies) && pump.frequencies.length > 0 && pump.frequencies.every(item => finite(item.frequencyHz) && typeof item.frequencyLabel === 'string' && validCurve(item)) &&
@@ -1486,6 +1486,23 @@ const selectHistoryRun = async runId => {
       : errorMessage(error))
   }
 }
+const resultTabRunTypes = {
+  nodal: ['nodal', 'combined'],
+  profile: ['profile', 'combined'],
+  sensitivity: ['sensitivity'],
+  'gas-lift-performance': ['gas-lift-performance'],
+  'gas-lift-diagnostics': ['gas-lift-diagnostics'],
+  'vfp-tables': ['vfp-tables'],
+  'esp-curves': ['esp-curves'],
+  trajectory: ['trajectory']
+}
+watch(activeTab, async name => {
+  const types = resultTabRunTypes[name]
+  if (!types) return
+  if (types.includes(selectedRun.value?.runType) && ['SUCCEEDED', 'PARTIAL_SUCCEEDED'].includes(selectedRun.value?.status)) return
+  const match = runHistory.value.find(run => types.includes(run.runType) && ['SUCCEEDED', 'PARTIAL_SUCCEEDED'].includes(run.status))
+  if (match) await selectHistoryRun(match.id)
+})
 const selectHistoricalSuccessfulNetworkRun = () => {
   if (historicalSuccessfulNetworkRun.value) selectHistoryRun(historicalSuccessfulNetworkRun.value.id)
   else activeTab.value = 'history'
@@ -1537,7 +1554,47 @@ watch([isNetworkModel, isWellModel, isEclipseModel], ([networkModel, wellModel, 
   if (activeTab.value === 'network' || activeTab.value === 'system-analysis' || activeTab.value === 'network-optimizer') activeTab.value = selectedRun.value?.runType === 'profile' ? 'profile' : 'nodal'
 }, { immediate: true })
 
-defineExpose({ eclipseRunRequest })
+const focusView = async view => {
+  if (view === 'monitor') {
+    activeTab.value = 'history'
+    await nextTick()
+    document.querySelector('.result-tabs')?.scrollIntoView({ block: 'start' })
+    return
+  }
+  if (view === '3d') {
+    if (isEclipseModel.value) {
+      activeTab.value = 'eclipse'
+      await nextTick()
+      document.getElementById('eclipse-3d-result')?.scrollIntoView({ block: 'center' })
+      return
+    }
+    if (isWellModel.value) {
+      activeTab.value = 'trajectory'
+      ElMessage.info('井筒模型打开井轨迹。网格三维需要已完成的 ECLIPSE 结果。')
+      return
+    }
+    activeTab.value = 'network'
+    ElMessage.info('管网结果是二维拓扑，没有网格三维。')
+    return
+  }
+  if (isEclipseModel.value) {
+    activeTab.value = 'eclipse'
+    await nextTick()
+    document.getElementById(view === '2d' ? 'eclipse-2d-result' : 'eclipse-summary-result')?.scrollIntoView({ block: 'center' })
+    return
+  }
+  if (isNetworkModel.value) {
+    activeTab.value = selectedRun.value?.runType === 'system-analysis' ? 'system-analysis' : 'network'
+  } else if (selectedRun.value?.runType === 'profile') {
+    activeTab.value = 'profile'
+  } else {
+    activeTab.value = 'nodal'
+  }
+  await nextTick()
+  document.querySelector('.result-chart, .result-tabs')?.scrollIntoView({ block: 'center' })
+}
+
+defineExpose({ eclipseRunRequest, focusView })
 </script>
 
 <template>

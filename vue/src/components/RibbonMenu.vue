@@ -109,51 +109,79 @@ const defaultTabs = [
         title: '数值模拟',
         columns: [
           { type: 'large', label: 'ECLIPSE', icon: 'Eclipse', commandId: 'software-integration.model.import.eclipse-100' },
-          { type: 'large', label: 'INTERSECT', icon: 'CMG' },
-          { type: 'large', label: '扩展接口', icon: '接口配置' }
+          { type: 'large', label: 'INTERSECT', icon: 'CMG', commandId: 'software-integration.simulator.intersect' },
+          { type: 'large', label: '扩展接口', icon: '接口配置', commandId: 'software-integration.extension.reservoir' }
         ]
       },
       {
         title: '井筒模拟',
         columns: [
           { type: 'large', label: 'PIPESIM 井筒', icon: 'PIPESIM', commandId: 'software-integration.model.import.pipesim-well' },
-          { type: 'large', label: 'wellcat', icon: '井身结构' },
-          { type: 'large', label: '扩展接口', icon: '接口配置' }
+          { type: 'large', label: 'wellcat', icon: '井身结构', commandId: 'software-integration.simulator.wellcat-well' },
+          { type: 'large', label: '扩展接口', icon: '接口配置', commandId: 'software-integration.extension.well' }
         ]
       },
       {
         title: '管网模拟',
         columns: [
           { type: 'large', label: 'PIPESIM Network', icon: '管流计算', commandId: 'software-integration.model.import.pipesim-network' },
-          { type: 'large', label: 'wellcat', icon: '约束条件' },
-          { type: 'large', label: '扩展接口', icon: '接口配置' }
+          { type: 'large', label: 'wellcat', icon: '约束条件', commandId: 'software-integration.simulator.wellcat-network' },
+          { type: 'large', label: '扩展接口', icon: '接口配置', commandId: 'software-integration.extension.network' }
         ]
       },
       {
         title: '一体化模拟',
         columns: [
-          { type: 'large', label: '加载模拟', icon: '初始方案' },
+          { type: 'large', label: '加载模拟', icon: '初始方案', commandId: 'software-integration.simulation.load' },
           {
             type: 'large',
             label: '一体化建模',
             icon: '一体化耦合优化',
             dropdown: true,
-            dropdownItems: ['模型组合', '方案构建']
+            dropdownItems: ['模型组合', '方案构建'],
+            dropdownCommandIds: {
+              '模型组合': 'software-integration.coupling.compose',
+              '方案构建': 'software-integration.coupling.plan'
+            }
           },
-          { type: 'checks', items: ['PVT设置', '井信息匹配', '耦合参数传递'] },
-          { type: 'checks', items: ['模拟控制', '耦合计算', '运行状态监控'] }
+          {
+            type: 'checks',
+            items: ['PVT设置', '井信息匹配', '耦合参数传递'],
+            commandIds: {
+              'PVT设置': 'software-integration.coupling.pvt',
+              '井信息匹配': 'software-integration.coupling.match',
+              '耦合参数传递': 'software-integration.coupling.transfer'
+            }
+          },
+          {
+            type: 'checks',
+            items: ['模拟控制', '耦合计算', '运行状态监控'],
+            commandIds: {
+              '模拟控制': 'software-integration.coupling.control',
+              '耦合计算': 'software-integration.coupling.run',
+              '运行状态监控': 'software-integration.monitor'
+            }
+          }
         ]
       },
       {
         title: '模拟器设置',
         columns: [
-          { type: 'large', label: '模拟器设置', icon: '接口配置' }
+          { type: 'large', label: '模拟器设置', icon: '接口配置', commandId: 'software-integration.settings' }
         ]
       },
       {
         title: '可视化',
         columns: [
-          { type: 'checks', items: ['2D可视化', '3D可视化', '曲线'] }
+          {
+            type: 'checks',
+            items: ['2D可视化', '3D可视化', '曲线'],
+            commandIds: {
+              '2D可视化': 'software-integration.view.2d',
+              '3D可视化': 'software-integration.view.3d',
+              '曲线': 'software-integration.view.curve'
+            }
+          }
         ]
       }
     ]

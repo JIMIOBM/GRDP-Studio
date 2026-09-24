@@ -4586,7 +4586,7 @@ const handleCommand = async ({ group, name, parent, commandId, wellName: command
     } else if (commandId === 'software-integration.project.save') {
       ElMessage.info('软件集成内容已自动保存。')
     } else if (commandId?.startsWith('software-integration.')) {
-      return
+      softwareIntegrationWorkspace.value?.handleRibbonAction(commandId)
     } else {
       ElMessage.info(`${name} 功能正在开发中`)
     }

@@ -98,7 +98,7 @@ const renderChart = async () => {
       type: 'line', showSymbol: false,
       lineStyle: { width: 2, type: source.history ? 'dashed' : 'solid', color: ['#2B6CB3', '#E88A1A'][index] },
       itemStyle: { color: ['#2B6CB3', '#E88A1A'][index] },
-      data: source.result[key].map(point => [point.flow, point.pressure])
+      data: [...source.result[key]].sort((left, right) => left.flow - right.flow).map(point => [point.flow, point.pressure])
     })))
   }, true)
   chart.resize()

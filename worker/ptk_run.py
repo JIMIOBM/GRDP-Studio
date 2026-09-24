@@ -101,6 +101,54 @@ def _result_document(model_kind, run_task, ipr, vlp, profile):
     }
 
 
+def _finite_positive(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value > 0
+
+
+def _nodal_parameters(model, well_name, study):
+    """Fill a blank nodal outlet pressure without changing a completed Study.
+
+    CSW_101 stores 300 psia and already returns curves. TUT_1 and CSN_301 have
+    no nodal operation, so OutletPressure is missing and PIPESIM returns no
+    inflow or outflow curve. The value is applied only to the isolated run.
+    """
+    get_conditions = getattr(getattr(model, "tasks", None), "nodalanalysis", None)
+    get_conditions = getattr(get_conditions, "get_conditions", None)
+    if not callable(get_conditions):
+        return None
+    try:
+        general, _inlet = get_conditions(producer=well_name, study=study)
+    except Exception:
+        return None
+    if not isinstance(general, dict) or _finite_positive(general.get("OutletPressure")):
+        return None
+    from sixgill.definitions import Parameters
+
+    outlet = 300.0
+    try:
+        reservoir_pressures = [
+            float(model.get_value(completion, parameter=Parameters.Completion.RESERVOIRPRESSURE))
+            for completion in model.find(component="Completion")
+        ]
+        reservoir_pressures = [value for value in reservoir_pressures if _finite_positive(value)]
+        if reservoir_pressures and outlet >= min(reservoir_pressures):
+            outlet = min(reservoir_pressures) * 0.2
+    except Exception:
+        pass
+    if not _finite_positive(outlet) or outlet > 100000:
+        outlet = 300.0
+    parameters = {Parameters.NodalAnalysisSimulation.OUTLETPRESSURE: outlet}
+    limits_missing = not any(
+        _finite_positive(general.get(name))
+        for name in ("MaxOutflowPressure", "MaxLiquidRate", "MaxGasRate", "MaxMassRate")
+    )
+    simulation = Parameters.NodalAnalysisSimulation
+    if limits_missing and hasattr(simulation, "LIMITINFLOW") and hasattr(simulation, "LIMITOUTFLOW"):
+        parameters[simulation.LIMITINFLOW] = False
+        parameters[simulation.LIMITOUTFLOW] = False
+    return parameters
+
+
 def _well_output_variables():
     """Use the explicit output list from the official PTK nodal examples.
 
@@ -1332,9 +1380,10 @@ def _execute_esp_curves(model, study, components, model_kind, emit_event):
         if not isinstance(curves, dict) or not curves:
             raise AdapterFailure("PROTOCOL", "EMPTY_ESP_CURVE_RESULT", "PIPESIM returned no ESP curves.")
         first_case = next(iter(curves.values()))
-        if not isinstance(first_case, dict) or "B-ESP" not in first_case:
-            raise AdapterFailure("MODEL", "ESP_PUMP_NOT_FOUND", "The official model has no B-ESP pump result.")
-        return _normalize_esp_pump("B-ESP", first_case["B-ESP"])
+        if not isinstance(first_case, dict) or not first_case:
+            raise AdapterFailure("MODEL", "ESP_PUMP_NOT_FOUND", "The official model has no ESP pump result.")
+        pump_name = "B-ESP" if "B-ESP" in first_case else next(iter(first_case))
+        return _normalize_esp_pump(pump_name, first_case[pump_name])
 
     return {
         "schemaVersion": "pipesim-esp-curves-result/1",
@@ -1692,6 +1741,9 @@ def _execute_sensitivity(model, study, components, model_kind, parameters, emit_
                     target,
                     value,
                 )
+                fallback_parameters = _nodal_parameters(model, components["Well"][0], study)
+                if fallback_parameters:
+                    nodal_parameters = {**(nodal_parameters or {}), **fallback_parameters}
                 run_kwargs = {"producer": components["Well"][0], "study": study}
                 run_kwargs.update(_well_output_variables())
                 if nodal_parameters is not None:
@@ -1964,11 +2016,12 @@ def execute_request(request, model_factory=None, emit_event=None):
         if run_task in ("nodal", "combined"):
             emit_event("RUNNING_NODAL", "Running the selected Study nodal analysis.")
             try:
-                nodal = model.tasks.nodalanalysis.run(
-                    producer=well_name,
-                    study=study,
-                    **_well_output_variables(),
-                )
+                nodal_kwargs = {"producer": well_name, "study": study}
+                nodal_kwargs.update(_well_output_variables())
+                nodal_parameters = _nodal_parameters(model, well_name, study)
+                if nodal_parameters:
+                    nodal_kwargs["parameters"] = nodal_parameters
+                nodal = model.tasks.nodalanalysis.run(**nodal_kwargs)
                 ipr = normalize_curve(nodal.inflow_curves[0].curve_data, is_gas) if nodal.inflow_curves else []
                 vlp = normalize_curve(nodal.outflow_curves[0].curve_data, is_gas) if nodal.outflow_curves else []
             except Exception as exc:
@@ -1997,6 +2050,21 @@ def execute_request(request, model_factory=None, emit_event=None):
                     if request['parameters'] is not None:
                         if request['parameters'].get('schemaVersion') == 'pipesim-well-parameters/1':
                             profile_kwargs["parameters"][Parameters.PTProfileSimulation.INLETPRESSURE] = request['parameters']['reservoirPressurePsi']
+                    profile_conditions = {}
+                    try:
+                        profile_conditions = model.tasks.ptprofilesimulation.get_conditions(producer=well_name, study=study) or {}
+                    except Exception:
+                        profile_conditions = {}
+                    if isinstance(profile_conditions, dict) and not _finite_positive(profile_conditions.get("GasFlowRate")):
+                        inlet = profile_conditions.get("InletPressure")
+                        outlet = profile_kwargs["parameters"].get(Parameters.PTProfileSimulation.OUTLETPRESSURE, profile_conditions.get("OutletPressure"))
+                        if _finite_positive(inlet):
+                            if not _finite_positive(outlet) or float(outlet) >= float(inlet):
+                                outlet = min(300.0, float(inlet) * 0.2)
+                            profile_kwargs["parameters"].update({
+                                Parameters.PTProfileSimulation.INLETPRESSURE: float(inlet),
+                                Parameters.PTProfileSimulation.OUTLETPRESSURE: float(outlet),
+                            })
                 pt_result = model.tasks.ptprofilesimulation.run(**profile_kwargs)
                 profile = normalize_profile(pt_result.profile)
                 if not profile:

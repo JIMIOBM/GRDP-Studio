@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRoute } from 'vue-router'
 import { Delete, Document, DocumentAdd, Folder, UploadFilled } from '@element-plus/icons-vue'
@@ -17,7 +17,8 @@ const {
   activeProjectDetail,
   activeProjectId,
   activeModel,
-  loadingProjects
+  loadingProjects,
+  capabilities
 } = storeToRefs(store)
 const creating = ref(false)
 const createError = ref('')
@@ -35,6 +36,11 @@ const activeTreeId = ref('')
 const selectedModelId = ref('')
 const selectedTreeProjectId = ref(null)
 const pendingExternalImport = ref(null)
+const runPage = ref(null)
+const settingsVisible = ref(false)
+const settingsNote = ref('')
+const couplingVisible = ref(false)
+const couplingStep = ref(null)
 let workspaceMounted = false
 const safeRequestMessage = fallback => fallback
 
@@ -362,7 +368,130 @@ onBeforeUnmount(() => {
   workspaceMounted = false
   store.cleanup()
 })
-defineExpose({ openCreateDialog, openImportModel, importExternalFile })
+const couplingCatalog = {
+  'software-integration.coupling.pvt': {
+    title: 'PVT设置',
+    body: '流体参数保存在已验证的 PIPESIM 模型里。打开井筒模型后，可以核对地层压力，再按 Study 运行。',
+    family: 'well'
+  },
+  'software-integration.coupling.match': {
+    title: '井信息匹配',
+    body: '井名和 Study 来自模型验证结果。打开井筒或 ECLIPSE 模型后，在 Study 和运行记录里核对同一口井。',
+    family: 'well'
+  },
+  'software-integration.coupling.transfer': {
+    title: '耦合参数传递',
+    body: '现在可以分别传递井筒地层压力、管网边界和 ECLIPSE 调度。跨模拟器自动传参还没有独立计算引擎。',
+    family: null
+  },
+  'software-integration.coupling.control': {
+    title: '模拟控制',
+    body: '在已打开的模型页选择 Study 和运行类型。井筒、管网和 ECLIPSE 各自使用自己的运行按钮。',
+    family: null
+  },
+  'software-integration.coupling.run': {
+    title: '耦合计算',
+    body: '已就绪的井筒、管网和 ECLIPSE 模型可以分别计算。一次把三者自动耦合求解的计算尚未接入 Worker。',
+    family: null
+  },
+  'software-integration.coupling.compose': {
+    title: '模型组合',
+    body: '资源树按井筒、管网和 ECLIPSE 分组。组合前请确认要用的模型都已验证为 READY。',
+    family: null
+  },
+  'software-integration.coupling.plan': {
+    title: '方案构建',
+    body: '井筒压力方案、管网边界和 ECLIPSE 调度都在对应模型的计算页里创建，不会改写已保存的历史运行。',
+    family: 'well'
+  }
+}
+const simulatorCatalog = {
+  'software-integration.simulator.intersect': 'INTERSECT 没有本地适配器，不能从这里发起计算。',
+  'software-integration.simulator.wellcat-well': 'wellcat 井筒没有本地适配器。井筒计算请使用 PIPESIM 2022.1。',
+  'software-integration.simulator.wellcat-network': 'wellcat 管网没有本地适配器。管网计算请使用 PIPESIM Network。',
+  'software-integration.extension.reservoir': '数值模拟扩展接口尚未绑定本机程序。',
+  'software-integration.extension.well': '井筒扩展接口尚未绑定本机程序。',
+  'software-integration.extension.network': '管网扩展接口尚未绑定本机程序。'
+}
+const readyModels = family => (activeProjectDetail.value?.models || []).filter(model => (!family || modelFamily(model) === family) && readyVersion(model))
+const statusLabel = status => status === 'AVAILABLE' ? '可用' : '不可用'
+const simulatorRows = computed(() => {
+  const current = capabilities.value
+  const connected = [
+    ['PIPESIM 井筒', current?.pipesimWell],
+    ['PIPESIM Network', current?.pipesimNetwork],
+    ['ECLIPSE 100', current?.eclipse100]
+  ].map(([name, item]) => ({
+    name,
+    version: item?.version || '-',
+    status: statusLabel(item?.status),
+    detail: item?.status === 'AVAILABLE' ? `${item.runTasks?.length || 0} 种运行` : 'Worker 未报告该模拟器可用'
+  }))
+  return [
+    ...connected,
+    { name: 'INTERSECT', version: '-', status: '不可用', detail: '未接入' },
+    { name: 'wellcat', version: '-', status: '不可用', detail: '未接入' }
+  ]
+})
+const ensureCalculation = async family => {
+  const projectId = selectedTreeProjectId.value || activeProjectId.value
+  if (!projectId) {
+    ElMessage.warning('请先创建或在资源树中选择一个软件项目')
+    return false
+  }
+  if (activeProjectId.value !== projectId) await store.selectProject(projectId)
+  const candidates = readyModels(family)
+  const target = candidates.find(model => model.id === activeModel.value?.id)
+    || candidates.find(model => String(model.id) === String(selectedModelId.value))
+    || (family ? candidates[0] : null)
+  if (!target) {
+    const missing = family === 'eclipse' ? 'ECLIPSE' : family === 'network' ? '管网' : family === 'well' ? '井筒' : ''
+    ElMessage.warning(missing ? `当前项目没有已验证的${missing}模型` : '请先在资源树选择一个已验证的模型')
+    return false
+  }
+  if (activeModel.value?.id !== target.id) {
+    await activateResource({ type: 'model', id: `model-${target.id}`, projectId, modelId: target.id })
+  }
+  await nextTick()
+  return Boolean(activeModel.value)
+}
+const showSettings = async note => {
+  settingsNote.value = note || ''
+  settingsVisible.value = true
+  try { await store.loadCapabilities() } catch { ElMessage.warning('模拟器状态读取失败，显示的是上次已知状态') }
+}
+const handleRibbonAction = async commandId => {
+  if (commandId === 'software-integration.settings' || simulatorCatalog[commandId]) {
+    await showSettings(simulatorCatalog[commandId] || '')
+    return
+  }
+  if (commandId === 'software-integration.simulation.load') {
+    await ensureCalculation()
+    return
+  }
+  if (commandId === 'software-integration.monitor') {
+    if (await ensureCalculation()) runPage.value?.focusView('monitor')
+    return
+  }
+  if (commandId === 'software-integration.view.2d' || commandId === 'software-integration.view.curve') {
+    if (await ensureCalculation()) runPage.value?.focusView(commandId.endsWith('2d') ? '2d' : 'curve')
+    return
+  }
+  if (commandId === 'software-integration.view.3d') {
+    const eclipseReady = readyModels('eclipse')[0]
+    if (await ensureCalculation(eclipseReady ? 'eclipse' : null)) runPage.value?.focusView('3d')
+    return
+  }
+  const step = couplingCatalog[commandId]
+  if (!step) return
+  couplingStep.value = step
+  couplingVisible.value = true
+}
+const openCouplingModel = async family => {
+  couplingVisible.value = false
+  await ensureCalculation(family)
+}
+defineExpose({ openCreateDialog, openImportModel, importExternalFile, handleRibbonAction })
 </script>
 
 <template>
@@ -402,7 +531,7 @@ defineExpose({ openCreateDialog, openImportModel, importExternalFile })
       </template>
     </aside>
     <main class="software-content">
-    <PipesimModelRunPage v-if="activeModel" />
+    <PipesimModelRunPage v-if="activeModel" ref="runPage" />
      <template v-else>
      <header class="workspace-header">
        <div>
@@ -462,6 +591,30 @@ defineExpose({ openCreateDialog, openImportModel, importExternalFile })
       </el-form>
       <template #footer><el-button @click="createDialogVisible = false">取消</el-button><el-button :loading="creating" type="primary" @click="createProject">创建</el-button></template>
     </el-dialog>
+    <el-dialog v-model="settingsVisible" title="模拟器设置" width="640px">
+      <p v-if="settingsNote" class="settings-note">{{ settingsNote }}</p>
+      <p class="settings-note">Worker {{ capabilities?.worker?.status === 'AVAILABLE' ? (capabilities.worker.idle ? '空闲' : '正在计算') : '不可达' }}。浏览器只访问后端，由本机 Worker 调用模拟器。</p>
+      <el-table :data="simulatorRows" row-key="name">
+        <el-table-column prop="name" label="模拟器" min-width="160" />
+        <el-table-column prop="version" label="版本" width="110" />
+        <el-table-column prop="status" label="状态" width="90" />
+        <el-table-column prop="detail" label="说明" min-width="180" />
+      </el-table>
+    </el-dialog>
+    <el-dialog v-model="couplingVisible" :title="couplingStep?.title || '一体化模拟'" width="560px">
+      <p class="settings-note">{{ couplingStep?.body }}</p>
+      <ul class="coupling-inventory">
+        <li>井筒模型 {{ readyModels('well').length }} 个</li>
+        <li>管网模型 {{ readyModels('network').length }} 个</li>
+        <li>ECLIPSE 模型 {{ readyModels('eclipse').length }} 个</li>
+      </ul>
+      <template #footer>
+        <el-button @click="couplingVisible = false">关闭</el-button>
+        <el-button v-if="readyModels('well').length" type="primary" @click="openCouplingModel('well')">打开井筒</el-button>
+        <el-button v-if="readyModels('network').length" @click="openCouplingModel('network')">打开管网</el-button>
+        <el-button v-if="readyModels('eclipse').length" @click="openCouplingModel('eclipse')">打开 ECLIPSE</el-button>
+      </template>
+    </el-dialog>
     <el-dialog v-model="recycleBinVisible" title="软件项目回收站" width="680px">
       <div v-loading="recycleBinLoading">
         <el-table v-if="recycleBinProjects.length" :data="recycleBinProjects" row-key="id">
@@ -479,6 +632,8 @@ defineExpose({ openCreateDialog, openImportModel, importExternalFile })
 </template>
 
 <style lang="scss" scoped>
+.settings-note { margin: 0 0 12px; color: #606266; font-size: 13px; line-height: 1.6; }
+.coupling-inventory { margin: 0; padding-left: 18px; color: #303133; line-height: 1.8; }
 .software-integration-workspace { flex: 1; min-width: 0; min-height: 0; display: flex; background: #f6f6f4; color: #252525; }
 .software-resource-panel { width: 238px; min-width: 238px; display: flex; flex-direction: column; border-right: 1px solid #deded9; background: #fff; transition: width .16s ease, min-width .16s ease; }
 .software-resource-panel.collapsed { width: 22px; min-width: 22px; border-right: 0; }
