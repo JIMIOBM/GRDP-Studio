@@ -31,10 +31,10 @@ export async function waterProperties (request, context, pressureMpa, temperatur
 }
 
 // 有有效边界温压时同步评价水密度和黏度；井底温压尚未填写时先加载PVT身份及气体比重。
-export async function selectedPvtProperties (request, context, pvtId, pressureMpa, temperatureC) {
+export async function selectedPvtProperties (request, context, pvtId, pressureMpa, temperatureC, gasOnly = false) {
   const validState = pressureMpa !== null && pressureMpa !== '' && Number.isFinite(Number(pressureMpa)) &&
     temperatureC !== null && temperatureC !== '' && Number.isFinite(Number(temperatureC))
-  if (validState) {
+  if (validState && !gasOnly) {
     return waterProperties(request, context, pressureMpa, temperatureC, pvtId)
   }
   const source = await firstPvtSource(request, context, pvtId)

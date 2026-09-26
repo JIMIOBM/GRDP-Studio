@@ -9,7 +9,8 @@ const states = new Map()
 const contextKey = context => [
   Number(context?.projectId),
   Number(context?.gasReservoirId),
-  String(context?.wellName ?? '').trim()
+  String(context?.wellName ?? '').trim(),
+  context?.operationMode === 'injection' ? 'injection' : 'production'
 ].join(':')
 
 export function getWellboreBoundaryState (context) {

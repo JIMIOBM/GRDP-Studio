@@ -8,7 +8,8 @@ public record PressureRecordSummary(
         String pressureName,
         Long temperatureId,
         Long pvtId,
-        String status
+        String status,
+        String operationMode
 ) {
     public static PressureRecordSummary from(WellPressureConversionEntity entity) {
         return new PressureRecordSummary(
@@ -17,7 +18,8 @@ public record PressureRecordSummary(
                 entity.getPressureName(),
                 entity.getTemperatureId(),
                 entity.getPvtId(),
-                entity.getStatus()
+                entity.getStatus(),
+                entity.getOperationMode()
         );
     }
 }

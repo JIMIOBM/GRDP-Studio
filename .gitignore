@@ -67,3 +67,11 @@ docs/
 /backend/src/test/java/com/grdp/studio/wellbore/*
 !/backend/src/test/java/com/grdp/studio/wellbore/calculation/
 !/backend/sql/wellbore_erosion.sql
+!/backend/src/test/java/com/grdp/studio/wellbore/pressure/
+!/vue/tests/e2e/
+/vue/tests/e2e/*
+!/vue/tests/e2e/pressure-injection.spec.js
+!/vue/tests/fixtures/
+/vue/tests/fixtures/*
+!/vue/tests/fixtures/pressure.html
+!/vue/tests/pressure.playwright.config.js

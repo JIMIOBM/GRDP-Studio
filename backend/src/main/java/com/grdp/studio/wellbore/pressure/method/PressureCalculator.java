@@ -55,7 +55,8 @@ public final class PressureCalculator {
     public record Result(
             List<Double> depth,
             Map<String, MethodResult> methods,
-            String boundaryPosition
+            String boundaryPosition,
+            String operationMode
     ) {}
 
     /** Uses the supplied JS depth grid, linear temperature, DAK, LGE, HB and MB flow. */
@@ -97,13 +98,18 @@ public final class PressureCalculator {
                 || profileDepth.size() != profileTemperature.size()) {
             fail("温度剖面需要2至10001个点");
         }
+        boolean injection = "injection".equals(request.operationMode);
+        if (!injection && !"production".equals(request.operationMode)) {
+            fail("工况仅支持采气或注气");
+        }
         if (request.models == null
                 || request.models.isEmpty()
-                || request.models.stream().anyMatch(model -> !List.of("HB", "MB").contains(model))) {
-            fail("折算方法仅支持HB、MB");
+                || request.models.stream().anyMatch(model -> model == null || !(injection
+                    ? List.of(SingleGasInjectionMethod.CODE) : List.of("HB", "MB")).contains(model))) {
+            fail(injection ? "注气仅支持单相气体方法GAS" : "采气折算方法仅支持HB、MB");
         }
-        if (!"production".equals(request.operationMode)) {
-            fail("注入工况算法暂未开放");
+        if (injection && (request.qGas <= 0 || request.qLiq != 0)) {
+            fail("单相注气要求注气量大于0、液量为0");
         }
         if (!"wellhead".equals(request.boundaryPosition)
                 && !"bottomhole".equals(request.boundaryPosition)) {
@@ -153,6 +159,9 @@ public final class PressureCalculator {
         Map<String, MethodResult> results = new LinkedHashMap<>();
         double diameter = request.idTubing / 1000;
         double area = Math.PI * diameter * diameter / 4;
+        boolean injection = "injection".equals(request.operationMode);
+        int iterationLimit = injection ? SingleGasInjectionMethod.ITERATION_LIMIT : MAX_ITERATION_COUNT;
+        double tolerance = injection ? SingleGasInjectionMethod.TOLERANCE_MPA : PRESSURE_TOLERANCE_MPA;
 
         for (String model : new LinkedHashSet<>(request.models)) {
             boolean fromWellhead = "wellhead".equals(request.boundaryPosition);
@@ -184,7 +193,7 @@ public final class PressureCalculator {
                 double gradient = 0;
                 int iteration = 0;
 
-                for (int currentIteration = 0; currentIteration < MAX_ITERATION_COUNT; currentIteration++) {
+                for (int currentIteration = 0; currentIteration < iterationLimit; currentIteration++) {
                     iteration = currentIteration + 1;
                     double averagePressure = (pressureStart + pressureGuess) / 2;
                     if (averagePressure <= 0) {
@@ -192,7 +201,7 @@ public final class PressureCalculator {
                     }
 
                     Properties currentProperties = properties.apply(averagePressure, averageTemperature);
-                    validateProperties(currentProperties);
+                    validateProperties(currentProperties, injection);
                     lastProperties = currentProperties;
                     lastAveragePressure = averagePressure;
 
@@ -213,12 +222,12 @@ public final class PressureCalculator {
                             request
                     );
 
-                    // 向井底计算累加压降，向井口反算则从井底压力中扣减压降。
+                    // 梯度以测深向下为正；边界位置仅决定积分方向，不决定实际气流方向。
                     double candidate = pressureStart + (fromWellhead ? 1 : -1) * gradient * segmentLength;
                     if (!Double.isFinite(candidate) || candidate <= 0) {
                         fail("压力折算超出有效范围");
                     }
-                    if (Math.abs(candidate - pressureGuess) < PRESSURE_TOLERANCE_MPA) {
+                    if (Math.abs(candidate - pressureGuess) < tolerance) {
                         pressureGuess = candidate;
                         converged = true;
                         break;
@@ -239,8 +248,8 @@ public final class PressureCalculator {
                         lastProperties.gasVolumeFactor(),
                         lastProperties.gasDensity(),
                         lastProperties.gasViscosity(),
-                        lastProperties.liquidDensity(),
-                        lastProperties.liquidViscosity(),
+                        injection ? null : lastProperties.liquidDensity(),
+                        injection ? null : lastProperties.liquidViscosity(),
                         gradient,
                         iteration,
                         converged
@@ -260,7 +269,8 @@ public final class PressureCalculator {
         return new Result(
                 depths.stream().map(depth -> round(depth, 1)).toList(),
                 results,
-                request.boundaryPosition
+                request.boundaryPosition,
+                request.operationMode
         );
     }
 
@@ -295,6 +305,10 @@ public final class PressureCalculator {
             Properties properties,
             PressureCalculateRequest request
     ) {
+        if (SingleGasInjectionMethod.CODE.equals(model)) {
+            return SingleGasInjectionMethod.gradient(diameter, request.roughness / 1000,
+                    request.angle, properties.gasDensity(), properties.gasViscosity(), superficialGasVelocity);
+        }
         if ("HB".equals(model)) {
             return HagedornBrownMethod.gradient(
                     pressure,
@@ -338,11 +352,13 @@ public final class PressureCalculator {
         requireRange(request.tWh, -273.14, 1000, "井口温度");
         requireRange(request.tGrad, 0, 100, "地温梯度");
         requireRange(request.gammaG, 0.001, 10, "气体相对密度");
-        requireRange(request.rhoL, 0.001, 10_000, "液体密度");
-        requireRange(request.muL, 0.000001, 100_000, "液体黏度");
+        if (!"injection".equals(request.operationMode)) {
+            requireRange(request.rhoL, 0.001, 10_000, "液体密度");
+            requireRange(request.muL, 0.000001, 100_000, "液体黏度");
+        }
     }
 
-    private static void validateProperties(Properties properties) {
+    private static void validateProperties(Properties properties, boolean injection) {
         if (properties == null
                 || !Double.isFinite(properties.gasVolumeFactor())
                 || properties.gasVolumeFactor() <= 0
@@ -350,10 +366,10 @@ public final class PressureCalculator {
                 || properties.gasDensity() <= 0
                 || !Double.isFinite(properties.gasViscosity())
                 || properties.gasViscosity() <= 0
-                || !Double.isFinite(properties.liquidDensity())
+                || (!injection && (!Double.isFinite(properties.liquidDensity())
                 || properties.liquidDensity() <= 0
                 || !Double.isFinite(properties.liquidViscosity())
-                || properties.liquidViscosity() <= 0) {
+                || properties.liquidViscosity() <= 0))) {
             fail("井筒流体物性计算结果无效");
         }
     }
