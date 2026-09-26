@@ -13,6 +13,7 @@
  * 该页面与 IprInterface.vue 相互独立；其他菜单板块仍返回 IprInterface.vue。
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { resolveErosionCommandTarget } from '@/utils/wellboreNavigation'
 import { productivityCoefficientApi } from '@/api/productivityCoefficient'
 import { COEFFICIENT_GROUP, COEFFICIENT_METHOD, COEFFICIENT_RECORD, ensureCoefficientTree, applyCoefficientRecords, coefficientLocation } from '@/utils/productivityCoefficientTree'
 import { useRoute, useRouter } from 'vue-router'
@@ -837,6 +838,18 @@ const handleCommand = async ({ group, name, parent }) => {
     return
   }
 
+  const erosionTarget = resolveErosionCommandTarget({ group, name }, resolveWorkspaceTargetWellName(''))
+  if (erosionTarget) {
+    if (!erosionTarget.wellName) {
+      ElMessage.warning('请先在左侧选择一口井，再打开冲蚀功能')
+      return
+    }
+    workspacePendingNode.value = null
+    workspacePendingCommand.value = { group, name, parent, wellName: erosionTarget.wellName }
+    await router.push({ name: 'IprInterface' })
+    return
+  }
+
   // 将本次点击一并交给 IPR 工作台，避免用户切换后还要再点第二次。
   // 跨工作台的命令携带左侧目标井，不依赖先打开该井的 PVT/其他记录。
   workspacePendingCommand.value = {
@@ -966,6 +979,15 @@ const handleSidebarSelect = async node => {
 
   // 记录目录所指向的井，但此处不直接修改右侧组件正在使用的 selectedWellName。
   if (node.wellName) sidebarTargetWellName.value = node.wellName
+
+  // 冲蚀入口直接跳转，不等待当前产能页面读取PVT或切换其业务数据。
+  if (node.type === 'wellbore-erosion') {
+    workspaceActiveNodeId.value = node.id
+    workspacePendingCommand.value = null
+    workspacePendingNode.value = node
+    await router.push({ name: 'IprInterface' })
+    return
+  }
 
   // 理论计算/动态产能及其“稳定流”都是纯目录节点：TreeNode 自己负责展开、收起，
   // 这里不能改变右侧页面，也不能覆盖当前具体记录的高亮状态。

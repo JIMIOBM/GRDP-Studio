@@ -37,10 +37,11 @@ import PressureConversion from '@/views/WellboreCapacity/PressureConversion.vue'
 import BoundaryConditionsContent from '@/views/WellboreCapacity/BoundaryConditionsContent.vue'
 import LiquidLoadingContent from '@/views/WellboreCapacity/LiquidLoadingContent.vue'
 import HydratePredictionContent from '@/views/WellboreCapacity/HydratePredictionContent.vue'
+import ErosionContent from '@/views/WellboreCapacity/ErosionContent.vue'
 import SingleWellProductivityInterface from '@/views/SingleWellProductivityInterface.vue'
 import PipelineCapacityContent from '@/views/PipelineCapacity/PipelineCapacityContent.vue'
 import { ensurePipelineNavigation, findPipelinePageNode, pipelinePageForCommand, resolvePipelinePage } from '@/utils/pipelineNavigation'
-import { createDefaultWellboreNodes, ensureWellboreNavigation } from '@/utils/wellboreNavigation'
+import { createDefaultWellboreNodes, ensureWellboreNavigation, resolveErosionCommandTarget } from '@/utils/wellboreNavigation'
 import { NODETYPE } from '@/constants/nodeType'
 import { resolveWorkspaceContextId } from '@/constants/workspaceContext'
 import { analyticMethodApi, dataManagementApi, dynamicBalanceApi, materialBalanceApi, nodeApi, notifyApi, parametersApi, projectApi, typicalCurveApi, wellApi } from '@/api/docker'
@@ -4497,7 +4498,7 @@ const handleSelect = async (node) => { // 点击左侧树节点
     return
   }
 
-  if (['wellbore-structure', 'wellbore-temperature', 'wellbore-pressure', 'wellbore-boundary', 'wellbore-liquid-loading', 'wellbore-hydrate'].includes(node.type)) {
+  if (['wellbore-structure', 'wellbore-temperature', 'wellbore-pressure', 'wellbore-boundary', 'wellbore-liquid-loading', 'wellbore-hydrate', 'wellbore-erosion'].includes(node.type)) {
     currentView.value = node.type
     currentViewNode.value = node
     return
@@ -4602,6 +4603,15 @@ const handleCommand = async ({ group, name, parent, commandId, wellName: command
     return // 库的物质平衡/图版法等同名菜单，不能落入下方单井计算分支。
   }
   if (route.query.scope === 'reservoir') await router.replace({ name: 'IprInterface' })
+  const erosionTarget = resolveErosionCommandTarget({ group, name, wellName: commandWellName }, resolveWorkspaceTargetWellName(''))
+  if (erosionTarget) {
+    if (!erosionTarget.wellName) {
+      ElMessage.warning('请先在左侧选择一口井，再打开冲蚀功能')
+      return
+    }
+    openWellboreStructure(erosionTarget.wellName, erosionTarget.type)
+    return
+  }
   // 点击目录只更新左侧高亮；执行顶部命令时才同步目标井，避免使用右侧旧记录的井名。
   // 跨工作台传入的井名优先，其次读取共享目录高亮（含不带 wellName 的子目录）。
   const targetWellName = (typeof commandWellName === 'string' && commandWellName.trim()) ||
@@ -5088,6 +5098,7 @@ onBeforeUnmount(() => {
         <BoundaryConditionsContent v-if="currentView === 'wellbore-boundary'" :key="currentViewNode?.id" :node="currentViewNode" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
         <LiquidLoadingContent v-if="currentView === 'wellbore-liquid-loading'" :key="currentViewNode?.id" :node="currentViewNode" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
         <HydratePredictionContent v-if="currentView === 'wellbore-hydrate'" :key="currentViewNode?.id" :node="currentViewNode" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
+        <ErosionContent v-if="currentView === 'wellbore-erosion'" :key="currentViewNode?.id" :node="currentViewNode" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
         <WellboreStructureContent v-if="currentView === 'wellbore-structure'"
           :key="currentViewNode?.id" :well-name="currentViewNode?.wellName"
           :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />

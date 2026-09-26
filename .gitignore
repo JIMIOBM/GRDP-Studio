@@ -56,7 +56,14 @@ docs/
 !/backend/sql/productivity_coefficient.sql
 !/backend/sql/README-coefficient.md
 !/backend/sql/storage_network.sql
+!/backend/sql/nodal_analysis.sql
 !/backend/src/test/java/com/grdp/studio/coefficient/
 !/backend/src/test/java/com/grdp/studio/storagematerialbalance/
+!/backend/src/test/java/com/grdp/studio/nodal/
 !/backend/src/test/java/com/grdp/studio/storagenetwork/
 !/vue/tests/storageMaterialBalance.test.js
+!/backend/sql/wellbore_erosion_sanding.sql
+!/backend/src/test/java/com/grdp/studio/wellbore/
+/backend/src/test/java/com/grdp/studio/wellbore/*
+!/backend/src/test/java/com/grdp/studio/wellbore/calculation/
+!/backend/sql/wellbore_erosion.sql
