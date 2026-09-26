@@ -272,7 +272,7 @@ const handleCalculate = async () => {
     </aside>
     <main class="result-area">
       <div class="result-tabs"><div class="result-tab active" :title="resultTitle">{{ resultTitle }}</div></div>
-      <PeriodWellChart3D :result="comparisonResult" :busy="calculating" :title="resultTitle" />
+      <PeriodWellChart3D :result="comparisonResult" :busy="calculating" :title="resultTitle" :project-id="projectId" :gas-reservoir-id="gasReservoirId" :storage-id="storageId" />
     </main>
   </div>
 </template>

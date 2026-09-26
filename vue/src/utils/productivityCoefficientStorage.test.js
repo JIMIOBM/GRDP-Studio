@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { reactive, computed, ref, watch, nextTick, effectScope } from 'vue'
 import * as calculation from './productivityCoefficientCalculation.js'
+import { buildIprDisplaySeries } from './iprDisplayCurve.js'
 
 const source = readFileSync(new URL('../views/SingleWellProductivity/ExponentialContent.vue', import.meta.url), 'utf8')
 const script = source.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import[\s\S]*?from\s+['"][^'"]+['"]\s*;?/gm, '')
@@ -28,7 +29,7 @@ function workspace(method = '指数式') {
     save: async payload => { requests.push(payload); const row={...payload,id:payload.id || 12,name:'记录1',version:'coefficient-v1'}; records.set(row.id,row); return row },
     detail: async id => { if (!records.has(Number(id))) throw new Error('不存在'); return records.get(Number(id)) }
   }
-  const deps = { ...calculation, computed, ref, watch, nextTick, onMounted(){}, onBeforeUnmount(){},
+  const deps = { ...calculation, buildIprDisplaySeries, computed, ref, watch, nextTick, onMounted(){}, onBeforeUnmount(){},
     defineProps:()=>props,defineEmits:()=>emits,productivityCoefficientApi:api,
     ElMessage:{success(){},error:m=>errors.push(m)} }
   const scope=effectScope()
@@ -203,7 +204,17 @@ test('三种方法的注气IPR显示九条非退化曲线和一个零流量点',
     for (const method of ['压力法','压力平方法','拟压力']) {
       w.state.calculationMethod.value=method
       w.state.handleCalculate()
-      assert.equal(option.series.length,10)
+      const originalSeries = option.series.filter(series => series.tooltip?.show !== false)
+      const displaySeries = option.series.filter(series => series.tooltip?.show === false)
+      assert.equal(originalSeries.length,10)
+      assert.equal(displaySeries.length,9)
+      displaySeries.forEach((series, index) => {
+        assert.equal(series.name, originalSeries[index].name)
+        assert.equal(series.silent, true)
+        assert.ok(series.data.length > originalSeries[index].data.length)
+        assert.deepEqual(originalSeries[index].data, w.state.calculatedRequest.value.iprFamily[index].curve.points
+          .map(point => [point.flowRate, point.flowingPressure]))
+      })
       const zero=option.series.at(-1)
       assert.equal(zero.type,'scatter')
       assert.deepEqual(zero.data,[[0,56]])
