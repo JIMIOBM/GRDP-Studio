@@ -7,6 +7,13 @@ import org.springframework.stereotype.Service;
 /** Java 等价迁移自 critical_liquid_carrying_algorithm.js。 */
 @Service
 public class LiquidLoadingCalculator {
+    /** Unrounded Turner+20% threshold for nodal boundary solving. */
+    public double criticalRate(double surfaceTension, double liquidDensity, double gasDensity, double diameterMm, double bg) {
+        if (!Double.isFinite(bg) || bg <= 0 || gasDensity <= 0 || liquidDensity <= gasDensity)
+            throw new com.grdp.studio.common.BusinessException(400, "携液判据物性不适用");
+        return criticalVelocity(surfaceTension, liquidDensity, gasDensity).turner20
+                * Math.PI * Math.pow(diameterMm / 1000, 2) / 4 / bg * 86400 / 10000;
+    }
     public LiquidLoadingResult calculate(LiquidLoadingRequest input) {
         double temperatureK = input.temperatureC() + 273.15;
         double z = zFactor(input.pressureMpa(), temperatureK, input.gasSpecificGravity());

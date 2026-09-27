@@ -1,5 +1,5 @@
 export const erosionFields = {
-  pressureMpa: '当前压力（MPa，绝压）', temperatureC: '当前温度（℃）',
+  pressureMpa: '当前压力（MPa）', temperatureC: '当前温度（℃）',
   actualGasRate1e4M3d: '标况日产气量（万m³/d）', tubingInnerDiameterMm: '管柱内径（mm）',
   gasDensityKgM3: '气体密度（kg/m³）', liquidDensityKgM3: '液体密度（kg/m³）',
   gasVolumeFactor: 'Bg（工况m³/标况m³）', liquidHoldupPercent: '持液率 Hₗ（%）',

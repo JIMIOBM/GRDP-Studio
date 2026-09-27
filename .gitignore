@@ -75,3 +75,8 @@ docs/
 /vue/tests/fixtures/*
 !/vue/tests/fixtures/pressure.html
 !/vue/tests/pressure.playwright.config.js
+
+# 节点分析模块交互回归
+!/vue/tests/nodal.playwright.config.js
+!/vue/tests/e2e/nodal.spec.js
+!/vue/tests/fixtures/nodal.html

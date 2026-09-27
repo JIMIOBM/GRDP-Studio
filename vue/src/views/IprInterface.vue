@@ -37,6 +37,9 @@ import PressureConversion from '@/views/WellboreCapacity/PressureConversion.vue'
 import BoundaryConditionsContent from '@/views/WellboreCapacity/BoundaryConditionsContent.vue'
 import LiquidLoadingContent from '@/views/WellboreCapacity/LiquidLoadingContent.vue'
 import HydratePredictionContent from '@/views/WellboreCapacity/HydratePredictionContent.vue'
+import NodalAnalysis from '@/views/ProductionAllocation/NodalAnalysis.vue'
+import { ensureNodalNavigation, nodalCommandTarget, NODAL_TYPE, NODAL_RECORD, applyNodalRecords, upsertNodalRecord, loadNodalRecords, deleteNodalRecord } from '@/utils/nodalNavigation'
+import { nodalApi } from '@/api/nodal'
 import ErosionContent from '@/views/WellboreCapacity/ErosionContent.vue'
 import SingleWellProductivityInterface from '@/views/SingleWellProductivityInterface.vue'
 import PipelineCapacityContent from '@/views/PipelineCapacity/PipelineCapacityContent.vue'
@@ -122,8 +125,9 @@ import {
 } from '@/utils/reservoirGeologicalLossTree'
 
 // 当前工作台所使用的项目和气藏。
-const PROJECT_ID = resolveWorkspaceContextId(import.meta.env.VITE_WORKSPACE_PROJECT_ID, 6)
-const GAS_RESERVOIR_ID = resolveWorkspaceContextId(import.meta.env.VITE_WORKSPACE_GAS_RESERVOIR_ID, 4)
+const route = useRoute()
+const PROJECT_ID = resolveWorkspaceContextId(route.query.projectId, import.meta.env.VITE_WORKSPACE_PROJECT_ID, 6)
+const GAS_RESERVOIR_ID = resolveWorkspaceContextId(route.query.gasReservoirId, import.meta.env.VITE_WORKSPACE_GAS_RESERVOIR_ID, 4)
 const SOFTWARE_INTEGRATION_WORKSPACE = 'software-integration'
 const SOFTWARE_INTEGRATION_IMPORT_INTENTS = {
   'software-integration.model.import.pipesim-well': 'import-pipesim-well',
@@ -135,7 +139,6 @@ const SOFTWARE_INTEGRATION_IMPORT_ACCEPTS = {
   'import-pipesim-network': '.pips,.PIPS,.zip,.ZIP',
   'import-eclipse-100': '.data,.DATA,.zip,.ZIP'
 }
-const route = useRoute()
 const router = useRouter()
 ensureWorkspaceReservoir({ projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID })
 const FLOW_BALANCE_NODE_TYPE = NODETYPE.NodeType_FlowingBalanceMethodBasedOnBottomPressure
@@ -572,9 +575,10 @@ const getVentLossApi = node => node.lossType === 'surface' ? surfaceLossApi : we
 const getVentLossLabel = node => node?.lossType === 'surface' ? '地面损耗' : '井筒损耗'
 const isTheoreticalRecord = node => [THEORETICAL_STABLE_RECORD_NODE_TYPE, THEORETICAL_UNSTABLE_RECORD_NODE_TYPE].includes(node?.type)
 const isDiagnosticRecord = item => item?.type === DIAGNOSTIC_CURVE_RECORD_TYPE
-const isTreeContextMenuNode = (item) => isInventoryResultNode(item) || isTypicalCurveResultNode(item) || isLossRecord(item) || isTheoreticalRecord(item) || isPvtRecord(item) || isDiagnosticRecord(item) || isProductivityTestRecord(item)
+const isTreeContextMenuNode = (item) => item?.type === NODAL_RECORD || isInventoryResultNode(item) || isTypicalCurveResultNode(item) || isLossRecord(item) || isTheoreticalRecord(item) || isPvtRecord(item) || isDiagnosticRecord(item) || isProductivityTestRecord(item)
 
 const treeContextMenuLabel = computed(() => {
+  if (treeContextMenu.value.node?.type === NODAL_RECORD) return '删除节点分析方案'
   if (isProductivityTestRecord(treeContextMenu.value.node)) return '删除产能试井记录'
   if (isDiagnosticRecord(treeContextMenu.value.node)) return '删除诊断曲线记录'
   if (isPvtRecord(treeContextMenu.value.node)) return '删除PVT记录'
@@ -4065,6 +4069,23 @@ const handleDeleteContextNode = async () => {
 
   if (!node) return
 
+  if (node.type === NODAL_RECORD) {
+    try {
+      await ElMessageBox.confirm(`删除“${node.label}”及其参数和计算结果？此操作不可撤销。`, '删除节点分析方案', {
+        type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消'
+      })
+      const parent = await deleteNodalRecord(treeData.value, node, nodalApi.delete)
+      if (String(activeNodeId.value) === String(node.id)) { activeNodeId.value = parent?.id || ''; activeNode.value = null }
+      if (currentView.value === NODAL_TYPE && openedNodalRecord.value === node.id) {
+        currentView.value = null; currentViewNode.value = null; openedNodalRecord.value = null
+      }
+      ElMessage.success('节点分析方案已删除')
+    } catch (error) {
+      if (error !== 'cancel' && error !== 'close') ElMessage.error(error?.msg || error?.response?.data?.msg || error.message || '删除节点分析方案失败')
+    }
+    return
+  }
+
   if (isProductivityTestRecord(node)) {
     try {
       await ElMessageBox.confirm(`删除“${node.label}”及其输入、二项式/指数式计算结果和IPR曲线？此操作不可撤销。`, '删除产能试井记录', {
@@ -4289,9 +4310,27 @@ const handleDeleteContextNode = async () => {
   }
 }
 
+const nodalDraftSequence = ref(0)
+const openedNodalRecord = ref(null)
+const handleNodalRecord = ({ scope, record }) => {
+  const node = upsertNodalRecord(treeData.value, scope, record)
+  if (node) { activeNodeId.value = node.id; openedNodalRecord.value = node.id }
+}
+const handleNodalHistory = ({ scope, records }) => {
+  const parent = applyNodalRecords(treeData.value, scope, records)
+  if (parent && String(activeNodeId.value).startsWith(`${parent.id}-`) && !parent.children.some(n => n.id === activeNodeId.value)) activeNodeId.value = parent.id
+}
 const handleSelect = async (node) => { // 点击左侧树节点
   closeTreeContextMenu()
   if (!node || node.disabled) return
+  if (node.type === NODAL_TYPE) return
+  if (node.type === NODAL_RECORD) {
+    openedNodalRecord.value = node.id
+    activeNodeId.value = node.id
+    currentView.value = NODAL_TYPE
+    currentViewNode.value = node
+    return
+  }
   if (isSoftwareIntegration.value) {
     softwareIntegrationActiveNodeId.value = node.id || ''
     return
@@ -4498,7 +4537,7 @@ const handleSelect = async (node) => { // 点击左侧树节点
     return
   }
 
-  if (['wellbore-structure', 'wellbore-temperature', 'wellbore-pressure', 'wellbore-boundary', 'wellbore-liquid-loading', 'wellbore-hydrate', 'wellbore-erosion'].includes(node.type)) {
+  if (['wellbore-structure', 'wellbore-temperature', 'wellbore-pressure', 'wellbore-boundary', 'wellbore-liquid-loading', 'wellbore-hydrate', 'wellbore-erosion', 'allocation-nodal'].includes(node.type)) {
     currentView.value = node.type
     currentViewNode.value = node
     return
@@ -4603,6 +4642,24 @@ const handleCommand = async ({ group, name, parent, commandId, wellName: command
     return // 库的物质平衡/图版法等同名菜单，不能落入下方单井计算分支。
   }
   if (route.query.scope === 'reservoir') await router.replace({ name: 'IprInterface' })
+  const nodalTarget = nodalCommandTarget({ group, name, wellName: commandWellName }, resolveWorkspaceTargetWellName(''))
+  if (nodalTarget) {
+    if (!nodalTarget.wellName) { ElMessage.warning('请先在左侧选择一口井'); return }
+    const well = ensureWell(nodalTarget.wellName)
+    if (!well) { ElMessage.warning('当前井目录尚未加载，请稍后重试'); return }
+    ensureNodalNavigation([well])
+    const groupNode = well.children.find(n => n.type === 'production-allocation')
+    well.expanded = true; groupNode.expanded = true
+    const parent = groupNode.children.find(n => n.type === NODAL_TYPE)
+    parent.expanded = true
+    activeNodeId.value = parent.id
+    currentView.value = NODAL_TYPE
+    currentViewNode.value = { ...parent, nodalId: null, draftId: ++nodalDraftSequence.value }
+    openedNodalRecord.value = null
+    try { await loadNodalRecords(treeData.value, { projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName: nodalTarget.wellName }, nodalApi.list) }
+    catch (e) { ElMessage.warning(e?.msg || e?.message || '节点分析历史加载失败') }
+    return
+  }
   const erosionTarget = resolveErosionCommandTarget({ group, name, wellName: commandWellName }, resolveWorkspaceTargetWellName(''))
   if (erosionTarget) {
     if (!erosionTarget.wellName) {
@@ -4840,6 +4897,10 @@ const handleNodeExpand = async node => {
       const scope = { projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName }
       const response = await productivityCoefficientApi.list(scope)
       applyCoefficientRecords(treeData.value, scope, response?.data ?? response ?? [])
+      return
+    }
+    if (node.type === NODAL_TYPE) {
+      await loadNodalRecords(treeData.value, { projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName }, nodalApi.list)
       return
     }
     // 展开模块目录时只读取该井、该模块的记录；刷新页面不会批量请求。
@@ -5098,6 +5159,7 @@ onBeforeUnmount(() => {
         <BoundaryConditionsContent v-if="currentView === 'wellbore-boundary'" :key="currentViewNode?.id" :node="currentViewNode" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
         <LiquidLoadingContent v-if="currentView === 'wellbore-liquid-loading'" :key="currentViewNode?.id" :node="currentViewNode" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
         <HydratePredictionContent v-if="currentView === 'wellbore-hydrate'" :key="currentViewNode?.id" :node="currentViewNode" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
+        <NodalAnalysis v-if="currentView === 'allocation-nodal'" :key="`${PROJECT_ID}-${GAS_RESERVOIR_ID}-${currentViewNode?.wellName}-${currentViewNode?.nodalId || 'new'}-${currentViewNode?.draftId || 0}`" :node="currentViewNode" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" @saved="handleNodalRecord" @restored="handleNodalRecord" @history-updated="handleNodalHistory" />
         <ErosionContent v-if="currentView === 'wellbore-erosion'" :key="currentViewNode?.id" :node="currentViewNode" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
         <WellboreStructureContent v-if="currentView === 'wellbore-structure'"
           :key="currentViewNode?.id" :well-name="currentViewNode?.wellName"

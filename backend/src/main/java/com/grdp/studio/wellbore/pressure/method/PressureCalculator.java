@@ -15,6 +15,9 @@ import java.util.function.BiFunction;
 public final class PressureCalculator {
     private static final int MAX_SEGMENT_COUNT = 10_000;
     private static final int MAX_ITERATION_COUNT = 10;
+    // Nodal capability searches reject unconverged profiles. The legacy page's ten
+    // relaxed iterations can stop early even for well-behaved high-rate segments.
+    private static final int NODAL_ITERATION_COUNT = 60;
     private static final double PRESSURE_TOLERANCE_MPA = 0.0001;
     private static final double GAS_LIQUID_SURFACE_TENSION = 0.03;
 
@@ -63,6 +66,18 @@ public final class PressureCalculator {
     public static Result calculate(PressureCalculateRequest request) {
         return calculate(request, (pressure, temperature) -> PressureCorrelations.originalProperties(
                 pressure, temperature + 273.15, request.gammaG, request.rhoL, request.muL));
+    }
+
+    /** Nodal root solving needs the integration values before presentation rounding. */
+    public static Result calculateUnrounded(PressureCalculateRequest request) {
+        validateDirectInput(request);
+        List<Double> depths = buildDepths(request.depth, request.step);
+        boolean fromWellhead = "wellhead".equals(request.boundaryPosition);
+        List<Double> temperatures = depths.stream().map(depth -> fromWellhead
+                ? request.tWh + request.tGrad / 100 * depth
+                : request.tWh - request.tGrad / 100 * (request.depth - depth)).toList();
+        return calculate(request, depths, temperatures, (pressure, temperature) -> PressureCorrelations.originalProperties(
+                pressure, temperature + 273.15, request.gammaG, request.rhoL, request.muL), false);
     }
 
     public static Result calculate(PressureCalculateRequest request, BiFunction<Double, Double, Properties> properties) {
@@ -151,6 +166,11 @@ public final class PressureCalculator {
             List<Double> temperatures,
             BiFunction<Double, Double, Properties> properties
     ) {
+        return calculate(request, depths, temperatures, properties, true);
+    }
+
+    private static Result calculate(PressureCalculateRequest request, List<Double> depths,
+            List<Double> temperatures, BiFunction<Double, Double, Properties> properties, boolean rounded) {
         validate(request, depths, temperatures);
         if (properties == null) {
             fail("缺少井筒流体物性计算方法");
@@ -160,7 +180,7 @@ public final class PressureCalculator {
         double diameter = request.idTubing / 1000;
         double area = Math.PI * diameter * diameter / 4;
         boolean injection = "injection".equals(request.operationMode);
-        int iterationLimit = injection ? SingleGasInjectionMethod.ITERATION_LIMIT : MAX_ITERATION_COUNT;
+        int iterationLimit = injection ? SingleGasInjectionMethod.ITERATION_LIMIT : rounded ? MAX_ITERATION_COUNT : NODAL_ITERATION_COUNT;
         double tolerance = injection ? SingleGasInjectionMethod.TOLERANCE_MPA : PRESSURE_TOLERANCE_MPA;
 
         for (String model : new LinkedHashSet<>(request.models)) {
@@ -170,7 +190,7 @@ public final class PressureCalculator {
             List<Point> points = new ArrayList<>(Collections.nCopies(depths.size(), null));
             points.set(boundaryIndex, new Point(
                     round(depths.get(boundaryIndex), 1),
-                    round(temperatures.get(boundaryIndex), 2),
+                    rounded ? round(temperatures.get(boundaryIndex), 2) : temperatures.get(boundaryIndex),
                     request.boundaryPressure,
                     null, null, null, null, null, null, null, null,
                     0,
@@ -241,8 +261,8 @@ public final class PressureCalculator {
                 }
                 points.set(index, new Point(
                         round(depths.get(index), 1),
-                        round(temperatures.get(index), 2),
-                        round(pressureGuess, 4),
+                        rounded ? round(temperatures.get(index), 2) : temperatures.get(index),
+                        rounded ? round(pressureGuess, 4) : pressureGuess,
                         lastAveragePressure,
                         averageTemperature,
                         lastProperties.gasVolumeFactor(),
