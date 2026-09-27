@@ -127,23 +127,27 @@ public class SoftwareIntegrationValidationDispatcher {
             validateVersion(versionId);
             if (durable) {
                 SoftwareIntegrationModelVersionEntity version = versionMapper.selectById(versionId);
-                SoftwareIntegrationValidationJobStore.Outcome outcome = validationJobStore.complete(
-                        versionId, version == null ? "MISSING" : version.getStatus(),
-                        version == null ? "模型版本不存在" : version.getValidationMessage(),
-                        properties.getValidationMaxAttempts(), properties.getValidationRetryBackoff());
-                if (outcome == SoftwareIntegrationValidationJobStore.Outcome.RETRY_SCHEDULED && version != null) {
+                String status = version == null ? "MISSING" : version.getStatus();
+                String message = version == null ? "模型版本不存在" : version.getValidationMessage();
+                // 重试额度充足时先把版本状态置回 VALIDATING，再完成队列任务，
+                // 避免观察者看到 job=QUEUED 而版本仍为 ENVIRONMENT_ERROR 的中间态。
+                if (version != null && "ENVIRONMENT_ERROR".equals(status)
+                        && validationJobStore.willRetry(versionId, properties.getValidationMaxAttempts())) {
                     update(version, "VALIDATING", "软件集成环境暂时不可用，正在自动重试", null);
                 }
+                validationJobStore.complete(
+                        versionId, status, message,
+                        properties.getValidationMaxAttempts(), properties.getValidationRetryBackoff());
             }
         } catch (RuntimeException exception) {
             if (durable) {
-                SoftwareIntegrationValidationJobStore.Outcome outcome = validationJobStore.complete(
+                SoftwareIntegrationModelVersionEntity version = versionMapper.selectById(versionId);
+                if (version != null && validationJobStore.willRetry(versionId, properties.getValidationMaxAttempts())) {
+                    update(version, "VALIDATING", "软件集成环境暂时不可用，正在自动重试", null);
+                }
+                validationJobStore.complete(
                         versionId, "ENVIRONMENT_ERROR", "验证任务执行异常",
                         properties.getValidationMaxAttempts(), properties.getValidationRetryBackoff());
-                if (outcome == SoftwareIntegrationValidationJobStore.Outcome.RETRY_SCHEDULED) {
-                    SoftwareIntegrationModelVersionEntity version = versionMapper.selectById(versionId);
-                    if (version != null) update(version, "VALIDATING", "软件集成环境暂时不可用，正在自动重试", null);
-                }
             } else {
                 throw exception;
             }

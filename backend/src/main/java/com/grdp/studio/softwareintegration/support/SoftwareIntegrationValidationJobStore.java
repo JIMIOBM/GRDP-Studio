@@ -108,6 +108,14 @@ public class SoftwareIntegrationValidationJobStore {
         return claims;
     }
 
+    /** True when the claimed attempt count still permits another retry; mirrors complete's cutoff. */
+    public boolean willRetry(long versionId, int maxAttempts) {
+        Integer attempts = jdbcTemplate.queryForObject(
+                "SELECT attempt_count FROM software_integration_validation_job WHERE version_id = ?",
+                Integer.class, versionId);
+        return attempts != null && attempts < maxAttempts;
+    }
+
     public Outcome complete(long versionId, String versionStatus, String message,
                             int maxAttempts, Duration retryBackoff) {
         LocalDateTime now = LocalDateTime.now();
