@@ -36,6 +36,7 @@ import PressureConversion from '@/views/WellboreCapacity/PressureConversion.vue'
 import BoundaryConditionsContent from '@/views/WellboreCapacity/BoundaryConditionsContent.vue'
 import LiquidLoadingContent from '@/views/WellboreCapacity/LiquidLoadingContent.vue'
 import HydratePredictionContent from '@/views/WellboreCapacity/HydratePredictionContent.vue'
+import SandProductionContent from '@/views/WellboreCapacity/SandProductionContent.vue'
 import SingleWellProductivityInterface from '@/views/SingleWellProductivityInterface.vue'
 import PipelineCapacityContent from '@/views/PipelineCapacity/PipelineCapacityContent.vue'
 import { ensurePipelineNavigation, findPipelinePageNode, pipelinePageForCommand, resolvePipelinePage } from '@/utils/pipelineNavigation'
@@ -4372,7 +4373,7 @@ const handleSelect = async (node) => { // 点击左侧树节点
     return
   }
 
-  if (['wellbore-structure', 'wellbore-temperature', 'wellbore-pressure', 'wellbore-boundary', 'wellbore-liquid-loading', 'wellbore-hydrate'].includes(node.type)) {
+  if (['wellbore-structure', 'wellbore-temperature', 'wellbore-pressure', 'wellbore-boundary', 'wellbore-liquid-loading', 'wellbore-hydrate', 'wellbore-sand'].includes(node.type)) {
     currentView.value = node.type
     currentViewNode.value = node
     return
@@ -4532,7 +4533,7 @@ const handleCommand = async ({ group, name, parent, wellName: commandWellName })
     return
   }
 
-  if (group === '井筒能力' && ['井身结构', '温度模型', '折算方法', '边界条件', '井筒积液', '水合物'].includes(name)) {
+  if (group === '井筒能力' && ['井身结构', '温度模型', '折算方法', '边界条件', '井筒积液', '水合物', '出砂'].includes(name)) {
     const activeWellName = targetWellName
     if (!activeWellName) {
       ElMessage.warning('请先在左侧选择一口井')
@@ -4543,7 +4544,8 @@ const handleCommand = async ({ group, name, parent, wellName: commandWellName })
       : name === '折算方法' ? 'wellbore-pressure'
         : name === '边界条件' ? 'wellbore-boundary'
           : name === '井筒积液' ? 'wellbore-liquid-loading'
-            : name === '水合物' ? 'wellbore-hydrate' : 'wellbore-structure'
+            : name === '水合物' ? 'wellbore-hydrate'
+              : name === '出砂' ? 'wellbore-sand' : 'wellbore-structure'
     openWellboreStructure(activeWellName, moduleType)
     return
   }
@@ -4922,6 +4924,7 @@ onBeforeUnmount(() => {
         <BoundaryConditionsContent v-if="currentView === 'wellbore-boundary'" :key="currentViewNode?.id" :node="currentViewNode" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
         <LiquidLoadingContent v-if="currentView === 'wellbore-liquid-loading'" :key="currentViewNode?.id" :node="currentViewNode" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
         <HydratePredictionContent v-if="currentView === 'wellbore-hydrate'" :key="currentViewNode?.id" :node="currentViewNode" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
+        <SandProductionContent v-if="currentView === 'wellbore-sand'" :key="currentViewNode?.id" :node="currentViewNode" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
         <WellboreStructureContent v-if="currentView === 'wellbore-structure'"
           :key="currentViewNode?.id" :well-name="currentViewNode?.wellName"
           :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />

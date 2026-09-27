@@ -5,6 +5,7 @@ const wellborePages = [
   { type: 'wellbore-boundary', label: '边界条件' },
   { type: 'wellbore-liquid-loading', label: '井筒积液' },
   { type: 'wellbore-hydrate', label: '水合物' },
+  { type: 'wellbore-sand', label: '出砂' },
   { type: 'wellbore-pressure-group', label: '压力折算' }
 ]
 const pressurePages = [
