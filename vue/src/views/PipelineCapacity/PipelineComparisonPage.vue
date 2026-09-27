@@ -10,7 +10,7 @@ const s = computed(() => props.state), nodeId = ref(''), metric = ref('pressure'
 const rows = computed(() => s.value.batchStale ? [] : s.value.comparisonRows || [])
 const nodes = computed(() => [...new Map(rows.value.map(row => [row.nodeId, {id:row.nodeId,name:row.name}])).values()])
 const selectedNode = computed(() => nodes.value.find(node => node.id === nodeId.value))
-const options = [{key:'pressure',label:'压力对比',unit:'MPa（绝压）'}, {key:'temperature',label:'温度对比',unit:'℃'}, {key:'flow',label:'流量对比',unit:'10⁴m³/d'}]
+const options = [{key:'pressure',label:'压力对比',unit:'MPa'}, {key:'temperature',label:'温度对比',unit:'℃'}, {key:'flow',label:'流量对比',unit:'10⁴m³/d'}]
 const selectedChart = computed(() => options.find(option => option.key === metric.value))
 const series = computed(() => comparisonChartSeries(rows.value, nodeId.value, metric.value))
 const pagedRows = computed(() => rows.value.slice((dataPage.value - 1) * pageSize, dataPage.value * pageSize))

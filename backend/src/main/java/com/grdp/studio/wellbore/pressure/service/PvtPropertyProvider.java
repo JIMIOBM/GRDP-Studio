@@ -16,6 +16,17 @@ public class PvtPropertyProvider {
     public Session open(PressureCalculateRequest request, String token, String cookie, String processEnv) {
         var source = pvt.selected(request.pvtId, request.projectId, request.gasReservoirId, request.wellName);
         pvt.validateSnapshot(source, request.pvtId, request.pvtSnapshot);
+        if ("injection".equals(request.operationMode)) {
+            // 单相注气沿用本地DAK/LGE，不创建含水会话，也不要求地层水输入。
+            request.pvtId = source.pvtId();
+            request.pvtSnapshot = source.snapshot();
+            request.gammaG = source.specificGravity();
+            request.rhoL = 0;
+            request.muL = 0;
+            return new Session(request.gammaG, (pressure, temperature) ->
+                    com.grdp.studio.wellbore.pressure.method.PressureCorrelations.originalProperties(
+                            pressure, temperature + 273.15, request.gammaG, 0, 0));
+        }
         var session = pvt.open(source, request.projectId, token, cookie, processEnv, true);
         var boundaryWater = session.water().apply(request.boundaryPressure, request.tWh);
         request.pvtId = source.pvtId();

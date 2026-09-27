@@ -19,6 +19,8 @@ import MaterialBalance from './InventoryEvaluation/MaterialBalance.vue'
 import WaterInvasion from './InventoryEvaluation/WaterInvasion.vue'
 import InterwellComparison from './WellboreConversion/InterwellComparison.vue'
 import GasReservoirDiagnosticCurveContent from './GasReservoirDiagnosticCurveContent.vue'
+import StorageNetworkTopology from './SurfaceNetwork/StorageNetworkTopology.vue'
+import StorageNetworkCorrelation from './SurfaceNetwork/StorageNetworkCorrelation.vue'
 
 const lossPages = { '微观损耗': MicroscopicLoss, '逸散性损耗': EscapeLoss, '井筒损耗': WellboreLoss, '地面损耗': SurfaceLoss }
 const comparisonPages = { '多周期': MultiPeriodComparison, '多方法': MultiMethodComparison, '注采对比': InjectionProductionComparison }
@@ -63,6 +65,12 @@ const isDiagnosticCurve = computed(() =>
 // 井筒折算：本次只接入「井间对比」，其他菜单项继续走占位分支。
 const isWellboreComparison = computed(() =>
   props.command?.group === '井筒折算' && props.command?.name === '井间对比'
+)
+const isStorageNetworkTopology = computed(() =>
+  props.command?.group === '地面管网' && props.command?.name === '管网拓扑结构'
+)
+const isStorageNetworkCorrelation = computed(() =>
+  props.command?.group === '地面管网' && props.command?.name === '相关性分析'
 )
 const lossComponent = computed(() => props.command?.name ? lossPages[props.command.name] : null)
 const lossKey = computed(() => `${props.reservoir?.projectId}-${props.reservoir?.gasReservoirId}-${props.reservoir?.storageId}-${props.command?.name}`)
@@ -117,6 +125,12 @@ const lossKey = computed(() => `${props.reservoir?.projectId}-${props.reservoir?
   <CapacityDesign v-else-if="isCapacityDesign"
     :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}`"
     :reservoir="reservoir" :command="command" />
+  <StorageNetworkTopology v-else-if="isStorageNetworkTopology"
+    :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-surface-network-topology`"
+    :reservoir="reservoir" />
+  <StorageNetworkCorrelation v-else-if="isStorageNetworkCorrelation"
+    :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-surface-network-correlation`"
+    :reservoir="reservoir" />
   <!-- 其他尚未接入的库级功能仍保留占位入口。 -->
   <section v-else class="reservoir-workspace" :aria-label="title">
     <div class="workspace-tabs">

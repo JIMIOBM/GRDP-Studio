@@ -6,6 +6,7 @@ import { wellborePressureApi } from '@/api/wellborePressure'
 import request from '@/utils/request'
 import { selectedPvtProperties } from './pvtSource'
 import { loadTemperatureSources } from '@/api/temperatureSources'
+import { pressureMethodName, pressurePayload, isInjectionRecord, injectionValues } from '@/utils/pressureOperation'
 import {
   inferWellheadChannel,
   normalizeProductionDate,
@@ -14,7 +15,6 @@ import {
 } from '@/utils/temperatureSources'
 import {
   applyWellboreBoundaryDefaults,
-  boundaryValuesForPressure,
   getWellboreBoundaryState,
   setWellboreBoundaryValue,
   wellboreBoundaryLabels
@@ -48,24 +48,17 @@ const defaults = {
 }
 
 const form = reactive({ ...defaults, models: [...defaults.models] })
+const isInjection = computed(() => form.operationMode === 'injection')
+let productionModels = [...defaults.models]
 const result = ref(null)
 const calculatedInput = ref(null)
-const payload = () => ({
-  ...context(),
-  ...form,
-  ...boundaryValuesForPressure(boundary),
-  models: [...form.models],
-  pvtId: boundary.values.pvtId,
-  productionRecordKey: boundary.values.productionRecordKey,
-  productionDate: boundary.values.productionDate,
-  productionChannel: boundary.values.boundaryPosition === 'wellhead'
-    ? boundary.values.wellheadChannel
-    : 'manual-bottomhole'
-})
+const payload = () => pressurePayload(form, boundary.values, context())
 const error = ref('')
 const sourceLoading = ref(false)
 const pvtLoading = ref(false)
 const availableProductionRecords = ref([])
+const operationRecords = computed(() => availableProductionRecords.value.filter(item =>
+  isInjection.value ? isInjectionRecord(item.row) : !isInjectionRecord(item.row)))
 const productionFields = ref([])
 const availablePvtRecords = ref([])
 const busy = ref(false)
@@ -75,10 +68,10 @@ const legendEl = ref(null)
 const legendPosition = ref(null)
 const draggingLegend = ref(false)
 const legendItems = computed(() => Object.keys(result.value?.methods || {}).map((code, index) => ({
-  name: code === 'HB' ? 'Hagedorn & Brown' : 'Mukherjee & Brill',
+  name: pressureMethodName(code),
   color: ['#5470c6', '#91cc75'][index % 2]
 })))
-const legendSelected = reactive({ 'Hagedorn & Brown': true, 'Mukherjee & Brill': true })
+const legendSelected = reactive({ 'Hagedorn & Brown': true, 'Mukherjee & Brill': true, '单相气体': true })
 const legendStyle = computed(() => legendPosition.value
   ? { left: legendPosition.value.x + 'px', top: legendPosition.value.y + 'px' }
   : { right: '38px', top: '52px' })
@@ -138,7 +131,11 @@ const context = () => ({
   gasReservoirId: Number(props.gasReservoirId),
   wellName: String(props.node?.wellName ?? '').trim()
 })
-const boundary = getWellboreBoundaryState(context())
+// 采气继续与温度页共享，注气保存独立边界，切换时不覆盖采气编辑值。
+const boundary = reactive({
+  get values () { return getWellboreBoundaryState({ ...context(), operationMode: form.operationMode }).values },
+  get modified () { return getWellboreBoundaryState({ ...context(), operationMode: form.operationMode }).modified }
+})
 const boundaryLabels = computed(() => wellboreBoundaryLabels(boundary.values.boundaryPosition))
 const sharedField = key => ({
   boundaryPressure: 'pressure',
@@ -146,18 +143,19 @@ const sharedField = key => ({
   qGas: 'qGas',
   qLiq: 'qLiq'
 })[key]
-const fieldValue = key => sharedField(key) ? boundary.values[sharedField(key)] : form[key]
+const fieldValue = key => isInjection.value && key === 'qLiq' ? 0
+  : sharedField(key) ? boundary.values[sharedField(key)] : form[key]
 const setFieldValue = (key, value) => {
   const field = sharedField(key)
   if (field) setWellboreBoundaryValue(boundary, field, value)
   else form[key] = value
 }
-const selectedProduction = computed(() => availableProductionRecords.value.find(
+const selectedProduction = computed(() => operationRecords.value.find(
   item => item.key === boundary.values.productionRecordKey
 ))
 // 日历中仅开放当前井实际存在注采记录的日期。
 const availableProductionDates = computed(() => new Set(
-  availableProductionRecords.value.map(item => item.date)
+  operationRecords.value.map(item => item.date)
 ))
 const channelLabel = computed(() => boundary.values.wellheadChannel === 'casing' ? '套管' : '油管')
 // 下拉选项直接对应当前井 project_well_pvt 主记录，不隐藏参数尚不完整的记录。
@@ -179,7 +177,7 @@ const outputPoint = method => resultBoundaryPosition.value === 'wellhead'
 function applySelectedProduction (explicit = false, selected = selectedProduction.value) {
   if (!selected) return
   const position = boundary.values.boundaryPosition
-  const values = productionValues(
+  const values = (isInjection.value ? injectionValues : productionValues)(
     selected.row,
     position,
     productionFields.value,
@@ -203,7 +201,7 @@ function applySelectedProduction (explicit = false, selected = selectedProductio
 }
 
 function selectProductionRecord (key) {
-  const selected = availableProductionRecords.value.find(item => item.key === key)
+  const selected = operationRecords.value.find(item => item.key === key)
   if (!selected) return
   setWellboreBoundaryValue(boundary, 'productionRecordKey', selected.key)
   setWellboreBoundaryValue(boundary, 'productionDate', selected.date)
@@ -212,7 +210,7 @@ function selectProductionRecord (key) {
 
 function selectProductionDate (value) {
   const date = normalizeProductionDate(value)
-  const selected = availableProductionRecords.value.find(item => item.date === date)
+  const selected = operationRecords.value.find(item => item.date === date)
   if (selected) selectProductionRecord(selected.key)
 }
 
@@ -237,7 +235,8 @@ async function selectPvt (pvtId) {
       context(),
       numericPvtId,
       boundary.values.pressure,
-      boundary.values.temperature
+      boundary.values.temperature,
+      isInjection.value
     )
     if (disposed || sequence !== pvtLoadSequence || Number(boundary.values.pvtId) !== numericPvtId) return false
     Object.assign(form, properties)
@@ -255,6 +254,24 @@ async function selectPvt (pvtId) {
 function selectWellheadChannel (channel) {
   setWellboreBoundaryValue(boundary, 'wellheadChannel', channel)
   if (boundary.values.boundaryPosition === 'wellhead') applySelectedProduction(true)
+}
+
+async function selectOperationMode (mode) {
+  if (mode === form.operationMode) return
+  const previousPvt = boundary.values.pvtId
+  if (!isInjection.value) productionModels = [...form.models]
+  form.operationMode = mode
+  form.models = mode === 'injection' ? ['GAS'] : [...productionModels]
+  error.value = ''
+  result.value = null
+  calculatedInput.value = null
+  chart?.clear()
+  if (!boundary.values.pvtId) boundary.values.pvtId = previousPvt
+  if (mode === 'injection') boundary.values.qLiq = 0
+  if (!boundary.values.productionRecordKey && operationRecords.value.length) {
+    selectProductionRecord(operationRecords.value[0].key)
+  }
+  if (boundary.values.pvtId) await selectPvt(boundary.values.pvtId)
 }
 
 function selectBoundaryPosition (position) {
@@ -307,7 +324,8 @@ const normalizeStoredResult = detail => {
     record: stored.record,
     methods,
     depth: Object.values(methods)[0]?.profile.map(point => point.depth) || [],
-    boundaryPosition: stored.record.boundaryPosition
+    boundaryPosition: stored.record.boundaryPosition,
+    operationMode: stored.record.operationMode || 'production'
   }
 }
 
@@ -317,7 +335,7 @@ async function loadLatestResult (currentContext) {
     currentContext.gasReservoirId,
     currentContext.wellName
   )) || []
-  const latest = history[0]
+  const latest = history.find(item => (item.operationMode || 'production') === form.operationMode)
   if (!latest?.id) return
 
   result.value = normalizeStoredResult(await wellborePressureApi.detail(
@@ -345,7 +363,7 @@ const parameterGroups = computed(() => [
     ]
   },
   {
-    title: '生产数据',
+    title: isInjection.value ? '注气数据' : '生产数据',
     fields: [
       [
         'boundaryPressure',
@@ -359,13 +377,15 @@ const parameterGroups = computed(() => [
         -273.14,
         1000
       ],
-      ['qGas', '日产气量 (×10⁴ m³/d)', 0, 1000000],
+      ['qGas', isInjection.value ? '日注气量 (×10⁴ m³/d)' : '日产气量 (×10⁴ m³/d)', 0, 1000000],
       ['qLiq', '日产水量 (m³/d)', 0, 1000000]
     ]
   }
 ])
 
 async function refresh () {
+  form.operationMode = 'production'
+  productionModels = [...defaults.models]
   const sequence = ++loadSequence
   const currentContext = context()
   if (!currentContext.wellName) {
@@ -403,10 +423,10 @@ async function refresh () {
       // 首次进入时依据“其他数据”中的生产通道给出默认值，用户手动选择后不再覆盖。
       boundary.values.wellheadChannel = inferWellheadChannel(source.flowPath)
     }
-    const selected = availableProductionRecords.value.find(
+    const selected = operationRecords.value.find(
       item => item.key === boundary.values.productionRecordKey
         || item.date === boundary.values.productionDate
-    ) || availableProductionRecords.value[0]
+    ) || operationRecords.value[0]
     if (selected) {
       boundary.values.productionRecordKey = selected.key
       boundary.values.productionDate = selected.date
@@ -531,7 +551,7 @@ async function draw () {
       splitLine: { lineStyle: { color: '#dce5f2' } }
     },
     series: Object.entries(current.methods || {}).map(([code, method]) => ({
-      name: code === 'HB' ? 'Hagedorn & Brown' : 'Mukherjee & Brill',
+      name: pressureMethodName(code),
       type: 'line',
       showSymbol: false,
       data: (method.profile || []).map(point => [point.pressure, point.depth])
@@ -561,14 +581,15 @@ async function calculate () {
     return
   }
   if (!validBoundaryNumber(boundary.values.qGas)
-    || !validBoundaryNumber(boundary.values.qLiq)
-    || Number(boundary.values.qGas) + Number(boundary.values.qLiq) <= 0) {
-    error.value = '所选生产记录缺少有效的日产气量或日产水量'
+    || (isInjection.value ? Number(boundary.values.qGas) <= 0
+      : !validBoundaryNumber(boundary.values.qLiq)
+        || Number(boundary.values.qGas) + Number(boundary.values.qLiq) <= 0)) {
+    error.value = isInjection.value ? '请输入大于0的日注气量' : '所选生产记录缺少有效的日产气量或日产水量'
     return
   }
   // 以当前边界温压重新评价所选PVT，确保参数栏与本次计算输入完全一致。
   if (!await selectPvt(boundary.values.pvtId)) return
-  if (![form.gammaG, form.rhoL, form.muL].every(validBoundaryNumber)) {
+  if (!(isInjection.value ? [form.gammaG] : [form.gammaG, form.rhoL, form.muL]).every(validBoundaryNumber)) {
     error.value = '所选PVT缺少可用的气体比重、地层水密度或地层水黏度'
     return
   }
@@ -645,8 +666,13 @@ watch(
     if (current && current !== previous) refresh()
   }
 )
-watch(form, () => { calculatedInput.value = null }, { deep: true })
-watch(() => ({ ...boundary.values }), () => { calculatedInput.value = null }, { deep: true })
+function invalidateResult () {
+  calculatedInput.value = null
+  result.value = null
+  chart?.clear()
+}
+watch(form, invalidateResult, { deep: true })
+watch(() => ({ ...boundary.values }), invalidateResult, { deep: true })
 
 onMounted(() => {
   refresh()
@@ -684,11 +710,19 @@ onBeforeUnmount(() => {
       </div>
 
       <div v-show="!paramsCollapsed && activeParamTab === 'input'" class="panel-body">
+        <div class="boundary-selector">
+          <span class="boundary-label">注采工况</span>
+          <el-radio-group :model-value="form.operationMode" :disabled="busy || sourceLoading || pvtLoading" size="small" @update:model-value="selectOperationMode">
+            <el-radio-button value="production">采气</el-radio-button>
+            <el-radio-button value="injection">注气</el-radio-button>
+          </el-radio-group>
+        </div>
         <section class="method-section">
           <div class="section-title">折算方法</div>
-          <el-checkbox-group v-model="form.models" :disabled="busy || sourceLoading">
+          <el-checkbox-group v-model="form.models" :disabled="busy || sourceLoading || isInjection">
             <el-checkbox value="HB">Hagedorn &amp; Brown</el-checkbox>
             <el-checkbox value="MB">Mukherjee &amp; Brill</el-checkbox>
+            <el-checkbox v-if="isInjection" value="GAS">单相气体</el-checkbox>
           </el-checkbox-group>
         </section>
 
@@ -713,9 +747,9 @@ onBeforeUnmount(() => {
               </el-select>
             </div>
           </div>
-          <div v-if="group.title === '生产数据'" class="parameter-grid source-grid">
+          <div v-if="['生产数据', '注气数据'].includes(group.title)" class="parameter-grid source-grid">
             <div class="field">
-              <label for="pressure-production-date">生产日期</label>
+              <label for="pressure-production-date">{{ isInjection ? '注气日期' : '生产日期' }}</label>
               <el-date-picker
                 id="pressure-production-date"
                 v-model="productionDateModel"
@@ -730,7 +764,7 @@ onBeforeUnmount(() => {
               />
             </div>
             <div v-if="boundary.values.boundaryPosition === 'wellhead'" class="field">
-              <label for="pressure-production-channel">井口生产通道</label>
+              <label for="pressure-production-channel">{{ isInjection ? '井口注气通道' : '井口生产通道' }}</label>
               <el-select
                 id="pressure-production-channel"
                 :model-value="boundary.values.wellheadChannel"
@@ -756,7 +790,7 @@ onBeforeUnmount(() => {
                 :min="min"
                 :max="max"
                 :controls="false"
-                :disabled="busy || sourceLoading"
+                :disabled="busy || sourceLoading || (isInjection && ['qLiq', 'rhoL', 'muL'].includes(key))"
                 size="small"
                 @update:model-value="setFieldValue(key, $event)"
               />
@@ -778,7 +812,12 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="boundary-source-tip">
-          <template v-if="boundary.values.boundaryPosition === 'wellhead'">
+          <template v-if="isInjection">
+            单相注气采用边界锚定的线性温度，忽略加速项；液体参数不参与计算。
+            压力请输入绝压，气量标况为20℃、101.325 kPa。
+            <template v-if="!operationRecords.length">当前无明确标识的注气记录，请手动填写注气温压和气量。</template>
+          </template>
+          <template v-else-if="boundary.values.boundaryPosition === 'wellhead'">
             使用 {{ boundary.values.productionDate || '所选日期' }} 的{{ channelLabel }}温压和同日气水量，折算井底压力。
           </template>
           <template v-else>
@@ -816,7 +855,7 @@ onBeforeUnmount(() => {
       <div v-show="!paramsCollapsed && activeParamTab === 'output'" class="panel-body">
         <div v-if="!result" class="section-title">请先计算压力分布</div>
         <section v-for="(method, code) in result?.methods || {}" :key="code" class="parameter-section">
-          <div class="section-title">{{ code === 'HB' ? 'Hagedorn & Brown' : 'Mukherjee & Brill' }}</div>
+          <div class="section-title">{{ pressureMethodName(code) }}</div>
           <div class="field">
             <label>{{ outputPositionLabel }}压力（MPa）</label>
             <el-input :model-value="outputPoint(method)?.pressure?.toFixed(4) ?? '—'" readonly size="small" />
@@ -835,9 +874,11 @@ onBeforeUnmount(() => {
       </div>
 
       <div v-if="result" class="summary">
+        <span>{{ result.operationMode === 'injection' ? '注气' : '采气' }}</span>
         <span v-for="(method, code) in result.methods" :key="code">
           {{ code }}：{{ outputPositionLabel }}
           {{ outputPoint(method)?.pressure?.toFixed(4) }} MPa
+          <template v-if="!method.allSegmentsConverged">（存在未收敛井段，请减小步长重算）</template>
         </span>
       </div>
 

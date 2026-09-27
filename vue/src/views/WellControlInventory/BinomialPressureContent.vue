@@ -5,6 +5,7 @@ import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import dockerRequest, { nodeApi, productivityEvaluationApi } from '@/api/docker'
 import { NODETYPE } from '@/constants/nodeType'
+import { buildIprDisplaySeries } from '@/utils/iprDisplayCurve'
 import {
   backPressurePotentialDifference,
   fitBackPressureBinomial,
@@ -2228,7 +2229,6 @@ const renderIprChart = () => {
   const chartInstance = ensureChart()
   if (!chartInstance) return
   const injection = result.value.operationType === 'injection'
-  const isExponentialResult = result.value.calculationResultType === 'exponential'
   const iprCurves = Array.isArray(result.value.iprCurves) && result.value.iprCurves.length
     ? result.value.iprCurves
     : [{ formationPressure: result.value.formationPressure, points: result.value.iprCurve || [] }]
@@ -2258,10 +2258,7 @@ const renderIprChart = () => {
     type: 'line',
     showSymbol: false,
     symbol: 'none',
-    // 指数式 IPR 已按压力网格密集采样；再次使用贝塞尔平滑会让控制点
-    // 在局部向左回摆，形成不符合物理规律的 S 形折返。保留原始密集
-    // 点连线即可得到平滑且单调的曲线，二项式仍沿用原展示效果。
-    smooth: !isExponentialResult,
+    smooth: false,
     data: (curve.points || []).map(point => [point.flowRate, point.flowingPressure]),
     lineStyle: { width: 1.7, color: iprColors[index % iprColors.length] },
     itemStyle: { color: iprColors[index % iprColors.length] }
@@ -2386,7 +2383,7 @@ const renderIprChart = () => {
       minorTick: { show: true, splitNumber: 5 },
       minorSplitLine: { show: true, lineStyle: { color: '#edf2f8', width: 1 } }
     },
-    series: iprSeries,
+    series: iprSeries.flatMap(buildIprDisplaySeries),
     graphic: [{
       id: 'ipr-legend-panel',
       type: 'group',

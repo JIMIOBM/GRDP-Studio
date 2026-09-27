@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
 import { productivityCoefficientApi } from '@/api/productivityCoefficient'
+import { buildIprDisplaySeries } from '@/utils/iprDisplayCurve'
 import {
   calculateBinomialCoefficientCurve,
   calculateBinomialCoefficientIprFamily,
@@ -257,7 +258,7 @@ const updateChart = () => {
       name: iprSeriesName(item),
       type: isZeroFlowIprPoint(item) ? 'scatter' : 'line',
       data: isZeroFlowIprPoint(item) ? curveToChartData(item.curve).slice(0, 1) : curveToChartData(item.curve),
-      smooth: !isInjection.value,
+      smooth: false,
       showSymbol: isZeroFlowIprPoint(item),
       symbol: isZeroFlowIprPoint(item) ? 'circle' : 'none',
       symbolSize: 10,
@@ -321,7 +322,7 @@ const updateChart = () => {
     ]
 
   const series = iprMode
-    ? exponentialSeries
+    ? exponentialSeries.flatMap(buildIprDisplaySeries)
     : exponential
       ? exponentialSeries
       : [

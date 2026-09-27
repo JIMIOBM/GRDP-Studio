@@ -7,6 +7,7 @@ import { NODETYPE } from '@/constants/nodeType'
 import { pvtStorageApi } from '@/api/pvtStorage'
 import { deletedPvtRecord, matchesPvtScope } from '@/utils/pvtRecordActions'
 import { productivityTestsApi } from '@/api/productivityTests'
+import { buildIprDisplaySeries } from '@/utils/iprDisplayCurve'
 
 const props = defineProps({
   projectId: { type: [Number, String], required: true },
@@ -948,8 +949,6 @@ const renderChart = () => {
     ? result.iprSeries.map(item => {
       const curveFormationPressure = iprFormationPressure(item, formationPressure)
       return { name: `Pr${item.curveNumber}=${compact(curveFormationPressure)} MPa`,
-        // IPR 数据本身已按压力网格密集采样。ECharts 的单调贝塞尔平滑
-        // 会在每个离散点之间生成 S 形过渡，反而呈现不符合物理的波浪。
         type: 'line', smooth: false, showSymbol: false,
         lineStyle: { width: 2 },
         data: iprChartData(item, curveFormationPressure) }
@@ -1016,7 +1015,8 @@ const renderChart = () => {
       name: isIpr ? '井底流压 Pwf (MPa)' : isExponential
         ? `ln(${exponentialAxisExpression})\n${exponentialAxisUnit || ''}`
         : pressureDirectionText(analysisUnit(result.calculationMethod)),
-      nameLocation: 'middle', nameGap: 62, splitNumber: 10 }, series,
+      nameLocation: 'middle', nameGap: 62, splitNumber: 10 },
+    series: isIpr ? series.flatMap(buildIprDisplaySeries) : series,
     graphic: isIpr ? [] : [
       movableAnalysisLegend(legendItems),
       movableFormulaPanel(formulaText)
