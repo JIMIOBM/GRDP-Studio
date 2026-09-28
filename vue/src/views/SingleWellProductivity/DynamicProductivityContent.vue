@@ -40,7 +40,6 @@ const DEFAULT_PVT_TABLE_VALUE = '__default_pvt__'
 const panelWidth = ref(238)
 const paramsCollapsed = ref(false)
 const activeDirection = ref('production')
-const activePanelTab = ref('input')
 const activePressureMethod = ref('pseudoPressure')
 const selectedPvtTable = ref(DEFAULT_PVT_TABLE_VALUE)
 const calculating = ref(false)
@@ -406,7 +405,6 @@ const loadSavedStable = async stableId => {
     const operations = detail.operations || {}
     Object.values(operations).forEach(applySavedOperation)
     activeDirection.value = operations.production ? 'production' : 'injection'
-    activePanelTab.value = 'output'
   } catch (error) {
     if (error?.response?.status === 404) {
       if (requestedWellName === props.wellName && Number(stableId) === Number(props.stableId)) {
@@ -702,7 +700,6 @@ const handleCalculate = async () => {
             }
           }
         }
-        if (current()) activePanelTab.value = 'output'
       } catch (error) {
         if (!current()) return
         initialDirectionErrors[direction] = `${label}：${errorText(error)}`
@@ -755,7 +752,6 @@ const handleInitialCalculation = async () => {
             throw new Error('返回的注采方向或计算结果无效')
           applySavedOperation(operation)
           if (request.operationType === 'production') defaultInput = operation.input
-          activePanelTab.value = 'output'
         } catch (error) {
           if (!current()) return
           const text = `${request.operationType === 'production' ? '采气' : '注气'}：${errorText(error)}`
@@ -784,7 +780,6 @@ const handleInitialCalculation = async () => {
           for (const direction of ['production', 'injection'])
             applyCalculatedDetail(direction, method, JSON.parse(JSON.stringify(loaded.detail)))
           defaultInput = buildStoredInput('production')
-          activePanelTab.value = 'output'
           // Generate all three injection charts now, not only after the tab is selected.
           const series = await prepareInjectionChart(method.key)
           if (current() && !series) failures.push(`注气${method.label}：${injectionCharts[method.key]?.error || '曲线生成失败'}`)
@@ -843,7 +838,6 @@ watch(() => props.resultData, value => {
     if (detail) applyCalculatedDetail('production', method, detail)
   })
   activeDirection.value = 'production'
-  activePanelTab.value = 'output'
 }, { immediate: true })
 
 const numericOrZero = value => Number.isFinite(Number(value)) ? Number(value) : 0
@@ -1104,11 +1098,6 @@ onBeforeUnmount(() => {
       <button v-if="paramsCollapsed" class="panel-collapsed-tab" type="button" @click="paramsCollapsed = false">参数设置</button>
 
       <template v-else>
-        <div class="direction-tabs">
-          <button type="button" :class="{ active: activeDirection === 'production' }" @click="activeDirection = 'production'">采气</button>
-          <button type="button" :class="{ active: activeDirection === 'injection' }" @click="activeDirection = 'injection'">注气</button>
-        </div>
-
         <div class="panel-head">
           <span>参数设置</span>
           <button class="panel-toggle" type="button" title="收起参数设置" @click="paramsCollapsed = true">
@@ -1116,28 +1105,20 @@ onBeforeUnmount(() => {
           </button>
         </div>
 
-        <div v-show="activePanelTab === 'input'" class="panel-body">
+        <div class="panel-body">
+          <div class="sec-label param-section-title">输入参数</div>
+          <fieldset class="direction-options">
+            <legend>注采类型</legend>
+            <div class="direction-choice-list">
+              <label><input v-model="activeDirection" type="radio" :name="`productivity-direction-${storageMode}`" value="production" />采气</label>
+              <label><input v-model="activeDirection" type="radio" :name="`productivity-direction-${storageMode}`" value="injection" />注气</label>
+            </div>
+          </fieldset>
           <div class="field">
             <label>选择PVT表</label>
             <el-select v-model="selectedPvtTable" clearable size="small" placeholder="不选择时使用后端默认值" style="width: 100%">
               <el-option v-for="option in availablePvtOptions" :key="option.value" :label="option.label" :value="option.value" />
             </el-select>
-          </div>
-
-          <div class="sec-label">气体性质</div>
-          <div class="field-grid">
-            <div class="field"><label>天然气类型</label><el-input v-model="pvtFields.gasType" size="small" readonly /></div>
-            <div class="field"><label>天然气比重(dless)</label><el-input v-model="pvtFields.specificGravity" size="small" readonly /></div>
-            <div class="field"><label>H₂S摩尔百分含量(%)</label><el-input v-model="pvtFields.hydrogenSulfide" size="small" readonly /></div>
-            <div class="field"><label>CO₂摩尔百分含量(%)</label><el-input v-model="pvtFields.carbonDioxide" size="small" readonly /></div>
-            <div class="field"><label>N₂摩尔百分含量(%)</label><el-input v-model="pvtFields.nitrogen" size="small" readonly /></div>
-          </div>
-
-          <div class="sec-label">计算方法</div>
-          <div class="field-grid">
-            <div class="field"><label>非烃气体修正方法</label><el-input v-model="pvtFields.correctionMethod" size="small" readonly /></div>
-            <div class="field"><label>天然气偏差系数计算方法</label><el-input v-model="pvtFields.deviationMethod" size="small" readonly /></div>
-            <div class="field"><label>天然气粘度计算方法</label><el-input v-model="pvtFields.viscosityMethod" size="small" readonly /></div>
           </div>
 
           <div class="sec-label">物性数据</div>
@@ -1164,16 +1145,14 @@ onBeforeUnmount(() => {
             <button type="button" class="calculate-button" :disabled="calculating || saving || restoringRecord" @click="handleCalculate">{{ calculating ? '计算中...' : '计算' }}</button>
             <button type="button" class="save-button" :disabled="saving || calculating || restoringRecord" @click="handleSave">{{ saving ? '保存中...' : '保存' }}</button>
           </div>
-        </div>
 
-        <div v-show="activePanelTab === 'output'" class="panel-body">
+          <div class="sec-label param-section-title">输出结果</div>
           <div class="field calculation-method-field">
-            <label>计算方法</label>
+            <label>结果形式</label>
             <div class="calculation-method-options">
               <label v-for="method in pressureMethods" :key="method.key"><input v-model="activePressureMethod" type="radio" :value="method.key" />{{ method.label }}</label>
             </div>
           </div>
-          <div class="sec-label">输出结果</div>
           <div class="field-grid">
             <div class="field"><label>达西渗流项系数A</label><el-input :model-value="result.a" size="small" readonly /></div>
             <div class="field"><label>非达西渗流项系数B</label><el-input :model-value="result.b" size="small" readonly /></div>
@@ -1181,10 +1160,6 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <div class="param-tabs">
-          <button type="button" :class="{ active: activePanelTab === 'input' }" @click="activePanelTab = 'input'">输入</button>
-          <button type="button" :class="{ active: activePanelTab === 'output' }" @click="activePanelTab = 'output'">输出</button>
-        </div>
         <div class="params-resizer" @pointerdown="startResize"></div>
       </template>
     </aside>
@@ -1207,15 +1182,18 @@ onBeforeUnmount(() => {
 .params-panel { position: relative; width: 300px; min-width: 300px; flex: 0 0 300px; min-height: 0; display: flex; flex-direction: column; overflow: hidden; border-right: 1px solid #d7d7d7; background: #fff; }
 .params-panel.collapsed { width: 34px; min-width: 34px; flex-basis: 34px; }
 .panel-collapsed-tab { width: 100%; height: 76px; padding: 8px 0; border: 0; border-bottom: 1px solid #e2e6ea; background: #fff; color: #333; writing-mode: vertical-rl; cursor: pointer; }
-.direction-tabs { height: 44px; padding: 7px 12px 0; display: flex; align-items: flex-start; flex-shrink: 0; box-sizing: border-box; }
-.direction-tabs button { min-width: 94px; height: 30px; padding: 0 12px; border: 1px solid #222; border-right: 0; background: #fff; color: #222; font: inherit; cursor: pointer; }
-.direction-tabs button:last-child { border-right: 1px solid #222; }
-.direction-tabs button.active { background: #f4d000; color: #111; font-weight: 700; }
+.direction-options { min-width: 0; margin: 0 0 12px; padding: 0; border: 0; }
+.direction-options legend { margin-bottom: 6px; padding: 0; color: #333; }
+.direction-choice-list { display: flex; flex-wrap: wrap; gap: 12px; }
+.direction-options label { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; cursor: pointer; }
+.direction-options input { margin: 0; accent-color: #303133; cursor: pointer; }
 .panel-head { height: 34px; padding: 0 12px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; border-bottom: 1px solid #d7d7d7; background: #f2f2f2; box-sizing: border-box; }
 .panel-toggle { width: 20px; height: 20px; padding: 0; border: 0; display: flex; align-items: center; justify-content: center; background: transparent; cursor: pointer; }
 .panel-body { flex: 1; min-height: 0; padding: 10px 12px 16px; overflow-y: auto; }
 .sec-label { height: 22px; margin: 8px 0 7px; display: flex; align-items: center; gap: 8px; font-weight: 500; }
 .sec-label::after { content: ''; height: 1px; flex: 1; background: #999; }
+.param-section-title { margin-top: 18px; font-weight: 700; }
+.param-section-title:first-child { margin-top: 0; }
 .field { margin-bottom: 9px; }
 .field label { display: block; margin-bottom: 3px; color: #555; font-size: 12px; }
 .field-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); column-gap: 24px; }
@@ -1229,10 +1207,6 @@ onBeforeUnmount(() => {
 .calculation-method-options { min-height: 28px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
 .calculation-method-options label { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; cursor: pointer; }
 .calculation-method-options input { width: 13px; height: 13px; margin: 0; accent-color: #333; }
-.param-tabs { height: 30px; display: flex; flex-shrink: 0; border-top: 1px solid #e0e0e0; }
-.param-tabs button { flex: 1; border: 0; border-right: 1px solid #e0e0e0; background: #fff; color: #333; font: inherit; cursor: pointer; }
-.param-tabs button:last-child { border-right: 0; }
-.param-tabs button.active { background: #f4d000; color: #111; font-weight: 600; }
 .params-resizer { position: absolute; z-index: 4; top: 0; right: -3px; width: 6px; height: 100%; cursor: col-resize; }
 
 .result-area { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: #fff; }

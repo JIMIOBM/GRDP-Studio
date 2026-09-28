@@ -10,6 +10,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import * as echarts from 'echarts'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { waterInvasionApi, isWaterInvasionTaskActive, waterInvasionRecordLabel } from '@/api/waterInvasion'
+import InventoryOperationPreview from './InventoryOperationPreview.vue'
 
 const props = defineProps({ // 父组件传进来的数据
   node:           Object,           // 包含 wellName 字段
@@ -81,7 +82,6 @@ const loading        = ref(false)   // 接口加载状态
 const wellData       = ref(null)  //接口返回的谁侵分析详细数据
 const activeChartIdx = ref(0)  // 选中的图表页签下标
 const activeContentTab = ref('chart')
-const activeParamTab = ref('input')  //左侧参数面板输入\输出显示
 const paramsPanelWidth = ref(238)  //参数面板宽度
 const paramsCollapsed = ref(false)  //参数面板是否收起
 const resizingParamsPanel = ref(false)  // 用户是否正在拖拽调整参数面板宽度
@@ -873,10 +873,6 @@ watch([chartTabs, activeChartIdx], ([tabs]) => {
   }
   const tab = activeTab.value
   if (!isProductionTab.value && tab?.hasRows && !tab.hasChart) activeContentTab.value = 'table'
-  if (tab?.hasOutput && !tab.hasChart && !tab.hasRows) activeParamTab.value = 'output'
-  if (!hasOutputResults.value && activeParamTab.value === 'output') {
-    activeParamTab.value = 'input'
-  }
   if ((!hasDataListForActiveTab.value || !tab?.hasRows) && activeContentTab.value === 'table') {
     activeContentTab.value = 'chart'
   }
@@ -930,7 +926,9 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <div v-if="!paramsCollapsed && activeParamTab === 'input'" class="panel-body">
+      <div v-if="!paramsCollapsed" class="panel-body">
+        <div class="sec-label">输入参数</div>
+        <InventoryOperationPreview :context-key="JSON.stringify([projectId, gasReservoirId, node?.wellName, selectedRecordId])" />
         <div class="sec-label">气体性质</div>
         <div class="field-grid">
           <div class="field">
@@ -1054,31 +1052,14 @@ onBeforeUnmount(() => {
           <el-button size="small" @click="downloadProductionTemplate">模版下载</el-button>
           <el-button size="small" @click="activeContentTab = 'production'">查看数据</el-button>
         </div>
-      </div>
-      <div v-else-if="!paramsCollapsed && hasOutputResults" class="panel-body">
-        <div class="sec-label">输出结果</div>
-        <div v-for="field in outputFields" :key="field.label" class="field">
-          <label>{{ field.label }}</label>
-          <el-input size="small" readonly :model-value="getOutputValue(field.keys)" />
-        </div>
-      </div>
 
-      <div v-show="!paramsCollapsed" class="param-tabs">
-        <div
-          class="param-tab"
-          :class="{ active: activeParamTab === 'input' }"
-          @click="activeParamTab = 'input'"
-        >
-          输入
-        </div>
-        <div
-          v-if="hasOutputResults"
-          class="param-tab"
-          :class="{ active: activeParamTab === 'output' }"
-          @click="activeParamTab = 'output'"
-        >
-          输出
-        </div>
+        <template v-if="hasOutputResults">
+          <div class="sec-label">输出结果</div>
+          <div v-for="field in outputFields" :key="field.label" class="field">
+            <label>{{ field.label }}</label>
+            <el-input size="small" readonly :model-value="getOutputValue(field.keys)" />
+          </div>
+        </template>
       </div>
       <div v-if="!paramsCollapsed" class="params-resizer" @mousedown="startParamsPanelResize"></div>
     </div>
@@ -1388,33 +1369,6 @@ onBeforeUnmount(() => {
   padding: 4px 12px 14px;
 }
 
-.param-tabs {
-  display: flex;
-  height: 30px;
-  border-top: 1px solid #e0e0e0;
-  flex-shrink: 0;
-}
-
-.param-tab {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 13px;
-  color: #555;
-  cursor: pointer;
-  border-right: 1px solid #e0e0e0;
-
-  &:last-child {
-    border-right: none;
-  }
-
-  &.active {
-    background-color: #f4d000;
-    color: #1a1a1a;
-    font-weight: 600;
-  }
-}
 
 .sec-label {
   font-weight: 500;

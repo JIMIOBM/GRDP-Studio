@@ -7,6 +7,7 @@ import fissureTransientTypeCurves from '@/constants/typeCurves/fissureTransient.
 import transientTypeCurves from '@/constants/typeCurves/transient.json'
 import { NODETYPE } from '@/constants/nodeType'
 import { ElMessage } from 'element-plus'
+import InventoryOperationPreview from './InventoryOperationPreview.vue'
 
 const props = defineProps({
   node: Object,
@@ -21,7 +22,6 @@ const props = defineProps({
 
 const emit = defineEmits(['recalculate'])
 
-const activePanelTab = ref('input')
 const activeChartTab = ref('chart')
 const chartEl = ref(null)
 const chartAreaEl = ref(null)
@@ -427,7 +427,9 @@ onBeforeUnmount(() => {
             </svg>
           </button>
         </div>
-        <div v-if="activePanelTab === 'input'" class="panel-body">
+        <div class="panel-body">
+          <div class="sec-label">输入参数</div>
+          <InventoryOperationPreview :context-key="JSON.stringify([projectId, gasReservoirId, node?.wellName, node?.id, method])" />
           <template v-for="group in inputGroups" :key="group.title">
             <div class="sec-label">{{ group.title }}</div>
             <div v-if="group.title === '控制参数'" class="control-panel">
@@ -491,8 +493,7 @@ onBeforeUnmount(() => {
           </template>
           <div class="sec-label">生产数据</div>
           <div class="btn-row"><el-button size="small">模板下载</el-button><el-button size="small">导入</el-button></div>
-        </div>
-        <div v-else class="panel-body">
+
           <div class="sec-label">输出结果</div>
           <div class="field-grid">
             <div v-for="field in outputFields" :key="field.label" class="field">
@@ -500,10 +501,6 @@ onBeforeUnmount(() => {
               <el-input size="small" readonly :model-value="field.value" />
             </div>
           </div>
-        </div>
-        <div class="param-tabs">
-          <div class="param-tab" :class="{ active: activePanelTab === 'input' }" @click="activePanelTab = 'input'">输入</div>
-          <div class="param-tab" :class="{ active: activePanelTab === 'output' }" @click="activePanelTab = 'output'">输出</div>
         </div>
         <div class="params-resizer" @mousedown="startParamsPanelResize"></div>
       </template>
@@ -629,9 +626,6 @@ onBeforeUnmount(() => {
 .field-with-switch .el-input { margin-top:3px; }
 .control-muted .wgr-label-row :deep(.el-checkbox__label) { color:#a8abb2; }
 .btn-row { display:flex; gap:8px; }
-.param-tabs { display:flex; height:30px; border-top:1px solid #ddd; }
-.param-tab { flex:1; display:flex; align-items:center; justify-content:center; border-right:1px solid #ddd; font-size:13px; cursor:pointer; }
-.param-tab.active { background:#f4d000; color:#1a1a1a; font-weight:600; }
 .params-resizer { position:absolute; top:0; right:-3px; width:6px; height:100%; cursor:col-resize; z-index:4; }
 .chart-area { flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; position:relative; overflow:hidden; }
 .dynamic-result-tabs { height:34px; flex-shrink:0; display:flex; align-items:center; border-bottom:1px solid #e4e7ed; background:#fafafa; overflow-x:auto; overflow-y:hidden; }

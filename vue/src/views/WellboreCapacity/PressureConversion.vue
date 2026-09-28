@@ -114,7 +114,6 @@ function toggleLegend (name) {
 const panel = ref(null)
 const panelWidth = ref(238)
 const paramsCollapsed = ref(false)
-const activeParamTab = ref('input')
 const validBoundaryNumber = value => value !== null && value !== '' && Number.isFinite(Number(value))
 watch(paramsCollapsed, async () => { await nextTick(); chart?.resize() })
 
@@ -709,7 +708,8 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <div v-show="!paramsCollapsed && activeParamTab === 'input'" class="panel-body">
+      <div v-show="!paramsCollapsed" class="panel-body">
+        <div class="section-title">输入参数</div>
         <div class="boundary-selector">
           <span class="boundary-label">注采工况</span>
           <el-radio-group :model-value="form.operationMode" :disabled="busy || sourceLoading || pvtLoading" size="small" @update:model-value="selectOperationMode">
@@ -850,10 +850,9 @@ onBeforeUnmount(() => {
             保存
           </el-button>
         </div>
-      </div>
 
-      <div v-show="!paramsCollapsed && activeParamTab === 'output'" class="panel-body">
-        <div v-if="!result" class="section-title">请先计算压力分布</div>
+        <div class="section-title">输出结果</div>
+        <div v-if="!result" class="output-empty">请先计算压力分布</div>
         <section v-for="(method, code) in result?.methods || {}" :key="code" class="parameter-section">
           <div class="section-title">{{ pressureMethodName(code) }}</div>
           <div class="field">
@@ -861,9 +860,6 @@ onBeforeUnmount(() => {
             <el-input :model-value="outputPoint(method)?.pressure?.toFixed(4) ?? '—'" readonly size="small" />
           </div>
         </section>
-      </div>
-      <div v-show="!paramsCollapsed" class="param-tabs" role="tablist" aria-label="参数面板">
-        <button v-for="tab in [['input', '输入'], ['output', '输出']]" :key="tab[0]" type="button" role="tab" class="param-tab" :class="{ active: activeParamTab === tab[0] }" :aria-selected="activeParamTab === tab[0]" @click="activeParamTab = tab[0]">{{ tab[1] }}</button>
       </div>
       <div v-if="!paramsCollapsed" class="resizer" @pointerdown="resize" />
     </aside>
@@ -945,6 +941,7 @@ onBeforeUnmount(() => {
 
 .parameter-section { margin: 0; padding: 0; border: 0; }
 .section-title:first-child { margin-top: 4px; }
+.output-empty { margin: 0 0 10px; color: #909399; font-size: 12px; }
 
 .parameter-grid {
   display: grid;
@@ -1066,9 +1063,6 @@ main :deep(.el-alert) {
 .panel-collapsed-tab { width: 22px; height: 76px; padding: 0; writing-mode: vertical-rl; border: 1px solid #e0e0e0; border-left: 0; background: #fff; color: #333; font: inherit; cursor: pointer; }
 .params-panel.collapsed { border-right: 0; }
 .panel-toggle:hover, .panel-collapsed-tab:hover { background: #fff8d8; }
-.param-tabs { display: flex; height: 30px; flex-shrink: 0; border-top: 1px solid #e0e0e0; }
-.param-tab { flex: 1; border: 0; border-right: 1px solid #e0e0e0; background: #fff; color: #555; font: inherit; cursor: pointer; }
-.param-tab.active { background: #f4d000; color: #1a1a1a; font-weight: 600; }
 .dynamic-result-tabs { display: flex; height: 34px; flex-shrink: 0; border-bottom: 1px solid #e4e7ed; background: #fafafa; }
 .dynamic-result-tab { display: flex; align-items: center; max-width: 340px; padding: 0 12px; background: #f4d000; color: #202020; font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chart-container { position: relative; flex: 1; min-height: 0; overflow: hidden; }

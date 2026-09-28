@@ -6,6 +6,7 @@ import { ElMessage } from 'element-plus'
 import { pvtStorageApi } from '@/api/pvtStorage'
 import { deletedPvtRecord, matchesPvtScope } from '@/utils/pvtRecordActions'
 import { diagnosticCurveApi } from '@/api/diagnosticCurve'
+import InventoryOperationPreview from './InventoryOperationPreview.vue'
 
 const props = defineProps({
     node: Object,
@@ -1973,6 +1974,7 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="panel-body">
+                <InventoryOperationPreview :context-key="JSON.stringify([projectId, gasReservoirId, node?.wellName, node?.id])" />
 
                 <label class="field">
 
