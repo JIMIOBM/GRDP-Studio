@@ -4,6 +4,7 @@ import * as echarts from 'echarts'
 import {analyticMethodApi, materialBalanceApi} from '@/api/docker'
 import {ElMessage} from "element-plus";
 import { formatSourceNumber } from '@/utils/storageMaterialBalanceSource'
+import InventoryOperationPreview from './InventoryOperationPreview.vue'
 
 const props = defineProps({
   node: Object,
@@ -21,7 +22,6 @@ const displayCell = (_row, _column, value) => displayValue(value)
 
 const loading = ref(false)
 const resultData = ref(null)
-const activePanelTab = ref('input')
 const activeChartTab = ref(0)
 const activeContentTab = ref('chart')
 const sourceDataPage = ref(1)
@@ -845,7 +845,6 @@ async function fetchData() {
     loading.value = false
     resultData.value = props.externalResult
     activeContentTab.value = 'input'
-    activePanelTab.value = 'input'
     sourceDataPage.value = 1
     await nextTick()
     renderChart()
@@ -948,7 +947,6 @@ async function fetchData() {
     resultData.value = nextResultData
     activeChartTab.value = 0
     activeContentTab.value = 'chart'
-    activePanelTab.value = 'input'
     await nextTick()
     renderChart()
     // 物质平衡是批量计算，但本次页面只刷新当前井对应的左侧节点。
@@ -1104,7 +1102,9 @@ onBeforeUnmount(() => {
           </button>
         </div>
 
-        <div v-show="activePanelTab === 'input'" class="panel-body">
+        <div class="panel-body">
+          <div class="section-title">输入参数</div>
+          <InventoryOperationPreview v-if="!readOnly" :context-key="JSON.stringify([projectId, gasReservoirId, node?.wellName, node?.id])" />
           <div v-if="!hasDisplayedInputFields" class="empty">暂无接口输入结果</div>
           <template v-for="section in groupedInputSections" :key="section.title">
             <div class="section-title">{{ section.title }}</div>
@@ -1170,21 +1170,16 @@ onBeforeUnmount(() => {
           </div>
 <!--          <input ref="importFileInput" class="hidden-file-input" type="file" accept=".xlsx,.xls" @change="importProductionData"/>-->
           <div v-if="readOnly" class="empty">智慧气藏已保存数据（只读），请在右侧“生产数据”查看。</div>
-        </div>
 
-        <div v-show="activePanelTab === 'output'" class="panel-body">
-          <div class="section-title">输出结果</div>
-          <div class="field-grid">
-            <div v-for="item in displayedOutputFields" :key="item.key" class="field">
-              <label>{{ item.label }}</label>
-              <el-input size="small" readonly :model-value="displayValue(item.value)" />
+          <div class="output-section">
+            <div class="section-title">输出结果</div>
+            <div class="field-grid">
+              <div v-for="item in displayedOutputFields" :key="item.key" class="field">
+                <label>{{ item.label }}</label>
+                <el-input size="small" readonly :model-value="displayValue(item.value)" />
+              </div>
             </div>
           </div>
-        </div>
-
-        <div class="panel-tabs">
-          <button :class="{ active: activePanelTab === 'input' }" @click="activePanelTab = 'input'">输入</button>
-          <button :class="{ active: activePanelTab === 'output' }" @click="activePanelTab = 'output'">输出</button>
         </div>
 
         <div
@@ -1532,32 +1527,6 @@ onBeforeUnmount(() => {
   padding: 4px 0 10px;
 }
 
-.panel-tabs {
-  height: 36px;
-  display: flex;
-  border-top: 1px solid #e0e0e0;
-  flex-shrink: 0;
-
-  button {
-    flex: 1;
-    border: 0;
-    border-right: 1px solid #e0e0e0;
-    background: #fff;
-    color: #333;
-    font-size: 14px;
-    cursor: pointer;
-
-    &:last-child {
-      border-right: 0;
-    }
-
-    &.active {
-      background: #f4d000;
-      color: #111;
-      font-weight: 600;
-    }
-  }
-}
 
 .chart-area {
   position: relative;

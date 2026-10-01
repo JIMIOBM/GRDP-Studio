@@ -27,7 +27,7 @@ import java.util.TreeMap;
  * <p>数据流程：</p>
  *
  * <pre>
- * 储气库全部井
+ * 储气库所选井
  *      ↓
  * 每口井最新 CALCULATED 诊断方案
  *      ↓
@@ -235,10 +235,32 @@ public class GasReservoirDiagnosticService {
             );
         }
 
+        final Set<Long> missingWellIds = new LinkedHashSet<>();
+
+        for (GasReservoirDiagnosticModels.WellRow well : wells) {
+            final GasReservoirDiagnosticModels.LatestDiagnosticRow diagnostic =
+                    diagnosticByWellId.get(well.getWellId());
+
+            if (
+                    diagnostic == null
+                            || diagnostic.getInputCount() == null
+                            || diagnostic.getInputCount() <= 0
+            ) {
+                missingWellIds.add(well.getWellId());
+            }
+        }
+
+        final List<GasReservoirDiagnosticModels.WellOption> wellOptions =
+                wells.stream()
+                        .map(well -> new GasReservoirDiagnosticModels.WellOption(
+                                well.getWellId(),
+                                safeWellName(well),
+                                !missingWellIds.contains(well.getWellId())
+                        ))
+                        .toList();
+
         return new GasReservoirDiagnosticModels.ContextResponse(
-                wells.size(),
-                wells.size() - missingWells.size(),
-                List.copyOf(missingWells),
+                List.copyOf(wellOptions),
                 List.copyOf(pvtMap.values())
         );
     }
@@ -281,6 +303,29 @@ public class GasReservoirDiagnosticService {
             );
         }
 
+        final Set<Long> storageWellIds =
+                allWells.stream()
+                        .map(GasReservoirDiagnosticModels.WellRow::getWellId)
+                        .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+
+        final Set<Long> selectedWellIds =
+                request.wellIds().stream()
+                        .filter(java.util.Objects::nonNull)
+                        .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+
+        if (selectedWellIds.isEmpty()) {
+            throw new BusinessException(400, "请至少选择一口井");
+        }
+
+        if (!storageWellIds.containsAll(selectedWellIds)) {
+            throw new BusinessException(400, "所选井中包含不属于当前储气库的井");
+        }
+
+        final List<GasReservoirDiagnosticModels.WellRow> selectedWells =
+                allWells.stream()
+                        .filter(well -> selectedWellIds.contains(well.getWellId()))
+                        .toList();
+
         /*
          * ---------------------------------------------------------
          * 2. 每口井找编号最大的 CALCULATED 方案。
@@ -318,7 +363,7 @@ public class GasReservoirDiagnosticService {
 
         /*
          * ---------------------------------------------------------
-         * 3. 强制所有井都必须有有效诊断 input。
+         * 3. 校验所选井都必须有有效诊断 input。
          *
          * 不允许：
          *
@@ -333,7 +378,7 @@ public class GasReservoirDiagnosticService {
 
         for (
                 GasReservoirDiagnosticModels.WellRow
-                        well : allWells
+                        well : selectedWells
         ) {
 
             final GasReservoirDiagnosticModels.LatestDiagnosticRow
@@ -384,7 +429,8 @@ public class GasReservoirDiagnosticService {
         ) {
 
             if (
-                    diagnostic.getPvtId() != null
+                    selectedWellIds.contains(diagnostic.getWellId())
+                            && diagnostic.getPvtId() != null
                             && diagnostic.getPvtId()
                             == request.pvtId()
                             && diagnostic.getPvtSnapshot()
@@ -415,16 +461,18 @@ public class GasReservoirDiagnosticService {
 
         /*
          * ---------------------------------------------------------
-         * 5. 查询所有井当前方案的 input。
+         * 5. 查询当前储气库方案 input，并筛选所选井。
          * ---------------------------------------------------------
          */
         final List<GasReservoirDiagnosticModels.DiagnosticInputRow>
                 inputRows =
                 mapper.selectLatestDiagnosticInputs(
-                        request.projectId(),
-                        request.gasReservoirId(),
-                        request.storageId()
-                );
+                                request.projectId(),
+                                request.gasReservoirId(),
+                                request.storageId()
+                        ).stream()
+                        .filter(row -> selectedWellIds.contains(row.getWellId()))
+                        .toList();
 
         if (
                 inputRows == null
@@ -439,7 +487,7 @@ public class GasReservoirDiagnosticService {
 
         /*
          * ---------------------------------------------------------
-         * 6. 根据 time_text 汇总所有井 gas_volume。
+         * 6. 根据 time_text 汇总所选井 gas_volume。
          *
          * 数据库：
          *      gas_volume 单位 = 10^4m3
@@ -567,7 +615,7 @@ public class GasReservoirDiagnosticService {
 
             throw new BusinessException(
                     400,
-                    "库内全部井按时间汇总后，净注采气量全部为0，无法计算诊断曲线"
+                    "所选井按时间汇总后，净注采气量全部为0，无法计算诊断曲线"
             );
         }
 
@@ -620,9 +668,7 @@ public class GasReservoirDiagnosticService {
          * ---------------------------------------------------------
          */
         return new GasReservoirDiagnosticModels.CalculateResponse(
-                allWells.size(),
-
-                allWells.size(),
+                selectedWells.size(),
 
                 productionResult.aggregatedRows(),
 
@@ -801,7 +847,7 @@ public class GasReservoirDiagnosticService {
                         "库级聚合后的第"
                                 + entry.getKey()
                                 + "周期不完整：必须同时包含注气和采气数据。"
-                                + "请检查所有单井当前诊断方案的时间范围是否完整。"
+                                + "请检查所选单井当前诊断方案的时间范围是否完整。"
                 );
             }
         }
@@ -981,6 +1027,16 @@ public class GasReservoirDiagnosticService {
             throw new BusinessException(
                     400,
                     "储气库ID必须大于0"
+            );
+        }
+
+        if (
+                request.wellIds() == null
+                        || request.wellIds().isEmpty()
+        ) {
+            throw new BusinessException(
+                    400,
+                    "请至少选择一口井"
             );
         }
 

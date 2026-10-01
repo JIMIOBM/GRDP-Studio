@@ -1,8 +1,9 @@
-﻿﻿<script setup>
+<script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
 import { dynamicBalanceApi } from '@/api/docker'
+import InventoryOperationPreview from './InventoryOperationPreview.vue'
 
 const props = defineProps({
   node: Object,
@@ -19,7 +20,6 @@ const chartAreaEl = ref(null)
 const paramsPanelEl = ref(null)
 const resultData = ref(null)
 const noData = ref(false)
-const activeTab = ref('input')
 const activeChartTab = ref('chart')
 const tableLoading = ref(false)
 const tableOutputItems = ref([])
@@ -141,6 +141,20 @@ const getInputValue = (keys, fallback = '') => {
   return formatNumber(fallback)
 }
 
+// 参数面板中部分字段按需求收敛小数位：默认保留两位小数；
+// 若四舍五入后变成 0（如地层水压缩系数是 1e-4 量级），说明按小数位截断会抹掉
+// 有效信息，此时改用两位有效数字（0.000374451276333 → 0.00037）。
+const formatRoundedInput = (value) => {
+  if (value === undefined || value === null || value === '') return ''
+  const num = Number(value)
+  if (!Number.isFinite(num)) return value
+  const twoDecimals = num.toFixed(2).replace(/\.?0+$/, '')
+  if (num !== 0 && Number(twoDecimals) === 0) return String(Number(num.toPrecision(2)))
+  return twoDecimals
+}
+
+const getRoundedInputValue = (keys, fallback = '') => formatRoundedInput(getInputValue(keys, fallback))
+
 const getMethodValue = (key, legacyKey, options) => {
   const value = inputParams.value?.[key] ?? inputParams.value?.[legacyKey]
   if (value === undefined || value === null || value === '') return ''
@@ -238,9 +252,9 @@ const otherData = computed(() => [
   { key: 'dataSize', label: fieldLabels.samplingPoints, value: getInputValue(['dataSize', 'samplingPoints']), type: 'number', hasSwitch: true, switchValue: Number(inputParams.value?.dataSize) > 0 },
   { key: 'waterGasRatioLimit', label: fieldLabels.waterGasRatioLimit, value: getInputValue('waterGasRatioLimit'), type: 'number', hasSwitch: true, switchValue: Number(inputParams.value?.waterGasRatioLimit) >= 0 },
   { key: 'reservoirOriginalGasVolume', label: fieldLabels.gasReservoirVolume, value: getInputValue(['reservoirOriginalGasVolume', 'gasReservoirVolume']), type: 'number' },
-  { key: 'waterSaturation', label: fieldLabels.connateWaterSaturation, value: getInputValue(['waterSaturation', 'connateWaterSaturation']), type: 'number' },
+  { key: 'waterSaturation', label: fieldLabels.connateWaterSaturation, value: getRoundedInputValue(['waterSaturation', 'connateWaterSaturation']), type: 'number' },
   { key: 'rockCompressionCoefficient', label: fieldLabels.rockCompressibility, value: getInputValue(['rockCompressionCoefficient', 'rockCompressibility']), type: 'number' },
-  { key: 'waterCompressionCoefficient', label: fieldLabels.waterCompressibility, value: getInputValue(['waterCompressionCoefficient', 'waterCompressibility']), type: 'number' }
+  { key: 'waterCompressionCoefficient', label: fieldLabels.waterCompressibility, value: getRoundedInputValue(['waterCompressionCoefficient', 'waterCompressibility']), type: 'number' }
 ])
 
 const findChartItem = (fields) => {
@@ -741,7 +755,9 @@ onBeforeUnmount(() => {
       </div>
 
       <div v-show="!panelCollapsed" class="panel-body">
-        <div v-if="activeTab === 'input'">
+        <div class="input-section">
+          <div class="sec-label">输入参数</div>
+          <InventoryOperationPreview :context-key="JSON.stringify([projectId, gasReservoirId, node?.wellName, node?.id])" />
           <template v-for="section in groupedInputSections" :key="section.title">
             <div class="sec-label">{{ section.title }}</div>
             <div class="field-grid">
@@ -813,9 +829,9 @@ onBeforeUnmount(() => {
               </div>
             </div>
           </div>
-        </div>
 
-        <div v-else>
+        </div>
+        <div class="output-section">
           <div class="sec-label">输出结果</div>
           <div class="field">
             <label>动态储量(10⁸m³)</label>
@@ -840,22 +856,6 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <div v-show="!panelCollapsed" class="panel-tabs">
-        <button
-            class="tab-btn"
-            :class="{ active: activeTab === 'input' }"
-            @click="activeTab = 'input'"
-        >
-          输入
-        </button>
-        <button
-            class="tab-btn"
-            :class="{ active: activeTab === 'output' }"
-            @click="activeTab = 'output'"
-        >
-          输出
-        </button>
-      </div>
       <div v-if="!panelCollapsed" class="params-resizer" @mousedown="startParamsPanelResize"></div>
     </div>
 
@@ -1183,35 +1183,6 @@ onBeforeUnmount(() => {
   }
 }
 
-.panel-tabs {
-  display: flex;
-  height: 30px;
-  border-top: 1px solid #e0e0e0;
-  flex-shrink: 0;
-}
-
-.tab-btn {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 13px;
-  color: #555;
-  cursor: pointer;
-  border: 0;
-  background: transparent;
-  border-right: 1px solid #e0e0e0;
-
-  &:last-child {
-    border-right: none;
-  }
-
-  &.active {
-    background-color: #f4d000;
-    color: #1a1a1a;
-    font-weight: 600;
-  }
-}
 
 .chart-area {
   flex: 1;

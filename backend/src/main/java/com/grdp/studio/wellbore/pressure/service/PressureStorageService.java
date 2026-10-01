@@ -17,6 +17,7 @@ import com.grdp.studio.wellbore.pressure.mapper.PressureMethodResultMapper;
 import com.grdp.studio.wellbore.pressure.mapper.PressureProfileMapper;
 import com.grdp.studio.wellbore.pressure.mapper.WellPressureConversionMapper;
 import com.grdp.studio.wellbore.pressure.method.PressureCalculator;
+import com.grdp.studio.wellbore.pressure.method.SingleGasInjectionMethod;
 import com.grdp.studio.wellbore.temperature.service.TemperatureStorageService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -121,16 +122,21 @@ public class PressureStorageService {
                 require(request.gasReservoirId, "气藏"),
                 request.wellName
         );
-        Long temperatureRecordId = resolveTemperatureRecordId(request);
+        // 注气使用本次输入生成线性温度，不绑定未参与求解的历史温度方案。
+        boolean injection = "injection".equals(request.operationMode);
+        Long temperatureRecordId = injection ? null : resolveTemperatureRecordId(request);
+        if (injection) request.temperatureRecordId = null;
         resolvePvtId(request, wellId);
-        var temperature = temperatures.detail(
-                temperatureRecordId,
-                request.projectId,
-                request.gasReservoirId,
-                request.wellName
-        );
-        if (!wellEquals(temperature.record().getWellId(), wellId)) {
-            throw new BusinessException(400, "温度方案不属于当前井");
+        if (temperatureRecordId != null) {
+            var temperature = temperatures.detail(
+                    temperatureRecordId,
+                    request.projectId,
+                    request.gasReservoirId,
+                    request.wellName
+            );
+            if (!wellEquals(temperature.record().getWellId(), wellId)) {
+                throw new BusinessException(400, "温度方案不属于当前井");
+            }
         }
 
         var calculation = calculator.calculateDetailed(request, token, cookie, environment);
@@ -141,7 +147,7 @@ public class PressureStorageService {
         entity.setPvtId(request.pvtId);
         entity.setPressureNo(nextNo(wellId));
         entity.setPressureName(name(save.pressureName, "压力折算方案"));
-        entity.setOperationMode("production");
+        entity.setOperationMode(request.operationMode);
         entity.setBoundaryPosition(request.boundaryPosition);
         entity.setBoundaryPressureMpa(request.boundaryPressure);
         entity.setStatus("calculated");
@@ -168,12 +174,13 @@ public class PressureStorageService {
         PressureMethodResultEntity method = new PressureMethodResultEntity();
         method.setPressureId(pressureId);
         method.setMethodCode(result.methodCode());
-        method.setMethodName("HB".equals(result.methodCode())
+        boolean gas = SingleGasInjectionMethod.CODE.equals(result.methodCode());
+        method.setMethodName(gas ? "单相气体" : "HB".equals(result.methodCode())
                 ? "Hagedorn & Brown"
                 : "Mukherjee & Brill");
-        method.setAlgorithmVersion("supplied-js-1-pvt");
-        method.setIterationLimit(10);
-        method.setConvergenceToleranceMpa(0.0001);
+        method.setAlgorithmVersion(gas ? SingleGasInjectionMethod.VERSION : "supplied-js-1-pvt");
+        method.setIterationLimit(gas ? SingleGasInjectionMethod.ITERATION_LIMIT : 10);
+        method.setConvergenceToleranceMpa(gas ? SingleGasInjectionMethod.TOLERANCE_MPA : 0.0001);
         method.setRelaxationFactor(0.5);
         method.setConverged(result.allSegmentsConverged());
         method.setCalculatedAt(LocalDateTime.now());

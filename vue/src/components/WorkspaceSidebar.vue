@@ -9,6 +9,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import TreeNode from '@/views/TreeNode.vue'
 import { ensurePipelineNavigation } from '@/utils/pipelineNavigation'
+import { ensureNodalNavigation } from '@/utils/nodalNavigation'
 import { ensureWellboreNavigation } from '@/utils/wellboreNavigation'
 import { ElMessage } from 'element-plus'
 import StorageCreateDialog from './StorageCreateDialog.vue'
@@ -82,6 +83,7 @@ watch(() => props.collapsed, closeStorageMenu)
 watch(() => props.nodes, nodes => {
   ensurePipelineNavigation(nodes)
   ensureWellboreNavigation(nodes)
+  ensureNodalNavigation(nodes)
 }, { deep: true, immediate: true })
 
 const panelEl = ref(null)

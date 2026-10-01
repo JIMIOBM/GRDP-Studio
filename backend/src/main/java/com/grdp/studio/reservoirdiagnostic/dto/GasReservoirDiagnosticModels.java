@@ -12,9 +12,9 @@ import java.util.List;
  *
  * <p>职责：</p>
  * <p>
- * 1. 前端传项目、气藏、储气库、代表 PVT、压力上下限；<br>
- * 2. 后端自动查询库内全部井的当前已计算诊断方案；<br>
- * 3. 后端自动汇总 project_well_diagnostic_input；<br>
+ * 1. 前端传项目、气藏、储气库、所选井、代表 PVT、压力上下限；<br>
+ * 2. 后端校验并使用所选井的当前已计算诊断方案；<br>
+ * 3. 后端只汇总所选井的 project_well_diagnostic_input；<br>
  * 4. 最终复用 DiagnosticCurveService。
  * </p>
  */
@@ -27,10 +27,18 @@ public final class GasReservoirDiagnosticModels {
      * 页面初始化上下文。
      */
     public record ContextResponse(
-            int totalWellCount,
-            int readyWellCount,
-            List<String> missingWellNames,
+            List<WellOption> wells,
             List<PvtOption> pvtOptions
+    ) {
+    }
+
+    /**
+     * 储气库内可选择的井。
+     */
+    public record WellOption(
+            long wellId,
+            String wellName,
+            boolean available
     ) {
     }
 
@@ -62,6 +70,9 @@ public final class GasReservoirDiagnosticModels {
 
             @Positive(message = "储气库ID必须大于0")
             long storageId,
+
+            @NotNull(message = "请选择参与计算的井")
+            List<Long> wellIds,
 
             @Positive(message = "PVT ID必须大于0")
             long pvtId,
@@ -115,8 +126,7 @@ public final class GasReservoirDiagnosticModels {
      * 库级计算返回。
      */
     public record CalculateResponse(
-            int totalWellCount,
-            int readyWellCount,
+            int selectedWellCount,
 
             /**
              * 后端按时间汇总后的数据，便于前端检查。

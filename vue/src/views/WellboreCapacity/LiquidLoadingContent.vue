@@ -347,7 +347,7 @@ watch(() => [props.projectId, props.gasReservoirId, props.node.wellName], () => 
       <div class="form-title">请输入计算参数</div>
       <div class="parameter-grid">
       <label class="field">
-        <span>压力（MPa，绝压）</span>
+        <span>压力（MPa）</span>
         <input
           v-model.number="form.pressureMpa"
           type="number"

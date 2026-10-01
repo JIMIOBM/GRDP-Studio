@@ -48,6 +48,7 @@ const toggle = () => {
 const handleClick = () => {
   if (props.node.disabled) return
   const directoryOnly = props.node.type === 'well-data-static-pressure' ||
+    props.node.type === 'allocation-nodal' ||
     props.node.type === 'wellbore-pressure-group' ||
     props.node.type === 'wellbore-pressure-comparison' ||
     props.node.type === 'pipeline-constraints-group' ||

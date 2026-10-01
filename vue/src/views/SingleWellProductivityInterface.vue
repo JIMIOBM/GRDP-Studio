@@ -13,7 +13,10 @@
  * 该页面与 IprInterface.vue 相互独立；其他菜单板块仍返回 IprInterface.vue。
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { resolveErosionCommandTarget } from '@/utils/wellboreNavigation'
 import { productivityCoefficientApi } from '@/api/productivityCoefficient'
+import { nodalApi } from '@/api/nodal'
+import { NODAL_TYPE, NODAL_RECORD, loadNodalRecords, deleteNodalRecord } from '@/utils/nodalNavigation'
 import { COEFFICIENT_GROUP, COEFFICIENT_METHOD, COEFFICIENT_RECORD, ensureCoefficientTree, applyCoefficientRecords, coefficientLocation } from '@/utils/productivityCoefficientTree'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -606,7 +609,7 @@ const isStableRecordNode = node => [
 
 const closeStableContextMenu = () => { stableContextMenu.value.visible = false }
 const handleStableContextMenu = (node, event) => {
-  if (!isStableRecordNode(node) && !isLossRecord(node) && !isPvtRecord(node) && !isProductivityTestRecord(node)) return closeStableContextMenu()
+  if (node?.type !== NODAL_RECORD && !isStableRecordNode(node) && !isLossRecord(node) && !isPvtRecord(node) && !isProductivityTestRecord(node)) return closeStableContextMenu()
   stableContextMenu.value = {
     visible: true,
     x: Math.max(8, Math.min(event.clientX, window.innerWidth - 190)),
@@ -631,6 +634,10 @@ const reloadStableBranch = async (node, expand = true) => {
 /** 展开哪个计算方法，就只加载该方法在当前井下的历史记录。 */
 const handleSidebarExpand = async node => {
   try {
+    if (node.type === NODAL_TYPE) {
+      await loadNodalRecords(workspaceTreeData.value, { projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName: node.wellName }, nodalApi.list)
+      return
+    }
     if ([COEFFICIENT_GROUP, COEFFICIENT_METHOD].includes(node.type)) {
       await loadCoefficientNodes(node.wellName)
       return
@@ -701,6 +708,20 @@ const renameStableNode = async () => {
 const deleteStableNode = async () => {
   const node = stableContextMenu.value.node
   closeStableContextMenu()
+  if (node?.type === NODAL_RECORD) {
+    try {
+      await ElMessageBox.confirm(`删除“${node.label}”及其参数和计算结果？此操作不可撤销。`, '删除节点分析方案', {
+        type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消'
+      })
+      const parent = await deleteNodalRecord(workspaceTreeData.value, node, nodalApi.delete)
+      if (String(workspaceActiveNodeId.value) === String(node.id)) workspaceActiveNodeId.value = parent?.id || ''
+      if (workspacePendingNode.value?.id === node.id) workspacePendingNode.value = null
+      ElMessage.success('节点分析方案已删除')
+    } catch (error) {
+      if (error !== 'cancel' && error !== 'close') ElMessage.error(error?.msg || error?.response?.data?.msg || error.message || '删除节点分析方案失败')
+    }
+    return
+  }
   if (isProductivityTestRecord(node)) {
     try {
       await ElMessageBox.confirm(`删除“${node.label}”及其输入、二项式/指数式计算结果和IPR曲线？此操作不可撤销。`, '删除产能试井记录', {
@@ -837,6 +858,26 @@ const handleCommand = async ({ group, name, parent }) => {
     return
   }
 
+  if (group === '配产配注' && name === '节点分析') {
+    const wellName = resolveWorkspaceTargetWellName('')
+    if (!wellName) { ElMessage.warning('请先在左侧选择一口井'); return }
+    workspacePendingNode.value = null
+    workspacePendingCommand.value = { group, name, parent, wellName }
+    await router.push({ name: 'IprInterface', query: { projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID } })
+    return
+  }
+  const erosionTarget = resolveErosionCommandTarget({ group, name }, resolveWorkspaceTargetWellName(''))
+  if (erosionTarget) {
+    if (!erosionTarget.wellName) {
+      ElMessage.warning('请先在左侧选择一口井，再打开冲蚀功能')
+      return
+    }
+    workspacePendingNode.value = null
+    workspacePendingCommand.value = { group, name, parent, wellName: erosionTarget.wellName }
+    await router.push({ name: 'IprInterface' })
+    return
+  }
+
   // 将本次点击一并交给 IPR 工作台，避免用户切换后还要再点第二次。
   // 跨工作台的命令携带左侧目标井，不依赖先打开该井的 PVT/其他记录。
   workspacePendingCommand.value = {
@@ -844,6 +885,14 @@ const handleCommand = async ({ group, name, parent }) => {
     wellName: resolveWorkspaceTargetWellName(sidebarTargetWellName.value || selectedWellName.value)
   }
   await router.push({ name: 'IprInterface' })
+}
+
+const handleRibbonTabChange = async tabName => {
+  if (tabName !== '软件集成') return
+  await router.push({
+    name: 'IprInterface',
+    query: { workspace: 'software-integration' }
+  })
 }
 
 const loadWells = async () => {
@@ -936,7 +985,7 @@ const selectWell = async wellName => {
 
 const handleSidebarSelect = async node => {
   if (!node || node.disabled) return
-  if ([COEFFICIENT_GROUP, COEFFICIENT_METHOD].includes(node.type)) return
+  if ([COEFFICIENT_GROUP, COEFFICIENT_METHOD, NODAL_TYPE].includes(node.type)) return
   if (node.type === COEFFICIENT_RECORD) {
     if (node.wellName !== selectedWellName.value) await selectWell(node.wellName)
     activeModule.value = '产能系数'
@@ -958,6 +1007,15 @@ const handleSidebarSelect = async node => {
 
   // 记录目录所指向的井，但此处不直接修改右侧组件正在使用的 selectedWellName。
   if (node.wellName) sidebarTargetWellName.value = node.wellName
+
+  // 冲蚀入口直接跳转，不等待当前产能页面读取PVT或切换其业务数据。
+  if (['wellbore-erosion', NODAL_RECORD].includes(node.type)) {
+    workspaceActiveNodeId.value = node.id
+    workspacePendingCommand.value = null
+    workspacePendingNode.value = node
+    await router.push({ name: 'IprInterface', query: { projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID } })
+    return
+  }
 
   // 理论计算/动态产能及其“稳定流”都是纯目录节点：TreeNode 自己负责展开、收起，
   // 这里不能改变右侧页面，也不能覆盖当前具体记录的高亮状态。
@@ -1508,7 +1566,7 @@ onBeforeUnmount(() => window.removeEventListener('click', closeStableContextMenu
   <!-- 顶部菜单栏对应板块：单井产能。 -->
   <div class="productivity-interface" :class="{ embedded: props.embedded }">
     <RibbonMenu v-if="!props.embedded" :scope="workspaceRibbonScope" @scope-change="setWorkspaceRibbonScope"
-      @command="handleCommand" />
+      @command="handleCommand" @tab-change="handleRibbonTabChange" />
 
     <div class="productivity-main">
       <!-- 公共左侧目录：与 IprInterface.vue 使用同一个组件。 -->

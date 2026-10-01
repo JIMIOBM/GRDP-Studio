@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
 import { materialBalanceApi } from '@/api/docker'
+import InventoryOperationPreview from './InventoryOperationPreview.vue'
 
 const props = defineProps({
   node: Object,
@@ -17,7 +18,6 @@ const loading = ref(false)
 const resultData = ref(null)
 const chartEl = ref(null)
 const chartAreaEl = ref(null)
-const activeParamTab = ref('input')
 const activeChartTab = ref('chart')
 const paramsPanelEl = ref(null)
 const paramsPanelWidth = ref(238)
@@ -823,7 +823,9 @@ onBeforeUnmount(() => {
           </button>
         </div>
 
-        <div v-if="activeParamTab === 'input'" class="panel-body">
+        <div class="panel-body">
+          <div class="sec-label">输入参数</div>
+          <InventoryOperationPreview :context-key="JSON.stringify([projectId, gasReservoirId, node?.wellName, node?.id])" />
           <div v-if="!hasFlowBalanceInputFields" class="empty">暂无接口输入参数</div>
           <template v-else>
             <template v-for="section in flowBalanceInputSections" :key="section.title">
@@ -899,25 +901,16 @@ onBeforeUnmount(() => {
               <el-button size="small">导入</el-button>
             </div>
           </template>
-        </div>
 
-        <div v-else class="panel-body">
-          <div class="sec-label">输出结果</div>
-          <div v-if="!outputFields.length" class="empty">暂无接口输出结果</div>
-          <div v-else class="field-grid">
-            <div v-for="item in outputFields" :key="item.key" class="field">
-              <label>{{ item.label }}</label>
-              <el-input size="small" readonly :model-value="item.value" />
+          <div class="output-section">
+            <div class="sec-label">输出结果</div>
+            <div v-if="!outputFields.length" class="empty">暂无接口输出结果</div>
+            <div v-else class="field-grid">
+              <div v-for="item in outputFields" :key="item.key" class="field">
+                <label>{{ item.label }}</label>
+                <el-input size="small" readonly :model-value="item.value" />
+              </div>
             </div>
-          </div>
-        </div>
-
-        <div class="param-tabs">
-          <div class="param-tab" :class="{ active: activeParamTab === 'input' }" @click="activeParamTab = 'input'">
-            输入
-          </div>
-          <div class="param-tab" :class="{ active: activeParamTab === 'output' }" @click="activeParamTab = 'output'">
-            输出
           </div>
         </div>
 
@@ -1077,33 +1070,6 @@ onBeforeUnmount(() => {
   padding: 4px 12px 14px;
 }
 
-.param-tabs {
-  display: flex;
-  height: 30px;
-  border-top: 1px solid #e0e0e0;
-  flex-shrink: 0;
-}
-
-.param-tab {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 13px;
-  color: #555;
-  cursor: pointer;
-  border-right: 1px solid #e0e0e0;
-
-  &:last-child {
-    border-right: none;
-  }
-
-  &.active {
-    background-color: #f4d000;
-    color: #1a1a1a;
-    font-weight: 600;
-  }
-}
 
 .sec-label {
   font-weight: 500;

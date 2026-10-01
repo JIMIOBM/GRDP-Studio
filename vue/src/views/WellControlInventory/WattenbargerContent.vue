@@ -4,6 +4,7 @@ import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
 import { typicalCurveApi } from '@/api/docker'
 import wattenbargerTypeCurveData from '@/constants/typeCurves/wattenbarger.json'
+import InventoryOperationPreview from './InventoryOperationPreview.vue'
 
 const props = defineProps({
   node: Object,
@@ -13,7 +14,6 @@ const props = defineProps({
 })
 const emit = defineEmits(['recalculate'])
 
-const activePanelTab = ref('input')
 const activeChartTab = ref('chart')
 const chartEl = ref(null)
 const chartAreaEl = ref(null)
@@ -630,7 +630,9 @@ onBeforeUnmount(() => {
           </button>
         </div>
 
-        <div v-if="activePanelTab === 'input'" class="panel-body">
+        <div class="panel-body">
+          <div class="sec-label">输入参数</div>
+          <InventoryOperationPreview :context-key="JSON.stringify([projectId, gasReservoirId, node?.wellName, node?.id])" />
           <div class="sec-label">气体性质</div>
           <div class="field-grid">
             <div v-for="field in inputFields.gas" :key="field.label" class="field">
@@ -752,25 +754,16 @@ onBeforeUnmount(() => {
             <el-button size="small" @click="downloadProductionTemplate">模板下载</el-button>
             <el-button size="small">导入</el-button>
           </div>
-        </div>
 
-        <div v-else-if="hasOutputResults" class="panel-body">
-          <div class="sec-label">输出结果</div>
-          <div class="field-grid">
-            <div v-for="field in outputFields" :key="field.label" class="field">
-              <label>{{ field.label }}</label>
-              <el-input size="small" readonly :model-value="field.value" />
+          <template v-if="hasOutputResults">
+            <div class="sec-label">输出结果</div>
+            <div class="field-grid">
+              <div v-for="field in outputFields" :key="field.label" class="field">
+                <label>{{ field.label }}</label>
+                <el-input size="small" readonly :model-value="field.value" />
+              </div>
             </div>
-          </div>
-        </div>
-
-        <div class="param-tabs">
-          <div class="param-tab" :class="{ active: activePanelTab === 'input' }" @click="activePanelTab = 'input'">
-            输入
-          </div>
-          <div v-if="hasOutputResults" class="param-tab" :class="{ active: activePanelTab === 'output' }" @click="activePanelTab = 'output'">
-            输出
-          </div>
+          </template>
         </div>
 
         <div class="params-resizer" @mousedown="startParamsPanelResize"></div>
@@ -926,33 +919,6 @@ onBeforeUnmount(() => {
   padding: 4px 12px 14px;
 }
 
-.param-tabs {
-  display: flex;
-  height: 30px;
-  border-top: 1px solid #e0e0e0;
-  flex-shrink: 0;
-}
-
-.param-tab {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 13px;
-  color: #555;
-  cursor: pointer;
-  border-right: 1px solid #e0e0e0;
-
-  &:last-child {
-    border-right: none;
-  }
-
-  &.active {
-    background-color: #f4d000;
-    color: #1a1a1a;
-    font-weight: 600;
-  }
-}
 
 .sec-label {
   font-weight: 500;

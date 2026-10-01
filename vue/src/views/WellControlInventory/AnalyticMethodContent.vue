@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
 import { analyticMethodApi } from '@/api/docker'
+import InventoryOperationPreview from './InventoryOperationPreview.vue'
 
 const props = defineProps({
   node: Object,
@@ -19,7 +20,6 @@ const VISCOSITY_METHODS = ['Lee-Gonzalez-Eakin 方法', 'Carr-Kobayashi-Burrous 
 const MATERIAL_BALANCE_METHODS = ['封闭气藏', '定容气藏', '页岩气藏']
 
 const loading = ref(false)
-const activeParamTab = ref('input')
 const activeChartTab = ref('chart')
 const resultData = ref(null)
 const chartEl = ref(null)
@@ -565,7 +565,6 @@ function startLegendDrag(event) {
 const fetchData = async () => {
   if (!props.projectId || !props.gasReservoirId || !wellName.value) return
   loading.value = true
-  activeParamTab.value = 'input'
   activeChartTab.value = 'chart'
   resultData.value = null
 
@@ -623,7 +622,9 @@ onBeforeUnmount(() => {
           </button>
         </div>
 
-        <div v-if="activeParamTab === 'input'" class="panel-body">
+        <div class="panel-body">
+          <div class="sec-label">输入参数</div>
+          <InventoryOperationPreview :context-key="JSON.stringify([projectId, gasReservoirId, node?.wellName, node?.id])" />
           <div v-if="!displayedFieldGroups.length" class="empty">暂无接口输入参数</div>
           <template v-for="group in displayedFieldGroups" :key="group.title">
             <div class="sec-label">{{ group.title }}</div>
@@ -679,25 +680,16 @@ onBeforeUnmount(() => {
               accept=".xlsx,.xls"
               @change="importProductionData"
           />
-        </div>
 
-        <div v-else-if="hasOutputResults" class="panel-body">
-          <div class="sec-label">输出结果</div>
-          <div v-for="field in outputFields" :key="field.label" class="field">
-            <label>{{ field.label }}</label>
-            <el-input size="small" readonly :model-value="field.value" />
-          </div>
-        </div>
-        <div v-else class="panel-body">
-          <div class="empty">暂无接口输出结果</div>
-        </div>
-
-        <div class="param-tabs">
-          <div class="param-tab" :class="{ active: activeParamTab === 'input' }" @click="activeParamTab = 'input'">
-            输入
-          </div>
-          <div class="param-tab" :class="{ active: activeParamTab === 'output' }" @click="activeParamTab = 'output'">
-            输出
+          <div class="output-section">
+            <div class="sec-label">输出结果</div>
+            <template v-if="hasOutputResults">
+              <div v-for="field in outputFields" :key="field.label" class="field">
+                <label>{{ field.label }}</label>
+                <el-input size="small" readonly :model-value="field.value" />
+              </div>
+            </template>
+            <div v-if="!hasOutputResults" class="empty">暂无接口输出结果</div>
           </div>
         </div>
 
@@ -859,33 +851,6 @@ onBeforeUnmount(() => {
   padding: 4px 12px 14px;
 }
 
-.param-tabs {
-  display: flex;
-  height: 30px;
-  border-top: 1px solid #e0e0e0;
-  flex-shrink: 0;
-}
-
-.param-tab {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 13px;
-  color: #555;
-  cursor: pointer;
-  border-right: 1px solid #e0e0e0;
-
-  &:last-child {
-    border-right: none;
-  }
-
-  &.active {
-    background-color: #f4d000;
-    color: #1a1a1a;
-    font-weight: 600;
-  }
-}
 
 .sec-label {
   font-weight: 500;
