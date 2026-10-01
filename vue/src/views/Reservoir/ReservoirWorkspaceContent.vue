@@ -16,6 +16,7 @@ import MultiMethodComparison from './ProductivityEvaluation/MultiMethodCompariso
 import InjectionProductionComparison from './ProductivityEvaluation/InjectionProductionComparison.vue'
 import CapacityDesign from './CapacityDesign/CapacityDesign.vue'
 import MaterialBalance from './InventoryEvaluation/MaterialBalance.vue'
+import PressureGradient from './InventoryEvaluation/PressureGradient.vue'
 import WaterInvasion from './InventoryEvaluation/WaterInvasion.vue'
 import InterwellComparison from './WellboreConversion/InterwellComparison.vue'
 import GasReservoirDiagnosticCurveContent from './GasReservoirDiagnosticCurveContent.vue'
@@ -57,6 +58,8 @@ const isCapacityDesign = computed(() => props.command?.group === '库容设计'
   && props.command?.name !== '孔隙体积')
 const isMaterialBalance = computed(() => props.command?.group === '库存评估'
   && props.command?.parent === '物质平衡法' && props.command?.name === '物质平衡')
+const isPressureGradient = computed(() => props.command?.group === '库存评估'
+  && props.command?.parent === '地层压力' && props.command?.name === '压力梯度')
 const isWaterInvasion = computed(() => props.command?.group === '库存评估'
   && props.command?.parent === '水侵动态分析' && props.command?.name === '水侵分析')
 const isDiagnosticCurve = computed(() =>
@@ -114,6 +117,9 @@ const lossKey = computed(() => `${props.reservoir?.projectId}-${props.reservoir?
   </section>
   <MaterialBalance v-else-if="isMaterialBalance"
     :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-material-balance`"
+    :reservoir="reservoir" />
+  <PressureGradient v-else-if="isPressureGradient"
+    :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-pressure-gradient`"
     :reservoir="reservoir" />
   <WaterInvasion v-else-if="isWaterInvasion"
     :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-water-invasion`"
