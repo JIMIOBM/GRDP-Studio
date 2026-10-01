@@ -1769,57 +1769,66 @@ const originalGasInput = detail => {
 
 const calculateWithOriginalPlatform = async payload => {
   let detail = await discoverOriginalEvaluation(payload)
-  if (!matchesOriginalInput(payload, detail)) {
-    const evaluationId = Number(detail?.evaluation?.id)
-    const evaluationForm = EVALUATION_FORM_BY_METHOD[normalizeCalculationMethod(payload.calculationMethod)]
-    const evaluationType = EVALUATION_TYPE_BY_TEST[payload.testType]
-    const originalInput = detail?.input || {}
-    const response = await productivityEvaluationApi.calculate(selectedWellName.value, {
-      gasReservoirId: Number(props.gasReservoirId),
-      projectId: Number(props.projectId),
-      evaluationId,
-      deletePointIds: [],
-      input: {
-        ...originalInput,
-        id: Number(originalInput.id),
-        ProductivityEvaluationId: evaluationId,
-        originalFormationPressure: Number(payload.formationPressure),
-        formationTemperature: Number(payload.temperature),
-        horizontalSectionLength: Number(originalInput.horizontalSectionLength || 0),
-        skinFactor: Number(originalInput.skinFactor || 0),
-        permeability: Number(originalInput.permeability || 0),
-        thickness: Number(originalInput.thickness || 0),
-        gasDrainageRadius: Number(originalInput.gasDrainageRadius || 0),
-        wellboreRadius: Number(originalInput.wellboreRadius || 0),
-        ...originalGasInput(detail),
-        edges: {}
-      },
-      inputItems: payload.points.map((point, index) => ({
-        testPointNumber: Number(point.sequence ?? index + 1),
-        reserviorPressure: Number(point.recoveryPressure),
-        testDailyGasProduction: Number(point.flowRate),
-        testFlowPressure: Number(point.flowingPressure),
-        testDailyOilProduction: 0
-      })),
-      evaluationForm,
-      evaluationType,
-      wellName: selectedWellName.value
-    }, { silentError: true })
-    detail = unwrapDockerPayload(response)
-    if (!detail?.output) {
-      const refreshed = await productivityEvaluationApi.getResult(
-        props.projectId,
-        props.gasReservoirId,
-        evaluationId,
-        { silentError: true }
-      )
-      detail = unwrapDockerPayload(refreshed)
-    }
+  const evaluationId = Number(detail?.evaluation?.id)
+  if (!Number.isFinite(evaluationId) || evaluationId <= 0) {
+    throw new Error('原平台评价记录缺少有效编号，无法提交计算')
   }
-  applyOriginalInputRows(detail)
-  formationPressure.value = Number(detail?.input?.originalFormationPressure ?? payload.formationPressure)
-  temperature.value = Number(detail?.input?.formationTemperature ?? payload.temperature)
-  return parseOriginalEvaluation(detail, payload)
+  const evaluationForm = EVALUATION_FORM_BY_METHOD[normalizeCalculationMethod(payload.calculationMethod)]
+  const evaluationType = EVALUATION_TYPE_BY_TEST[payload.testType]
+  const originalInput = detail?.input || {}
+  // 每次点击计算都调用原平台计算接口；已有结果只用于取得评价编号和原始参数。
+  const response = await productivityEvaluationApi.calculate(selectedWellName.value, {
+    gasReservoirId: Number(props.gasReservoirId),
+    projectId: Number(props.projectId),
+    evaluationId,
+    deletePointIds: [],
+    input: {
+      ...originalInput,
+      id: Number(originalInput.id),
+      ProductivityEvaluationId: evaluationId,
+      originalFormationPressure: Number(payload.formationPressure),
+      formationTemperature: Number(payload.temperature),
+      horizontalSectionLength: Number(originalInput.horizontalSectionLength || 0),
+      skinFactor: Number(originalInput.skinFactor || 0),
+      permeability: Number(originalInput.permeability || 0),
+      thickness: Number(originalInput.thickness || 0),
+      gasDrainageRadius: Number(originalInput.gasDrainageRadius || 0),
+      wellboreRadius: Number(originalInput.wellboreRadius || 0),
+      ...originalGasInput(detail),
+      edges: {}
+    },
+    inputItems: payload.points.map((point, index) => ({
+      testPointNumber: Number(point.sequence ?? index + 1),
+      reserviorPressure: Number(point.recoveryPressure),
+      testDailyGasProduction: Number(point.flowRate),
+      testFlowPressure: Number(point.flowingPressure),
+      testDailyOilProduction: 0
+    })),
+    evaluationForm,
+    evaluationType,
+    wellName: selectedWellName.value
+  }, { silentError: true })
+
+  detail = unwrapDockerPayload(response)
+  if (!detail?.output) {
+    const refreshed = await productivityEvaluationApi.getResult(
+      props.projectId,
+      props.gasReservoirId,
+      evaluationId,
+      { silentError: true }
+    )
+    detail = unwrapDockerPayload(refreshed)
+  }
+  if (!detail?.output) throw new Error('原平台计算接口未返回有效计算结果')
+  const result = parseOriginalEvaluation(detail, payload)
+  if (Array.isArray(detail?.inputItems) && detail.inputItems.length) applyOriginalInputRows(detail)
+  if (Number.isFinite(result.formationPressure) && result.formationPressure > 0) {
+    formationPressure.value = result.formationPressure
+  }
+  const calculatedTemperature = Number(detail?.input?.formationTemperature)
+  if (Number.isFinite(calculatedTemperature)) temperature.value = calculatedTemperature
+  originalEvaluationCache.clear()
+  return result
 }
 
 const analyze = async () => {

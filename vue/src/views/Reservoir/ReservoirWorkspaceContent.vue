@@ -15,6 +15,7 @@ import MultiPeriodComparison from './ProductivityEvaluation/MultiPeriodCompariso
 import MultiMethodComparison from './ProductivityEvaluation/MultiMethodComparison.vue'
 import InjectionProductionComparison from './ProductivityEvaluation/InjectionProductionComparison.vue'
 import MaterialBalance from './InventoryEvaluation/MaterialBalance.vue'
+import PressureGradient from './InventoryEvaluation/PressureGradient.vue'
 import GasReservoirDiagnosticCurveContent from './GasReservoirDiagnosticCurveContent.vue'
 
 const lossPages = { '微观损耗': MicroscopicLoss, '逸散性损耗': EscapeLoss, '井筒损耗': WellboreLoss, '地面损耗': SurfaceLoss }
@@ -48,6 +49,8 @@ const isPeriodComparison = computed(() => props.command?.group === '产能评价
   && props.command?.parent === '产能对比' && ['多周期', '多方法', '注采对比'].includes(props.command?.name))
 const isMaterialBalance = computed(() => props.command?.group === '库存评估'
   && props.command?.parent === '物质平衡法' && props.command?.name === '物质平衡')
+const isPressureGradient = computed(() => props.command?.group === '库存评估'
+  && props.command?.parent === '地层压力' && props.command?.name === '压力梯度')
 const isDiagnosticCurve = computed(() =>
   props.command?.group === '库存评估' && props.command?.name === '诊断曲线'
 )
@@ -83,6 +86,9 @@ const lossKey = computed(() => `${props.reservoir?.projectId}-${props.reservoir?
   </section>
   <MaterialBalance v-else-if="isMaterialBalance"
     :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-material-balance`"
+    :reservoir="reservoir" />
+  <PressureGradient v-else-if="isPressureGradient"
+    :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-pressure-gradient`"
     :reservoir="reservoir" />
   <!-- 其他尚未接入的库级功能仍保留占位入口。 -->
   <section v-else class="reservoir-workspace" :aria-label="title">
