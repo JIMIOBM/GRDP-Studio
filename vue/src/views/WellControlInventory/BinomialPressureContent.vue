@@ -5,6 +5,7 @@ import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import dockerRequest, { nodeApi, productivityEvaluationApi } from '@/api/docker'
 import { NODETYPE } from '@/constants/nodeType'
+import { buildOriginalProductivityInputItems } from '@/utils/originalProductivityInput'
 import { buildIprDisplaySeries } from '@/utils/iprDisplayCurve'
 import {
   backPressurePotentialDifference,
@@ -1769,6 +1770,11 @@ const originalGasInput = detail => {
 }
 
 const calculateWithOriginalPlatform = async payload => {
+  const formationPressure = Number(payload.formationPressure)
+  if (!Number.isFinite(formationPressure) || formationPressure <= 0) {
+    throw new Error('最大地层压力必须是有效正数')
+  }
+  const inputItems = buildOriginalProductivityInputItems(payload.points, formationPressure, payload.operationType)
   let detail = await discoverOriginalEvaluation(payload)
   const evaluationId = Number(detail?.evaluation?.id)
   if (!Number.isFinite(evaluationId) || evaluationId <= 0) {
@@ -1787,7 +1793,7 @@ const calculateWithOriginalPlatform = async payload => {
       ...originalInput,
       id: Number(originalInput.id),
       ProductivityEvaluationId: evaluationId,
-      originalFormationPressure: Number(payload.formationPressure),
+      originalFormationPressure: formationPressure,
       formationTemperature: Number(payload.temperature),
       horizontalSectionLength: Number(originalInput.horizontalSectionLength || 0),
       skinFactor: Number(originalInput.skinFactor || 0),
@@ -1798,13 +1804,7 @@ const calculateWithOriginalPlatform = async payload => {
       ...originalGasInput(detail),
       edges: {}
     },
-    inputItems: payload.points.map((point, index) => ({
-      testPointNumber: Number(point.sequence ?? index + 1),
-      reserviorPressure: Number(point.recoveryPressure),
-      testDailyGasProduction: Number(point.flowRate),
-      testFlowPressure: Number(point.flowingPressure),
-      testDailyOilProduction: 0
-    })),
+    inputItems,
     evaluationForm,
     evaluationType,
     wellName: selectedWellName.value
