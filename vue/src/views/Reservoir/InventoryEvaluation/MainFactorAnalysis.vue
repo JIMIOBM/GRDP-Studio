@@ -44,6 +44,18 @@ const loading = ref(false)
 const calculating = ref(false)
 const error = ref('')
 const warnings = ref([])
+// 只有点过「读取并计算」才有柱子；之前保留坐标轴、分类、图例，但不出数据
+const calculated = ref(false)
+
+/**
+ * 画图用的因素数据：没点过计算就把理论/实际值清空，
+ * 分类（四个因素名）仍来自 factors，所以坐标轴和图例照常显示。
+ */
+const chartFactors = computed(() => calculated.value ? factors.value : factors.value.map(factor => ({
+  ...factor,
+  theoretical: { ...factor.theoretical, value: null },
+  actual: { ...factor.actual, value: null }
+})))
 const factors = ref([])
 // 必须始终是对象：参数栏在 loading 分支之外渲染，inputs 为 null 时模板里
 // 的 inputs[field.key] 会直接抛错，整个页面白屏。
@@ -139,6 +151,12 @@ const PLACEHOLDER_HINTS = {
 
 const placeholderFor = key => PLACEHOLDER_HINTS[key] || '待填写'
 
+/**
+ * 理论值没值时的提示：①地层压力既可能手填、也可能由原平台自动读回，
+ * ②动用孔隙体积与③天然气库里根本没有，只能手填。
+ */
+const missingHint = key => (key === 'formationPressure' ? '需手填/自动读取' : '需手填')
+
 const chartRef = ref(null)
 const facetRefs = ref([])
 let chart = null
@@ -157,17 +175,36 @@ const setFacetRef = (el, index) => {
   if (el) facetRefs.value[index] = el
 }
 
+/**
+ * ECharts 的画布尺寸在 init 时定死，容器之后变宽就会把画布拉伸，文字发虚。
+ * 只监听 window.resize 不够：滚动条出现、参数栏稳定、标签页切换都会改变容器宽度。
+ * 用 ResizeObserver 盯住容器本身，尺寸一变就重算画布。
+ */
+let chartObserver = null
+const observeChartSize = el => {
+  chartObserver?.disconnect()
+  chartObserver = null
+  if (!el || typeof ResizeObserver === 'undefined') return
+  chartObserver = new ResizeObserver(() => {
+    chart?.resize()
+    facetCharts.forEach(instance => instance?.resize())
+  })
+  chartObserver.observe(el)
+}
+
 const renderChart = async () => {
   await nextTick()
   disposeChart()
+  chartObserver?.disconnect()
+  chartObserver = null
 
   if (chartMode.value === 'relative') {
     if (!chartRef.value) return
     chart = echarts.init(chartRef.value)
-    const series = buildRelativeSeries(factors.value)
+    const series = buildRelativeSeries(chartFactors.value)
     chart.setOption({
       tooltip: { trigger: 'axis' },
-      legend: { data: ['理论值', '实际值'] },
+      legend: { bottom: 0, data: ['理论值', '实际值'] },
       grid: { left: 60, right: 24, top: 40, bottom: 40 },
       xAxis: { type: 'category', data: series.map(item => item.label) },
       // 四个因素单位不同，绝对值不可同图比较，因此以理论值 100% 为基准
@@ -177,12 +214,13 @@ const renderChart = async () => {
         { name: '实际值', type: 'bar', data: series.map(item => item.actual) }
       ]
     }, true)
+    observeChartSize(chartRef.value)
     return
   }
 
   // 绝对值模式**按因素分面**：MPa 的 32 与小数的 0.74 画在同一根轴上，小的那几根根本看不见，
   // 所以每个因素一张小图，各自带自己的单位与量纲。
-  const series = buildAbsoluteSeries(factors.value)
+  const series = buildAbsoluteSeries(chartFactors.value)
   facetCharts = series.map((item, index) => {
     const el = facetRefs.value[index]
     if (!el) return null
@@ -290,6 +328,7 @@ const calculate = async () => {
       inputs: buildInputs()
     }))
     factors.value = result?.factors || factors.value
+    calculated.value = true
     warnings.value = result?.warnings || []
     await renderChart()
   } catch (cause) {
@@ -329,28 +368,11 @@ onBeforeUnmount(() => {
       <aside class="params-panel">
         <div class="panel-head">参数设置</div>
         <div class="panel-body">
-          <!-- 先说清楚"要你填什么"：整栏里只有 Bg 是必须手输的，
-               其余是自动预填的工具箱入参，一般不用动。 -->
-          <div class="required-block">
-            <div class="required-title">这一栏需要你填</div>
-            <label class="field">
-              <span>天然气体积系数 Bg（小数，必填）</span>
-              <input v-model="volumeFactor" inputmode="decimal" autocomplete="off" placeholder="例如 0.0065" />
-            </label>
-            <p class="panel-note">
-              填了 Bg，②动用孔隙体积与④气体饱和度的实际值会自动算出来（Vp = G·Bg/(1−Swi)、Sg = (G−Gp)·Bg/Vp）；
-              不填这两格就得自己输。库级没有 Bg 字段，只能手填。
-            </p>
-          </div>
-
-          <div class="group-title">传给原平台的入参（已自动预填，一般不用改）</div>
-          <p class="panel-note">
-            这些是算「理论地层压力」用的条件，按库内第一口有完整输入的井预填。
-            这里显示的是<strong>数据库口径</strong>：Pa / K / 小数 / 1/Pa。
-            后端提交给原平台时会自动换算成平台的界面单位
-            （MPa / ℃ / 10⁸m³ / % / MPa⁻¹），
-            <strong>所以不要按 MPa 来改这里的数</strong>。只有想换一组条件重算时才需要动。
-          </p>
+          <!-- 左侧唯一必须手填的就是 Bg，放最前面 -->
+          <label class="field">
+            <span>天然气体积系数 Bg（必填项）</span>
+            <input v-model="volumeFactor" inputmode="decimal" autocomplete="off" placeholder="例如 0.0065" />
+          </label>
 
           <label v-for="field in INPUT_FIELDS" :key="field.key" class="field">
             <span>{{ field.label }}（{{ field.unit }}）</span>
@@ -363,6 +385,10 @@ onBeforeUnmount(() => {
             <input v-model="inputs.gasPvtParam[field.key]" inputmode="decimal" autocomplete="off" />
           </label>
 
+        </div>
+
+        <!-- 按钮与滚动区分离：滚动的只有 .panel-body -->
+        <div class="panel-footer">
           <button class="calculate" :disabled="loading || calculating" @click="calculate">
             {{ calculating ? '计算中…' : '读取并计算' }}
           </button>
@@ -379,9 +405,6 @@ onBeforeUnmount(() => {
           <div v-else-if="loading" class="status" role="status">正在读取库内井的物质平衡输入…</div>
 
           <template v-else>
-            <el-alert v-for="(warning, index) in warnings" :key="index" :title="warning"
-              type="warning" :closable="false" show-icon class="warning" />
-
             <table class="factor-table">
               <thead>
                 <tr>
@@ -402,17 +425,19 @@ onBeforeUnmount(() => {
                     <input :value="cellValue(row, 'theoretical')"
                       @input="onCellInput('theoretical', row.key, $event)"
                       inputmode="decimal" autocomplete="off" :placeholder="placeholderFor(row.key)" />
-                    <span class="source" :class="cellSourceType(row, 'theoretical').toLowerCase()">
+                    <!-- 理论值：没有值就明说"需手填"，有值才显示来源 -->
+                    <span v-if="cellSourceType(row, 'theoretical') === 'MISSING'"
+                      class="source missing">{{ missingHint(row.key) }}</span>
+                    <span v-else class="source" :class="cellSourceType(row, 'theoretical').toLowerCase()">
                       {{ cellSourceLabel(row, 'theoretical') }}
                     </span>
                   </td>
                   <td>
                     <input :value="cellValue(row, 'actual')"
                       @input="onCellInput('actual', row.key, $event)"
-                      inputmode="decimal" autocomplete="off" :placeholder="placeholderFor(row.key)" />
-                    <span class="source" :class="cellSourceType(row, 'actual').toLowerCase()">
-                      {{ cellSourceLabel(row, 'actual') }}
-                    </span>
+                      inputmode="decimal" autocomplete="off" />
+                    <!-- 实际值都是自动算出来的，只标"自动读取"；手改过的就不标了 -->
+                    <span v-if="cellSourceType(row, 'actual') === 'AUTO'" class="source auto">自动读取</span>
                   </td>
                   <td :class="['difference', row.direction ? row.direction.toLowerCase() : '']">
                     {{ row.differenceText }}
@@ -427,9 +452,6 @@ onBeforeUnmount(() => {
               <button class="mode" :class="{ active: chartMode === 'relative' }" @click="chartMode = 'relative'">相对理论值</button>
               <button class="mode" :class="{ active: chartMode === 'absolute' }" @click="chartMode = 'absolute'">绝对值</button>
             </div>
-            <p class="chart-note">
-              四个因素单位不同（MPa / 10⁸m³ / 小数），绝对值不能同图比较，因此默认以理论值为 100% 基准显示。
-            </p>
             <div v-if="chartMode === 'relative'" ref="chartRef" class="chart"></div>
             <div v-else class="facet-grid">
               <div v-for="(item, index) in buildAbsoluteSeries(factors)" :key="item.key" class="facet">
@@ -483,6 +505,9 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* 上级容器有时给不出确定高度，整栏会比视口高一点，最下方的按钮就被裁掉。
+     这里留出底部余量，把按钮往上提，保证完整可见。 */
+  padding-bottom: 24px;
 }
 .panel-head {
   height: 32px;
@@ -495,10 +520,20 @@ onBeforeUnmount(() => {
   font-weight: 600;
   font-size: 13px;
 }
+/* 参数栏页脚：与滚动区分离，按钮始终完整可见 */
+.panel-footer {
+  flex: 0 0 auto;
+  padding: 10px 12px;
+  border-top: 1px solid #e4e7ed;
+  background: #fff;
+}
 .panel-body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  /* 覆盖式滚动条会浮在内容之上：按钮 width:100% 会把它底部压住，
+     看起来"只有上方箭头"。预留滚动条槽位即可。 */
+  scrollbar-gutter: stable;
   padding: 12px;
 }
 .panel-note {
@@ -549,12 +584,19 @@ onBeforeUnmount(() => {
 }
 .calculate {
   width: 100%;
-  height: 32px;
-  margin-top: 12px;
+  height: 36px;
+  /* 用 flex 居中：原来只给了 height，标签位置由继承行高决定，文字会贴底被裁 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  margin: 12px 0 0;
   border: none;
   border-radius: 2px;
   background: #f4d000;
   color: #202020;
+  font-size: 13px;
+  line-height: 1;
   font-weight: 600;
   cursor: pointer;
 }

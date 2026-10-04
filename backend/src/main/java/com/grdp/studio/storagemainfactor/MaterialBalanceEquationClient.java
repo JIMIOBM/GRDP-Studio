@@ -185,10 +185,11 @@ public class MaterialBalanceEquationClient {
             // （本机实测：储层孔隙度 0.0514、岩石密度 2700、langmuir 4000000/3000、
             //  formationPressure 2e7 等），算出的理论地层压力会依赖它们。
             // 页岩气藏且库里没有孔隙度/langmuir 时尤其重要——结果看着正常，其实用的是别人的样例值。
+            // 平台模板替我们补的参数（库里没有对应数据）只记 DEBUG：
+            // 这是正常兜底，不是故障，但排查页岩气藏压力异常时用得上。
             List<String> fromTemplate = templateSuppliedKeys(template, payload);
-            if (!fromTemplate.isEmpty()) {
-                log.warn("物质平衡方程入参中以下参数取自平台模板默认值（本库没有对应数据）：{}；"
-                        + "理论地层压力会依赖这些默认值，请核对。", fromTemplate);
+            if (!fromTemplate.isEmpty() && log.isDebugEnabled()) {
+                log.debug("物质平衡方程入参中以下参数取自平台模板默认值（本库没有对应数据）：{}", fromTemplate);
             }
 
             step = "提交计算";
