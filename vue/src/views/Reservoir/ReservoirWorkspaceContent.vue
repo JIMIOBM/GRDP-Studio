@@ -18,6 +18,7 @@ import CapacityDesign from './CapacityDesign/CapacityDesign.vue'
 import MaterialBalance from './InventoryEvaluation/MaterialBalance.vue'
 import PressureGradient from './InventoryEvaluation/PressureGradient.vue'
 import WaterInvasion from './InventoryEvaluation/WaterInvasion.vue'
+import MainFactorAnalysis from './InventoryEvaluation/MainFactorAnalysis.vue'
 import InterwellComparison from './WellboreConversion/InterwellComparison.vue'
 import GasReservoirDiagnosticCurveContent from './GasReservoirDiagnosticCurveContent.vue'
 import StorageNetworkTopology from './SurfaceNetwork/StorageNetworkTopology.vue'
@@ -62,6 +63,9 @@ const isPressureGradient = computed(() => props.command?.group === '库存评估
   && props.command?.parent === '地层压力' && props.command?.name === '压力梯度')
 const isWaterInvasion = computed(() => props.command?.group === '库存评估'
   && props.command?.parent === '水侵动态分析' && props.command?.name === '水侵分析')
+// 主控因素分析：库存评估下的库级功能，四个因素的理论值与实际值对比。
+const isMainFactor = computed(() =>
+  props.command?.group === '库存评估' && props.command?.name === '主控因素分析')
 const isDiagnosticCurve = computed(() =>
   props.command?.group === '库存评估' && props.command?.name === '诊断曲线'
 )
@@ -123,6 +127,10 @@ const lossKey = computed(() => `${props.reservoir?.projectId}-${props.reservoir?
     :reservoir="reservoir" />
   <WaterInvasion v-else-if="isWaterInvasion"
     :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-water-invasion`"
+    :reservoir="reservoir" />
+  <!-- 主控因素分析：必须放在下方 v-else 占位分支之前，否则会继续落到占位页。 -->
+  <MainFactorAnalysis v-else-if="isMainFactor"
+    :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-main-factor`"
     :reservoir="reservoir" />
   <!-- 库容设计的运行压力与库容参数共用一个界面（截图要求"合成一个界面"）。
        key 只跟库范围绑定：同一库内切换这几个菜单项不重建表单，未保存的编辑不会丢；
