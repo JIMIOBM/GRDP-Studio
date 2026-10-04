@@ -181,11 +181,14 @@ public final class StorageMainFactorCalculator {
             throw new BusinessException(400, "缺少物质平衡方程工具箱必填入参：气藏类型");
         }
         payload.put("gasReservoirType", input.gasReservoirType());
-        // 以下四项只有页岩气藏会用到，缺省按 0 发送。
-        payload.put("reservoirPorosity", num(zeroIfNull(input.reservoirPorosity())));
-        payload.put("rockDensity", num(zeroIfNull(input.rockDensity())));
-        payload.put("langmuirPressure", num(zeroIfNull(input.langmuirPressure())));
-        payload.put("langmuirVolume", num(zeroIfNull(input.langmuirVolume())));
+        // 这四项只有页岩气藏会用。**没值时不要写 0**：
+        // 写了就会在合并平台模板时把它自己的默认值（孔隙度 0.0514、岩石密度 2700、
+        // langmuir 4000000/3000）覆盖成 0，而原平台的校验是 `值 <= 下限 即拒绝`，
+        // 0 正是那个非法值。留给模板提供。
+        putWhenMeaningful(payload, "reservoirPorosity", input.reservoirPorosity());
+        putWhenMeaningful(payload, "rockDensity", input.rockDensity());
+        putWhenMeaningful(payload, "langmuirPressure", input.langmuirPressure());
+        putWhenMeaningful(payload, "langmuirVolume", input.langmuirVolume());
         Map<String, Object> gasPvtParam = new LinkedHashMap<>();
         gasPvtParam.put("gasType", pvt.gasType());
         gasPvtParam.put("specificGravity", num(pvt.specificGravity()));
@@ -236,5 +239,12 @@ public final class StorageMainFactorCalculator {
 
     private static double zeroIfNull(Double value) {
         return value == null ? 0d : value;
+    }
+
+    /** 只在真有值时写入：0/缺值留给平台模板自己的默认值，避免把合法值覆盖成非法的 0。 */
+    private static void putWhenMeaningful(Map<String, Object> payload, String key, Double value) {
+        if (value != null && value != 0d && Double.isFinite(value)) {
+            payload.put(key, num(value));
+        }
     }
 }

@@ -143,10 +143,25 @@ class StorageMainFactorCalculatorTests {
 
         assertTrue(json.contains("\"originalPressure\":50000000"), json);
         assertTrue(json.contains("\"temperature\":353.15"), json);
-        assertTrue(json.contains("\"reservoirPorosity\":0"), json);
         assertTrue(json.contains("\"h2SMoleFraction\":0.0462"), json);
         assertFalse(json.contains("E7"), "不应出现科学计数法：" + json);
         assertFalse(json.contains("0.0,"), "整数值不应带小数点：" + json);
+        // 没值的页岩气藏专属参数不要写 0：0 会被平台校验拒绝，
+        // 且会在合并模板时把平台自己的默认值覆盖成 0。
+        assertFalse(json.contains("reservoirPorosity"), "0 值不应下发：" + json);
+        assertFalse(json.contains("langmuirPressure"), "0 值不应下发：" + json);
+    }
+
+    @Test
+    void toolboxPayloadStillSendsShaleParametersWhenTheyHaveRealValues() {
+        var input = new ToolboxInput(50_000_000d, 353.15, 23.4, 12.3,
+                1.0E-10, 3.7E-10, 0.26, 2, 0.0513, 2700d, 4_000_000d, 3000d,
+                new GasPvtParam(0, 0.58, 0, 0.0462, 0.0396, 0, 0, 0));
+        var payload = toolboxPayload(input);
+        assertEquals(0.0513, numeric(payload, "reservoirPorosity"), 1e-12);
+        assertEquals(2700d, numeric(payload, "rockDensity"), 1e-9);
+        assertEquals(4_000_000d, numeric(payload, "langmuirPressure"), 1e-6);
+        assertEquals(3000d, numeric(payload, "langmuirVolume"), 1e-9);
     }
 
     @Test
