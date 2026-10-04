@@ -94,6 +94,35 @@ const rows = computed(() => factors.value.map(factor => ({
     : `${factor.deviationPercent.toFixed(2)} %`
 })))
 
+/**
+ * 表格里每个格子都是输入框：自动读取来的值也允许改。
+ *
+ * 原来只有"待填写"的格子才是输入框，一旦填过、点过计算，那一格就变成只读文本，
+ * 打错一个数字只能刷新页面——这对"人工对比"的用法是硬伤。
+ */
+const draftOf = side => (side === 'theoretical' ? theoreticalDraft : actualDraft)
+
+const cellValue = (row, side) => {
+  const draft = draftOf(side).value
+  if (draft[row.key] !== undefined) return draft[row.key]
+  const current = row[side]?.value
+  return current === null || current === undefined ? '' : String(current)
+}
+
+const onCellInput = (side, key, event) => {
+  const draft = draftOf(side)
+  draft.value = { ...draft.value, [key]: event.target.value }
+}
+
+/** 用户动过的格子标成"手动填写"，没动过的沿用自动读取/待填写。 */
+const cellSourceType = (row, side) => {
+  const text = draftOf(side).value[row.key]
+  if (text !== undefined && String(text).trim() !== '') return 'MANUAL'
+  return row[`${side}SourceType`]
+}
+
+const cellSourceLabel = (row, side) => sourceLabel(cellSourceType(row, side))
+
 const chartRef = ref(null)
 const facetRefs = ref([])
 let chart = null
@@ -351,18 +380,20 @@ onBeforeUnmount(() => {
                     <span class="unit">（{{ row.unit }}）</span>
                   </td>
                   <td>
-                    <template v-if="row.theoreticalSourceType === 'MISSING'">
-                      <input v-model="theoreticalDraft[row.key]" inputmode="decimal" autocomplete="off" placeholder="待填写" />
-                    </template>
-                    <template v-else>{{ row.theoreticalText }}</template>
-                    <span class="source" :class="row.theoreticalSourceType.toLowerCase()">{{ row.theoreticalSource }}</span>
+                    <input :value="cellValue(row, 'theoretical')"
+                      @input="onCellInput('theoretical', row.key, $event)"
+                      inputmode="decimal" autocomplete="off" placeholder="待填写" />
+                    <span class="source" :class="cellSourceType(row, 'theoretical').toLowerCase()">
+                      {{ cellSourceLabel(row, 'theoretical') }}
+                    </span>
                   </td>
                   <td>
-                    <template v-if="row.actualSourceType === 'MISSING'">
-                      <input v-model="actualDraft[row.key]" inputmode="decimal" autocomplete="off" placeholder="待填写" />
-                    </template>
-                    <template v-else>{{ row.actualText }}</template>
-                    <span class="source" :class="row.actualSourceType.toLowerCase()">{{ row.actualSource }}</span>
+                    <input :value="cellValue(row, 'actual')"
+                      @input="onCellInput('actual', row.key, $event)"
+                      inputmode="decimal" autocomplete="off" placeholder="待填写" />
+                    <span class="source" :class="cellSourceType(row, 'actual').toLowerCase()">
+                      {{ cellSourceLabel(row, 'actual') }}
+                    </span>
                   </td>
                   <td :class="['difference', row.direction ? row.direction.toLowerCase() : '']">
                     {{ row.differenceText }}
