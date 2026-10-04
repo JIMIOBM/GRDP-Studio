@@ -174,10 +174,9 @@ public class MaterialBalanceEquationClient {
             }
             Map<String, Object> template = asMap(templateState.path("input"));
             contract = describeContract(templateState);
-            // 平台的 GET 模板是**界面单位**（压力为 MPa）；提交给算法要 Pa。
-            // 不换算就会把模板里的 20 当成"20 Pa"发过去，参数校验随即失败——
-            // 这正是"原始地层压力 取值范围 (0, 500000000]"的来源。
-            scaleTemplatePressures(template);
+            // 模板与我们的 payload 都是**界面单位**（fields.unit_label 为 MPa/℃/%），
+            // 直接合并即可，不要再做换算——上一版把模板的 20 当成 MPa 乘了 10⁶，
+            // 反而把 maxOriginalPressure=200 撑爆。
             Map<String, Object> effective = mergeOverTemplate(template, payload);
             sent = effective;
             if (log.isInfoEnabled() && !effective.keySet().equals(payload.keySet())) {

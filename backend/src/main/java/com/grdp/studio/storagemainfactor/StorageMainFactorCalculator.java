@@ -168,23 +168,30 @@ public final class StorageMainFactorCalculator {
             throw new BusinessException(400, "缺少物质平衡方程工具箱必填入参：气体 PVT 参数");
         }
         Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("originalPressure", num(require(input.originalPressure(), "原始地层压力")));
-        payload.put("formationTemperature", num(require(input.formationTemperature(), "地层温度")));
-        payload.put("originalGasInPlace",
-                num(require(StorageMainFactorUnits.hundredMillionToCubicMeter(input.originalGasInPlace()), "动态地质储量")));
-        payload.put("cumulativeGasProduction",
-                num(require(StorageMainFactorUnits.hundredMillionToCubicMeter(input.cumulativeGasProduction()), "累产气量")));
-        payload.put("rockCompressionCoefficient", num(require(input.rockCompressionCoefficient(), "岩石压缩系数")));
-        payload.put("waterCompressionCoefficient", num(require(input.waterCompressionCoefficient(), "地层水压缩系数")));
-        payload.put("waterSaturation", num(require(input.waterSaturation(), "束缚水饱和度")));
+        // 口径以平台自己返回的 fields.unit_label 与 inputRange 为准（见类注释）：
+        // calc 收的是**界面单位** MPa / ℃ / 10⁸m³ / % / MPa⁻¹，
+        // 不是算法内部的 Pa / K / m³ / 小数。发错会被 inputRange 直接挡回，
+        // 例如 maxOriginalPressure=200，而 50000000 Pa 远超它。
+        payload.put("originalPressure",
+                num(require(StorageMainFactorUnits.paToMpa(input.originalPressure()), "原始地层压力")));
+        payload.put("formationTemperature",
+                num(require(StorageMainFactorUnits.kelvinToCelsius(input.formationTemperature()), "地层温度")));
+        // 体积本来就是 10⁸m³，不再换算
+        payload.put("originalGasInPlace", num(require(input.originalGasInPlace(), "动态地质储量")));
+        payload.put("cumulativeGasProduction", num(require(input.cumulativeGasProduction(), "累产气量")));
+        payload.put("rockCompressionCoefficient",
+                num(require(StorageMainFactorUnits.perPaToPerMpa(input.rockCompressionCoefficient()), "岩石压缩系数")));
+        payload.put("waterCompressionCoefficient",
+                num(require(StorageMainFactorUnits.perPaToPerMpa(input.waterCompressionCoefficient()), "地层水压缩系数")));
+        payload.put("waterSaturation",
+                num(require(StorageMainFactorUnits.fractionToPercent(input.waterSaturation()), "束缚水饱和度")));
         if (input.gasReservoirType() == null) {
             throw new BusinessException(400, "缺少物质平衡方程工具箱必填入参：气藏类型");
         }
         payload.put("gasReservoirType", input.gasReservoirType());
         // 这四项只有页岩气藏会用。**没值时不要写 0**：
-        // 写了就会在合并平台模板时把它自己的默认值（孔隙度 0.0514、岩石密度 2700、
-        // langmuir 4000000/3000）覆盖成 0，而原平台的校验是 `值 <= 下限 即拒绝`，
-        // 0 正是那个非法值。留给模板提供。
+        // 平台的校验是"值 <= 下限即拒绝"，0 正是那个非法值；
+        // 留给平台模板自己的默认值。
         putWhenMeaningful(payload, "reservoirPorosity", input.reservoirPorosity());
         putWhenMeaningful(payload, "rockDensity", input.rockDensity());
         putWhenMeaningful(payload, "langmuirPressure", input.langmuirPressure());
@@ -193,17 +200,20 @@ public final class StorageMainFactorCalculator {
         gasPvtParam.put("gasType", pvt.gasType());
         gasPvtParam.put("specificGravity", num(pvt.specificGravity()));
         gasPvtParam.put("modificationMethod", pvt.modificationMethod());
-        gasPvtParam.put("h2SMoleFraction", num(pvt.h2SMoleFraction()));
-        gasPvtParam.put("co2MoleFraction", num(pvt.co2MoleFraction()));
-        gasPvtParam.put("n2MoleFraction", num(pvt.n2MoleFraction()));
+        // 摩尔分数是**百分数**（inputRange maxH2SMoleFraction=100），库里存的是小数
+        gasPvtParam.put("h2SMoleFraction",
+                num(require(StorageMainFactorUnits.fractionToPercent(pvt.h2SMoleFraction()), "H₂S摩尔百分含量")));
+        gasPvtParam.put("co2MoleFraction",
+                num(require(StorageMainFactorUnits.fractionToPercent(pvt.co2MoleFraction()), "CO₂摩尔百分含量")));
+        gasPvtParam.put("n2MoleFraction",
+                num(require(StorageMainFactorUnits.fractionToPercent(pvt.n2MoleFraction()), "N₂摩尔百分含量")));
         gasPvtParam.put("deviationFactorMethod", pvt.deviationFactorMethod());
         gasPvtParam.put("viscosityMethod", pvt.viscosityMethod());
-        // 嵌套 PVT 也要带上温度与原始地层压力：原平台会校验它们，缺省成 0 会被判为
-        //   工具箱计算出错:invoke algorithm error:参数校验失败:
-        //   原始地层压力 取值范围 (0, 500000000]
-        // 原始地层压力与温度在两层是同一个物理量，直接取外层值，不是编造。
-        gasPvtParam.put("temperature", num(input.formationTemperature()));
-        gasPvtParam.put("originalPressure", num(input.originalPressure()));
+        // 嵌套 PVT 也是界面单位：温度 ℃、压力 MPa
+        gasPvtParam.put("temperature",
+                num(require(StorageMainFactorUnits.kelvinToCelsius(input.formationTemperature()), "地层温度")));
+        gasPvtParam.put("originalPressure",
+                num(require(StorageMainFactorUnits.paToMpa(input.originalPressure()), "原始地层压力")));
         payload.put("gasPvtParam", gasPvtParam);
         return payload;
     }

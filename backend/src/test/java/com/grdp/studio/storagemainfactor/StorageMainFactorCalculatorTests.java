@@ -103,27 +103,26 @@ class StorageMainFactorCalculatorTests {
 
     @Test
     void toolboxPayloadSpeaksThePlatformsOwnUnits() {
-        // 期望值取自原平台自己存下来的调用记录（toolbox_result 里
-        // MaterialBalanceEquationAppl_FormationPressure 的 inputs）：
-        //   "originalGasInPlace":347222200, "h2SMoleFraction":0.1462, "waterSaturation":0.1804
-        // 即**体积是 m³（不是 10⁸m³）、摩尔分数是小数（不是百分数）**。
+        // 依据是平台自己返回的 fields.unit_label 与 inputRange：
+        //   originalPressure MPa、formationTemperature ℃、originalGasInPlace 10⁸m³、
+        //   waterSaturation %、rockCompressionCoefficient MPa⁻¹、maxH2SMoleFraction 100(%)
+        // 即 calc 收**界面单位**，不是算法内部的 Pa/K/m³/小数。
         var input = new ToolboxInput(50_000_000d, 353.15, 23.398270898104453, 12.306372768,
                 1.0E-10, 3.744512763331313E-10, 0.26158040988077613, 1, 0d, 0d, 0d, 0d,
                 new GasPvtParam(0, 0.58, 0, 0.0462, 0.0396, 0, 0, 0));
         var payload = toolboxPayload(input);
 
-        // 压力与温度本来就是平台口径，不缩放
-        assertEquals(50_000_000d, numeric(payload, "originalPressure"), 1e-6);
-        assertEquals(353.15, numeric(payload, "formationTemperature"), 1e-9);
-        // 体积必须换算成 m³（×10⁸）
-        assertEquals(2_339_827_089.8104453, numeric(payload, "originalGasInPlace"), 1e-6);
-        assertEquals(1_230_637_276.8, numeric(payload, "cumulativeGasProduction"), 1e-6);
-        // 摩尔分数与饱和度保持小数，不乘 100
-        assertEquals(0.26158040988077613, numeric(payload, "waterSaturation"), 1e-15);
+        assertEquals(50d, numeric(payload, "originalPressure"), 1e-9);            // MPa
+        assertEquals(80d, numeric(payload, "formationTemperature"), 1e-9);        // ℃
+        assertEquals(23.398270898104453, numeric(payload, "originalGasInPlace"), 1e-9);   // 10⁸m³
+        assertEquals(12.306372768, numeric(payload, "cumulativeGasProduction"), 1e-9);
+        assertEquals(26.158040988077613, numeric(payload, "waterSaturation"), 1e-9);      // %
+        assertEquals(1.0E-4, numeric(payload, "rockCompressionCoefficient"), 1e-18);      // MPa⁻¹
         var pvt = (Map<?, ?>) payload.get("gasPvtParam");
-        assertEquals(0.0462, ((Number) pvt.get("h2SMoleFraction")).doubleValue(), 1e-12);
-        assertEquals(0.0396, ((Number) pvt.get("co2MoleFraction")).doubleValue(), 1e-12);
-        assertEquals(0, pvt.get("viscosityMethod"));
+        assertEquals(4.62, ((Number) pvt.get("h2SMoleFraction")).doubleValue(), 1e-12);   // %
+        assertEquals(3.96, ((Number) pvt.get("co2MoleFraction")).doubleValue(), 1e-12);
+        assertEquals(80d, ((Number) pvt.get("temperature")).doubleValue(), 1e-9);
+        assertEquals(50d, ((Number) pvt.get("originalPressure")).doubleValue(), 1e-9);
         assertEquals(1, payload.get("gasReservoirType"));
     }
 
@@ -141,12 +140,11 @@ class StorageMainFactorCalculatorTests {
                 new GasPvtParam(0, 0.58, 0, 0.0462, 0.0396, 0, 0, 0));
         String json = new ObjectMapper().writeValueAsString(toolboxPayload(input));
 
-        assertTrue(json.contains("\"originalPressure\":50000000"), json);
-        assertTrue(json.contains("\"temperature\":353.15"), json);
-        assertTrue(json.contains("\"h2SMoleFraction\":0.0462"), json);
-        assertFalse(json.contains("E7"), "不应出现科学计数法：" + json);
+        assertTrue(json.contains("\"originalPressure\":50"), json);
+        assertTrue(json.contains("\"temperature\":80"), json);
+        assertTrue(json.contains("\"h2SMoleFraction\":4.62"), json);
         assertFalse(json.contains("0.0,"), "整数值不应带小数点：" + json);
-        // 没值的页岩气藏专属参数不要写 0：0 会被平台校验拒绝，
+        // 没值的页岩气藏专属参数不要写 0：0 会被平台校验拒绝（值 <= 下限即拒绝），
         // 且会在合并模板时把平台自己的默认值覆盖成 0。
         assertFalse(json.contains("reservoirPorosity"), "0 值不应下发：" + json);
         assertFalse(json.contains("langmuirPressure"), "0 值不应下发：" + json);
@@ -177,8 +175,9 @@ class StorageMainFactorCalculatorTests {
 
         var pvt = (Map<?, ?>) toolboxPayload(input).get("gasPvtParam");
 
-        assertEquals(50_000_000d, ((Number) pvt.get("originalPressure")).doubleValue(), 1e-6);
-        assertEquals(353.15, ((Number) pvt.get("temperature")).doubleValue(), 1e-9);
+        // 嵌套 PVT 同样是界面单位：压力 MPa、温度 ℃
+        assertEquals(50d, ((Number) pvt.get("originalPressure")).doubleValue(), 1e-9);
+        assertEquals(80d, ((Number) pvt.get("temperature")).doubleValue(), 1e-9);
     }
 
     @Test
