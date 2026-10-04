@@ -224,15 +224,34 @@ public class StorageMainFactorService {
                 ORDER BY i.id
                 """, (rs, n) -> new Source(
                         rs.getLong(1), rs.getString(2),
-                        (Double) rs.getObject(3), (Double) rs.getObject(4),
-                        (Double) rs.getObject(5), (Double) rs.getObject(6), (Double) rs.getObject(7),
-                        (Integer) rs.getObject(8), rs.getString(9), (Double) rs.getObject(10),
-                        (Double) rs.getObject(11), (Double) rs.getObject(12), (Double) rs.getObject(13),
-                        (Integer) rs.getObject(14), (Integer) rs.getObject(15),
-                        (Double) rs.getObject(16), (Double) rs.getObject(17),
-                        (Double) rs.getObject(18), (Double) rs.getObject(19)),
+                        doubleOrNull(rs, 3), doubleOrNull(rs, 4),
+                        doubleOrNull(rs, 5), doubleOrNull(rs, 6), doubleOrNull(rs, 7),
+                        intOrNull(rs, 8), rs.getString(9), doubleOrNull(rs, 10),
+                        doubleOrNull(rs, 11), doubleOrNull(rs, 12), doubleOrNull(rs, 13),
+                        intOrNull(rs, 14), intOrNull(rs, 15),
+                        doubleOrNull(rs, 16), doubleOrNull(rs, 17),
+                        doubleOrNull(rs, 18), doubleOrNull(rs, 19)),
                 projectId, gasReservoirId, wellName);
         return found.isEmpty() ? null : found.getFirst();
+    }
+
+    /**
+     * 按 {@link Number} 取值，不按具体包装类型强转。
+     *
+     * <p>真实库里 {@code modification_method} / {@code deviation_factor_method} /
+     * {@code gas_reservoir_type} 是 <b>BIGINT</b>，MySQL 驱动因此返回 {@code Long}；
+     * 若写成 {@code (Integer) rs.getObject(n)} 会 ClassCastException 直接 500。
+     * 而 H2 用 INT 建表时返回的是 Integer，恰好把这个差异掩盖过去——所以测试建表也用 BIGINT，
+     * 与真实库保持一致。
+     */
+    private static Integer intOrNull(java.sql.ResultSet rs, int index) throws java.sql.SQLException {
+        Object value = rs.getObject(index);
+        return value == null ? null : ((Number) value).intValue();
+    }
+
+    private static Double doubleOrNull(java.sql.ResultSet rs, int index) throws java.sql.SQLException {
+        Object value = rs.getObject(index);
+        return value == null ? null : ((Number) value).doubleValue();
     }
 
     /** 实测静压以 Pa 存在物质平衡输入明细里，换成 MPa 再展示。 */

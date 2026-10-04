@@ -181,11 +181,23 @@ const buildInputs = () => {
   return merged
 }
 
-const collect = draft => {
+/**
+ * 汇总某一侧的取值：用户改过的用手输值，否则回传当前已有的值。
+ *
+ * 必须回传已有值，不能只发手输值：calculate 不回读数据库，
+ * 只发手输值会把 context 读到的"实际地层压力""实际天然气量"变成 MISSING，
+ * 表格里的实际值会在点一次计算之后凭空消失。
+ */
+const effectiveValues = (draft, side) => {
   const collected = {}
-  Object.entries(draft).forEach(([key, value]) => {
-    const number = toNumberOrNull(value)
-    if (number !== null) collected[key] = number
+  factors.value.forEach(factor => {
+    const typed = toNumberOrNull(draft[factor.key])
+    if (typed !== null) {
+      collected[factor.key] = typed
+      return
+    }
+    const current = toNumberOrNull(factor[side]?.value)
+    if (current !== null) collected[factor.key] = current
   })
   return collected
 }
@@ -197,8 +209,8 @@ const calculate = async () => {
     const result = unwrap(await storageMainFactorApi.calculate({
       ...scope.value,
       volumeFactor: toNumberOrNull(volumeFactor.value),
-      theoretical: collect(theoreticalDraft.value),
-      actual: collect(actualDraft.value),
+      theoretical: effectiveValues(theoreticalDraft.value, 'theoretical'),
+      actual: effectiveValues(actualDraft.value, 'actual'),
       inputs: buildInputs()
     }))
     factors.value = result?.factors || factors.value

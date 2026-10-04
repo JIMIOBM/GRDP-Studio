@@ -45,10 +45,10 @@ class StorageMainFactorServiceTests {
                 CREATE TABLE dynamic_original_gas_in_place_by_mb_input(
                   id BIGINT PRIMARY KEY,dynamic_original_gas_in_place_id BIGINT,gas_type VARCHAR(20),
                   specific_gravity DOUBLE,hydrogen_sulfide DOUBLE,carbon_dioxide DOUBLE,nitrogen DOUBLE,
-                  modification_method INT,deviation_factor_method INT,original_pressure DOUBLE,temperature DOUBLE,
+                  modification_method BIGINT,deviation_factor_method BIGINT,original_pressure DOUBLE,temperature DOUBLE,
                   rock_compression_coefficient DOUBLE,water_compression_coefficient DOUBLE,water_saturation DOUBLE,
                   reservoir_porosity DOUBLE,shale_rock_desity DOUBLE,langmuir_pressure DOUBLE,langmuir_volume DOUBLE,
-                  gas_reservoir_type INT)
+                  gas_reservoir_type BIGINT)
                 """);
         jdbc.execute("""
                 CREATE TABLE dynamic_original_gas_in_place_output(
