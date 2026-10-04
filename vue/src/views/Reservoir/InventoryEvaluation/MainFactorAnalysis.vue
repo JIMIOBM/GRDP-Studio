@@ -95,21 +95,30 @@ const rows = computed(() => factors.value.map(factor => ({
 })))
 
 const chartRef = ref(null)
+const facetRefs = ref([])
 let chart = null
+let facetCharts = []
 
 const disposeChart = () => {
   if (chart) {
     chart.dispose()
     chart = null
   }
+  facetCharts.forEach(instance => instance.dispose())
+  facetCharts = []
+}
+
+const setFacetRef = (el, index) => {
+  if (el) facetRefs.value[index] = el
 }
 
 const renderChart = async () => {
   await nextTick()
-  if (!chartRef.value) return
-  if (!chart) chart = echarts.init(chartRef.value)
+  disposeChart()
 
   if (chartMode.value === 'relative') {
+    if (!chartRef.value) return
+    chart = echarts.init(chartRef.value)
     const series = buildRelativeSeries(factors.value)
     chart.setOption({
       tooltip: { trigger: 'axis' },
@@ -126,19 +135,29 @@ const renderChart = async () => {
     return
   }
 
+  // 绝对值模式**按因素分面**：MPa 的 32 与小数的 0.74 画在同一根轴上，小的那几根根本看不见，
+  // 所以每个因素一张小图，各自带自己的单位与量纲。
   const series = buildAbsoluteSeries(factors.value)
-  // 绝对值模式下按因素分面：每个因素一张小图，各自带单位
-  chart.setOption({
-    tooltip: { trigger: 'axis' },
-    legend: { data: ['理论值', '实际值'] },
-    grid: { left: 60, right: 24, top: 40, bottom: 40 },
-    xAxis: { type: 'category', data: series.map(item => `${item.label}\n(${item.unit})`) },
-    yAxis: { type: 'value' },
-    series: [
-      { name: '理论值', type: 'bar', data: series.map(item => item.theoretical) },
-      { name: '实际值', type: 'bar', data: series.map(item => item.actual) }
-    ]
-  }, true)
+  facetCharts = series.map((item, index) => {
+    const el = facetRefs.value[index]
+    if (!el) return null
+    const instance = echarts.init(el)
+    instance.setOption({
+      tooltip: { trigger: 'axis' },
+      grid: { left: 56, right: 12, top: 28, bottom: 26 },
+      xAxis: { type: 'category', data: ['理论值', '实际值'] },
+      yAxis: { type: 'value', name: item.unit },
+      series: [{
+        type: 'bar',
+        barWidth: 26,
+        data: [
+          { value: item.theoretical, itemStyle: { color: '#909399' } },
+          { value: item.actual, itemStyle: { color: '#f4d000' } }
+        ]
+      }]
+    })
+    return instance
+  }).filter(Boolean)
 }
 
 const applyContext = data => {
@@ -165,39 +184,47 @@ const load = async () => {
   }
 }
 
+/**
+ * 构造要回传的工具箱入参。
+ *
+ * 必须深拷一层再转换：直接改 inputs.value.gasPvtParam 会把用户清空的输入框就地改成 0，
+ * 界面上看起来"自己变成了 0"，而且之后再提交就是那个 0。空值保持 null，
+ * 由后端（Jackson 对原始类型）按 0 处理。
+ */
 const buildInputs = () => {
-  if (!inputs.value) return null
-  const merged = { ...inputs.value }
+  const current = inputs.value
+  if (!current) return null
+  const merged = { ...current }
   INPUT_FIELDS.forEach(field => {
-    const value = toNumberOrNull(merged[field.key])
-    merged[field.key] = value === null ? null : value
+    merged[field.key] = toNumberOrNull(merged[field.key])
   })
-  const pvt = { ...(merged.gasPvtParam || {}) }
+  const pvt = { ...(current.gasPvtParam || {}) }
   PVT_FIELDS.forEach(field => {
-    const value = toNumberOrNull(pvt[field.key])
-    pvt[field.key] = value === null ? 0 : value
+    pvt[field.key] = toNumberOrNull(pvt[field.key])
   })
   merged.gasPvtParam = pvt
   return merged
 }
 
 /**
- * 汇总某一侧的取值：用户改过的用手输值，否则回传当前已有的值。
+ * 汇总某一侧要回传的取值：用户改过的按"手动填写"，否则把当前值**连同来源**原样回传。
  *
- * 必须回传已有值，不能只发手输值：calculate 不回读数据库，
- * 只发手输值会把 context 读到的"实际地层压力""实际天然气量"变成 MISSING，
- * 表格里的实际值会在点一次计算之后凭空消失。
+ * 两个必须点：一是不能只发手输值，否则 context 读到的实际地层压力/实际天然气量
+ * 会在点一次计算后变成 MISSING；二是必须带上 source/note，
+ * 否则"实测静压：X-1"这类溯源信息会被统一冲成"手动填写"。
  */
 const effectiveValues = (draft, side) => {
   const collected = {}
   factors.value.forEach(factor => {
     const typed = toNumberOrNull(draft[factor.key])
     if (typed !== null) {
-      collected[factor.key] = typed
+      collected[factor.key] = { value: typed, source: 'MANUAL', note: '手动填写' }
       return
     }
-    const current = toNumberOrNull(factor[side]?.value)
-    if (current !== null) collected[factor.key] = current
+    const current = factor[side]
+    if (current && current.value !== null && current.value !== undefined) {
+      collected[factor.key] = { value: current.value, source: current.source, note: current.note }
+    }
   })
   return collected
 }
@@ -223,7 +250,10 @@ const calculate = async () => {
   }
 }
 
-const onResize = () => chart?.resize()
+const onResize = () => {
+  chart?.resize()
+  facetCharts.forEach(instance => instance.resize())
+}
 
 watch(() => [props.reservoir?.projectId, props.reservoir?.gasReservoirId, props.reservoir?.storageId], () => {
   load()
@@ -334,7 +364,13 @@ onBeforeUnmount(() => {
             <p class="chart-note">
               四个因素单位不同（MPa / 10⁸m³ / 小数），绝对值不能同图比较，因此默认以理论值为 100% 基准显示。
             </p>
-            <div ref="chartRef" class="chart"></div>
+            <div v-if="chartMode === 'relative'" ref="chartRef" class="chart"></div>
+            <div v-else class="facet-grid">
+              <div v-for="(item, index) in buildAbsoluteSeries(factors)" :key="item.key" class="facet">
+                <div class="facet-title">{{ item.label }}（{{ item.unit }}）</div>
+                <div :ref="el => setFacetRef(el, index)" class="facet-chart"></div>
+              </div>
+            </div>
           </template>
         </div>
       </main>
@@ -524,4 +560,22 @@ onBeforeUnmount(() => {
 .mode.active { background: #f4d000; border-color: #f4d000; color: #202020; }
 .chart-note { margin: 6px 0 8px; color: #909399; font-size: 12px; }
 .chart { width: 100%; height: 320px; }
+/* 绝对值模式：四个因素单位不同，分面显示，各自带单位 */
+.facet-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.facet {
+  border: 1px solid #e4e7ed;
+  border-radius: 2px;
+  padding: 8px;
+}
+.facet-title {
+  margin-bottom: 4px;
+  color: #606266;
+  font-size: 12px;
+  font-weight: 600;
+}
+.facet-chart { width: 100%; height: 200px; }
 </style>

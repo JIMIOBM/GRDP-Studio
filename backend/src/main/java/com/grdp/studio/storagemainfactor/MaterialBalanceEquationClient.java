@@ -37,6 +37,18 @@ public class MaterialBalanceEquationClient {
 
     public static final String ALGORITHM = "MaterialBalanceEquationAppl_FormationPressure";
 
+    /**
+     * 原平台返回的地层压力按 **MPa** 解释（该平台其它压力输出也是 MPa）。
+     * 这个区间只用于兜住"口径变了"的情况：若哪天它开始返回 Pa，
+     * 19650000 会被判为不可信而走手输，而不是当成 MPa 显示出去。
+     */
+    private static final double MIN_PLAUSIBLE_MPA = 0.01d;
+    private static final double MAX_PLAUSIBLE_MPA = 300d;
+
+    /** 工具箱是异步落结果的，calc 返回只代表受理，所以要给结果几次机会。 */
+    private static final int RESULT_ATTEMPTS = 3;
+    private static final long RESULT_RETRY_MILLIS = 300L;
+
     private static final Logger log = LoggerFactory.getLogger(MaterialBalanceEquationClient.class);
 
     private final OriginalPlatformClient platform;
@@ -98,7 +110,15 @@ public class MaterialBalanceEquationClient {
         return code == 400 || code == 401;
     }
 
-    /** 创建工具箱的响应形状不唯一，id 直接找、找不到再往 data 里找一层。 */
+    /** 地层压力是否落在可解释为 MPa 的范围内；超出即认为口径异常，交给人工填写。 */
+    public static boolean isPlausiblePressure(Double pressureMpa) {
+        return pressureMpa != null && Double.isFinite(pressureMpa)
+                && pressureMpa >= MIN_PLAUSIBLE_MPA && pressureMpa <= MAX_PLAUSIBLE_MPA;
+    }
+
+    /**
+     * 创建工具箱的响应形状不唯一，id 直接找、找不到再往 data 里找一层。
+     */
     public static Long extractToolboxId(JsonNode created) {
         if (created == null) {
             return null;
@@ -140,14 +160,36 @@ public class MaterialBalanceEquationClient {
                 return null;
             }
 
-            JsonNode state = platform.get("/api/toolbox/" + toolboxId, JsonNode.class, headers);
-            if (isLegacyErrorEnvelope(state)) {
-                log.warn("读取物质平衡方程结果失败：{}", state.path("msg").asText("原平台返回错误"));
-                return null;
+            JsonNode state = null;
+            Double pressure = null;
+            // 工具箱计算异步落结果：calc 之后立即 GET 可能仍是上一次的值或空结果，
+            // 所以这里给几次机会；直接把第一次读到的值当成"自动算出来的"会展示一个过期结果。
+            for (int attempt = 0; attempt < RESULT_ATTEMPTS; attempt++) {
+                state = platform.get("/api/toolbox/" + toolboxId, JsonNode.class, headers);
+                if (isLegacyErrorEnvelope(state)) {
+                    log.warn("读取物质平衡方程结果失败：{}", state.path("msg").asText("原平台返回错误"));
+                    return null;
+                }
+                pressure = extractFormationPressure(state);
+                if (pressure != null) {
+                    break;
+                }
+                if (attempt < RESULT_ATTEMPTS - 1) {
+                    try {
+                        Thread.sleep(RESULT_RETRY_MILLIS);
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        return null;
+                    }
+                }
             }
-            Double pressure = extractFormationPressure(state);
             if (pressure == null) {
                 log.warn("物质平衡方程结果里没有 output.formationPressure：{}", state);
+                return null;
+            }
+            if (!isPlausiblePressure(pressure)) {
+                log.warn("物质平衡方程返回的地层压力 {} 不在可解释为 MPa 的范围内，降级为手动填写", pressure);
+                return null;
             }
             return pressure;
         } catch (RuntimeException e) {

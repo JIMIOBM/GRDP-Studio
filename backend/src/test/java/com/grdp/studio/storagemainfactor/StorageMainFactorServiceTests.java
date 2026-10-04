@@ -40,7 +40,7 @@ class StorageMainFactorServiceTests {
         jdbc.execute("CREATE TABLE project_storage(id BIGINT PRIMARY KEY,project_id BIGINT,gas_reservoir_id BIGINT)");
         jdbc.execute("CREATE TABLE project_well_heads(id BIGINT PRIMARY KEY,project_id BIGINT,project_gas_reservoir_id BIGINT,well_name VARCHAR(100))");
         jdbc.execute("CREATE TABLE project_storage_well(storage_id BIGINT,well_id BIGINT)");
-        jdbc.execute("CREATE TABLE dynamic_original_gas_in_place(id BIGINT PRIMARY KEY,project_id BIGINT,project_gas_reservoir_id BIGINT,well_name VARCHAR(100),dynamic_original_gas_inplace_method BIGINT)");
+        jdbc.execute("CREATE TABLE dynamic_original_gas_in_place(id BIGINT PRIMARY KEY,project_id BIGINT,project_gas_reservoir_id BIGINT,well_name VARCHAR(100),dynamic_original_gas_inplace_method BIGINT,create_time TIMESTAMP,update_time TIMESTAMP)");
         jdbc.execute("""
                 CREATE TABLE dynamic_original_gas_in_place_by_mb_input(
                   id BIGINT PRIMARY KEY,dynamic_original_gas_in_place_id BIGINT,gas_type VARCHAR(20),
@@ -92,7 +92,7 @@ class StorageMainFactorServiceTests {
 
     /** 插入一口井的物质平衡输入与同源的动态储量；数值取自本机实测。 */
     void measuredSource() {
-        jdbc.update("INSERT INTO dynamic_original_gas_in_place VALUES(1,8,5,'X-1',2)");
+        jdbc.update("INSERT INTO dynamic_original_gas_in_place VALUES(1,8,5,'X-1',2,TIMESTAMP '2020-01-01 00:00:00',TIMESTAMP '2020-01-01 00:00:00')");
         jdbc.update("""
                 INSERT INTO dynamic_original_gas_in_place_by_mb_input
                 (id,dynamic_original_gas_in_place_id,gas_type,specific_gravity,hydrogen_sulfide,carbon_dioxide,nitrogen,
@@ -145,7 +145,7 @@ class StorageMainFactorServiceTests {
     void readsGasVolumeFromTheSameSourceRowAsTheInputs() {
         measuredSource();
         // 另一条来源记录：method 6 也有一个储量，但与本井的物质平衡输入不是同一行
-        jdbc.update("INSERT INTO dynamic_original_gas_in_place VALUES(2,8,5,'X-1',6)");
+        jdbc.update("INSERT INTO dynamic_original_gas_in_place VALUES(2,8,5,'X-1',6,TIMESTAMP '2021-01-01 00:00:00',TIMESTAMP '2021-01-01 00:00:00')");
         jdbc.update("INSERT INTO dynamic_original_gas_in_place_output VALUES(102,2,8,5,'X-1',6,2940228666.6234493,0.61,1)");
 
         var gas = row(service.context(8, 5, 2).factors(), "gas");
@@ -155,10 +155,67 @@ class StorageMainFactorServiceTests {
 
     @Test
     void fallsBackToStaticPressureTableWhenNoMeasurementsExist() {
-        jdbc.update("INSERT INTO project_static_pressure_data VALUES(301,'X-1',TIMESTAMP '2010-06-10 00:00:00',19.65,5,8)");
+        // 真实库里这一列是 **Pa**（实测 19650000 ~ 31608000），不是 MPa。
+        // 早期版本的 fixture 写的是 19.65 并断言 19.65，等于把这个错误钉死成"通过"。
+        jdbc.update("INSERT INTO project_static_pressure_data VALUES(301,'X-1',TIMESTAMP '2010-06-10 00:00:00',19650000,5,8)");
         var pressure = row(service.context(8, 5, 2).factors(), "formationPressure");
         assertEquals(AUTO, pressure.actual().source());
         assertEquals(19.65, pressure.actual().value(), 1e-9);
+    }
+
+    @Test
+    void calculateStillReturnsDifferencesWhenThereIsNoMbInputAtAll() {
+        // spec §8/§11-5：库级数据为空是本机现状。此时用户仍要能手工填四个值并看到差异，
+        // 不能因为"没有入参"就把整个请求拒掉（那是把最主要的兜底路径堵死）。
+        var theoretical = Map.of("formationPressure", new FactorValue(32.15, MANUAL, "用户手输"),
+                "gasSaturation", new FactorValue(0.8, MANUAL, "用户手输"));
+        var actual = Map.of("formationPressure", new FactorValue(13.5573, MANUAL, "用户手输"));
+        var request = new CalculateRequest(8, 5, 2, null, theoretical, actual, null);
+
+        var result = service.calculate(request, Map.of());
+
+        assertNull(result.formationPressure());
+        assertEquals(MANUAL, result.formationPressureSource());
+        assertEquals(4, result.factors().size());
+        assertEquals(-18.5927, row(result.factors(), "formationPressure").difference(), 1e-9);
+        assertEquals("NEGATIVE", row(result.factors(), "formationPressure").direction());
+        assertTrue(result.warnings().stream().anyMatch(w -> w.contains("手动")),
+                "必须说明为什么理论地层压力没有自动算出来");
+    }
+
+    @Test
+    void preservesAutomaticProvenanceWhenTheCallerEchoesContextValuesBack() {
+        // 页面把 context 读到的实际值原样回传，来源必须仍然是"自动读取"，
+        // 否则点一次计算之后"实测静压：X-1"就变成了"手动填写"，用户再也分不清数据出处。
+        measuredSource();
+        var context = service.context(8, 5, 2);
+        var request = new CalculateRequest(8, 5, 2, 0.0065,
+                Map.of(), context.factors().stream().collect(
+                        java.util.stream.Collectors.toMap(FactorRow::key, FactorRow::actual)),
+                context.inputs());
+
+        var result = service.calculate(request, Map.of());
+
+        var pressure = row(result.factors(), "formationPressure").actual();
+        assertEquals(AUTO, pressure.source());
+        assertTrue(pressure.note() != null && pressure.note().contains("X-1"),
+                "自动值要保留它的来源说明");
+        assertEquals(AUTO, row(result.factors(), "gas").actual().source());
+    }
+
+    @Test
+    void prefersTheGasVolumeWhoseMethodMatchesTheSourceRowAndLabelsIt() {
+        // 同一个来源行挂多条输出时，必须挑与母行 method 一致的那条，并把选中的行说清楚；
+        // 靠 o.id 取第一条会随插入顺序漂移（本库 G 的跨度是 19.85~33.05 ×10⁸m³）。
+        measuredSource();
+        jdbc.update("INSERT INTO dynamic_original_gas_in_place_output VALUES(103,1,8,5,'X-1',7,9900000000.0,0.5,2)");
+        jdbc.update("INSERT INTO dynamic_original_gas_in_place_output VALUES(104,1,8,5,'X-1',2,1985476101.8,0.88,1)");
+
+        var gas = row(service.context(8, 5, 2).factors(), "gas");
+        // 母行 method=2 → 应取 method=2 的那条 (1.9854761018e9 m³ = 19.854761018 ×10⁸m³)
+        assertEquals(19.854761018, gas.actual().value(), 1e-9);
+        assertTrue(gas.actual().note() != null && gas.actual().note().contains("104"),
+                "要把选中的输出行标出来，便于人工核对：" + gas.actual().note());
     }
 
     @Test

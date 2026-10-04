@@ -70,6 +70,19 @@ class MaterialBalanceEquationClientTests {
     }
 
     @Test
+    void rejectsImplausiblePressureInsteadOfPresentingItAsAutomatic() {
+        // 原平台压力按 MPa 解释。若某天口径变成 Pa（或返回 0/负值），
+        // 直接把 19650000 当成 MPa 显示，就是又一个"看着正常的错结果"——宁可降级为手输。
+        assertTrue(MaterialBalanceEquationClient.isPlausiblePressure(32.1534));
+        assertTrue(MaterialBalanceEquationClient.isPlausiblePressure(50.0));
+        assertTrue(MaterialBalanceEquationClient.isPlausiblePressure(0.01));
+        assertFalse(MaterialBalanceEquationClient.isPlausiblePressure(19650000.0));
+        assertFalse(MaterialBalanceEquationClient.isPlausiblePressure(0.0));
+        assertFalse(MaterialBalanceEquationClient.isPlausiblePressure(-1.0));
+        assertFalse(MaterialBalanceEquationClient.isPlausiblePressure(null));
+    }
+
+    @Test
     void incompleteInputFailsLoudlyInsteadOfSilentlyFallingBack() {
         // 入参不齐 ≠ 原平台不可用：前者要告诉用户缺哪个字段（400），
         // 后者才降级为手输。两者混为一谈会把"没填完"变成一个查不出原因的静默降级。

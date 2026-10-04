@@ -68,6 +68,10 @@ public final class StorageMainFactorDtos {
     /**
      * 计算请求：四因素的理论/实际值由前端回传（用户可能改过），入参同样回传。
      *
+     * <p>两侧都传 {@link FactorValue} 而不是裸数值：页面会把 context 读到的自动值原样回传，
+     * 如果只传数字，后端就无法区分"这是数据库读来的"还是"用户手输的"，
+     * 点一次计算之后所有来源都会退化成"手动填写"（spec 要求每个值都标明来源）。
+     *
      * <p>{@code volumeFactor} 是天然气体积系数 Bg。库级没有 Bg 字段（井级为
      * {@code project_well_pvt_gas_result.volume_factor}），spec 把它定为页面上的手输项；
      * ② 动用孔隙体积与 ④ 气体饱和度都要用它，所以必须随请求带上来。
@@ -77,8 +81,8 @@ public final class StorageMainFactorDtos {
             long gasReservoirId,
             long storageId,
             Double volumeFactor,
-            Map<String, Double> theoretical,
-            Map<String, Double> actual,
+            Map<String, FactorValue> theoretical,
+            Map<String, FactorValue> actual,
             ToolboxInput inputs) {}
 
     /**
