@@ -1,0 +1,86 @@
+package com.grdp.studio.storagemainfactor;
+
+import java.util.List;
+import java.util.Map;
+
+/**
+ * 主控因素分析对外传输对象。全部为 record，便于 Jackson 直接序列化。
+ *
+ * <p>{@link FactorValue} 把「值」和「来源」绑在一起：理论侧与实际侧的来源天然不同
+ * （理论地层压力来自原平台工具箱，实际值来自数据库），所以两侧各自携带 source，
+ * 而不是共用一个来源表。
+ */
+public final class StorageMainFactorDtos {
+
+    private StorageMainFactorDtos() {}
+
+    /** 单个因素一侧的取值。{@code source} 取 {@code AUTO} / {@code MANUAL} / {@code MISSING}。 */
+    public record FactorValue(Double value, String source, String note) {}
+
+    /** 一个因素的一行：理论值、实际值、差异、差异方向与百分比偏差。 */
+    public record FactorRow(
+            String key,
+            String label,
+            String unit,
+            FactorValue theoretical,
+            FactorValue actual,
+            Double difference,
+            String direction,
+            Double deviationPercent) {}
+
+    /** 原平台 {@code gasPvtParam}，字段名与取值都与原平台一致。 */
+    public record GasPvtParam(
+            int gasType,
+            double specificGravity,
+            int modificationMethod,
+            double h2SMoleFraction,
+            double co2MoleFraction,
+            double n2MoleFraction,
+            int deviationFactorMethod) {}
+
+    /**
+     * 原平台「物质平衡方程 → 计算地层压力」的入参。
+     * 数值一律是**原平台口径**：Pa / K / 10⁸m³ / 小数 / 1/Pa。
+     * 后四项仅页岩气藏（gasReservoirType=2）使用，允许为 null（按 0 发送）。
+     */
+    public record ToolboxInput(
+            Double originalPressure,
+            Double formationTemperature,
+            Double originalGasInPlace,
+            Double cumulativeGasProduction,
+            Double rockCompressionCoefficient,
+            Double waterCompressionCoefficient,
+            Double waterSaturation,
+            Integer gasReservoirType,
+            Double reservoirPorosity,
+            Double rockDensity,
+            Double langmuirPressure,
+            Double langmuirVolume,
+            GasPvtParam gasPvtParam) {}
+
+    /** 页面初次加载的预填结果：四因素行 + 工具箱入参 + 入参来源 + 缺失说明。 */
+    public record Context(
+            List<FactorRow> factors,
+            ToolboxInput inputs,
+            Map<String, String> inputSources,
+            List<String> warnings) {}
+
+    /** 计算请求：四因素的理论/实际值由前端回传（用户可能改过），入参同样回传。 */
+    public record CalculateRequest(
+            long projectId,
+            long gasReservoirId,
+            long storageId,
+            Map<String, Double> theoretical,
+            Map<String, Double> actual,
+            ToolboxInput inputs) {}
+
+    /**
+     * 计算结果。{@code formationPressure} 为 null 表示原平台不可用或未登录，
+     * 此时前端应把理论地层压力切换为手输，{@code formationPressureSource} 会说明原因。
+     */
+    public record CalculateResult(
+            Double formationPressure,
+            String formationPressureSource,
+            List<FactorRow> factors,
+            List<String> warnings) {}
+}
