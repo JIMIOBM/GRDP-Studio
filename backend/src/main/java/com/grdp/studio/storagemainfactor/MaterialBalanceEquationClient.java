@@ -8,7 +8,9 @@ import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import static com.grdp.studio.storagemainfactor.StorageMainFactorDtos.ToolboxInput;
@@ -179,9 +181,14 @@ public class MaterialBalanceEquationClient {
             // 反而把 maxOriginalPressure=200 撑爆。
             Map<String, Object> effective = mergeOverTemplate(template, payload);
             sent = effective;
-            if (log.isInfoEnabled() && !effective.keySet().equals(payload.keySet())) {
-                log.info("物质平衡方程工具箱参数集以平台模板为准，额外字段：{}",
-                        effective.keySet().stream().filter(k -> !payload.containsKey(k)).toList());
+            // 平台模板替我们补上的参数必须让用户知道：这些值来自平台的**示例默认值**
+            // （本机实测：储层孔隙度 0.0514、岩石密度 2700、langmuir 4000000/3000、
+            //  formationPressure 2e7 等），算出的理论地层压力会依赖它们。
+            // 页岩气藏且库里没有孔隙度/langmuir 时尤其重要——结果看着正常，其实用的是别人的样例值。
+            List<String> fromTemplate = templateSuppliedKeys(template, payload);
+            if (!fromTemplate.isEmpty()) {
+                log.warn("物质平衡方程入参中以下参数取自平台模板默认值（本库没有对应数据）：{}；"
+                        + "理论地层压力会依赖这些默认值，请核对。", fromTemplate);
             }
 
             step = "提交计算";
@@ -284,6 +291,28 @@ public class MaterialBalanceEquationClient {
         Map<String, Object> typed = new LinkedHashMap<>();
         source.forEach((key, value) -> typed.put(String.valueOf(key), value));
         return typed;
+    }
+
+    /**
+     * 列出"平台模板提供了、而我们自己没给"的参数名，嵌套的 {@code gasPvtParam} 加一层前缀。
+     *
+     * <p>这些是我们数据缺失、由平台示例默认值兜住的参数，必须在日志里说清楚。
+     */
+    private static List<String> templateSuppliedKeys(Map<String, Object> template, Map<String, Object> ours) {
+        List<String> keys = new ArrayList<>();
+        template.forEach((key, value) -> {
+            Object mine = ours.get(key);
+            if (mine == null) {
+                keys.add(key);
+                return;
+            }
+            if (value instanceof Map<?, ?> fromPlatform && mine instanceof Map<?, ?> fromOurs) {
+                fromPlatform.keySet().stream()
+                        .filter(nested -> !fromOurs.containsKey(nested))
+                        .forEach(nested -> keys.add(key + "." + nested));
+            }
+        });
+        return keys;
     }
 
     /** JsonNode 对象转 Map；不是对象就返回空表（模板缺失时退化为只用我们自己的入参）。 */

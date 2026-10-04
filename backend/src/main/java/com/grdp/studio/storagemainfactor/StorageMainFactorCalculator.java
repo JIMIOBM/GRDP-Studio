@@ -250,7 +250,6 @@ public final class StorageMainFactorCalculator {
     private static double zeroIfNull(Double value) {
         return value == null ? 0d : value;
     }
-
     /** 只在真有值时写入：0/缺值留给平台模板自己的默认值，避免把合法值覆盖成非法的 0。 */
     private static void putWhenMeaningful(Map<String, Object> payload, String key, Double value) {
         if (value != null && value != 0d && Double.isFinite(value)) {

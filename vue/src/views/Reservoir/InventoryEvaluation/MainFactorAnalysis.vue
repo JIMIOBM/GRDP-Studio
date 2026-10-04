@@ -346,7 +346,10 @@ onBeforeUnmount(() => {
           <div class="group-title">传给原平台的入参（已自动预填，一般不用改）</div>
           <p class="panel-note">
             这些是算「理论地层压力」用的条件，按库内第一口有完整输入的井预填。
-            口径是原平台的：<strong>Pa / K / 小数 / 1/Pa</strong>，不是 MPa。只有想换一组条件重算时才需要改。
+            这里显示的是<strong>数据库口径</strong>：Pa / K / 小数 / 1/Pa。
+            后端提交给原平台时会自动换算成平台的界面单位
+            （MPa / ℃ / 10⁸m³ / % / MPa⁻¹），
+            <strong>所以不要按 MPa 来改这里的数</strong>。只有想换一组条件重算时才需要动。
           </p>
 
           <label v-for="field in INPUT_FIELDS" :key="field.key" class="field">
