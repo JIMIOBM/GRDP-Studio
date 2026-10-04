@@ -140,6 +140,9 @@ public class MaterialBalanceEquationClient {
         // 入参校验发生在 try 之外，因此它的 BusinessException 不会被下面的 catch 吞掉：
         // "用户没填完" 与 "原平台不可用" 是两件事，前者要报出缺哪个字段，后者才降级为手输。
         Map<String, Object> payload = StorageMainFactorCalculator.toolboxPayload(input);
+        // 记录**真正发给原平台**的那份入参：合并模板之后它和 payload 不是一回事，
+        // 日志里打 payload 会让人误判成"我发的就是这些字段"。
+        Map<String, Object> sent = payload;
         String step = "创建工具箱";
         try {
             JsonNode created = platform.post("/api/toolbox",
@@ -166,6 +169,7 @@ public class MaterialBalanceEquationClient {
                 return null;
             }
             Map<String, Object> effective = mergeOverTemplate(asMap(templateState.path("input")), payload);
+            sent = effective;
             if (log.isInfoEnabled() && !effective.keySet().equals(payload.keySet())) {
                 log.info("物质平衡方程工具箱参数集以平台模板为准，额外字段：{}",
                         effective.keySet().stream().filter(k -> !payload.containsKey(k)).toList());
@@ -216,7 +220,7 @@ public class MaterialBalanceEquationClient {
             // 带上**失败的步骤**和**实际发出的入参**：原平台只回状态码时，
             // 这两样是唯一能定位原因的东西（原平台自己的说明由 OriginalPlatformClient 带在消息里）。
             log.warn("原平台物质平衡方程工具箱调用失败（{}），降级为手动填写理论地层压力：{}；已发送入参 {}",
-                    step, e.getMessage(), payload);
+                    step, e.getMessage(), sent);
             return null;
         }
     }
