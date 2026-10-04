@@ -123,6 +123,22 @@ const cellSourceType = (row, side) => {
 
 const cellSourceLabel = (row, side) => sourceLabel(cellSourceType(row, side))
 
+/**
+ * 例子值只用于输入框占位提示，来源是本库真实数据，不是随便写的：
+ *  - 地层压力·理论值 ≈ 原始压力 50 × (1 − 累产气量 12.306 / 动态地质储量 23.398) ≈ 23.70 MPa
+ *  - 动用孔隙体积·实际值由 G·Bg/(1−Swi) 算出，Bg 取 0.0065 时约 0.206（这里提示设计值量级）
+ *  - 天然气·实际值 23.4，设计值通常略大
+ *  - 气体饱和度·理论值 = 1 − 束缚水饱和度 = 1 − 0.2616 ≈ 0.74
+ */
+const PLACEHOLDER_HINTS = {
+  formationPressure: '如 23.70',
+  poreVolume: '如 0.220',
+  gas: '如 25.0',
+  gasSaturation: '如 0.74'
+}
+
+const placeholderFor = key => PLACEHOLDER_HINTS[key] || '待填写'
+
 const chartRef = ref(null)
 const facetRefs = ref([])
 let chart = null
@@ -382,7 +398,7 @@ onBeforeUnmount(() => {
                   <td>
                     <input :value="cellValue(row, 'theoretical')"
                       @input="onCellInput('theoretical', row.key, $event)"
-                      inputmode="decimal" autocomplete="off" placeholder="待填写" />
+                      inputmode="decimal" autocomplete="off" :placeholder="placeholderFor(row.key)" />
                     <span class="source" :class="cellSourceType(row, 'theoretical').toLowerCase()">
                       {{ cellSourceLabel(row, 'theoretical') }}
                     </span>
@@ -390,7 +406,7 @@ onBeforeUnmount(() => {
                   <td>
                     <input :value="cellValue(row, 'actual')"
                       @input="onCellInput('actual', row.key, $event)"
-                      inputmode="decimal" autocomplete="off" placeholder="待填写" />
+                      inputmode="decimal" autocomplete="off" :placeholder="placeholderFor(row.key)" />
                     <span class="source" :class="cellSourceType(row, 'actual').toLowerCase()">
                       {{ cellSourceLabel(row, 'actual') }}
                     </span>
