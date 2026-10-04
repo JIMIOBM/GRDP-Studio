@@ -168,7 +168,12 @@ public class MaterialBalanceEquationClient {
                 log.warn("读取物质平衡方程入参模板失败：{}", templateState.path("msg").asText("原平台返回错误"));
                 return null;
             }
-            Map<String, Object> effective = mergeOverTemplate(asMap(templateState.path("input")), payload);
+            Map<String, Object> template = asMap(templateState.path("input"));
+            // 平台的 GET 模板是**界面单位**（压力为 MPa）；提交给算法要 Pa。
+            // 不换算就会把模板里的 20 当成"20 Pa"发过去，参数校验随即失败——
+            // 这正是"原始地层压力 取值范围 (0, 500000000]"的来源。
+            scaleTemplatePressures(template);
+            Map<String, Object> effective = mergeOverTemplate(template, payload);
             sent = effective;
             if (log.isInfoEnabled() && !effective.keySet().equals(payload.keySet())) {
                 log.info("物质平衡方程工具箱参数集以平台模板为准，额外字段：{}",
@@ -253,6 +258,44 @@ public class MaterialBalanceEquationClient {
             merged.put(key, value);
         });
         return merged;
+    }
+
+    /**
+     * 模板里的压力字段是界面单位（MPa），换算成算法单位（Pa）。
+     *
+     * <p>依据：原平台 {@code toolbox_result} 里一次**成功**的
+     * {@code MaterialBalanceEquationAppl_FormationPressure} 调用存的是
+     * {@code formationPressure=20000000}、{@code pressure=20000000}、
+     * {@code regularizedPseudoPressure=40000000}、{@code apparentPressure=40000000}，
+     * 而同一套工具 GET 回来的模板给的是 20 / 20 / 40 / 40——正好相差 10⁶。
+     *
+     * <p>{@code pseudoPressure} 不在此列：本仓库能工作的 GasPVT 调用直接发
+     * {@code pseudoPressure=4e-8}（见 GasPvtService.buildLegacySinglePointInput），
+     * 说明该字段不是 MPa 量纲，不能一起乘。
+     *
+     * <p>这些辅助字段算法会自己重算，值不重要，只要落在合法区间内且量纲正确。
+     */
+    private static final java.util.List<String> TEMPLATE_PRESSURE_MPA_KEYS =
+            java.util.List.of("formationPressure", "originalPressure", "pressure",
+                    "regularizedPseudoPressure", "apparentPressure");
+
+    private static void scaleTemplatePressures(Map<String, Object> template) {
+        template.replaceAll((key, value) ->
+                TEMPLATE_PRESSURE_MPA_KEYS.contains(key) ? mpaToPa(value) : value);
+        Object nested = template.get("gasPvtParam");
+        if (nested instanceof Map<?, ?> map) {
+            Map<String, Object> typed = stringKeyed(map);
+            typed.replaceAll((key, value) ->
+                    TEMPLATE_PRESSURE_MPA_KEYS.contains(key) ? mpaToPa(value) : value);
+            template.put("gasPvtParam", typed);
+        }
+    }
+
+    private static Object mpaToPa(Object value) {
+        if (value instanceof Number number) {
+            return number.doubleValue() * 1_000_000d;
+        }
+        return value;
     }
 
     private static Map<String, Object> stringKeyed(Map<?, ?> source) {
