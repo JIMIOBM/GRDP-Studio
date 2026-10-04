@@ -1,0 +1,175 @@
+package com.grdp.studio.storagemainfactor;
+
+import com.grdp.studio.integration.OriginalPlatformClient;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpHeaders;
+import org.springframework.stereotype.Service;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
+
+import static com.grdp.studio.storagemainfactor.StorageMainFactorDtos.ToolboxInput;
+
+/**
+ * 调用原平台「工具箱 → 物质平衡方程 → 计算地层压力」，得到**理论地层压力**。
+ *
+ * <p>算法编码 {@link #ALGORITHM} 取自原平台自身前端 bundle
+ * （{@code assets/index-3fe4405a.js}），不是猜测值。
+ *
+ * <p>三步法与仓库里其它 7 个调用原平台的模块一致：
+ * <ol>
+ *   <li>{@code POST /api/toolbox} —— 用 algorithm + projectId 创建工具箱，取 id；</li>
+ *   <li>{@code POST /api/toolbox/calc} —— 提交该点的 input，注意 {@code input} 必须是
+ *       <b>JSON 字符串</b>而不是嵌套对象；</li>
+ *   <li>{@code GET /api/toolbox/{id}} —— 读取结果，理论地层压力在 {@code output.formationPressure}。</li>
+ * </ol>
+ * 工具箱是**有状态**的：同一个 id 必须 calc 后立即 GET，不能并发复用。
+ *
+ * <p><b>降级是需求，不是异常</b>：原平台不可用、会话过期、超时、结果缺失，
+ * 一律返回 {@code null} 交给前端切手输；只有"入参不齐"才抛错（那是用户还没填完，
+ * 应该告诉他缺什么，而不是悄悄降级）。
+ */
+@Service
+public class MaterialBalanceEquationClient {
+
+    public static final String ALGORITHM = "MaterialBalanceEquationAppl_FormationPressure";
+
+    private static final Logger log = LoggerFactory.getLogger(MaterialBalanceEquationClient.class);
+
+    private final OriginalPlatformClient platform;
+    private final ObjectMapper json;
+
+    public MaterialBalanceEquationClient(OriginalPlatformClient platform, ObjectMapper json) {
+        this.platform = platform;
+        this.json = json;
+    }
+
+    /**
+     * 组装转发给原平台的请求头。{@code x-project-id} 必须带：原平台用它校验项目权限，
+     * 只在请求体里传 projectId 会被挡掉。缺 token/Cookie 时不写入空串，避免把会话打坏。
+     */
+    public static Map<String, String> forwardedHeaders(String token, String cookie, String processEnv, long projectId) {
+        Map<String, String> headers = new LinkedHashMap<>();
+        if (token != null && !token.isBlank()) {
+            headers.put("token", token);
+        }
+        if (cookie != null && !cookie.isBlank()) {
+            headers.put(HttpHeaders.COOKIE, cookie);
+        }
+        headers.put("Process-Env", processEnv == null || processEnv.isBlank() ? "prod" : processEnv);
+        headers.put("x-project-id", Long.toString(projectId));
+        return headers;
+    }
+
+    /**
+     * 从工具箱状态里取理论地层压力。缺失返回 {@code null}——返回 0 会让差异列
+     * 凭空多出一个 -理论值 的偏差，比没有值更糟。
+     */
+    public static Double extractFormationPressure(JsonNode toolboxState) {
+        if (toolboxState == null) {
+            return null;
+        }
+        JsonNode output = toolboxState.path("output");
+        JsonNode value = output.path("formationPressure");
+        if (!value.isNumber()) {
+            return null;
+        }
+        double pressure = value.asDouble();
+        return Double.isFinite(pressure) ? pressure : null;
+    }
+
+    /**
+     * 原平台会把业务错误放在 HTTP 200 的 {@code {status: 400, msg: "..."}} 里，
+     * {@link OriginalPlatformClient} 只看 HTTP 状态码，会把它当成成功数据返回，
+     * 所以必须在这里显式识别。
+     */
+    public static boolean isLegacyErrorEnvelope(JsonNode body) {
+        if (body == null) {
+            return false;
+        }
+        JsonNode status = body.path("status");
+        if (!status.isNumber()) {
+            return false;
+        }
+        int code = status.asInt();
+        return code == 400 || code == 401;
+    }
+
+    /** 创建工具箱的响应形状不唯一，id 直接找、找不到再往 data 里找一层。 */
+    public static Long extractToolboxId(JsonNode created) {
+        if (created == null) {
+            return null;
+        }
+        Long direct = asLong(created.path("id"));
+        if (direct != null) {
+            return direct;
+        }
+        return asLong(created.path("data").path("id"));
+    }
+
+    /**
+     * 三步法取理论地层压力。原平台侧的任何失败都返回 {@code null}（降级为手输）。
+     *
+     * @return 理论地层压力；原平台不可用或没有结果时为 {@code null}
+     * @throws com.grdp.studio.common.BusinessException 入参不齐（400），此时不降级
+     */
+    public Double calculateFormationPressure(long projectId, ToolboxInput input, Map<String, String> headers) {
+        // 入参校验发生在 try 之外，因此它的 BusinessException 不会被下面的 catch 吞掉：
+        // "用户没填完" 与 "原平台不可用" 是两件事，前者要报出缺哪个字段，后者才降级为手输。
+        Map<String, Object> payload = StorageMainFactorCalculator.toolboxPayload(input);
+        try {
+            JsonNode created = platform.post("/api/toolbox",
+                    Map.of("algorithm", ALGORITHM, "projectId", projectId), JsonNode.class, headers);
+            if (isLegacyErrorEnvelope(created)) {
+                log.warn("创建物质平衡方程工具箱失败：{}", created.path("msg").asText("原平台返回错误"));
+                return null;
+            }
+            Long toolboxId = extractToolboxId(created);
+            if (toolboxId == null) {
+                log.warn("创建物质平衡方程工具箱后未取到 id：{}", created);
+                return null;
+            }
+
+            JsonNode calculated = platform.post("/api/toolbox/calc",
+                    Map.of("id", toolboxId, "input", json.writeValueAsString(payload)), JsonNode.class, headers);
+            if (isLegacyErrorEnvelope(calculated)) {
+                log.warn("物质平衡方程计算失败：{}", calculated.path("msg").asText("原平台返回错误"));
+                return null;
+            }
+
+            JsonNode state = platform.get("/api/toolbox/" + toolboxId, JsonNode.class, headers);
+            if (isLegacyErrorEnvelope(state)) {
+                log.warn("读取物质平衡方程结果失败：{}", state.path("msg").asText("原平台返回错误"));
+                return null;
+            }
+            Double pressure = extractFormationPressure(state);
+            if (pressure == null) {
+                log.warn("物质平衡方程结果里没有 output.formationPressure：{}", state);
+            }
+            return pressure;
+        } catch (RuntimeException e) {
+            // 会话过期(401)/原平台未启动(连接失败)/超时/算法报错，都降级为手输，不把页面打白。
+            log.warn("原平台物质平衡方程工具箱调用失败，降级为手动填写理论地层压力：{}", e.getMessage());
+            return null;
+        }
+    }
+
+    private static Long asLong(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return null;
+        }
+        // 原平台有时把 id 当字符串返回（"7"）。canConvertToLong() 对文本节点是 false，
+        // 只判断它会把合法响应当成"没取到 id"。
+        if (node.isTextual()) {
+            try {
+                return Long.parseLong(node.asText().trim());
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        }
+        return node.canConvertToLong() ? node.asLong() : null;
+    }
+}
