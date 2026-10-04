@@ -143,6 +143,10 @@ public class MaterialBalanceEquationClient {
         // 记录**真正发给原平台**的那份入参：合并模板之后它和 payload 不是一回事，
         // 日志里打 payload 会让人误判成"我发的就是这些字段"。
         Map<String, Object> sent = payload;
+        // 平台的参数契约：fields 给出每个参数的键与单位，inputRange 给出取值范围。
+        // 出现"参数校验失败"时，这两样是唯一能一次说清原因的凭据——
+        // 靠对比入参反推一个内部算法的契约是不收敛的。
+        String contract = "";
         String step = "创建工具箱";
         try {
             JsonNode created = platform.post("/api/toolbox",
@@ -169,6 +173,7 @@ public class MaterialBalanceEquationClient {
                 return null;
             }
             Map<String, Object> template = asMap(templateState.path("input"));
+            contract = describeContract(templateState);
             // 平台的 GET 模板是**界面单位**（压力为 MPa）；提交给算法要 Pa。
             // 不换算就会把模板里的 20 当成"20 Pa"发过去，参数校验随即失败——
             // 这正是"原始地层压力 取值范围 (0, 500000000]"的来源。
@@ -224,8 +229,8 @@ public class MaterialBalanceEquationClient {
         } catch (RuntimeException e) {
             // 带上**失败的步骤**和**实际发出的入参**：原平台只回状态码时，
             // 这两样是唯一能定位原因的东西（原平台自己的说明由 OriginalPlatformClient 带在消息里）。
-            log.warn("原平台物质平衡方程工具箱调用失败（{}），降级为手动填写理论地层压力：{}；已发送入参 {}",
-                    step, e.getMessage(), sent);
+            log.warn("原平台物质平衡方程工具箱调用失败（{}），降级为手动填写理论地层压力：{}；已发送入参 {}；平台参数契约 {}",
+                    step, e.getMessage(), sent, contract);
             return null;
         }
     }
@@ -296,6 +301,22 @@ public class MaterialBalanceEquationClient {
             return number.doubleValue() * 1_000_000d;
         }
         return value;
+    }
+
+    /**
+     * 把平台的参数契约压成一行：{@code fields} 给每个参数的键与单位，
+     * {@code inputRange} 给每个参数的取值范围。
+     *
+     * <p>参数校验失败时，这两样直接说明"哪个键、什么单位、什么区间"，
+     * 比反复对比入参去反推要可靠得多。
+     */
+    private static String describeContract(JsonNode state) {
+        return "fields=" + truncate(state.path("fields").toString(), 1500)
+                + " inputRange=" + truncate(state.path("inputRange").toString(), 1500);
+    }
+
+    private static String truncate(String text, int max) {
+        return text.length() <= max ? text : text.substring(0, max) + "…";
     }
 
     private static Map<String, Object> stringKeyed(Map<?, ?> source) {
