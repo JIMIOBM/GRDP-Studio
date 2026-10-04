@@ -2,6 +2,7 @@ package com.grdp.studio.storagemainfactor;
 
 import com.grdp.studio.common.BusinessException;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.List;
 import java.util.Map;
@@ -112,18 +113,40 @@ class StorageMainFactorCalculatorTests {
         var payload = toolboxPayload(input);
 
         // 压力与温度本来就是平台口径，不缩放
-        assertEquals(50_000_000d, payload.get("originalPressure"));
-        assertEquals(353.15, payload.get("formationTemperature"));
+        assertEquals(50_000_000d, numeric(payload, "originalPressure"), 1e-6);
+        assertEquals(353.15, numeric(payload, "formationTemperature"), 1e-9);
         // 体积必须换算成 m³（×10⁸）
-        assertEquals(2_339_827_089.8104453, payload.get("originalGasInPlace"));
-        assertEquals(1_230_637_276.8, payload.get("cumulativeGasProduction"));
+        assertEquals(2_339_827_089.8104453, numeric(payload, "originalGasInPlace"), 1e-6);
+        assertEquals(1_230_637_276.8, numeric(payload, "cumulativeGasProduction"), 1e-6);
         // 摩尔分数与饱和度保持小数，不乘 100
-        assertEquals(0.26158040988077613, payload.get("waterSaturation"));
+        assertEquals(0.26158040988077613, numeric(payload, "waterSaturation"), 1e-15);
         var pvt = (Map<?, ?>) payload.get("gasPvtParam");
-        assertEquals(0.0462, pvt.get("h2SMoleFraction"));
-        assertEquals(0.0396, pvt.get("co2MoleFraction"));
+        assertEquals(0.0462, ((Number) pvt.get("h2SMoleFraction")).doubleValue(), 1e-12);
+        assertEquals(0.0396, ((Number) pvt.get("co2MoleFraction")).doubleValue(), 1e-12);
         assertEquals(0, pvt.get("viscosityMethod"));
         assertEquals(1, payload.get("gasReservoirType"));
+    }
+
+    static double numeric(Map<String, Object> payload, String key) {
+        return ((Number) payload.get(key)).doubleValue();
+    }
+
+    @Test
+    void toolboxPayloadSerializesIntegralNumbersWithoutScientificNotation() throws Exception {
+        // 原平台自己存的入参写的是 56340000；我们原来写出 5.0E7，
+        // 它的参数校验便判为不合法：参数校验失败: 原始地层压力 取值范围 (0, 500000000]
+        // ——数值明明在区间内，问题在写法。
+        var input = new ToolboxInput(50_000_000d, 353.15, 23.398270898104453, 12.306372768,
+                1.0E-10, 3.744512763331313E-10, 0.26158040988077613, 1, 0d, 0d, 0d, 0d,
+                new GasPvtParam(0, 0.58, 0, 0.0462, 0.0396, 0, 0, 0));
+        String json = new ObjectMapper().writeValueAsString(toolboxPayload(input));
+
+        assertTrue(json.contains("\"originalPressure\":50000000"), json);
+        assertTrue(json.contains("\"temperature\":353.15"), json);
+        assertTrue(json.contains("\"reservoirPorosity\":0"), json);
+        assertTrue(json.contains("\"h2SMoleFraction\":0.0462"), json);
+        assertFalse(json.contains("E7"), "不应出现科学计数法：" + json);
+        assertFalse(json.contains("0.0,"), "整数值不应带小数点：" + json);
     }
 
     @Test
@@ -139,8 +162,8 @@ class StorageMainFactorCalculatorTests {
 
         var pvt = (Map<?, ?>) toolboxPayload(input).get("gasPvtParam");
 
-        assertEquals(50_000_000d, pvt.get("originalPressure"));
-        assertEquals(353.15, pvt.get("temperature"));
+        assertEquals(50_000_000d, ((Number) pvt.get("originalPressure")).doubleValue(), 1e-6);
+        assertEquals(353.15, ((Number) pvt.get("temperature")).doubleValue(), 1e-9);
     }
 
     @Test

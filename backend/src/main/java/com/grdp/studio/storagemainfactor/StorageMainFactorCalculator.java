@@ -2,6 +2,7 @@ package com.grdp.studio.storagemainfactor;
 
 import com.grdp.studio.common.BusinessException;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -167,42 +168,63 @@ public final class StorageMainFactorCalculator {
             throw new BusinessException(400, "缺少物质平衡方程工具箱必填入参：气体 PVT 参数");
         }
         Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("originalPressure", require(input.originalPressure(), "原始地层压力"));
-        payload.put("formationTemperature", require(input.formationTemperature(), "地层温度"));
+        payload.put("originalPressure", num(require(input.originalPressure(), "原始地层压力")));
+        payload.put("formationTemperature", num(require(input.formationTemperature(), "地层温度")));
         payload.put("originalGasInPlace",
-                require(StorageMainFactorUnits.hundredMillionToCubicMeter(input.originalGasInPlace()), "动态地质储量"));
+                num(require(StorageMainFactorUnits.hundredMillionToCubicMeter(input.originalGasInPlace()), "动态地质储量")));
         payload.put("cumulativeGasProduction",
-                require(StorageMainFactorUnits.hundredMillionToCubicMeter(input.cumulativeGasProduction()), "累产气量"));
-        payload.put("rockCompressionCoefficient", require(input.rockCompressionCoefficient(), "岩石压缩系数"));
-        payload.put("waterCompressionCoefficient", require(input.waterCompressionCoefficient(), "地层水压缩系数"));
-        payload.put("waterSaturation", require(input.waterSaturation(), "束缚水饱和度"));
+                num(require(StorageMainFactorUnits.hundredMillionToCubicMeter(input.cumulativeGasProduction()), "累产气量")));
+        payload.put("rockCompressionCoefficient", num(require(input.rockCompressionCoefficient(), "岩石压缩系数")));
+        payload.put("waterCompressionCoefficient", num(require(input.waterCompressionCoefficient(), "地层水压缩系数")));
+        payload.put("waterSaturation", num(require(input.waterSaturation(), "束缚水饱和度")));
         if (input.gasReservoirType() == null) {
             throw new BusinessException(400, "缺少物质平衡方程工具箱必填入参：气藏类型");
         }
         payload.put("gasReservoirType", input.gasReservoirType());
         // 以下四项只有页岩气藏会用到，缺省按 0 发送。
-        payload.put("reservoirPorosity", zeroIfNull(input.reservoirPorosity()));
-        payload.put("rockDensity", zeroIfNull(input.rockDensity()));
-        payload.put("langmuirPressure", zeroIfNull(input.langmuirPressure()));
-        payload.put("langmuirVolume", zeroIfNull(input.langmuirVolume()));
+        payload.put("reservoirPorosity", num(zeroIfNull(input.reservoirPorosity())));
+        payload.put("rockDensity", num(zeroIfNull(input.rockDensity())));
+        payload.put("langmuirPressure", num(zeroIfNull(input.langmuirPressure())));
+        payload.put("langmuirVolume", num(zeroIfNull(input.langmuirVolume())));
         Map<String, Object> gasPvtParam = new LinkedHashMap<>();
         gasPvtParam.put("gasType", pvt.gasType());
-        gasPvtParam.put("specificGravity", pvt.specificGravity());
+        gasPvtParam.put("specificGravity", num(pvt.specificGravity()));
         gasPvtParam.put("modificationMethod", pvt.modificationMethod());
-        gasPvtParam.put("h2SMoleFraction", pvt.h2SMoleFraction());
-        gasPvtParam.put("co2MoleFraction", pvt.co2MoleFraction());
-        gasPvtParam.put("n2MoleFraction", pvt.n2MoleFraction());
+        gasPvtParam.put("h2SMoleFraction", num(pvt.h2SMoleFraction()));
+        gasPvtParam.put("co2MoleFraction", num(pvt.co2MoleFraction()));
+        gasPvtParam.put("n2MoleFraction", num(pvt.n2MoleFraction()));
         gasPvtParam.put("deviationFactorMethod", pvt.deviationFactorMethod());
         gasPvtParam.put("viscosityMethod", pvt.viscosityMethod());
         // 嵌套 PVT 也要带上温度与原始地层压力：原平台会校验它们，缺省成 0 会被判为
         //   工具箱计算出错:invoke algorithm error:参数校验失败:
         //   原始地层压力 取值范围 (0, 500000000]
-        // 注意报的是**这一层**——外层同名入参 5e7 本身完全合法。
         // 原始地层压力与温度在两层是同一个物理量，直接取外层值，不是编造。
-        gasPvtParam.put("temperature", input.formationTemperature());
-        gasPvtParam.put("originalPressure", input.originalPressure());
+        gasPvtParam.put("temperature", num(input.formationTemperature()));
+        gasPvtParam.put("originalPressure", num(input.originalPressure()));
         payload.put("gasPvtParam", gasPvtParam);
         return payload;
+    }
+
+    /**
+     * 数字的书写形式要与原平台一致：**整数写整数、非整数写十进制，不要科学计数法**。
+     *
+     * <p>Java 的 {@code Double.toString(5.0E7)} 是 {@code "5.0E7"}，Jackson 会照写成
+     * {@code 5.0E7}；而原平台自己存的入参写的是 {@code 56340000}。原平台的参数校验
+     * 拿到 {@code 5.0E7} 后判为不合法，报的就是
+     * {@code 参数校验失败: 原始地层压力 取值范围 (0, 500000000]}——
+     * 数值明明在区间内，问题出在写法上。
+     *
+     * <p>整数用 {@link Long}（写出 {@code 50000000}），其余用 {@link BigDecimal}
+     * 的十进制写法（写出 {@code 0.26158040988077613}），整数值的 0 也会写成 {@code 0}。
+     */
+    private static Object num(double value) {
+        if (!Double.isFinite(value)) {
+            throw new BusinessException(400, "物质平衡方程工具箱入参出现非法数值：" + value);
+        }
+        if (value == Math.rint(value) && Math.abs(value) <= 9.007199254740991E15) {
+            return (long) value;
+        }
+        return new BigDecimal(Double.toString(value));
     }
 
     private static Double require(Double value, String label) {
