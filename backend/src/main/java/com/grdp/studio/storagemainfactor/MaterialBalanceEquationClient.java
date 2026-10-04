@@ -265,44 +265,6 @@ public class MaterialBalanceEquationClient {
     }
 
     /**
-     * 模板里的压力字段是界面单位（MPa），换算成算法单位（Pa）。
-     *
-     * <p>依据：原平台 {@code toolbox_result} 里一次**成功**的
-     * {@code MaterialBalanceEquationAppl_FormationPressure} 调用存的是
-     * {@code formationPressure=20000000}、{@code pressure=20000000}、
-     * {@code regularizedPseudoPressure=40000000}、{@code apparentPressure=40000000}，
-     * 而同一套工具 GET 回来的模板给的是 20 / 20 / 40 / 40——正好相差 10⁶。
-     *
-     * <p>{@code pseudoPressure} 不在此列：本仓库能工作的 GasPVT 调用直接发
-     * {@code pseudoPressure=4e-8}（见 GasPvtService.buildLegacySinglePointInput），
-     * 说明该字段不是 MPa 量纲，不能一起乘。
-     *
-     * <p>这些辅助字段算法会自己重算，值不重要，只要落在合法区间内且量纲正确。
-     */
-    private static final java.util.List<String> TEMPLATE_PRESSURE_MPA_KEYS =
-            java.util.List.of("formationPressure", "originalPressure", "pressure",
-                    "regularizedPseudoPressure", "apparentPressure");
-
-    private static void scaleTemplatePressures(Map<String, Object> template) {
-        template.replaceAll((key, value) ->
-                TEMPLATE_PRESSURE_MPA_KEYS.contains(key) ? mpaToPa(value) : value);
-        Object nested = template.get("gasPvtParam");
-        if (nested instanceof Map<?, ?> map) {
-            Map<String, Object> typed = stringKeyed(map);
-            typed.replaceAll((key, value) ->
-                    TEMPLATE_PRESSURE_MPA_KEYS.contains(key) ? mpaToPa(value) : value);
-            template.put("gasPvtParam", typed);
-        }
-    }
-
-    private static Object mpaToPa(Object value) {
-        if (value instanceof Number number) {
-            return number.doubleValue() * 1_000_000d;
-        }
-        return value;
-    }
-
-    /**
      * 把平台的参数契约压成一行：{@code fields} 给每个参数的键与单位，
      * {@code inputRange} 给每个参数的取值范围。
      *
