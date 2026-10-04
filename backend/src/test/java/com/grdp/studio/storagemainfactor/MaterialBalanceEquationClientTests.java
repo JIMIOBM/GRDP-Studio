@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 import static com.grdp.studio.storagemainfactor.StorageMainFactorDtos.GasPvtParam;
@@ -80,6 +81,46 @@ class MaterialBalanceEquationClientTests {
         assertFalse(MaterialBalanceEquationClient.isPlausiblePressure(0.0));
         assertFalse(MaterialBalanceEquationClient.isPlausiblePressure(-1.0));
         assertFalse(MaterialBalanceEquationClient.isPlausiblePressure(null));
+    }
+
+    @Test
+    void mergeKeepsEveryPlatformParameterAndOverridesOnlyWhatWeKnow() {
+        // 原平台前端 clone 服务端返回的 input 再改几个字段；工具箱的参数集是平台声明的，
+        // 自己拼一份不完整的会被参数校验判为不合法（缺的按 0 → "取值范围 (0, ...]"）。
+        Map<String, Object> template = new LinkedHashMap<>();
+        template.put("originalPressure", 56340000);
+        template.put("formationPressure", 20000000);
+        template.put("gasReservoirType", 0);
+        Map<String, Object> nested = new LinkedHashMap<>();
+        nested.put("gasType", 0);
+        nested.put("pressure", 20000000);
+        nested.put("pseudoPressure", 40000000);
+        template.put("gasPvtParam", nested);
+
+        Map<String, Object> ours = new LinkedHashMap<>();
+        ours.put("originalPressure", 50000000);
+        Map<String, Object> ourNested = new LinkedHashMap<>();
+        ourNested.put("gasType", 0);
+        ours.put("gasPvtParam", ourNested);
+
+        Map<String, Object> merged = MaterialBalanceEquationClient.mergeOverTemplate(template, ours);
+
+        assertEquals(50_000_000, merged.get("originalPressure"));
+        // 模板里有、我们没有的参数必须原样保留
+        assertEquals(20000000, merged.get("formationPressure"));
+        // 嵌套对象逐键合并，不能整块替换，否则又会丢掉平台需要的 PVT 参数
+        Map<?, ?> pvt = (Map<?, ?>) merged.get("gasPvtParam");
+        assertEquals(0, pvt.get("gasType"));
+        assertEquals(20000000, pvt.get("pressure"));
+        assertEquals(40000000, pvt.get("pseudoPressure"));
+    }
+
+    @Test
+    void mergeWithoutATemplateStillYieldsOurPayload() {
+        Map<String, Object> ours = new LinkedHashMap<>();
+        ours.put("originalPressure", 50000000);
+        assertEquals(50_000_000, MaterialBalanceEquationClient.mergeOverTemplate(null, ours).get("originalPressure"));
+        assertEquals(Map.of(), MaterialBalanceEquationClient.mergeOverTemplate(null, null));
     }
 
     @Test

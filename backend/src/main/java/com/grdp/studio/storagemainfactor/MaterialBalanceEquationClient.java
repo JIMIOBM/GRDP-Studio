@@ -154,9 +154,26 @@ public class MaterialBalanceEquationClient {
                 return null;
             }
 
+            // 以**平台自己返回的入参对象**为底再覆盖（原平台前端就是这么做的：
+            // 它 clone 服务端返回的 input，只改其中几个字段）。
+            // 工具箱的参数集是平台按算法声明的；自己从零拼一份不完整的，
+            // 缺的字段会被当成 0，于是报"某某 取值范围 (0, ...]"——之前两轮
+            // 只修我们发出去的字段，所以怎么改都没用，因为问题在**没发的字段**。
+            step = "读取入参模板";
+            JsonNode templateState = platform.get("/api/toolbox/" + toolboxId, JsonNode.class, headers);
+            if (isLegacyErrorEnvelope(templateState)) {
+                log.warn("读取物质平衡方程入参模板失败：{}", templateState.path("msg").asText("原平台返回错误"));
+                return null;
+            }
+            Map<String, Object> effective = mergeOverTemplate(asMap(templateState.path("input")), payload);
+            if (log.isInfoEnabled() && !effective.keySet().equals(payload.keySet())) {
+                log.info("物质平衡方程工具箱参数集以平台模板为准，额外字段：{}",
+                        effective.keySet().stream().filter(k -> !payload.containsKey(k)).toList());
+            }
+
             step = "提交计算";
             JsonNode calculated = platform.post("/api/toolbox/calc",
-                    Map.of("id", toolboxId, "input", json.writeValueAsString(payload)), JsonNode.class, headers);
+                    Map.of("id", toolboxId, "input", json.writeValueAsString(effective)), JsonNode.class, headers);
             if (isLegacyErrorEnvelope(calculated)) {
                 log.warn("物质平衡方程计算失败：{}", calculated.path("msg").asText("原平台返回错误"));
                 return null;
@@ -202,6 +219,50 @@ public class MaterialBalanceEquationClient {
                     step, e.getMessage(), payload);
             return null;
         }
+    }
+
+    /**
+     * 以原平台返回的 {@code input} 对象为底，把我们算出来的值覆盖上去。
+     *
+     * <p>工具箱的参数集由平台按算法声明。只发我们"认识"的那几个字段，
+     * 其余参数在平台的校验里就是 0，于是报出
+     * {@code 参数校验失败: 原始地层压力 取值范围 (0, 500000000]} 这类错误——
+     * 数值本身合法，缺的是**没发出去的参数**。
+     *
+     * <p>嵌套对象（{@code gasPvtParam}）必须**逐键合并**，不能整块替换，
+     * 否则又会把平台需要的 PVT 参数丢掉。
+     */
+    public static Map<String, Object> mergeOverTemplate(Map<String, Object> template, Map<String, Object> overrides) {
+        Map<String, Object> merged = new LinkedHashMap<>();
+        if (template != null) {
+            merged.putAll(template);
+        }
+        if (overrides == null) {
+            return merged;
+        }
+        overrides.forEach((key, value) -> {
+            Object base = merged.get(key);
+            if (base instanceof Map<?, ?> baseMap && value instanceof Map<?, ?> overrideMap) {
+                merged.put(key, mergeOverTemplate(stringKeyed(baseMap), stringKeyed(overrideMap)));
+                return;
+            }
+            merged.put(key, value);
+        });
+        return merged;
+    }
+
+    private static Map<String, Object> stringKeyed(Map<?, ?> source) {
+        Map<String, Object> typed = new LinkedHashMap<>();
+        source.forEach((key, value) -> typed.put(String.valueOf(key), value));
+        return typed;
+    }
+
+    /** JsonNode 对象转 Map；不是对象就返回空表（模板缺失时退化为只用我们自己的入参）。 */
+    private Map<String, Object> asMap(JsonNode node) {
+        if (node == null || !node.isObject()) {
+            return new LinkedHashMap<>();
+        }
+        return stringKeyed(json.convertValue(node, Map.class));
     }
 
     private static Long asLong(JsonNode node) {
