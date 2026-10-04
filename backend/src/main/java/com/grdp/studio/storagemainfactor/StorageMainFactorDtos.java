@@ -65,11 +65,18 @@ public final class StorageMainFactorDtos {
             Map<String, String> inputSources,
             List<String> warnings) {}
 
-    /** 计算请求：四因素的理论/实际值由前端回传（用户可能改过），入参同样回传。 */
+    /**
+     * 计算请求：四因素的理论/实际值由前端回传（用户可能改过），入参同样回传。
+     *
+     * <p>{@code volumeFactor} 是天然气体积系数 Bg。库级没有 Bg 字段（井级为
+     * {@code project_well_pvt_gas_result.volume_factor}），spec 把它定为页面上的手输项；
+     * ② 动用孔隙体积与 ④ 气体饱和度都要用它，所以必须随请求带上来。
+     */
     public record CalculateRequest(
             long projectId,
             long gasReservoirId,
             long storageId,
+            Double volumeFactor,
             Map<String, Double> theoretical,
             Map<String, Double> actual,
             ToolboxInput inputs) {}
