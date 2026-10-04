@@ -76,6 +76,18 @@ export function formatFactorValue(value, unit) {
   return unit ? `${text} ${unit}` : text
 }
 
+/**
+ * **算出来的**格子（差异、百分比偏差）的格式化：缺值显示 "—"。
+ *
+ * 这些格子没有输入框，用 "待填写" 会让人以为还得自己填一遍——
+ * 手稿里的"差异{正,负}"是要看结果的，不是要录入的。
+ */
+export function formatComputedValue(value) {
+  const number = toNumberOrNull(value)
+  if (number === null) return '—'
+  return number.toFixed(2).replace(/\.?0+$/, '')
+}
+
 const valueOf = side => {
   if (side === null || side === undefined) return null
   return toNumberOrNull(side.value)

@@ -21,8 +21,8 @@ import {
   FACTOR_UNITS,
   buildAbsoluteSeries,
   buildRelativeSeries,
-  deviationPercent,
   differenceDirection,
+  formatComputedValue,
   formatFactorValue,
   sourceLabel,
   toNumberOrNull
@@ -87,7 +87,7 @@ const rows = computed(() => factors.value.map(factor => ({
   actualSource: sourceLabel(factor.actual?.source),
   theoreticalSourceType: factor.theoretical?.source || 'MISSING',
   actualSourceType: factor.actual?.source || 'MISSING',
-  differenceText: formatFactorValue(factor.difference, null),
+  differenceText: formatComputedValue(factor.difference),
   direction: differenceDirection(factor.difference),
   deviationText: factor.deviationPercent === null || factor.deviationPercent === undefined
     ? '—'
@@ -173,15 +173,19 @@ const load = async () => {
   controller = new AbortController()
   loading.value = true
   error.value = ''
+  let loaded = false
   try {
     applyContext(unwrap(await storageMainFactorApi.context(scope.value, controller.signal)))
-    await renderChart()
+    loaded = true
   } catch (cause) {
     // 后端用 silentError，页面自己显示中文原因
     error.value = cause?.msg || cause?.message || '读取主控因素分析数据失败'
   } finally {
     loading.value = false
   }
+  // 必须在 loading 关掉之后才画图：图表所在的 v-else 分支在 loading 期间根本不存在，
+  // 提前调用会拿到空的 chartRef 然后静默 return，图表永远不出现。
+  if (loaded) await renderChart()
 }
 
 /**
@@ -280,7 +284,25 @@ onBeforeUnmount(() => {
       <aside class="params-panel">
         <div class="panel-head">参数设置</div>
         <div class="panel-body">
-          <p class="panel-note">以下为原平台入参口径（Pa / K / 小数 / 1/Pa），不是 MPa。</p>
+          <!-- 先说清楚"要你填什么"：整栏里只有 Bg 是必须手输的，
+               其余是自动预填的工具箱入参，一般不用动。 -->
+          <div class="required-block">
+            <div class="required-title">这一栏需要你填</div>
+            <label class="field">
+              <span>天然气体积系数 Bg（小数，必填）</span>
+              <input v-model="volumeFactor" inputmode="decimal" autocomplete="off" placeholder="例如 0.0065" />
+            </label>
+            <p class="panel-note">
+              填了 Bg，②动用孔隙体积与④气体饱和度的实际值会自动算出来（Vp = G·Bg/(1−Swi)、Sg = (G−Gp)·Bg/Vp）；
+              不填这两格就得自己输。库级没有 Bg 字段，只能手填。
+            </p>
+          </div>
+
+          <div class="group-title">传给原平台的入参（已自动预填，一般不用改）</div>
+          <p class="panel-note">
+            这些是算「理论地层压力」用的条件，按库内第一口有完整输入的井预填。
+            口径是原平台的：<strong>Pa / K / 小数 / 1/Pa</strong>，不是 MPa。只有想换一组条件重算时才需要改。
+          </p>
 
           <label v-for="field in INPUT_FIELDS" :key="field.key" class="field">
             <span>{{ field.label }}（{{ field.unit }}）</span>
@@ -291,12 +313,6 @@ onBeforeUnmount(() => {
           <label v-for="field in PVT_FIELDS" :key="field.key" class="field">
             <span>{{ field.label }}（{{ field.unit }}）</span>
             <input v-model="inputs.gasPvtParam[field.key]" inputmode="decimal" autocomplete="off" />
-          </label>
-
-          <div class="group-title">② ④ 计算所需的 Bg</div>
-          <label class="field">
-            <span>天然气体积系数 Bg（小数，必填）</span>
-            <input v-model="volumeFactor" inputmode="decimal" autocomplete="off" placeholder="例如 0.0065" />
           </label>
 
           <button class="calculate" :disabled="loading || calculating" @click="calculate">
@@ -440,6 +456,20 @@ onBeforeUnmount(() => {
   color: #909399;
   font-size: 12px;
   line-height: 1.6;
+}
+/* 整栏里只有 Bg 必须手输，单独框出来，避免用户以为整栏都要填 */
+.required-block {
+  margin-bottom: 16px;
+  padding: 10px;
+  border: 1px solid #f4d000;
+  border-radius: 2px;
+  background: #fffdf0;
+}
+.required-title {
+  margin-bottom: 8px;
+  color: #8d6e00;
+  font-size: 12px;
+  font-weight: 600;
 }
 .group-title {
   margin: 14px 0 8px;

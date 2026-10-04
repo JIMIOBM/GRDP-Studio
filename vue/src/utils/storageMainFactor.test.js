@@ -7,6 +7,7 @@ import {
   buildRelativeSeries,
   deviationPercent,
   differenceDirection,
+  formatComputedValue,
   formatFactorValue,
   sourceLabel,
   toNumberOrNull
@@ -46,6 +47,16 @@ test('格式化带单位，缺值显示占位而不是 0', () => {
   assert.equal(formatFactorValue(32.1534, 'MPa'), '32.15 MPa')
   assert.equal(formatFactorValue(null, 'MPa'), '待填写')
   assert.equal(formatFactorValue(0.8, '小数'), '0.8 小数')
+})
+
+test('算出来的格子缺值显示破折号，不能显示"待填写"', () => {
+  // 差异和偏差是算出来的，没有可填的输入框；显示"待填写"会让人以为还要自己填。
+  assert.equal(formatComputedValue(null), '—')
+  assert.equal(formatComputedValue(undefined), '—')
+  assert.equal(formatComputedValue(-18.5927), '-18.59')
+  assert.equal(formatComputedValue(0), '0')
+  // 而输入用的格子仍然显示"待填写"
+  assert.equal(formatFactorValue(null, null), '待填写')
 })
 
 test('四个因素的键、标签与单位齐全且键与后端一致', () => {
