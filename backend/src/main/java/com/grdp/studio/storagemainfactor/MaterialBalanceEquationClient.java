@@ -140,6 +140,7 @@ public class MaterialBalanceEquationClient {
         // 入参校验发生在 try 之外，因此它的 BusinessException 不会被下面的 catch 吞掉：
         // "用户没填完" 与 "原平台不可用" 是两件事，前者要报出缺哪个字段，后者才降级为手输。
         Map<String, Object> payload = StorageMainFactorCalculator.toolboxPayload(input);
+        String step = "创建工具箱";
         try {
             JsonNode created = platform.post("/api/toolbox",
                     Map.of("algorithm", ALGORITHM, "projectId", projectId), JsonNode.class, headers);
@@ -153,6 +154,7 @@ public class MaterialBalanceEquationClient {
                 return null;
             }
 
+            step = "提交计算";
             JsonNode calculated = platform.post("/api/toolbox/calc",
                     Map.of("id", toolboxId, "input", json.writeValueAsString(payload)), JsonNode.class, headers);
             if (isLegacyErrorEnvelope(calculated)) {
@@ -160,6 +162,7 @@ public class MaterialBalanceEquationClient {
                 return null;
             }
 
+            step = "读取结果";
             JsonNode state = null;
             Double pressure = null;
             // 工具箱计算异步落结果：calc 之后立即 GET 可能仍是上一次的值或空结果，
@@ -193,8 +196,10 @@ public class MaterialBalanceEquationClient {
             }
             return pressure;
         } catch (RuntimeException e) {
-            // 会话过期(401)/原平台未启动(连接失败)/超时/算法报错，都降级为手输，不把页面打白。
-            log.warn("原平台物质平衡方程工具箱调用失败，降级为手动填写理论地层压力：{}", e.getMessage());
+            // 带上**失败的步骤**和**实际发出的入参**：原平台只回状态码时，
+            // 这两样是唯一能定位原因的东西（原平台自己的说明由 OriginalPlatformClient 带在消息里）。
+            log.warn("原平台物质平衡方程工具箱调用失败（{}），降级为手动填写理论地层压力：{}；已发送入参 {}",
+                    step, e.getMessage(), payload);
             return null;
         }
     }

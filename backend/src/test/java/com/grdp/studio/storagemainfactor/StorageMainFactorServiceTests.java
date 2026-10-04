@@ -45,7 +45,7 @@ class StorageMainFactorServiceTests {
                 CREATE TABLE dynamic_original_gas_in_place_by_mb_input(
                   id BIGINT PRIMARY KEY,dynamic_original_gas_in_place_id BIGINT,gas_type VARCHAR(20),
                   specific_gravity DOUBLE,hydrogen_sulfide DOUBLE,carbon_dioxide DOUBLE,nitrogen DOUBLE,
-                  modification_method BIGINT,deviation_factor_method BIGINT,original_pressure DOUBLE,temperature DOUBLE,
+                  modification_method BIGINT,deviation_factor_method BIGINT,viscosity_method BIGINT,original_pressure DOUBLE,temperature DOUBLE,
                   rock_compression_coefficient DOUBLE,water_compression_coefficient DOUBLE,water_saturation DOUBLE,
                   reservoir_porosity DOUBLE,shale_rock_desity DOUBLE,langmuir_pressure DOUBLE,langmuir_volume DOUBLE,
                   gas_reservoir_type BIGINT)
@@ -96,10 +96,10 @@ class StorageMainFactorServiceTests {
         jdbc.update("""
                 INSERT INTO dynamic_original_gas_in_place_by_mb_input
                 (id,dynamic_original_gas_in_place_id,gas_type,specific_gravity,hydrogen_sulfide,carbon_dioxide,nitrogen,
-                 modification_method,deviation_factor_method,original_pressure,temperature,
+                 modification_method,deviation_factor_method,viscosity_method,original_pressure,temperature,
                  rock_compression_coefficient,water_compression_coefficient,water_saturation,
                  reservoir_porosity,shale_rock_desity,langmuir_pressure,langmuir_volume,gas_reservoir_type)
-                VALUES(11,1,'干气',0.58,0.0462,0.0396,0,0,0,50000000,353.15,
+                VALUES(11,1,'干气',0.58,0.0462,0.0396,0,0,0,0,50000000,353.15,
                        1.0E-10,3.744512763331313E-10,0.26158040988077613,0,0,0,0,1)
                 """);
         jdbc.update("INSERT INTO dynamic_original_gas_in_place_output VALUES(101,1,8,5,'X-1',2,2339827089.8104453,1.0,2)");
@@ -127,10 +127,11 @@ class StorageMainFactorServiceTests {
         assertEquals(23.398270898104453, inputs.originalGasInPlace(), 1e-9);
         // 累产气量同表存 m³
         assertEquals(12.306372768, inputs.cumulativeGasProduction(), 1e-9);
-        // 组分在物质平衡输入表里存小数，原平台要百分数
+        // 组分保持**小数**（库里存的就是 0.0462），原平台自己存的 MBE 调用记录也是小数；
+        // 早期实现乘了 100 发 4.62，被原平台的范围校验挡回 HTTP 400。
         assertEquals(0, inputs.gasPvtParam().gasType());
-        assertEquals(4.62, inputs.gasPvtParam().h2SMoleFraction(), 1e-9);
-        assertEquals(3.96, inputs.gasPvtParam().co2MoleFraction(), 1e-9);
+        assertEquals(0.0462, inputs.gasPvtParam().h2SMoleFraction(), 1e-12);
+        assertEquals(0.0396, inputs.gasPvtParam().co2MoleFraction(), 1e-12);
     }
 
     @Test

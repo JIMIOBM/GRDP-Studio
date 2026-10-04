@@ -140,7 +140,20 @@ public final class StorageMainFactorCalculator {
     }
 
     /**
-     * 组装原平台工具箱入参。数值**原样透传**，不做任何单位换算。
+     * 组装原平台工具箱入参——这里是**应用口径 → 原平台口径**的唯一转换点。
+     *
+     * <p>口径依据是原平台自己存下的调用记录（{@code toolbox_result} 里
+     * {@code MaterialBalanceEquationAppl_FormationPressure} 的 inputs）：
+     * <pre>
+     *   "originalPressure":56340000      → Pa（不缩放）
+     *   "formationTemperature":293       → K（不缩放）
+     *   "originalGasInPlace":347222200   → **m³**，不是 10⁸m³
+     *   "cumulativeGasProduction":147222200 → **m³**
+     *   "waterSaturation":0.1804         → 小数
+     *   "h2SMoleFraction":0.1462         → **小数**，不是百分数
+     *   "rockCompressionCoefficient":2.26e-9 → 1/Pa
+     * </pre>
+     * 自己的库容/孔隙体积等派生量一律用应用口径（10⁸m³、小数），只有这里跨到平台口径。
      *
      * <p>必填项缺失直接抛错：把缺失的地质储量当成 0 发给原平台，
      * 它会返回一个看起来正常但完全错误的地层压力。
@@ -156,8 +169,10 @@ public final class StorageMainFactorCalculator {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("originalPressure", require(input.originalPressure(), "原始地层压力"));
         payload.put("formationTemperature", require(input.formationTemperature(), "地层温度"));
-        payload.put("originalGasInPlace", require(input.originalGasInPlace(), "动态地质储量"));
-        payload.put("cumulativeGasProduction", require(input.cumulativeGasProduction(), "累产气量"));
+        payload.put("originalGasInPlace",
+                require(StorageMainFactorUnits.hundredMillionToCubicMeter(input.originalGasInPlace()), "动态地质储量"));
+        payload.put("cumulativeGasProduction",
+                require(StorageMainFactorUnits.hundredMillionToCubicMeter(input.cumulativeGasProduction()), "累产气量"));
         payload.put("rockCompressionCoefficient", require(input.rockCompressionCoefficient(), "岩石压缩系数"));
         payload.put("waterCompressionCoefficient", require(input.waterCompressionCoefficient(), "地层水压缩系数"));
         payload.put("waterSaturation", require(input.waterSaturation(), "束缚水饱和度"));
@@ -178,6 +193,7 @@ public final class StorageMainFactorCalculator {
         gasPvtParam.put("co2MoleFraction", pvt.co2MoleFraction());
         gasPvtParam.put("n2MoleFraction", pvt.n2MoleFraction());
         gasPvtParam.put("deviationFactorMethod", pvt.deviationFactorMethod());
+        gasPvtParam.put("viscosityMethod", pvt.viscosityMethod());
         payload.put("gasPvtParam", gasPvtParam);
         return payload;
     }

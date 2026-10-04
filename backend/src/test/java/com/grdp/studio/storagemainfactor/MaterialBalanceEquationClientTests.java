@@ -90,7 +90,7 @@ class MaterialBalanceEquationClientTests {
         var client = new MaterialBalanceEquationClient(null, M);
         var noGasInPlace = new ToolboxInput(null, 353.15, 23.398270898104453, 12.306372768,
                 1.0E-10, 3.744512763331313E-10, 0.26158040988077613, 1, 0d, 0d, 0d, 0d,
-                new GasPvtParam(0, 0.58, 0, 4.62, 3.96, 0, 0));
+                new GasPvtParam(0, 0.58, 0, 0.0462, 0.0396, 0, 0, 0));
         assertThrows(com.grdp.studio.common.BusinessException.class,
                 () -> client.calculateFormationPressure(8, noGasInPlace, Map.of()));
     }

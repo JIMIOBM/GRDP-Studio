@@ -28,7 +28,12 @@ public final class StorageMainFactorDtos {
             String direction,
             Double deviationPercent) {}
 
-    /** 原平台 {@code gasPvtParam}，字段名与取值都与原平台一致。 */
+    /**
+     * 原平台 {@code gasPvtParam}，字段名与取值都与原平台一致。
+     *
+     * <p>三个摩尔分数是**小数**（0.0462 = 4.62%），不是百分数——依据是原平台自己存下的
+     * 调用记录（{@code toolbox_result}）里这个字段就是 {@code "h2SMoleFraction":0.0462}。
+     */
     public record GasPvtParam(
             int gasType,
             double specificGravity,
@@ -36,7 +41,8 @@ public final class StorageMainFactorDtos {
             double h2SMoleFraction,
             double co2MoleFraction,
             double n2MoleFraction,
-            int deviationFactorMethod) {}
+            int deviationFactorMethod,
+            int viscosityMethod) {}
 
     /**
      * 原平台「物质平衡方程 → 计算地层压力」的入参。

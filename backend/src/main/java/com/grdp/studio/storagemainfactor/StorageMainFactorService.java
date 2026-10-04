@@ -65,7 +65,8 @@ public class StorageMainFactorService {
             Double reservoirPorosity,
             Double rockDensity,
             Double langmuirPressure,
-            Double langmuirVolume) {}
+            Double langmuirVolume,
+            Integer viscosityMethod) {}
 
     /** 动态地质储量及其来源说明（要把选中的输出行标出来，便于人工核对）。 */
     private record GasVolume(Double value, String note) {}
@@ -257,7 +258,8 @@ public class StorageMainFactorService {
                        i.rock_compression_coefficient, i.water_compression_coefficient, i.water_saturation,
                        i.gas_reservoir_type, i.gas_type, i.specific_gravity, i.hydrogen_sulfide,
                        i.carbon_dioxide, i.nitrogen, i.modification_method, i.deviation_factor_method,
-                       i.reservoir_porosity, i.shale_rock_desity, i.langmuir_pressure, i.langmuir_volume
+                       i.reservoir_porosity, i.shale_rock_desity, i.langmuir_pressure, i.langmuir_volume,
+                       i.viscosity_method
                 FROM dynamic_original_gas_in_place d
                 JOIN dynamic_original_gas_in_place_by_mb_input i ON i.dynamic_original_gas_in_place_id = d.id
                 WHERE d.project_id=? AND d.project_gas_reservoir_id=? AND d.well_name=?
@@ -270,7 +272,8 @@ public class StorageMainFactorService {
                         doubleOrNull(rs, 11), doubleOrNull(rs, 12), doubleOrNull(rs, 13),
                         intOrNull(rs, 14), intOrNull(rs, 15),
                         doubleOrNull(rs, 16), doubleOrNull(rs, 17),
-                        doubleOrNull(rs, 18), doubleOrNull(rs, 19)),
+                        doubleOrNull(rs, 18), doubleOrNull(rs, 19),
+                        intOrNull(rs, 20)),
                 projectId, gasReservoirId, wellName);
         return found.isEmpty() ? null : found.getFirst();
     }
@@ -397,10 +400,13 @@ public class StorageMainFactorService {
                 StorageMainFactorUnits.gasTypeCode(source.gasType()),
                 nz(source.specificGravity()),
                 source.modificationMethod() == null ? 0 : source.modificationMethod(),
-                nz(StorageMainFactorUnits.fractionToPercent(source.hydrogenSulfide())),
-                nz(StorageMainFactorUnits.fractionToPercent(source.carbonDioxide())),
-                nz(StorageMainFactorUnits.fractionToPercent(source.nitrogen())),
-                source.deviationFactorMethod() == null ? 0 : source.deviationFactorMethod());
+                // 三个组分保持**小数**：原平台自己存下的 MBE 调用记录就是
+                // "h2SMoleFraction":0.1462 这种小数，乘 100 会被范围校验挡回 400。
+                nz(source.hydrogenSulfide()),
+                nz(source.carbonDioxide()),
+                nz(source.nitrogen()),
+                source.deviationFactorMethod() == null ? 0 : source.deviationFactorMethod(),
+                source.viscosityMethod() == null ? 0 : source.viscosityMethod());
         return new ToolboxInput(
                 source.originalPressure(),
                 source.temperature(),

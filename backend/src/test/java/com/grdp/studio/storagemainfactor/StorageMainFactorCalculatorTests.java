@@ -101,16 +101,28 @@ class StorageMainFactorCalculatorTests {
     }
 
     @Test
-    void toolboxPayloadUsesPlatformUnitsVerbatim() {
+    void toolboxPayloadSpeaksThePlatformsOwnUnits() {
+        // 期望值取自原平台自己存下来的调用记录（toolbox_result 里
+        // MaterialBalanceEquationAppl_FormationPressure 的 inputs）：
+        //   "originalGasInPlace":347222200, "h2SMoleFraction":0.1462, "waterSaturation":0.1804
+        // 即**体积是 m³（不是 10⁸m³）、摩尔分数是小数（不是百分数）**。
         var input = new ToolboxInput(50_000_000d, 353.15, 23.398270898104453, 12.306372768,
                 1.0E-10, 3.744512763331313E-10, 0.26158040988077613, 1, 0d, 0d, 0d, 0d,
-                new GasPvtParam(0, 0.58, 0, 4.62, 3.96, 0, 0));
+                new GasPvtParam(0, 0.58, 0, 0.0462, 0.0396, 0, 0, 0));
         var payload = toolboxPayload(input);
+
+        // 压力与温度本来就是平台口径，不缩放
         assertEquals(50_000_000d, payload.get("originalPressure"));
         assertEquals(353.15, payload.get("formationTemperature"));
-        assertEquals(23.398270898104453, payload.get("originalGasInPlace"));
+        // 体积必须换算成 m³（×10⁸）
+        assertEquals(2_339_827_089.8104453, payload.get("originalGasInPlace"));
+        assertEquals(1_230_637_276.8, payload.get("cumulativeGasProduction"));
+        // 摩尔分数与饱和度保持小数，不乘 100
         assertEquals(0.26158040988077613, payload.get("waterSaturation"));
-        assertEquals(4.62, ((Map<?, ?>) payload.get("gasPvtParam")).get("h2SMoleFraction"));
+        var pvt = (Map<?, ?>) payload.get("gasPvtParam");
+        assertEquals(0.0462, pvt.get("h2SMoleFraction"));
+        assertEquals(0.0396, pvt.get("co2MoleFraction"));
+        assertEquals(0, pvt.get("viscosityMethod"));
         assertEquals(1, payload.get("gasReservoirType"));
     }
 
@@ -120,7 +132,7 @@ class StorageMainFactorCalculatorTests {
         // 这种静默的错误结果比直接报错危险得多，所以必填项缺一即抛。
         var noGasInPlace = new ToolboxInput(50_000_000d, 353.15, null, 12.306372768,
                 1.0E-10, 3.744512763331313E-10, 0.26158040988077613, 1, 0d, 0d, 0d, 0d,
-                new GasPvtParam(0, 0.58, 0, 4.62, 3.96, 0, 0));
+                new GasPvtParam(0, 0.58, 0, 0.0462, 0.0396, 0, 0, 0));
         assertThrows(BusinessException.class, () -> toolboxPayload(noGasInPlace));
 
         var noPvt = new ToolboxInput(50_000_000d, 353.15, 23.398270898104453, 12.306372768,
