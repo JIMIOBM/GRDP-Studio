@@ -194,6 +194,13 @@ public final class StorageMainFactorCalculator {
         gasPvtParam.put("n2MoleFraction", pvt.n2MoleFraction());
         gasPvtParam.put("deviationFactorMethod", pvt.deviationFactorMethod());
         gasPvtParam.put("viscosityMethod", pvt.viscosityMethod());
+        // 嵌套 PVT 也要带上温度与原始地层压力：原平台会校验它们，缺省成 0 会被判为
+        //   工具箱计算出错:invoke algorithm error:参数校验失败:
+        //   原始地层压力 取值范围 (0, 500000000]
+        // 注意报的是**这一层**——外层同名入参 5e7 本身完全合法。
+        // 原始地层压力与温度在两层是同一个物理量，直接取外层值，不是编造。
+        gasPvtParam.put("temperature", input.formationTemperature());
+        gasPvtParam.put("originalPressure", input.originalPressure());
         payload.put("gasPvtParam", gasPvtParam);
         return payload;
     }

@@ -127,6 +127,23 @@ class StorageMainFactorCalculatorTests {
     }
 
     @Test
+    void toolboxPayloadCarriesTheNestedPvtOriginalPressure() {
+        // 原平台校验的是**嵌套 PVT 里**的原始地层压力。我们原来只发外层，嵌套缺省成 0，
+        // 原平台便报：工具箱计算出错:invoke algorithm error:参数校验失败:
+        //            原始地层压力 取值范围 (0, 500000000]
+        // 而外层 5e7 本身完全合法 —— 所以缺的是这一层。
+        // 原始地层压力在两层是同一个物理量，取外层值即可，不是编造。
+        var input = new ToolboxInput(50_000_000d, 353.15, 23.398270898104453, 12.306372768,
+                1.0E-10, 3.744512763331313E-10, 0.26158040988077613, 1, 0d, 0d, 0d, 0d,
+                new GasPvtParam(0, 0.58, 0, 0.0462, 0.0396, 0, 0, 0));
+
+        var pvt = (Map<?, ?>) toolboxPayload(input).get("gasPvtParam");
+
+        assertEquals(50_000_000d, pvt.get("originalPressure"));
+        assertEquals(353.15, pvt.get("temperature"));
+    }
+
+    @Test
     void toolboxPayloadRejectsMissingRequiredFieldsInsteadOfSendingZeros() {
         // 少了动态地质储量却照发，原平台会拿 0 算出一个"看着正常"的压力——
         // 这种静默的错误结果比直接报错危险得多，所以必填项缺一即抛。
