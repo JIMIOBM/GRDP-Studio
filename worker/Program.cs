@@ -51,6 +51,7 @@ builder.Services.AddSingleton<PtkRunRegistry>();
 builder.Services.AddSingleton<PtkProcessRunner>();
 builder.Services.AddSingleton<PtkRunService>();
 builder.Services.AddSingleton<PtkValidationService>();
+builder.Services.AddTemplateCreation();
 builder.Services.AddSingleton<EclipseLauncher>();
 builder.Services.AddSingleton<EclipseDeckPackageResolver>();
 builder.Services.AddSingleton<EclipseExecutionCoordinator>();
@@ -59,6 +60,7 @@ builder.Services.AddSingleton<EclipseDataInspectionService>();
 builder.Services.AddSingleton<EclipseRunService>();
 
 var app = builder.Build();
+app.MapTemplateCreation();
 
 app.MapGet("/api/health", (WorkerIdentity identity, PtkRunRegistry registry, PtkExecutionCoordinator coordinator) =>
 {

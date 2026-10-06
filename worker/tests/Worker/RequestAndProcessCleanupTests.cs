@@ -216,7 +216,7 @@ public sealed class RequestAndProcessCleanupTests : IDisposable
             "import json, subprocess, sys, threading, time\n" +
             "class Model:\n" +
             "    @staticmethod\n" +
-            "    def open(path):\n" +
+            "    def open(path, **kwargs):\n" +
             $"        open('{escapedThreadSnapshot}', 'w').write(json.dumps([thread.name for thread in threading.enumerate()]))\n" +
             "        child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'], creationflags=subprocess.CREATE_NO_WINDOW)\n" +
             $"        open('{escaped}', 'w').write(str(child.pid))\n" +

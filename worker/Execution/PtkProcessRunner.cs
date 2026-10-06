@@ -49,6 +49,9 @@ public sealed class PtkProcessRunner
         return await RunSingleJsonProcessAsync(script, [modelPath], timeout, cancellationToken);
     }
 
+    public Task<AdapterExecutionResult> CreateTemplateAsync(string requestPath, TimeSpan timeout, CancellationToken cancellationToken) =>
+        RunSingleJsonProcessAsync(Path.Combine(AppContext.BaseDirectory, "ptk_create_template.py"), [requestPath], timeout, cancellationToken);
+
     private async Task<AdapterExecutionResult> RunJsonLinesProcessAsync(
         string script,
         IReadOnlyList<string> arguments,

@@ -4,7 +4,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>Grdp.SoftwareIntegration.Worker</RootNamespace>
-    <DefaultItemExcludes>$(DefaultItemExcludes);tests\**\*;tests/**/*</DefaultItemExcludes>
+    <DefaultItemExcludes>$(DefaultItemExcludes);tests\**\*;tests/**/*;bin\**;bin/**;obj\**;obj/**;bin-*\**;bin-*/**;obj-*\**;obj-*/**</DefaultItemExcludes>
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Grdp.SoftwareIntegration.Worker.Tests" />
@@ -17,5 +17,8 @@
     <Content Include="ptk_run.py" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="ptk_normalization.py" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="ptk_network.py" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="ptk_create_template.py" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\tools\pipesim_template_preflight.py" Link="pipesim_template_preflight.py" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\tools\pipesim_template_profile.py" Link="pipesim_template_profile.py" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
