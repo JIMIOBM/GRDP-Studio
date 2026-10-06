@@ -20,18 +20,23 @@ import com.grdp.studio.softwareintegration.support.SoftwareIntegrationValidation
 import com.grdp.studio.softwareintegration.support.SoftwareIntegrationStorageKeyNormalizer;
 import com.grdp.studio.softwareintegration.support.SoftwareIntegrationModelArchiveExtractor;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.util.Comparator;
@@ -41,6 +46,7 @@ import java.util.Locale;
 
 @Service
 public class SoftwareIntegrationServiceImpl implements SoftwareIntegrationService {
+    private static final Logger log = LoggerFactory.getLogger(SoftwareIntegrationServiceImpl.class);
     private final SoftwareIntegrationProjectMapper projectMapper;
     private final SoftwareIntegrationModelMapper modelMapper;
     private final SoftwareIntegrationModelVersionMapper versionMapper;
@@ -49,6 +55,8 @@ public class SoftwareIntegrationServiceImpl implements SoftwareIntegrationServic
     private final SoftwareIntegrationStorageKeyNormalizer storageKeyNormalizer;
     private final SoftwareIntegrationModelArchiveExtractor archiveExtractor;
     private final JdbcTemplate jdbcTemplate;
+    private final TransactionTemplate uploadTransaction;
+    private final TransactionTemplate afterUploadCommit;
 
     public SoftwareIntegrationServiceImpl(SoftwareIntegrationProjectMapper projectMapper, SoftwareIntegrationModelMapper modelMapper,
                                            SoftwareIntegrationModelVersionMapper versionMapper, SoftwareIntegrationProperties properties,
@@ -63,6 +71,11 @@ public class SoftwareIntegrationServiceImpl implements SoftwareIntegrationServic
         this.storageKeyNormalizer = storageKeyNormalizer;
         this.archiveExtractor = new SoftwareIntegrationModelArchiveExtractor(properties, storageKeyNormalizer);
         this.jdbcTemplate = jdbcTemplate;
+        // Use the same DataSource resource as MyBatis/JDBC, including direct calls and both overloads.
+        var transactionManager = new DataSourceTransactionManager(jdbcTemplate.getDataSource());
+        this.uploadTransaction = new TransactionTemplate(transactionManager);
+        this.afterUploadCommit = new TransactionTemplate(transactionManager);
+        this.afterUploadCommit.setPropagationBehavior(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
     }
 
     @Override
@@ -212,11 +225,36 @@ public class SoftwareIntegrationServiceImpl implements SoftwareIntegrationServic
                 ? archiveExtractor.inspect(file) : null;
         if (archive == null && mainFile != null && !mainFile.isBlank()) throw new BusinessException(400, "非 ZIP 模型不接受主模型选择");
         String selectedExtension = archive == null ? null : extensionOf(archive.select(mainFile));
+        return uploadTransaction.execute(status -> saveUploadedModel(projectId, file, mainFile, originalName,
+                lowerName, archive, selectedExtension));
+    }
+
+    private SoftwareIntegrationProjectDetailResponse saveUploadedModel(long projectId, MultipartFile file,
+            String mainFile, String originalName, String lowerName,
+            SoftwareIntegrationModelArchiveExtractor.ArchiveDescriptor archive, String selectedExtension) {
+        // A project row exists even for the first upload of a model. InnoDB holds this cross-process
+        // lock until the enclosing transaction commits/rolls back, also coordinating with deletion.
+        Boolean active = jdbcTemplate.query(
+                "SELECT deleted_at FROM software_integration_project WHERE id = ? FOR UPDATE",
+                resultSet -> resultSet.next() && resultSet.getTimestamp(1) == null, projectId);
+        if (!Boolean.TRUE.equals(active)) throw new BusinessException(404, "软件集成项目不存在");
         SoftwareIntegrationModelEntity model = findOrCreateModel(projectId, modelName(originalName),
                 archive != null && ".data".equals(selectedExtension) || lowerName.endsWith(".data")
                         ? "ECLIPSE_100" : "PIPESIM_WELL");
-        int nextVersion = versionMapper.selectCount(new LambdaQueryWrapper<SoftwareIntegrationModelVersionEntity>().eq(SoftwareIntegrationModelVersionEntity::getModelId, model.getId())).intValue() + 1;
+        Integer latestVersion = versionMapper.selectLatestVersionNoForUpdate(model.getId());
+        if (latestVersion != null && latestVersion == Integer.MAX_VALUE) throw new BusinessException(409, "模型版本编号已耗尽");
+        int nextVersion = latestVersion == null ? 1 : latestVersion + 1;
         String versionRootKey = storageKeyNormalizer.normalizeRelative("models/" + model.getId() + "/" + nextVersion);
+        Path versionRoot = storageKeyNormalizer.resolve(versionRootKey);
+        try {
+            Files.createDirectories(versionRoot.getParent());
+            // Never pass a pre-existing directory to the extractor: its failure handler deletes it.
+            Files.createDirectory(versionRoot);
+        } catch (FileAlreadyExistsException exception) {
+            throw new BusinessException(409, "模型版本目录已存在，拒绝覆盖，请检查遗留文件");
+        } catch (IOException exception) { throw new BusinessException(500, "模型文件保存失败"); }
+        UploadDirectory ownedDirectory = new UploadDirectory(versionRoot);
+        TransactionSynchronizationManager.registerSynchronization(ownedDirectory);
         Path target;
         String storageKey;
         try {
@@ -227,19 +265,45 @@ public class SoftwareIntegrationServiceImpl implements SoftwareIntegrationServic
             } else {
                 storageKey = storageKeyNormalizer.normalizeRelative(versionRootKey + "/" + originalName);
                 target = storageKeyNormalizer.resolve(storageKey);
-                Files.createDirectories(target.getParent());
-                try (InputStream input = file.getInputStream()) { Files.copy(input, target, StandardCopyOption.REPLACE_EXISTING); }
+                try (InputStream input = file.getInputStream()) { Files.copy(input, target); }
             }
-        } catch (BusinessException exception) {
+            SoftwareIntegrationModelVersionEntity version = new SoftwareIntegrationModelVersionEntity();
+            LocalDateTime now = LocalDateTime.now();
+            version.setModelId(model.getId()); version.setVersionNo(nextVersion); version.setOriginalName(originalName);
+            version.setStorageKey(storageKey); version.setSizeBytes(fileSize(target)); version.setSha256(sha256(target));
+            version.setStatus("UPLOADED"); version.setCreatedAt(now); version.setUpdatedAt(now); versionMapper.insert(version);
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void afterCommit() {
+                    // Suspend the completed transaction's still-bound connection so durable queue writes
+                    // use autocommit and direct validation cannot observe an uncommitted version.
+                    afterUploadCommit.executeWithoutResult(status -> validationDispatcher.enqueue(version.getId()));
+                }
+            });
+            return getProject(projectId);
+        } catch (IOException exception) {
+            ownedDirectory.cleanup();
+            throw new BusinessException(500, "模型文件保存失败");
+        } catch (RuntimeException | Error exception) {
+            // Clean before releasing the DB lock. The extractor may already have removed the root;
+            // do not later delete a directory another uploader acquired after this rollback.
+            ownedDirectory.cleanup();
             throw exception;
-        } catch (IOException exception) { throw new BusinessException(500, "模型文件保存失败"); }
-        SoftwareIntegrationModelVersionEntity version = new SoftwareIntegrationModelVersionEntity();
-        LocalDateTime now = LocalDateTime.now();
-        version.setModelId(model.getId()); version.setVersionNo(nextVersion); version.setOriginalName(originalName);
-        version.setStorageKey(storageKey); version.setSizeBytes(fileSize(target)); version.setSha256(sha256(target));
-        version.setStatus("UPLOADED"); version.setCreatedAt(now); version.setUpdatedAt(now); versionMapper.insert(version);
-        validationDispatcher.enqueue(version.getId());
-        return getProject(projectId);
+        }
+    }
+
+    private final class UploadDirectory implements TransactionSynchronization {
+        private final Path root;
+        private boolean cleanupRequired = true;
+        private UploadDirectory(Path root) { this.root = root; }
+        private void cleanup() {
+            if (!cleanupRequired) return;
+            cleanupRequired = false;
+            if (!deleteTree(root)) log.warn("Upload rollback left an orphan directory; future uploads will refuse to overwrite it: {}", root);
+        }
+        @Override public void afterCompletion(int status) {
+            if (status == STATUS_ROLLED_BACK) cleanup();
+            // Unknown completion may have committed: retain the files and refuse any later reuse.
+        }
     }
 
     private static String extensionOf(String path) {
@@ -274,7 +338,7 @@ public class SoftwareIntegrationServiceImpl implements SoftwareIntegrationServic
     private SoftwareIntegrationModelEntity findOrCreateModel(long projectId, String name, String initialSimulatorType) {
         SoftwareIntegrationModelEntity existing = modelMapper.selectOne(new LambdaQueryWrapper<SoftwareIntegrationModelEntity>()
                 .eq(SoftwareIntegrationModelEntity::getProjectId, projectId).eq(SoftwareIntegrationModelEntity::getName, name)
-                .isNull(SoftwareIntegrationModelEntity::getDeletedAt));
+                .isNull(SoftwareIntegrationModelEntity::getDeletedAt).last("FOR UPDATE"));
         if (existing != null) {
             boolean existingEclipse = "ECLIPSE_100".equals(existing.getSimulatorType());
             boolean requestedEclipse = "ECLIPSE_100".equals(initialSimulatorType);

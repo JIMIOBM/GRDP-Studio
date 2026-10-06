@@ -466,15 +466,21 @@ class SoftwareIntegrationValidationDispatcherTests {
                 new SoftwareIntegrationStorageKeyNormalizer(properties), validationJobStore);
 
         validationJobStore.enqueue(seed.versionId());
-        dispatcher.recoverQueuedValidations();
-        awaitJobStatus(seed.versionId(), "QUEUED");
+        // Process claimed jobs synchronously in this state-transition test. Observing QUEUED
+        // alone can race the subsequent version-state write in the asynchronous sweeper.
+        assertThat(validationJobStore.claimDue(1, LocalDateTime.now(), properties.getValidationLease()))
+                .singleElement().satisfies(claim -> dispatcher.validate(claim.versionId()));
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM software_integration_validation_job WHERE version_id = ?", String.class,
+                seed.versionId())).isEqualTo("QUEUED");
         assertThat(versionMapper.selectById(seed.versionId()).getStatus()).isEqualTo("VALIDATING");
 
         RESPONSE_STATUS.set(200);
         RESPONSE.set("""
                 {"status":"READY","studies":["Study 1"],"message":"模型验证完成","modelKind":"black_oil_liquid"}
                 """);
-        dispatcher.recoverQueuedValidations();
+        assertThat(validationJobStore.claimDue(1, LocalDateTime.now(), properties.getValidationLease()))
+                .singleElement().satisfies(claim -> dispatcher.validate(claim.versionId()));
         awaitTerminalValidation(seed.versionId());
         awaitTerminalJob(seed.versionId());
 
