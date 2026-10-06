@@ -34,11 +34,19 @@ class TemplateCreationControllerTests {
     @Test void unauthorizedRequestsCannotInspectOrMutateJobsOrCallWorker() {
         doThrow(new ResponseStatusException(HttpStatus.UNAUTHORIZED)).when(sessions).requireMember(request);
         assertThatThrownBy(() -> controller.find(1, id, request)).isInstanceOf(ResponseStatusException.class);
+        assertThatThrownBy(() -> controller.list(1, request)).isInstanceOf(ResponseStatusException.class);
         assertThatThrownBy(() -> controller.create(1, new TemplateCreationController.CreationRequest(id, "Well", null), request)).isInstanceOf(ResponseStatusException.class);
         assertThatThrownBy(() -> controller.cancel(1, id, request)).isInstanceOf(ResponseStatusException.class);
         assertThatThrownBy(() -> controller.register(1, id, request)).isInstanceOf(ResponseStatusException.class);
         assertThatThrownBy(() -> controller.download(1, id, request)).isInstanceOf(ResponseStatusException.class);
         verifyNoInteractions(dispatcher, workflow, store, worker, projects);
+    }
+    @Test void sharedListRequiresMembershipAndProjectAndDoesNotDispatch() {
+        var summary = new TemplateCreationJobStore.Summary(id, 1, "SharedWell", "UNCERTAIN", null);
+        when(store.list(1)).thenReturn(java.util.List.of(summary));
+        assertThat(controller.list(1, request).data()).containsExactly(summary);
+        verify(sessions).requireMember(request); verify(projects).getProject(1);
+        verifyNoInteractions(dispatcher, workflow, worker);
     }
     @Test void wrongProjectIs404BeforeAnyComputationOrRegistration() {
         when(store.find(id)).thenReturn(job(2, "SUCCEEDED"));

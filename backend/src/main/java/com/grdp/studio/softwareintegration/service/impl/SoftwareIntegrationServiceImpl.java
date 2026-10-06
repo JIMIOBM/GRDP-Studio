@@ -136,6 +136,9 @@ public class SoftwareIntegrationServiceImpl implements SoftwareIntegrationServic
                 WHERE project_id = ? AND status IN ('CLAIMED','PREPARING','RUNNING_NODAL','RUNNING_PROFILE','RUNNING_NETWORK','RUNNING_ECLIPSE','COLLECTING','CANCEL_REQUESTED')
                 """, Integer.class, projectId);
         if (active != null && active > 0) throw new BusinessException(409, "项目存在活动运行，不能删除");
+        if (com.grdp.studio.softwareintegration.support.TemplateCreationJobStore.hasUnresolvedJobs(jdbcTemplate, projectId)) {
+            throw new BusinessException(409, "项目存在建井任务或未确认状态，请先查询恢复或确认取消后再删除");
+        }
         SoftwareIntegrationProjectEntity entity = requireProject(projectId);
         entity.setDeletedAt(LocalDateTime.now()); entity.setUpdatedAt(LocalDateTime.now()); projectMapper.updateById(entity);
     }

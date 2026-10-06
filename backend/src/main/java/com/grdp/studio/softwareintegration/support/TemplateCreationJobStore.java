@@ -44,6 +44,27 @@ public class TemplateCreationJobStore implements ApplicationRunner {
     public record Job(UUID requestId, long projectId, String fingerprint, JsonNode request,
                       String state, JsonNode workerRecord, Long versionId) { }
     public record Claim(Job job, boolean newlyClaimed) { }
+    public record Summary(UUID requestId, long projectId, String well, String state, Long versionId) { }
+
+    /** Bounded metadata-only read: no Worker calls, inputs, profile arrays or local paths. */
+    public List<Summary> list(long projectId) {
+        return jdbc.query("""
+                SELECT request_id,project_id,request_json,state,version_id
+                FROM software_integration_template_creation WHERE project_id=?
+                ORDER BY created_at DESC,request_id DESC LIMIT 50
+                """, (rs, row) -> new Summary(UUID.fromString(rs.getString("request_id")),
+                rs.getLong("project_id"), mapper.readTree(rs.getString("request_json")).path("well").asText(),
+                rs.getString("state"), rs.getObject("version_id") == null ? null : rs.getLong("version_id")), projectId);
+    }
+
+    /** Caller holds the project row lock, shared with claim/register, before deletion or recycling. */
+    public static boolean hasUnresolvedJobs(JdbcTemplate jdbc, long projectId) {
+        Long count = jdbc.queryForObject("""
+                SELECT COUNT(*) FROM software_integration_template_creation WHERE project_id=?
+                AND state NOT IN ('SUCCEEDED','FAILED','INTERRUPTED','CANCELLED','TIMED_OUT')
+                """, Long.class, projectId);
+        return count != null && count > 0;
+    }
 
     /** Persist before dispatch; same ID never authorizes a second POST, including after restart. */
     public Claim claim(long projectId, UUID id, String well, JsonNode inputs) {

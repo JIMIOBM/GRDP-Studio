@@ -75,6 +75,7 @@ public class SoftwareIntegrationProjectCleanup {
                     "SELECT COUNT(*) FROM software_integration_run WHERE project_id = ? AND status IN (" + placeholders(ACTIVE_STATUSES.size()) + ")",
                     Integer.class, parameters(projectId, ACTIVE_STATUSES));
             if (active != null && active > 0) return false;
+            if (TemplateCreationJobStore.hasUnresolvedJobs(jdbcTemplate, projectId)) return false;
 
             List<ModelVersionPath> versions = jdbcTemplate.query("""
                     SELECT v.model_id, v.version_no, v.storage_key

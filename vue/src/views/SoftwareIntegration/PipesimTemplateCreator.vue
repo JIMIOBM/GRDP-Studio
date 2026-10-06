@@ -15,6 +15,10 @@ const requestId = ref('')
 const busy = ref(false)
 const error = ref('')
 const capable = ref(false)
+const records = ref([])
+const recordsBusy = ref(false)
+const recordsError = ref('')
+let listRevision = 0
 let generation = 0
 let readRevision = 0
 let timer
@@ -36,6 +40,29 @@ const envelope = response => {
   return response.data
 }
 const message = exception => exception?.response?.data?.msg || exception?.msg || exception?.message || '请求失败'
+
+async function loadRecords() {
+  const expected = generation
+  const revision = ++listRevision
+  recordsBusy.value = true; recordsError.value = ''
+  try {
+    const result = envelope(await api.list(props.projectId))
+    if (expected === generation && revision === listRevision) records.value = result
+  } catch (exception) {
+    if (expected === generation && revision === listRevision) recordsError.value = message(exception)
+  } finally {
+    if (expected === generation && revision === listRevision) recordsBusy.value = false
+  }
+}
+
+function selectRecord(id) {
+  if (busy.value || !id) return
+  readRevision++; clearTimeout(timer)
+  requestId.value = id; job.value = null; error.value = ''
+  sessionStorage.setItem(storageKey(props.projectId), id)
+  refresh()
+  // Switching the observed record never creates or cancels another member's task.
+}
 
 async function refresh() {
   clearTimeout(timer)
@@ -113,14 +140,17 @@ function newTask() {
   generation++; clearTimeout(timer)
   requestId.value = ''; job.value = null; error.value = ''
   sessionStorage.removeItem(storageKey(props.projectId))
+  recordsBusy.value = false
+  if (visible.value) { checkCapabilities(); loadRecords() }
 }
 watch(() => props.projectId, projectId => {
   generation++; clearTimeout(timer); busy.value = false; job.value = null; error.value = ''
+  records.value = []; recordsBusy.value = false; recordsError.value = ''
   requestId.value = sessionStorage.getItem(storageKey(projectId)) || ''
   if (requestId.value) refresh()
-  if (visible.value) checkCapabilities()
+  if (visible.value) { checkCapabilities(); loadRecords() }
 }, { immediate: true })
-watch(visible, open => { if (open) checkCapabilities() })
+watch(visible, open => { if (open) { checkCapabilities(); loadRecords() } })
 onBeforeUnmount(() => { generation++; clearTimeout(timer) })
 </script>
 
@@ -131,6 +161,15 @@ onBeforeUnmount(() => { generation++; clearTimeout(timer) })
   </div>
   <el-dialog v-model="visible" title="新建模板井 · 团队共享项目" width="min(960px, 95vw)" :close-on-click-modal="false">
     <el-alert type="info" :closable="false" title="官方 Simple vertical 模板：继承井筒几何，显式设置黑油流体及边界。FIELD 为输入单位；结果单位未由接口提供时不推测。不是任意井建模或已校准 PVT。" />
+    <div class="template-actions">
+      <el-select :model-value="requestId || undefined" aria-label="选择团队建井记录" placeholder="选择团队建井记录" :disabled="busy" @change="selectRecord">
+        <el-option v-for="record in records" :key="record.requestId" :value="record.requestId"
+          :label="`${record.well} · ${labels[record.state] || record.state} · ${record.requestId}`" />
+      </el-select>
+      <el-button :loading="recordsBusy" @click="loadRecords">刷新团队记录</el-button>
+    </div>
+    <p>显示本项目最近50条持久记录；选择只查询状态，不会重新建井或取消原任务。</p>
+    <el-alert v-if="recordsError" :title="`团队记录读取失败：${recordsError}`" type="error" :closable="false" />
     <el-form label-position="top" :disabled="Boolean(requestId) || busy">
       <div class="template-fields">
         <el-form-item label="井名"><el-input v-model="well" placeholder="例如 ConsoleWell" maxlength="64" /></el-form-item>

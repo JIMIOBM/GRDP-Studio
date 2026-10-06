@@ -11,6 +11,7 @@ import org.springframework.web.server.ResponseStatusException;
 import tools.jackson.databind.JsonNode;
 
 import java.util.UUID;
+import java.util.List;
 import java.util.function.Supplier;
 
 /** Only this new feature's routes use shared-team authorization; legacy modules are unchanged. */
@@ -36,6 +37,13 @@ public class TemplateCreationController {
             Long versionId, boolean cancellationRequested, JsonNode profile, String resultUnits, String errorCode) { }
 
     public record Capabilities(String template, String unitsSystem, int executionBudgetSeconds, int maxProjectClaims) { }
+
+    @GetMapping
+    public ApiResponse<List<TemplateCreationJobStore.Summary>> list(@PathVariable long projectId,
+            HttpServletRequest request) {
+        authorize(projectId, request);
+        return ApiResponse.success(store.list(projectId));
+    }
 
     @GetMapping("/capabilities")
     public ApiResponse<Capabilities> capabilities(@PathVariable long projectId, HttpServletRequest request) {

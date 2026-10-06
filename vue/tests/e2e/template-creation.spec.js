@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test'
 // Isolated UI contract tests: mount the real component and replace only HTTP.
 // This does not log into the user's platform and is not native SDK acceptance.
 async function setup(page) {
-  const state = { posts: [], job: null, failCapabilities: false, rejectCreate: false, getGate: null }
+  const state = { posts: [], job: null, records: [], failCapabilities: false, rejectCreate: false, getGate: null, listGate: null }
   await page.route('**/template-creation-test', route => route.fulfill({
     contentType: 'text/html', body: '<html><body><div id="app"></div></body></html>'
   }))
@@ -12,6 +12,12 @@ async function setup(page) {
     const method = route.request().method()
     const reply = (data, status = 200) => route.fulfill({ status, json: { code: status === 202 ? 200 : status, msg: status < 300 ? 'success' : '测试拒绝', data } })
     if (url.pathname.endsWith('/capabilities')) return state.failCapabilities ? reply(null, 502) : reply({ template: 'Simple vertical', unitsSystem: 'PIPESIM_FIELD' })
+    if (method === 'GET' && url.pathname.endsWith('/template-creations')) {
+      const records = structuredClone(state.records)
+      const gate = state.listGate; state.listGate = null
+      if (gate) { gate.started(); await gate.promise }
+      return reply(records)
+    }
     if (method === 'POST') {
       state.posts.push(url.pathname)
       if (url.pathname.endsWith('/cancel')) {
@@ -70,6 +76,46 @@ test('取消确认不冒充终态，取消后不展示曲线，刷新不重复 P
   await expect(page.getByText(/已取消/).first()).toBeVisible()
   expect(state.posts.filter(path => path.endsWith('/template-creations'))).toHaveLength(1)
   expect(state.job.requestId).toBe(originalId)
+})
+
+test('团队成员无需本标签页请求ID即可恢复持久记录，查询不创建任务', async ({ page }) => {
+  const state = await setup(page)
+  const id = 'aa391543-b261-4d9e-9ad3-d3b88840d74f'
+  state.job = { requestId: id, projectId: 1, well: 'TeamWell', state: 'SUCCEEDED', versionId: 61,
+    profile: [{ depth: 0, pressure: 250, temperature: 92 }] }
+  state.records = [{ requestId: id, projectId: 1, well: 'TeamWell', state: 'SUCCEEDED', versionId: 61 }]
+  await page.getByRole('button', { name: '刷新团队记录' }).click()
+  await page.getByRole('combobox', { name: '选择团队建井记录' }).click()
+  await page.getByRole('option', { name: /TeamWell/ }).click()
+  await expect(page.getByText(/已登记模型版本 #61/)).toBeVisible()
+  await expect(page.getByRole('button', { name: '下载 .pips' })).toBeEnabled()
+  await expect(page.getByRole('button', { name: '保存到项目并验证' })).toBeDisabled()
+  expect(state.posts).toHaveLength(0)
+})
+
+test('团队记录较早刷新迟到不能覆盖较新的列表', async ({ page }) => {
+  const state = await setup(page)
+  await expect(page.getByRole('button', { name: '刷新团队记录' })).toBeEnabled()
+  let release, started
+  const begin = new Promise(resolve => { started = resolve })
+  state.records = [{ requestId: 'aa391543-b261-4d9e-9ad3-d3b88840d74f', well: 'OldWell', state: 'PREPARING' }]
+  state.listGate = { promise: new Promise(resolve => { release = resolve }), started }
+  await page.getByRole('button', { name: '刷新团队记录' }).click()
+  await begin
+  state.records = [{ requestId: 'bb391543-b261-4d9e-9ad3-d3b88840d74f', well: 'NewWell', state: 'SUCCEEDED' }]
+  // Reopening the dialog starts a newer read while the old request is still in flight.
+  await page.getByRole('button', { name: 'Close this dialog' }).click()
+  const newResponse = page.waitForResponse(async response => response.url().endsWith('/template-creations')
+    && response.status() === 200 && (await response.json()).data[0]?.well === 'NewWell')
+  await page.getByRole('button', { name: '新建 PIPESIM 模板井' }).click()
+  await newResponse
+  const oldResponse = page.waitForResponse(async response => response.url().endsWith('/template-creations')
+    && response.status() === 200 && (await response.json()).data[0]?.well === 'OldWell')
+  release(); await oldResponse
+  await page.getByRole('combobox', { name: '选择团队建井记录' }).click()
+  await expect(page.getByRole('option', { name: /NewWell/ })).toBeVisible()
+  await expect(page.getByRole('option', { name: /OldWell/ })).toHaveCount(0)
+  expect(state.posts).toHaveLength(0)
 })
 
 test('SDK 服务未就绪时禁止建井；明确拒绝可修正重试', async ({ page }) => {

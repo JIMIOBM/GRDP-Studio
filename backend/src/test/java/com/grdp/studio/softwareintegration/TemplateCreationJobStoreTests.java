@@ -63,6 +63,33 @@ class TemplateCreationJobStoreTests {
         assertThat(store.claim(2, UUID.randomUUID(), "Other", inputs(), 1).newlyClaimed()).isTrue();
     }
 
+    @Test void sharedListIsProjectBoundedMetadataOnlyAndStableOnRestart() {
+        store.claim(1, id, "SharedWell", inputs());
+        store.claim(2, UUID.randomUUID(), "OtherProjectWell", inputs());
+        for (int index = 0; index < 51; index++) store.claim(1, UUID.randomUUID(), "Well" + index, inputs());
+        var restarted = new TemplateCreationJobStore(jdbc, mapper);
+        var records = restarted.list(1);
+        assertThat(records).hasSize(50).allMatch(record -> record.projectId() == 1);
+        assertThat(restarted.list(2)).extracting(TemplateCreationJobStore.Summary::well).containsExactly("OtherProjectWell");
+        assertThat(restarted.list(3)).isEmpty();
+        assertThat(mapper.writeValueAsString(records)).doesNotContain("fingerprint", "request_json", "workerRecord", "inputs");
+        assertThat(restarted.list(1)).isEqualTo(records);
+    }
+
+    @Test void deletionProtectionIncludesUnknownStatesUntilConfirmedTerminal() {
+        store.claim(1, id, "Well", inputs());
+        assertThat(TemplateCreationJobStore.hasUnresolvedJobs(jdbc, 1)).isTrue();
+        store.markUncertain(id);
+        assertThat(TemplateCreationJobStore.hasUnresolvedJobs(jdbc, 1)).isTrue();
+        jdbc.update("UPDATE software_integration_template_creation SET state='FUTURE_STATE' WHERE request_id=?", id.toString());
+        assertThat(TemplateCreationJobStore.hasUnresolvedJobs(jdbc, 1)).isTrue();
+        for (String state : java.util.List.of("SUCCEEDED", "FAILED", "INTERRUPTED", "CANCELLED", "TIMED_OUT")) {
+            jdbc.update("UPDATE software_integration_template_creation SET state=? WHERE request_id=?", state, id.toString());
+            assertThat(TemplateCreationJobStore.hasUnresolvedJobs(jdbc, 1)).isFalse();
+        }
+        assertThat(TemplateCreationJobStore.hasUnresolvedJobs(jdbc, 2)).isFalse();
+    }
+
     @Test void uncertainClaimIsRecoveredWithoutDispatchAndTerminalRecordIsImmutable() {
         store.claim(1, id, "Well", inputs()); store.markUncertain(id);
         assertThat(store.find(id).state()).isEqualTo("UNCERTAIN");
