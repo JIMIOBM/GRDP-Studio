@@ -29,6 +29,11 @@ class WorkerTemplateCreationClientTests {
     private final AtomicInteger calls = new AtomicInteger();
     private String lastPath;
     private String lastMethod;
+    private int capabilityStatus = 200;
+    private String capabilityBody = """
+            {"schemaVersion":"pipesim-template-creation-capabilities/1","template":"Simple vertical","unitsSystem":"PIPESIM_FIELD",
+             "supportsCancellation":true,"maxRunTimeoutSeconds":600,"maxCleanupSeconds":32,"maxModelBytes":67108864}
+            """;
 
     @BeforeEach void setup() throws Exception {
         status = 200;
@@ -37,8 +42,10 @@ class WorkerTemplateCreationClientTests {
         server.createContext("/", exchange -> {
             calls.incrementAndGet(); lastPath = exchange.getRequestURI().getPath(); lastMethod = exchange.getRequestMethod();
             exchange.getRequestBody().readAllBytes();
-            exchange.sendResponseHeaders(status, response.length);
-            try (var output = exchange.getResponseBody()) { output.write(response); }
+            boolean capability = lastPath.endsWith("/capabilities");
+            byte[] body = capability ? capabilityBody.getBytes(StandardCharsets.UTF_8) : response;
+            exchange.sendResponseHeaders(capability ? capabilityStatus : status, body.length);
+            try (var output = exchange.getResponseBody()) { output.write(body); }
         });
         server.start();
         var properties = new SoftwareIntegrationProperties();
@@ -66,14 +73,14 @@ class WorkerTemplateCreationClientTests {
                 .isInstanceOfSatisfying(CreationTransportException.class, e -> {
                     assertThat(e.statusCode()).isEqualTo(409); assertThat(e.dispatchUncertain()).isFalse();
                 });
-        assertThat(calls.get()).isEqualTo(1);
+        assertThat(calls.get()).isEqualTo(2);
     }
 
     @Test void malformedPostResponseRequiresRecoveryNotRetry() {
         response = "not-json".getBytes(StandardCharsets.UTF_8);
         assertThatThrownBy(() -> client.create(id, "Well", mapper.createObjectNode()))
                 .isInstanceOfSatisfying(CreationTransportException.class, e -> assertThat(e.dispatchUncertain()).isTrue());
-        assertThat(calls.get()).isEqualTo(1);
+        assertThat(calls.get()).isEqualTo(2);
     }
 
     @Test void findHandlesMissingAndRejectsWrongIdentityAndState() {
@@ -144,5 +151,25 @@ class WorkerTemplateCreationClientTests {
         try { assertThatThrownBy(() -> shortTimeout.find(id)).isInstanceOf(CreationTransportException.class); }
         finally { release.countDown(); }
         assertThat(java.time.Duration.ofNanos(System.nanoTime() - started)).isLessThan(java.time.Duration.ofSeconds(1));
+    }
+
+    @Test void missingOrInvalidBudgetPreventsCreationPost() {
+        assertThat(client.executionBudgetSeconds()).isEqualTo(632);
+        calls.set(0);
+        capabilityStatus = 404;
+        assertThatThrownBy(() -> client.create(id, "Well", mapper.createObjectNode())).isInstanceOf(CreationTransportException.class);
+        assertThat(calls.get()).isEqualTo(1); assertThat(lastMethod).isEqualTo("GET");
+        capabilityStatus = 200; capabilityBody = capabilityBody.replace("600", "0");
+        assertThatThrownBy(client::executionBudgetSeconds).isInstanceOf(CreationTransportException.class);
+    }
+
+    @Test void cancellationSignalAndAlreadyCompletedRecordRemainDistinct() {
+        status = 202; response = record("CANCEL_REQUESTED").toString().getBytes(StandardCharsets.UTF_8);
+        assertThat(client.cancel(id).statusCode()).isEqualTo(202);
+        assertThat(lastPath).endsWith("/" + id + "/cancel");
+        status = 200; response = record("SUCCEEDED").toString().getBytes(StandardCharsets.UTF_8);
+        assertThat(client.cancel(id).record().path("status").asText()).isEqualTo("SUCCEEDED");
+        status = 202; response = record("CANCELLED").toString().getBytes(StandardCharsets.UTF_8);
+        assertThatThrownBy(() -> client.cancel(id)).isInstanceOf(CreationTransportException.class);
     }
 }

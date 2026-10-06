@@ -89,4 +89,20 @@ class TemplateCreationWorkflowTests {
         verify(store, never()).register(any(), anyLong(), any());
         verify(projects, never()).uploadModel(anyLong(), any(MultipartFile.class));
     }
+
+    @Test void completedOrWrongProjectCannotSendCancellation() {
+        assertThat(workflow.cancel(1, id)).isEqualTo(job);
+        assertThatThrownBy(() -> workflow.cancel(2, id)).isInstanceOf(IllegalStateException.class);
+        verifyNoInteractions(worker);
+    }
+
+    @Test void cancellationAcknowledgementIsNotPersistedAsTerminalSuccess() {
+        var preparing = new TemplateCreationJobStore.Job(id, 1, "fp", job.request(), "PREPARING", null, null);
+        when(store.find(id)).thenReturn(preparing);
+        var acknowledgement = mapper.createObjectNode().put("requestId", id.toString()).put("status", "CANCEL_REQUESTED");
+        when(worker.cancel(id)).thenReturn(new WorkerTemplateCreationClient.Reply(202, acknowledgement));
+        when(worker.find(id)).thenReturn(null);
+        assertThat(workflow.cancel(1, id)).isEqualTo(preparing);
+        verify(store, never()).recover(any(), any()); verify(worker).find(id);
+    }
 }

@@ -22,6 +22,35 @@ public sealed class TemplateCreationService(TemplateCreationStore store, PtkExec
     ITemplateCreationAdapter adapter, IOptions<WorkerOptions> configuredOptions)
 {
     private readonly WorkerOptions options = configuredOptions.Value;
+    private readonly object cancellationGate = new();
+    private readonly Dictionary<Guid, CancellationTokenSource> activeCreations = new();
+
+    public TemplateCreationOutcome Cancel(Guid id)
+    {
+        if (id == Guid.Empty) return new(400, WorkerApiError.Request("INVALID_CREATION_ID", "Creation ID is required."));
+        lock (cancellationGate)
+        {
+            var record = store.Read(id);
+            // Cancellation never rewrites an already committed terminal result.
+            if (record is not null && record.Status != "PREPARING") return new(200, record);
+            if (activeCreations.TryGetValue(id, out var cancellation))
+            {
+                cancellation.Cancel();
+                return new(202, new { requestId = id, status = "CANCEL_REQUESTED" });
+            }
+            return record is null ? new(404, WorkerApiError.Request("CREATION_NOT_FOUND", "Creation record does not exist."))
+                : new(409, WorkerApiError.Request("CREATION_CANCEL_UNAVAILABLE", "This generation is not executing the creation; recover its record."));
+        }
+    }
+
+    public object Capabilities() => new
+    {
+        schemaVersion = "pipesim-template-creation-capabilities/1", template = "Simple vertical",
+        unitsSystem = "PIPESIM_FIELD", supportsCancellation = true,
+        maxRunTimeoutSeconds = options.MaxRunTimeoutSeconds,
+        maxCleanupSeconds = (long)options.GracefulStopSeconds + options.ProcessExitConfirmationSeconds,
+        maxModelBytes = 67_108_864
+    };
 
     public async Task<TemplateCreationOutcome> CreateAsync(TemplateCreationRequest request, CancellationToken cancellationToken)
     {
@@ -35,6 +64,8 @@ public sealed class TemplateCreationService(TemplateCreationStore store, PtkExec
         var acquired = coordinator.TryAcquire("template-creation");
         if (!acquired.Acquired) return new(409, acquired.Error!);
         using var lease = acquired.Lease!;
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var token = cancellation.Token;
         var adapterStarted = false;
         var exitConfirmed = false;
         try
@@ -45,12 +76,13 @@ public sealed class TemplateCreationService(TemplateCreationStore store, PtkExec
                 : new(409, WorkerApiError.Request("CREATION_ID_CONFLICT", "Creation ID belongs to different inputs."));
             try { store.Claim(request, fingerprint); }
             catch (IOException) { return new(409, WorkerApiError.Request("CREATION_ALREADY_CLAIMED", "Creation storage is already claimed; inspect its record, do not resubmit.")); }
+            lock (cancellationGate) activeCreations.Add(request.RequestId, cancellation);
             var directory = store.DirectoryFor(request.RequestId);
             var adapterRequest = Path.Combine(directory, "adapter-request.json");
             await File.WriteAllTextAsync(adapterRequest, JsonSerializer.Serialize(new
-                { well = request.Well, inputs = request.Inputs, output = store.ModelPath(request.RequestId) }), cancellationToken);
+                { well = request.Well, inputs = request.Inputs, output = store.ModelPath(request.RequestId) }), token);
             adapterStarted = true;
-            var execution = await adapter.ExecuteAsync(adapterRequest, TimeSpan.FromSeconds(options.MaxRunTimeoutSeconds), cancellationToken);
+            var execution = await adapter.ExecuteAsync(adapterRequest, TimeSpan.FromSeconds(options.MaxRunTimeoutSeconds), token);
             exitConfirmed = execution.ProcessTreeExitConfirmed;
             if (!execution.ProcessTreeExitConfirmed)
             {
@@ -66,10 +98,15 @@ public sealed class TemplateCreationService(TemplateCreationStore store, PtkExec
             if (!file.Exists || file.Length is < 1 or > 67_108_864)
                 return Fail(request, fingerprint, "FAILED", new("STORAGE", "CREATED_MODEL_MISSING", "A valid created engineering file is required.", false), 422);
             await using var stream = File.OpenRead(path);
-            var sha = Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken)).ToLowerInvariant();
+            var sha = Convert.ToHexString(await SHA256.HashDataAsync(stream, token)).ToLowerInvariant();
             var record = new TemplateCreationRecord(request.RequestId, fingerprint, "SUCCEEDED", DateTimeOffset.UtcNow,
                 result.Clone(), Model: new("created.pips", file.Length, sha));
-            store.Save(record);
+            lock (cancellationGate)
+            {
+                // Cancel and success publication have a single ordering point.
+                token.ThrowIfCancellationRequested();
+                store.Save(record);
+            }
             return new(201, record);
         }
         catch (OperationCanceledException)
@@ -87,6 +124,10 @@ public sealed class TemplateCreationService(TemplateCreationStore store, PtkExec
         {
             if (adapterStarted && !exitConfirmed) lease.BlockRelease();
             return Fail(request, fingerprint, "FAILED", new("EXECUTION", "CREATION_ADAPTER_FAILED", "Creation adapter failed; no model was published.", false), 503);
+        }
+        finally
+        {
+            lock (cancellationGate) activeCreations.Remove(request.RequestId);
         }
     }
 

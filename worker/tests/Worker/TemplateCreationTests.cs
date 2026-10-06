@@ -158,6 +158,84 @@ public sealed class TemplateCreationTests
         }
     }
 
+    [Fact]
+    public async Task ActiveCancellationStopsAdapterAndCannotRewriteTerminalRecord()
+    {
+        using var setup = new Fixture();
+        setup.Adapter.BlockUntilCancelled = true;
+        var pending = setup.Service.CreateAsync(setup.Request, TestContext.Current.CancellationToken);
+        await setup.Adapter.Started.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        Assert.Equal(404, setup.Service.Cancel(Guid.NewGuid()).HttpStatus);
+        Assert.Equal(400, setup.Service.Cancel(Guid.Empty).HttpStatus);
+        Assert.Equal(202, setup.Service.Cancel(setup.Request.RequestId).HttpStatus);
+        var outcome = await pending.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        Assert.Equal(422, outcome.HttpStatus);
+        var record = setup.Store.Read(setup.Request.RequestId)!;
+        Assert.Equal("CANCELLED", record.Status);
+        Assert.Null(record.Model);
+        Assert.False(setup.Coordinator.IsBusy);
+        Assert.Equal(200, setup.Service.Cancel(setup.Request.RequestId).HttpStatus);
+        Assert.Equal(record, setup.Store.Read(setup.Request.RequestId));
+        Assert.Equal(200, (await setup.Service.CreateAsync(setup.Request, TestContext.Current.CancellationToken)).HttpStatus);
+        Assert.Equal(1, setup.Adapter.Calls);
+    }
+
+    [Fact]
+    public async Task CancelBeforePublicationCannotExposeCompletedModel()
+    {
+        using var setup = new Fixture();
+        setup.Adapter.BeforeReturn = () => Assert.Equal(202, setup.Service.Cancel(setup.Request.RequestId).HttpStatus);
+        Assert.Equal(422, (await setup.Service.CreateAsync(setup.Request, TestContext.Current.CancellationToken)).HttpStatus);
+        Assert.Equal("CANCELLED", setup.Store.Read(setup.Request.RequestId)!.Status);
+        Assert.Null(setup.Store.Read(setup.Request.RequestId)!.Model);
+        Assert.False(setup.Coordinator.IsBusy);
+    }
+
+    [Fact]
+    public async Task CancellationWithUnconfirmedExitRetainsEngineLock()
+    {
+        using var setup = new Fixture();
+        setup.Adapter.BlockUntilCancelled = true; setup.Adapter.Confirmed = false;
+        var pending = setup.Service.CreateAsync(setup.Request, TestContext.Current.CancellationToken);
+        await setup.Adapter.Started.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        Assert.Equal(202, setup.Service.Cancel(setup.Request.RequestId).HttpStatus);
+        Assert.Equal(503, (await pending.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken)).HttpStatus);
+        Assert.True(setup.Coordinator.IsBusy);
+        Assert.Null(setup.Store.Read(setup.Request.RequestId)!.Model);
+    }
+
+    [Fact]
+    public async Task CompletedCreationCannotBeCancelledAndUnownedPreparationIsRejected()
+    {
+        using var setup = new Fixture();
+        await setup.Service.CreateAsync(setup.Request, TestContext.Current.CancellationToken);
+        var original = setup.Store.Read(setup.Request.RequestId)!;
+        Assert.Equal(200, setup.Service.Cancel(setup.Request.RequestId).HttpStatus);
+        var unchanged = setup.Store.Read(setup.Request.RequestId)!;
+        Assert.Equal(original.Status, unchanged.Status);
+        Assert.Equal(original.UpdatedAtUtc, unchanged.UpdatedAtUtc);
+        Assert.Equal(original.Model, unchanged.Model);
+        Assert.Equal(original.Result!.Value.GetRawText(), unchanged.Result!.Value.GetRawText());
+        var waiting = setup.Request with { RequestId = Guid.NewGuid() };
+        setup.Store.Claim(waiting, TemplateCreationParameters.Fingerprint(waiting));
+        Assert.Equal(409, setup.Service.Cancel(waiting.RequestId).HttpStatus);
+        Assert.Equal("PREPARING", setup.Store.Read(waiting.RequestId)!.Status);
+    }
+
+    [Fact]
+    public async Task RequestAbortSharesTheSameCancellationAndCleanupPath()
+    {
+        using var setup = new Fixture();
+        using var abort = new CancellationTokenSource();
+        setup.Adapter.BlockUntilCancelled = true;
+        var pending = setup.Service.CreateAsync(setup.Request, abort.Token);
+        await setup.Adapter.Started.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        abort.Cancel();
+        await pending.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        Assert.Equal("CANCELLED", setup.Store.Read(setup.Request.RequestId)!.Status);
+        Assert.False(setup.Coordinator.IsBusy);
+    }
+
     private sealed class Fixture : IDisposable
     {
         private readonly string directory = Path.Combine(Path.GetTempPath(), "grdp-template-test-" + Guid.NewGuid().ToString("N"));
@@ -190,12 +268,26 @@ public sealed class TemplateCreationTests
         public bool Invalid { get; set; }
         public bool Confirmed { get; set; } = true;
         public AdapterStopReason StopReason { get; set; }
+        public bool BlockUntilCancelled { get; set; }
+        public Action? BeforeReturn { get; set; }
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public async Task<AdapterExecutionResult> ExecuteAsync(string path, TimeSpan timeout, CancellationToken token)
         {
             Calls++;
+            if (BlockUntilCancelled)
+            {
+                Started.TrySetResult();
+                try { await Task.Delay(Timeout.InfiniteTimeSpan, token); }
+                catch (OperationCanceledException)
+                {
+                    return new(AdapterStopReason.Cancelled, 0, null, Confirmed, false, false,
+                        new("CANCELLATION", "CREATION_CANCELLED", "Test cancellation fixture", false));
+                }
+            }
             using var request = JsonDocument.Parse(await File.ReadAllTextAsync(path, token));
             await File.WriteAllTextAsync(request.RootElement.GetProperty("output").GetString()!, "test pips bytes", token);
             var result = Invalid ? JsonSerializer.SerializeToElement(new { calculationVerified = true }) : Result(request.RootElement.GetProperty("inputs"));
+            BeforeReturn?.Invoke();
             return new(StopReason, 0, result, Confirmed, false, false,
                 StopReason == AdapterStopReason.None ? null : new("EXECUTION", "TEST_STOP", "Test stop fixture", false));
         }

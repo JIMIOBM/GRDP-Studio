@@ -42,6 +42,41 @@ public class WorkerTemplateCreationClient {
 
     public record Reply(int statusCode, JsonNode record) { }
 
+    public int executionBudgetSeconds() {
+        Reply reply = json(HttpRequest.newBuilder(URI.create(properties.getWorkerBaseUrl().replaceAll("/+$", "")
+                + "/api/model-creations/pipesim-template/capabilities"))
+                .timeout(properties.getWorkerReadTimeout()).GET().build());
+        JsonNode budget = reply.record().path("maxRunTimeoutSeconds");
+        JsonNode cleanup = reply.record().path("maxCleanupSeconds");
+        JsonNode cancellation = reply.record().path("supportsCancellation");
+        JsonNode modelLimit = reply.record().path("maxModelBytes");
+        if (reply.statusCode() != 200
+                || !"pipesim-template-creation-capabilities/1".equals(reply.record().path("schemaVersion").asText())
+                || !"PIPESIM_FIELD".equals(reply.record().path("unitsSystem").asText())
+                || !"Simple vertical".equals(reply.record().path("template").asText())
+                || !cancellation.isBoolean() || !cancellation.booleanValue()
+                || !modelLimit.isIntegralNumber() || !modelLimit.canConvertToInt() || modelLimit.intValue() != MAX_MODEL_BYTES
+                || !cleanup.isIntegralNumber() || !cleanup.canConvertToInt() || cleanup.intValue() < 0 || cleanup.intValue() > 600
+                || !budget.isIntegralNumber() || !budget.canConvertToInt() || budget.intValue() < 1 || budget.intValue() > 86_400) {
+            throw new CreationTransportException("Worker creation budget/cancellation capability unavailable", reply.statusCode(), false);
+        }
+        return budget.intValue() + cleanup.intValue();
+    }
+
+    /** 202 acknowledges a signal, not native process termination or a terminal CANCELLED record. */
+    public Reply cancel(UUID id) {
+        requireId(id);
+        Reply reply = json(HttpRequest.newBuilder(URI.create(properties.getWorkerBaseUrl().replaceAll("/+$", "")
+                + "/api/model-creations/" + id + "/cancel"))
+                .timeout(properties.getWorkerReadTimeout()).POST(HttpRequest.BodyPublishers.noBody()).build());
+        if (reply.statusCode() == 200) validateRecord(id, reply.record());
+        else if (reply.statusCode() != 202 || !id.toString().equalsIgnoreCase(reply.record().path("requestId").asText())
+                || !"CANCEL_REQUESTED".equals(reply.record().path("status").asText())) {
+            throw new CreationTransportException("Worker cancellation unavailable", reply.statusCode(), false);
+        }
+        return reply;
+    }
+
     /** Never automatically retries POST: a lost response is recovered with find(id). */
     public Reply create(UUID id, String well, JsonNode inputs) {
         requireId(id);
@@ -52,7 +87,7 @@ public class WorkerTemplateCreationClient {
         payload.put("requestId", id.toString());
         payload.put("well", well);
         payload.set("inputs", inputs);
-        Duration timeout = Duration.ofSeconds(Math.max(1, properties.getDefaultRunTimeoutSeconds()) + 30L);
+        Duration timeout = Duration.ofSeconds(executionBudgetSeconds() + 30L);
         HttpRequest request = HttpRequest.newBuilder(uri(id, true, false)).timeout(timeout)
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(payload))).build();

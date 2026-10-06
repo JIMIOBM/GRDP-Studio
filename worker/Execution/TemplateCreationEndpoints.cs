@@ -11,6 +11,12 @@ public static class TemplateCreationEndpoints
     public static void MapTemplateCreation(this WebApplication app)
     {
         // Loopback Worker API only. Spring project authorization/version registration comes next.
+        app.MapGet("/api/model-creations/pipesim-template/capabilities", (TemplateCreationService service) => Results.Ok(service.Capabilities()));
+        app.MapPost("/api/model-creations/{id:guid}/cancel", (Guid id, TemplateCreationService service) =>
+        {
+            var outcome = service.Cancel(id);
+            return Results.Json(outcome.Body, statusCode: outcome.HttpStatus);
+        });
         app.MapPost("/api/model-creations/pipesim-template", async (TemplateCreationRequest request, TemplateCreationService service, CancellationToken token) =>
         {
             var outcome = await service.CreateAsync(request, token);

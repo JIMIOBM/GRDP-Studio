@@ -48,6 +48,15 @@ public class TemplateCreationWorkflow {
         return store.find(id);
     }
 
+    public TemplateCreationJobStore.Job cancel(long projectId, UUID id) {
+        var job = requireProjectJob(projectId, id);
+        if (!java.util.Set.of("CLAIMED", "UNCERTAIN", "PREPARING").contains(job.state())) return job;
+        var reply = worker.cancel(id);
+        if (reply.statusCode() == 200) store.recover(id, reply.record());
+        // An acknowledgement is not persisted as CANCELLED. GET observes the actual terminal state.
+        return recover(projectId, id);
+    }
+
     /** Download verification precedes the DB transaction; the upload and binding commit together. */
     public long register(long projectId, UUID id) {
         var job = recover(projectId, id);
