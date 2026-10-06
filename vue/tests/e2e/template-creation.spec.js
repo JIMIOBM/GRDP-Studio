@@ -134,6 +134,24 @@ test('SDK 服务未就绪时禁止建井；明确拒绝可修正重试', async (
   await expect(page.getByPlaceholder('例如 ConsoleWell')).toBeEnabled()
 })
 
+test('明确执行前拒绝允许人工新任务，但未知状态仍禁止重建', async ({ page }) => {
+  const state = await setup(page)
+  await fillExperiment(page)
+  await page.getByRole('button', { name: '创建并真实计算' }).click()
+  await expect.poll(() => state.job?.state).toBe('PREPARING')
+  state.job = { ...state.job, state: 'UNCERTAIN' }
+  await page.getByRole('button', { name: '查询 / 恢复状态' }).click()
+  await expect(page.getByRole('button', { name: '开始另一口井' })).toBeDisabled()
+  state.job = { ...state.job, state: 'REJECTED', errorCode: 'CREATION_NOT_DISPATCHED' }
+  await page.getByRole('button', { name: '查询 / 恢复状态' }).click()
+  await expect(page.getByText(/执行前已拒绝（未启动建井）/).first()).toBeVisible()
+  await expect(page.getByRole('button', { name: '开始另一口井' })).toBeEnabled()
+  await expect(page.getByRole('button', { name: '下载 .pips' })).toBeDisabled()
+  await page.getByRole('button', { name: '开始另一口井' }).click()
+  await expect(page.getByPlaceholder('例如 ConsoleWell')).toBeEnabled()
+  expect(state.posts.filter(path => path.endsWith('/template-creations'))).toHaveLength(1)
+})
+
 test('成功显示真实返回点，登记后不能重复登记', async ({ page }) => {
   const state = await setup(page)
   await fillExperiment(page)

@@ -53,6 +53,21 @@ class TemplateCreationWorkflowTests {
         verify(worker, never()).create(any(), any(), any());
     }
 
+    @Test void provenPreDispatchRejectionEndsLocallyWithoutReplayOrAdoptingWorkerRecords() {
+        when(worker.create(eq(id), eq("Well"), any())).thenThrow(
+                new WorkerTemplateCreationClient.CreationTransportException("pre-dispatch", 503, false));
+        assertThatThrownBy(() -> workflow.executeClaim(new TemplateCreationJobStore.Claim(job, true))).isInstanceOf(RuntimeException.class);
+        verify(store).markRejected(id); verify(store, never()).markUncertain(id);
+        var rejected = new TemplateCreationJobStore.Job(id, 1, "fp", job.request(), "REJECTED", null, null);
+        when(store.find(id)).thenReturn(rejected);
+        assertThat(workflow.recover(1, id)).isEqualTo(rejected);
+        assertThat(workflow.cancel(1, id)).isEqualTo(rejected);
+        assertThatThrownBy(() -> workflow.register(1, id)).isInstanceOf(IllegalStateException.class);
+        verify(worker, never()).download(any(), any());
+        verify(worker, never()).find(any()); verify(worker, never()).cancel(any());
+        verify(worker, times(1)).create(any(), any(), any());
+    }
+
     @Test void wrongProjectNeverContactsWorker() {
         assertThatThrownBy(() -> workflow.recover(2, id)).isInstanceOf(IllegalStateException.class);
         verifyNoInteractions(worker);

@@ -24,4 +24,6 @@ test('uncertain and preparing must not be presented as completed or allow anothe
   assert.equal(terminalCreation('PREPARING'), false)
   assert.equal(terminalCreation('CANCELLED'), true)
   assert.equal(terminalCreation('SUCCEEDED'), true)
+  assert.equal(terminalCreation('REJECTED'), true)
+  assert.equal(terminalCreation('UNKNOWN_NEW_STATE'), false)
 })

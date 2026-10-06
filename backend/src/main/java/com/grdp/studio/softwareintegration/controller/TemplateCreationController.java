@@ -86,6 +86,7 @@ public class TemplateCreationController {
             HttpServletRequest request) {
         authorizeJob(projectId, id, request);
         var job = checked(() -> dispatcher.find(projectId, id));
+        if (!"SUCCEEDED".equals(job.state())) throw new ResponseStatusException(HttpStatus.CONFLICT, "只有原生计算成功的工程可下载");
         byte[] bytes = checked(() -> worker.download(id, job.workerRecord()));
         return ResponseEntity.ok().contentType(MediaType.APPLICATION_OCTET_STREAM)
                 .header(HttpHeaders.CACHE_CONTROL, "no-store")
@@ -111,6 +112,7 @@ public class TemplateCreationController {
         JsonNode result = job.workerRecord() == null ? null : job.workerRecord().path("result");
         boolean success = "SUCCEEDED".equals(job.state());
         String code = job.workerRecord() == null ? null : job.workerRecord().path("error").path("code").asText("");
+        if ("REJECTED".equals(job.state())) code = "CREATION_NOT_DISPATCHED";
         return new CreationView(job.requestId(), job.projectId(), job.request().path("well").asText(),
                 job.state(), job.versionId(), dispatcher.cancellationRequested(job.requestId()),
                 success && result != null ? result.path("profile") : null,

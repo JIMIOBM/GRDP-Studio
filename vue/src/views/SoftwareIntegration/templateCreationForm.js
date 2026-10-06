@@ -14,7 +14,7 @@ export const experimentInputs = {
   gorScfStb: 200, waterCutPercent: 20, reservoirPressurePsia: 4000,
   reservoirTemperatureDegF: 150, outletPressurePsia: 250, liquidRateStbDay: 1000
 }
-export const terminalCreation = state => ['SUCCEEDED', 'FAILED', 'CANCELLED', 'TIMED_OUT', 'INTERRUPTED'].includes(state)
+export const terminalCreation = state => ['SUCCEEDED', 'FAILED', 'CANCELLED', 'TIMED_OUT', 'INTERRUPTED', 'REJECTED'].includes(state)
 export function creationPayload(well, study, values, requestId) {
   if (!/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(well)) throw new Error('井名须以字母开头，限 64 位字母、数字、下划线或短横线')
   if (!study.trim() || study.length > 64 || /[\u0000-\u001f\u007f-\u009f]/.test(study)) throw new Error('请填写有效 Study 名称')

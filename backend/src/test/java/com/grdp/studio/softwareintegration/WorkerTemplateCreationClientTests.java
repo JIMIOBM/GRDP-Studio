@@ -69,10 +69,28 @@ class WorkerTemplateCreationClientTests {
 
     @Test void rejectionIsNotRetried() {
         status = 409;
+        response = "{\"code\":\"WORKER_BUSY\"}".getBytes(StandardCharsets.UTF_8);
         assertThatThrownBy(() -> client.create(id, "Well", mapper.createObjectNode()))
                 .isInstanceOfSatisfying(CreationTransportException.class, e -> {
                     assertThat(e.statusCode()).isEqualTo(409); assertThat(e.dispatchUncertain()).isFalse();
                 });
+        assertThat(calls.get()).isEqualTo(2);
+    }
+
+    @Test void partialClaimStorageFailureConflictOrUnknownErrorMustRemainUncertain() {
+        for (String code : java.util.List.of("CREATION_ALREADY_CLAIMED", "CREATION_STORAGE_ERROR", "CREATION_ID_CONFLICT", "UNKNOWN")) {
+            status = code.equals("CREATION_STORAGE_ERROR") ? 503 : 409;
+            response = ("{\"code\":\"" + code + "\"}").getBytes(StandardCharsets.UTF_8);
+            assertThatThrownBy(() -> client.create(id, "Well", mapper.createObjectNode()))
+                    .isInstanceOfSatisfying(CreationTransportException.class, e -> assertThat(e.dispatchUncertain()).isTrue());
+        }
+        assertThat(calls.get()).isEqualTo(8);
+    }
+
+    @Test void unavailableToolkitProvesPreDispatchRejection() {
+        status = 503; response = "{\"code\":\"PTK_UNAVAILABLE\"}".getBytes(StandardCharsets.UTF_8);
+        assertThatThrownBy(() -> client.create(id, "Well", mapper.createObjectNode()))
+                .isInstanceOfSatisfying(CreationTransportException.class, e -> assertThat(e.dispatchUncertain()).isFalse());
         assertThat(calls.get()).isEqualTo(2);
     }
 

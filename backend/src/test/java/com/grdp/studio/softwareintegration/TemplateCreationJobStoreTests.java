@@ -90,6 +90,15 @@ class TemplateCreationJobStoreTests {
         assertThat(TemplateCreationJobStore.hasUnresolvedJobs(jdbc, 2)).isFalse();
     }
 
+    @Test void rejectedClaimIsImmutableAndDoesNotBlockDeletionOrAuthorizeNewPost() {
+        store.claim(1, id, "Well", inputs()); store.markRejected(id); store.markUncertain(id);
+        assertThat(store.find(id).state()).isEqualTo("REJECTED");
+        assertThat(store.find(id).workerRecord()).isNull();
+        assertThat(TemplateCreationJobStore.hasUnresolvedJobs(jdbc, 1)).isFalse();
+        assertThat(store.claim(1, id, "Well", inputs()).newlyClaimed()).isFalse();
+        assertThatThrownBy(() -> store.recover(id, successful())).isInstanceOf(IllegalStateException.class);
+    }
+
     @Test void uncertainClaimIsRecoveredWithoutDispatchAndTerminalRecordIsImmutable() {
         store.claim(1, id, "Well", inputs()); store.markUncertain(id);
         assertThat(store.find(id).state()).isEqualTo("UNCERTAIN");

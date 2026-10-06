@@ -62,6 +62,15 @@ class TemplateCreationControllerTests {
         assertThat(view.profile()).isNull(); assertThat(view.errorCode()).isEqualTo("TEST_CODE");
         assertThat(new ObjectMapper().writeValueAsString(view)).doesNotContain("must-not-leak");
     }
+    @Test void preDispatchRejectionHasSafeCodeAndCannotDownload() {
+        var rejected = job(1, "REJECTED"); when(store.find(id)).thenReturn(rejected);
+        when(dispatcher.find(1, id)).thenReturn(rejected);
+        var view = controller.find(1, id, request).data();
+        assertThat(view.errorCode()).isEqualTo("CREATION_NOT_DISPATCHED"); assertThat(view.profile()).isNull();
+        assertThatThrownBy(() -> controller.download(1, id, request)).isInstanceOfSatisfying(ResponseStatusException.class,
+                exception -> assertThat(exception.getStatusCode().value()).isEqualTo(409));
+        verifyNoInteractions(worker);
+    }
     @Test void acceptedCreationIsHttp202WithStandard200EnvelopeAndNoSynchronousNativeCall() {
         var payload = new ObjectMapper().createObjectNode();
         when(dispatcher.submit(1, id, "Well", payload)).thenReturn(job(1, "CLAIMED"));

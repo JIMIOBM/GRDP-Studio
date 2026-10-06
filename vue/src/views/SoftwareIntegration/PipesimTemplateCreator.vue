@@ -33,7 +33,7 @@ async function checkCapabilities() {
   } catch (exception) { if (expected === generation) error.value = `建井服务未就绪：${message(exception)}` }
 }
 const active = computed(() => requestId.value && !terminalCreation(job.value?.state))
-const labels = { CLAIMED: '已接收，等待计算服务', PREPARING: '正在真实建井与计算', UNCERTAIN: '状态待确认（不会自动重建）', SUCCEEDED: '原生计算成功', FAILED: '建井失败', CANCELLED: '已取消', TIMED_OUT: '计算超时', INTERRUPTED: '计算服务重启，任务中断' }
+const labels = { CLAIMED: '已接收，等待计算服务', PREPARING: '正在真实建井与计算', UNCERTAIN: '状态待确认（不会自动重建）', REJECTED: '执行前已拒绝（未启动建井）', SUCCEEDED: '原生计算成功', FAILED: '建井失败', CANCELLED: '已取消', TIMED_OUT: '计算超时', INTERRUPTED: '计算服务重启，任务中断' }
 const storageKey = projectId => `pipesim-template-creation:${projectId}`
 const envelope = response => {
   if (response?.code !== 200) throw new Error(response?.msg || '请求未成功')

@@ -39,6 +39,10 @@ public class TemplateCreationWorkflow {
         try {
             var reply = worker.create(id, job.request().path("well").asText(), job.request().path("inputs"));
             store.recover(id, reply.record());
+        } catch (WorkerTemplateCreationClient.CreationTransportException exception) {
+            if (exception.dispatchUncertain()) store.markUncertain(id);
+            else store.markRejected(id);
+            throw exception;
         } catch (RuntimeException exception) {
             // Persist uncertainty, including response parsing/DB failures after native creation.
             // Never automatically POST again, even if a later GET returns 404.
@@ -69,6 +73,7 @@ public class TemplateCreationWorkflow {
     public long register(long projectId, UUID id) {
         var job = recover(projectId, id);
         if (job.versionId() != null) return job.versionId();
+        if (!"SUCCEEDED".equals(job.state())) throw new IllegalStateException("Creation has no successful model");
         byte[] bytes = worker.download(id, job.workerRecord());
         String name = job.request().path("well").asText() + "_" + id.toString().replace("-", "") + ".pips";
         return store.register(id, projectId, locked -> {

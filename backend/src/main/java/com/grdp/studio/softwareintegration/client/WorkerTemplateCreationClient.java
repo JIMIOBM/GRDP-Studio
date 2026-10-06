@@ -94,8 +94,16 @@ public class WorkerTemplateCreationClient {
         Reply reply = json(request);
         if (Set.of(200, 201, 422).contains(reply.statusCode())
                 || reply.statusCode() == 503 && reply.record().has("requestId")) validateRecord(id, reply.record());
-        else throw new CreationTransportException("Worker rejected creation", reply.statusCode(), false);
+        else throw new CreationTransportException("Worker rejected creation", reply.statusCode(), !rejectedBeforeClaim(reply));
         return reply;
+    }
+
+    /** Only installed Worker codes emitted before durable claim prove no native dispatch occurred. */
+    private static boolean rejectedBeforeClaim(Reply reply) {
+        String code = reply.record().path("code").asText();
+        return reply.statusCode() == 400 && "INVALID_TEMPLATE_INPUTS".equals(code)
+                || reply.statusCode() == 503 && "PTK_UNAVAILABLE".equals(code)
+                || reply.statusCode() == 409 && Set.of("WORKER_BUSY", "PIPESIM_GLOBAL_BUSY", "COORDINATOR_STOPPED").contains(code);
     }
 
     /** 404 means no readable record, not permission to dispatch the same creation again. */

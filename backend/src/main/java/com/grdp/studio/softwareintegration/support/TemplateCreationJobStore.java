@@ -61,7 +61,7 @@ public class TemplateCreationJobStore implements ApplicationRunner {
     public static boolean hasUnresolvedJobs(JdbcTemplate jdbc, long projectId) {
         Long count = jdbc.queryForObject("""
                 SELECT COUNT(*) FROM software_integration_template_creation WHERE project_id=?
-                AND state NOT IN ('SUCCEEDED','FAILED','INTERRUPTED','CANCELLED','TIMED_OUT')
+                AND state NOT IN ('SUCCEEDED','FAILED','INTERRUPTED','CANCELLED','TIMED_OUT','REJECTED')
                 """, Long.class, projectId);
         return count != null && count > 0;
     }
@@ -118,6 +118,12 @@ public class TemplateCreationJobStore implements ApplicationRunner {
                 id.toString());
     }
 
+    /** Local terminal state: proven pre-dispatch rejection, not a fabricated Worker result. */
+    public void markRejected(UUID id) {
+        jdbc.update("UPDATE software_integration_template_creation SET state='REJECTED', updated_at=CURRENT_TIMESTAMP WHERE request_id=? AND state='CLAIMED' AND record_json IS NULL",
+                id.toString());
+    }
+
     public void recover(UUID id, JsonNode record) {
         String state = record == null ? "" : record.path("status").asText();
         if (record == null || !id.toString().equalsIgnoreCase(record.path("requestId").asText())
@@ -129,6 +135,7 @@ public class TemplateCreationJobStore implements ApplicationRunner {
             if (known == null) throw new IllegalStateException("Creation was not claimed by this backend");
             lockProject(known.projectId());
             Job locked = lockJob(id);
+            if ("REJECTED".equals(locked.state())) throw new IllegalStateException("Rejected creation cannot adopt a Worker result");
             if (locked.versionId() != null || List.of("SUCCEEDED", "FAILED", "INTERRUPTED", "CANCELLED", "TIMED_OUT").contains(locked.state())) {
                 if (!locked.state().equals(state) || !locked.workerRecord().equals(record)) {
                     throw new IllegalStateException("Terminal creation record cannot be replaced");
