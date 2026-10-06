@@ -2,6 +2,8 @@ import importlib.util
 from pathlib import Path
 import tempfile
 import unittest
+import sys
+import zipfile
 from unittest.mock import Mock
 
 spec = importlib.util.spec_from_file_location("template_preflight", Path(__file__).parents[1] / "pipesim_template_preflight.py")
@@ -47,6 +49,23 @@ class TemplateTests(unittest.TestCase):
                 module.create_template(api, Path(root) / "new.pips", "Well")
             model.close.assert_called_once()
             api.open.assert_not_called()
+
+    def test_runtime_rejects_archive_traversal_and_cleans_import_path(self):
+        with tempfile.TemporaryDirectory() as root:
+            archive = Path(root) / "unsafe.zip"
+            with zipfile.ZipFile(archive, "w") as writer:
+                writer.writestr("../escape.txt", "rejected")
+            with self.assertRaises(ValueError), module.toolkit_runtime(archive):
+                self.fail("unsafe runtime was yielded")
+            self.assertFalse((Path(root) / "escape.txt").exists())
+            with zipfile.ZipFile(archive, "w") as writer:
+                writer.writestr("resource.txt", "test fixture")
+            original = list(sys.path)
+            with module.toolkit_runtime(archive):
+                runtime = Path(sys.path[0])
+                self.assertTrue((runtime / "resource.txt").is_file())
+            self.assertEqual(sys.path, original)
+            self.assertFalse(runtime.exists())
 
 
 if __name__ == "__main__":

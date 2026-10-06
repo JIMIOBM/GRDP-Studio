@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "pipesim-template-profile-inputs/1",
+  "unitsSystem": "PIPESIM_FIELD",
+  "study": "Study 1",
+  "oilApi": 35,
+  "gasSpecificGravity": 0.65,
+  "waterSpecificGravity": 1.05,
+  "gorScfStb": 200,
+  "waterCutPercent": 20,
+  "reservoirPressurePsia": 4000,
+  "reservoirTemperatureDegF": 150,
+  "outletPressurePsia": 250,
+  "liquidRateStbDay": 1000
+}

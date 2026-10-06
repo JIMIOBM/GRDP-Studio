@@ -1,5 +1,6 @@
 """L42 preparation: create and reopen one official template, never claim it is runnable."""
 import argparse
+from contextlib import contextmanager
 import json
 from pathlib import Path
 import re
@@ -57,6 +58,27 @@ def create_template(model_api, output, well_name):
         model.close()
 
 
+@contextmanager
+def toolkit_runtime(toolkit):
+    """Expose the installed SDK's physical resources without changing installation files."""
+    toolkit = Path(toolkit)
+    if not toolkit.is_file():
+        raise ValueError("Installed toolkit is missing")
+    with tempfile.TemporaryDirectory(prefix="grdp-ptk-template-") as runtime:
+        root = Path(runtime).resolve()
+        with zipfile.ZipFile(toolkit) as archive:
+            for entry in archive.infolist():
+                candidate = (root / entry.filename.replace("\\", "/")).resolve()
+                if not candidate.is_relative_to(root) or (entry.external_attr >> 16) & 0o170000 == 0o120000:
+                    raise ValueError("Toolkit archive contains an unsafe entry")
+            archive.extractall(root)
+        sys.path.insert(0, str(root))
+        try:
+            yield
+        finally:
+            sys.path.remove(str(root))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ptk", required=True, help="Installed PythonToolkitModules.zip")
@@ -68,15 +90,7 @@ def main():
         parser.error("Installed toolkit is missing")
     # Model.new opens a physical bundled .pips template through __file__;
     # zipimport works for Model.open but cannot expose this resource as a file.
-    with tempfile.TemporaryDirectory(prefix="grdp-ptk-template-") as runtime:
-        root = Path(runtime).resolve()
-        with zipfile.ZipFile(toolkit) as archive:
-            for entry in archive.infolist():
-                candidate = (root / entry.filename.replace("\\", "/")).resolve()
-                if not candidate.is_relative_to(root) or (entry.external_attr >> 16) & 0o170000 == 0o120000:
-                    raise ValueError("Toolkit archive contains an unsafe entry")
-            archive.extractall(root)
-        sys.path.insert(0, str(root))
+    with toolkit_runtime(toolkit):
         from sixgill.pipesim import Model
         print(json.dumps(create_template(Model, args.output, args.well), ensure_ascii=False))
 
