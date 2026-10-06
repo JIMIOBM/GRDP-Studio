@@ -27,9 +27,17 @@ public class TemplateCreationWorkflow {
 
     public TemplateCreationJobStore.Job create(long projectId, UUID id, String well, JsonNode inputs) {
         var claim = store.claim(projectId, id, well, inputs);
+        return executeClaim(claim);
+    }
+
+    /** The dispatcher owns a durable claim before returning HTTP 202. Never redispatch old claims. */
+    public TemplateCreationJobStore.Job executeClaim(TemplateCreationJobStore.Claim claim) {
+        var job = claim.job();
+        long projectId = job.projectId();
+        UUID id = job.requestId();
         if (!claim.newlyClaimed()) return recover(projectId, id);
         try {
-            var reply = worker.create(id, well, inputs);
+            var reply = worker.create(id, job.request().path("well").asText(), job.request().path("inputs"));
             store.recover(id, reply.record());
         } catch (RuntimeException exception) {
             // Persist uncertainty, including response parsing/DB failures after native creation.

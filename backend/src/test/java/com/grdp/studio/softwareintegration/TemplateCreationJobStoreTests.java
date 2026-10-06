@@ -55,6 +55,14 @@ class TemplateCreationJobStoreTests {
         assertThat(store.find(id)).isNull();
     }
 
+    @Test void projectQuotaIsDurableAndExistingClaimCanStillBeRecovered() {
+        assertThat(store.claim(1, id, "Well", inputs(), 1).newlyClaimed()).isTrue();
+        assertThat(store.claim(1, id, "Well", inputs(), 1).newlyClaimed()).isFalse();
+        assertThatThrownBy(() -> store.claim(1, UUID.randomUUID(), "Other", inputs(), 1))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("上限");
+        assertThat(store.claim(2, UUID.randomUUID(), "Other", inputs(), 1).newlyClaimed()).isTrue();
+    }
+
     @Test void uncertainClaimIsRecoveredWithoutDispatchAndTerminalRecordIsImmutable() {
         store.claim(1, id, "Well", inputs()); store.markUncertain(id);
         assertThat(store.find(id).state()).isEqualTo("UNCERTAIN");

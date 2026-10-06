@@ -47,6 +47,10 @@ public class TemplateCreationJobStore implements ApplicationRunner {
 
     /** Persist before dispatch; same ID never authorizes a second POST, including after restart. */
     public Claim claim(long projectId, UUID id, String well, JsonNode inputs) {
+        return claim(projectId, id, well, inputs, Integer.MAX_VALUE);
+    }
+
+    public Claim claim(long projectId, UUID id, String well, JsonNode inputs, int maxProjectClaims) {
         if (id == null || id.equals(new UUID(0, 0)) || well == null
                 || !well.matches("[A-Za-z][A-Za-z0-9_-]{0,63}") || inputs == null || !inputs.isObject()) {
             throw new IllegalArgumentException("Invalid creation request");
@@ -67,6 +71,10 @@ public class TemplateCreationJobStore implements ApplicationRunner {
                     throw new IllegalStateException("Creation ID already belongs to another project or input");
                 }
                 return new Claim(existing, false);
+            }
+            Long count = jdbc.queryForObject("SELECT COUNT(*) FROM software_integration_template_creation WHERE project_id=?", Long.class, projectId);
+            if (count != null && count >= maxProjectClaims) {
+                throw new IllegalStateException("项目已达到建井记录上限，请联系管理员");
             }
             // Global PK prevents the same ID being concurrently bound in two different projects.
             jdbc.update("INSERT INTO software_integration_template_creation (request_id,project_id,fingerprint,request_json,state) VALUES (?,?,?,?,'CLAIMED')",

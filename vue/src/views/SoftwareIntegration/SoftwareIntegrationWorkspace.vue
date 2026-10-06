@@ -6,6 +6,7 @@ import { Delete, Document, DocumentAdd, Folder, UploadFilled } from '@element-pl
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useSoftwareIntegrationStore } from '@/stores/softwareIntegration'
 import PipesimModelRunPage from './PipesimModelRunPage.vue'
+import PipesimTemplateCreator from './PipesimTemplateCreator.vue'
 
 const store = useSoftwareIntegrationStore()
 const route = useRoute()
@@ -37,6 +38,10 @@ const selectedTreeProjectId = ref(null)
 const pendingExternalImport = ref(null)
 let workspaceMounted = false
 const safeRequestMessage = fallback => fallback
+const refreshCreatedModel = async ({ projectId }) => {
+  try { await store.loadProjectDetail(projectId) }
+  catch { ElMessage.error('模型已登记，项目目录刷新失败，请重新打开项目') }
+}
 
 const importIntents = {
   'import-pipesim-well': {
@@ -402,6 +407,7 @@ defineExpose({ openCreateDialog, openImportModel, importExternalFile })
       </template>
     </aside>
     <main class="software-content">
+    <PipesimTemplateCreator v-if="activeProjectId" :project-id="Number(activeProjectId)" @registered="refreshCreatedModel" />
     <PipesimModelRunPage v-if="activeModel" />
      <template v-else>
      <header class="workspace-header">
