@@ -38,10 +38,8 @@ async function setup(page) {
   })
   await page.goto('/template-creation-test')
   await page.evaluate(async () => {
-    const { createApp } = await import('/node_modules/.vite/deps/vue.js')
-    const { default: ElementPlus } = await import('/node_modules/.vite/deps/element-plus.js')
-    const { default: Creator } = await import('/src/views/SoftwareIntegration/PipesimTemplateCreator.vue')
-    window.creatorApp = createApp(Creator, { projectId: 1 }).use(ElementPlus).mount('#app')
+    const { mountCreator } = await import('/tests/e2e/fixtures/template-creator-harness.js')
+    window.creatorApp = mountCreator()
   })
   await page.getByRole('button', { name: '新建 PIPESIM 模板井' }).click()
   return state
@@ -68,10 +66,8 @@ test('取消确认不冒充终态，取消后不展示曲线，刷新不重复 P
   // Re-mount in a fresh page with the same sessionStorage. No new create POST is allowed.
   await page.reload()
   await page.evaluate(async () => {
-    const { createApp } = await import('/node_modules/.vite/deps/vue.js')
-    const { default: ElementPlus } = await import('/node_modules/.vite/deps/element-plus.js')
-    const { default: Creator } = await import('/src/views/SoftwareIntegration/PipesimTemplateCreator.vue')
-    createApp(Creator, { projectId: 1 }).use(ElementPlus).mount('#app')
+    const { mountCreator } = await import('/tests/e2e/fixtures/template-creator-harness.js')
+    mountCreator()
   })
   await expect(page.getByText(/已取消/).first()).toBeVisible()
   expect(state.posts.filter(path => path.endsWith('/template-creations'))).toHaveLength(1)
@@ -91,6 +87,31 @@ test('团队成员无需本标签页请求ID即可恢复持久记录，查询不
   await expect(page.getByRole('button', { name: '下载 .pips' })).toBeEnabled()
   await expect(page.getByRole('button', { name: '保存到项目并验证' })).toBeDisabled()
   expect(state.posts).toHaveLength(0)
+})
+
+test('刷新后保留取消意图，原生先成功时不伪造已取消状态', async ({ page }) => {
+  const state = await setup(page)
+  await fillExperiment(page)
+  await page.getByRole('button', { name: '创建并真实计算' }).click()
+  await expect(page.getByRole('button', { name: '取消任务' })).toBeEnabled()
+  await page.getByRole('button', { name: '取消任务' }).click()
+  await expect(page.getByText(/取消意图已保存/)).toBeVisible()
+  const id = state.job.requestId
+  await page.reload()
+  await page.evaluate(async () => {
+    const { mountCreator } = await import('/tests/e2e/fixtures/template-creator-harness.js')
+    mountCreator()
+  })
+  await page.getByRole('button', { name: '新建 PIPESIM 模板井' }).click()
+  await expect(page.getByText(/取消意图已保存/)).toBeVisible()
+  await expect(page.getByRole('button', { name: '开始另一口井' })).toBeDisabled()
+  state.job = { ...state.job, state: 'SUCCEEDED', cancellationRequested: false,
+    profile: [{ depth: 0, pressure: 250, temperature: 92 }] }
+  await page.getByRole('button', { name: '查询 / 恢复状态' }).click()
+  await expect(page.getByRole('button', { name: '下载 .pips' })).toBeEnabled()
+  await expect(page.getByText(/取消意图已保存/)).toHaveCount(0)
+  expect(state.job.requestId).toBe(id)
+  expect(state.posts.filter(path => path.endsWith('/template-creations'))).toHaveLength(1)
 })
 
 test('团队记录较早刷新迟到不能覆盖较新的列表', async ({ page }) => {

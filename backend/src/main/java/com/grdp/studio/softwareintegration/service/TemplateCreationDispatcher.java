@@ -1,6 +1,7 @@
 package com.grdp.studio.softwareintegration.service;
 
 import com.grdp.studio.softwareintegration.support.TemplateCreationInputs;
+import com.grdp.studio.softwareintegration.client.WorkerTemplateCreationClient;
 import com.grdp.studio.softwareintegration.support.TemplateCreationJobStore;
 import jakarta.annotation.PreDestroy;
 import org.springframework.stereotype.Service;
@@ -51,9 +52,21 @@ public class TemplateCreationDispatcher {
         return claim.job();
     }
 
-    public TemplateCreationJobStore.Job find(long projectId, UUID id) { return workflow.recover(projectId, id); }
+    public TemplateCreationJobStore.Job find(long projectId, UUID id) {
+        requireJob(projectId, id);
+        // After restart, explicit recovery follows durable cancellation intent, never replays creation.
+        if (store.cancellationRequested(id)) {
+            try { return workflow.cancel(projectId, id); }
+            catch (WorkerTemplateCreationClient.CreationTransportException exception) {
+                // A missing/rejected cancel signal does not prove termination; still read real state.
+                return workflow.recover(projectId, id);
+            }
+        }
+        return workflow.recover(projectId, id);
+    }
 
     public TemplateCreationJobStore.Job cancel(long projectId, UUID id) {
+        if (!store.requestCancellation(projectId, id)) return requireJob(projectId, id);
         synchronized (this) {
             if (active != null && active.id.equals(id) && active.projectId == projectId) {
                 active.cancelRequested = true;
@@ -64,7 +77,7 @@ public class TemplateCreationDispatcher {
     }
 
     public synchronized boolean cancellationRequested(UUID id) {
-        return active != null && active.id.equals(id) && active.cancelRequested;
+        return store.cancellationRequested(id);
     }
 
     private TemplateCreationJobStore.Job requireJob(long projectId, UUID id) {

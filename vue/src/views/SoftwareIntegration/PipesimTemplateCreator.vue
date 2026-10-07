@@ -183,6 +183,7 @@ onBeforeUnmount(() => { generation++; clearTimeout(timer) })
     <p>采用 SDK 默认相关式与模板继承设置；演示参数不用于工程决策。关闭窗口不会取消后台计算。</p>
     <el-alert v-if="error" :title="error" type="error" :closable="false" />
     <p v-if="requestId">请求 ID：{{ requestId }}<br />{{ labels[job?.state] || '请求待查询' }}{{ job?.cancellationRequested ? ' · 已请求取消，等待进程退出' : '' }}{{ job?.errorCode ? ` · ${job.errorCode}` : '' }}</p>
+    <p v-if="job?.cancellationRequested">取消意图已保存；刷新、换成员或服务重启后，查询会继续跟进取消。只有计算服务确认真实终态后才解除任务保护。</p>
     <div class="template-actions">
       <el-button type="primary" :loading="busy" :disabled="Boolean(requestId) || !capable" @click="create">创建并真实计算</el-button>
       <el-button v-if="!capable" :disabled="busy" @click="checkCapabilities">检查建井服务</el-button>

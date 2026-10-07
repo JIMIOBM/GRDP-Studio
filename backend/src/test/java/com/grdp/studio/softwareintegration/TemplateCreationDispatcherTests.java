@@ -1,6 +1,7 @@
 package com.grdp.studio.softwareintegration;
 
 import com.grdp.studio.softwareintegration.service.TemplateCreationDispatcher;
+import com.grdp.studio.softwareintegration.client.WorkerTemplateCreationClient;
 import com.grdp.studio.softwareintegration.service.TemplateCreationWorkflow;
 import com.grdp.studio.softwareintegration.support.TemplateCreationJobStore;
 import org.junit.jupiter.api.*;
@@ -44,6 +45,8 @@ class TemplateCreationDispatcherTests {
         when(store.find(id)).thenReturn(job);
         when(store.claim(1, id, "Well", inputs)).thenReturn(new TemplateCreationJobStore.Claim(job, false));
         assertThat(dispatcher.submit(1, id, "Well", inputs)).isEqualTo(job);
+        when(store.requestCancellation(1, id)).thenReturn(true);
+        when(store.cancellationRequested(id)).thenReturn(true);
         assertThat(dispatcher.cancel(1, id)).isEqualTo(job);
         assertThat(dispatcher.cancellationRequested(id)).isTrue();
         verify(workflow, times(1)).executeClaim(claim);
@@ -59,5 +62,43 @@ class TemplateCreationDispatcherTests {
         when(store.claim(1, id, "Well", inputs)).thenReturn(new TemplateCreationJobStore.Claim(job, false));
         assertThat(dispatcher.submit(1, id, "Well", inputs)).isEqualTo(job);
         verifyNoInteractions(workflow);
+    }
+
+    @Test void freshDispatcherRecoveryFollowsDurableCancelIntentWithoutRecreatingModel() {
+        when(store.find(id)).thenReturn(job);
+        when(store.cancellationRequested(id)).thenReturn(true);
+        when(workflow.cancel(1, id)).thenReturn(job);
+        assertThat(dispatcher.find(1, id)).isEqualTo(job);
+        assertThat(dispatcher.cancellationRequested(id)).isTrue();
+        verify(workflow).cancel(1, id);
+        verify(workflow, never()).executeClaim(any());
+        verify(workflow, never()).recover(anyLong(), any());
+        assertThatThrownBy(() -> dispatcher.find(2, id)).isInstanceOf(IllegalStateException.class);
+        verify(workflow, never()).cancel(eq(2L), any());
+    }
+
+    @Test void cancelIntentPersistsBeforeWorkerFailureAndTerminalJobsNeverSendCancel() {
+        when(store.find(id)).thenReturn(job);
+        when(store.requestCancellation(1, id)).thenReturn(true);
+        when(workflow.cancel(1, id)).thenThrow(new IllegalStateException("offline"));
+        assertThatThrownBy(() -> dispatcher.cancel(1, id)).hasMessage("offline");
+        var order = inOrder(store, workflow);
+        order.verify(store).requestCancellation(1, id);
+        order.verify(workflow).cancel(1, id);
+        when(store.requestCancellation(1, id)).thenReturn(false);
+        assertThat(dispatcher.cancel(1, id)).isEqualTo(job);
+        verify(workflow, times(1)).cancel(1, id);
+    }
+
+    @Test void missingCancelEndpointStillQueriesRealWorkerStateWithoutDroppingIntent() {
+        when(store.find(id)).thenReturn(job);
+        when(store.cancellationRequested(id)).thenReturn(true);
+        when(workflow.cancel(1, id)).thenThrow(new WorkerTemplateCreationClient.CreationTransportException("missing", 404, false));
+        when(workflow.recover(1, id)).thenReturn(job);
+        assertThat(dispatcher.find(1, id)).isEqualTo(job);
+        verify(workflow).recover(1, id);
+        verify(workflow, never()).executeClaim(any());
+        verify(store, never()).markRejected(any());
+        assertThat(dispatcher.cancellationRequested(id)).isTrue();
     }
 }

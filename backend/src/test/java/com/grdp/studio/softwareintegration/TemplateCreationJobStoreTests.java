@@ -34,6 +34,44 @@ class TemplateCreationJobStoreTests {
     }
 
     private ObjectNode inputs() { return mapper.createObjectNode().put("a", 1).put("b", 2); }
+    @Test void cancelIntentSurvivesStoreRestartIsIdempotentAndNeverChangesJobState() {
+        store.claim(1, id, "Well", inputs()); store.markUncertain(id);
+        assertThat(store.requestCancellation(1, id)).isTrue();
+        assertThat(store.requestCancellation(1, id)).isTrue();
+        var restarted = new TemplateCreationJobStore(jdbc, mapper); restarted.run(null);
+        assertThat(restarted.cancellationRequested(id)).isTrue();
+        assertThat(restarted.find(id).state()).isEqualTo("UNCERTAIN");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM software_integration_template_cancel_request", Long.class)).isEqualTo(1);
+        store.recover(id, mapper.createObjectNode().put("requestId", id.toString()).put("status", "CANCELLED"));
+        assertThat(restarted.cancellationRequested(id)).isFalse();
+        assertThat(restarted.requestCancellation(1, id)).isFalse();
+    }
+
+    @Test void foreignProjectOrMissingClaimCannotPersistCancellation() {
+        store.claim(1, id, "Well", inputs());
+        assertThatThrownBy(() -> store.requestCancellation(2, id)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> store.requestCancellation(1, UUID.randomUUID())).isInstanceOf(IllegalStateException.class);
+        assertThat(store.cancellationRequested(id)).isFalse();
+    }
+
+    @Test void concurrentTeamCancellationKeepsOneDurableIntent() throws Exception {
+        store.claim(1, id, "Well", inputs());
+        try (var pool = Executors.newFixedThreadPool(4)) {
+            var requests = new java.util.ArrayList<java.util.concurrent.Future<Boolean>>();
+            for (int i = 0; i < 8; i++) requests.add(pool.submit(() -> store.requestCancellation(1, id)));
+            for (var request : requests) assertThat(request.get(5, TimeUnit.SECONDS)).isTrue();
+        }
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM software_integration_template_cancel_request", Long.class)).isEqualTo(1);
+        assertThat(store.find(id).state()).isEqualTo("CLAIMED");
+    }
+
+    @Test void nativeSuccessAfterCancelIntentIsPreservedAndDoesNotPretendCancellation() {
+        store.claim(1, id, "Well", inputs()); store.requestCancellation(1, id);
+        store.recover(id, successful());
+        assertThat(store.find(id).state()).isEqualTo("SUCCEEDED");
+        assertThat(store.cancellationRequested(id)).isFalse();
+        assertThat(store.requestCancellation(1, id)).isFalse();
+    }
     private ObjectNode successful() {
         var node = mapper.createObjectNode().put("requestId", id.toString()).put("status", "SUCCEEDED");
         node.putObject("model").put("sha256", "a".repeat(64)).put("sizeBytes", 10);

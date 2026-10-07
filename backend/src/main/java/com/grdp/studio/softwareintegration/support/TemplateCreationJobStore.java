@@ -39,6 +39,12 @@ public class TemplateCreationJobStore implements ApplicationRunner {
                   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
                 """);
+        jdbc.execute("""
+                CREATE TABLE IF NOT EXISTS software_integration_template_cancel_request (
+                  request_id VARCHAR(36) PRIMARY KEY,
+                  requested_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """);
     }
 
     public record Job(UUID requestId, long projectId, String fingerprint, JsonNode request,
@@ -125,6 +131,30 @@ public class TemplateCreationJobStore implements ApplicationRunner {
     public void markUncertain(UUID id) {
         jdbc.update("UPDATE software_integration_template_creation SET state='UNCERTAIN', updated_at=CURRENT_TIMESTAMP WHERE request_id=? AND state='CLAIMED'",
                 id.toString());
+    }
+
+    /** Durable intent, never a simulated CANCELLED result. Project/job locks serialize duplicate requests. */
+    public boolean requestCancellation(long projectId, UUID id) {
+        return Boolean.TRUE.equals(transaction.execute(status -> {
+            lockProject(projectId);
+            Job job = lockJob(id);
+            if (job.projectId() != projectId) throw new IllegalStateException("Creation project mismatch");
+            if (!List.of("CLAIMED", "UNCERTAIN", "PREPARING").contains(job.state())) return false;
+            Long count = jdbc.queryForObject("SELECT COUNT(*) FROM software_integration_template_cancel_request WHERE request_id=?",
+                    Long.class, id.toString());
+            if (count == null || count == 0) jdbc.update(
+                    "INSERT INTO software_integration_template_cancel_request (request_id) VALUES (?)", id.toString());
+            return true;
+        }));
+    }
+
+    public boolean cancellationRequested(UUID id) {
+        Long count = jdbc.queryForObject("""
+                SELECT COUNT(*) FROM software_integration_template_cancel_request c
+                JOIN software_integration_template_creation j ON j.request_id=c.request_id
+                WHERE c.request_id=? AND j.state IN ('CLAIMED','UNCERTAIN','PREPARING')
+                """, Long.class, id.toString());
+        return count != null && count > 0;
     }
 
     /** Local terminal state: proven pre-dispatch rejection, not a fabricated Worker result. */
