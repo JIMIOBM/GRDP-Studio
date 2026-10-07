@@ -4,6 +4,7 @@ import { ElMessage } from 'element-plus'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { softwareIntegrationApi } from '@/api/softwareIntegration'
+import { zcornCornerIndices } from './eclipseCornerGeometry'
 
 const props = defineProps({
   runId: { type: [Number, String], default: null },
@@ -211,17 +212,18 @@ const buildCells = () => {
         const pillar10 = pillar00 + 1
         const pillar01 = (j + 1) * (nx + 1) + i
         const pillar11 = pillar01 + 1
-        const zbase = base * 8
+        const corners = zcornCornerIndices(nx, ny, i, j, k).map(index => zcorn[index])
         const pointValues = [
-          [pillar00, zcorn[zbase]], [pillar10, zcorn[zbase + 1]], [pillar01, zcorn[zbase + 2]], [pillar11, zcorn[zbase + 3]],
-          [pillar00, zcorn[zbase + 4]], [pillar10, zcorn[zbase + 5]], [pillar01, zcorn[zbase + 6]], [pillar11, zcorn[zbase + 7]]
+          [pillar00, corners[0]], [pillar10, corners[1]], [pillar01, corners[2]], [pillar11, corners[3]],
+          [pillar00, corners[4]], [pillar10, corners[5]], [pillar01, corners[6]], [pillar11, corners[7]]
         ]
         for (const [pillar, z] of pointValues) {
           const offset = pillar * 6
+          const dz = coord[offset + 5] - coord[offset + 2]
+          const ratio = Math.abs(dz) > 1e-9 ? (z - coord[offset + 2]) / dz : 0
           rawPoints.push(new THREE.Vector3(
-            coord[offset] + (coord[offset + 3] - coord[offset]) * 0.5,
-            coord[offset + 1] + (coord[offset + 4] - coord[offset + 1]) * 0.5,
-            z
+            coord[offset] + (coord[offset + 3] - coord[offset]) * ratio,
+            coord[offset + 1] + (coord[offset + 4] - coord[offset + 1]) * ratio, z
           ))
         }
       }
@@ -237,16 +239,16 @@ const buildCells = () => {
       for (let i = 0; i < nx; i++) {
         const base = k * nx * ny + j * nx + i
         if (actnum[base] <= 0) continue
-        const zbase = base * 8
+        const corners = zcornCornerIndices(nx, ny, i, j, k).map(index => zcorn[index])
         const pillar00 = j * (nx + 1) + i
         const pillar10 = pillar00 + 1
         const pillar01 = (j + 1) * (nx + 1) + i
         const pillar11 = pillar01 + 1
         const points = [
-          pillarPoint(pillar00, zcorn[zbase], coord, center), pillarPoint(pillar10, zcorn[zbase + 1], coord, center),
-          pillarPoint(pillar01, zcorn[zbase + 2], coord, center), pillarPoint(pillar11, zcorn[zbase + 3], coord, center),
-          pillarPoint(pillar00, zcorn[zbase + 4], coord, center), pillarPoint(pillar10, zcorn[zbase + 5], coord, center),
-          pillarPoint(pillar01, zcorn[zbase + 6], coord, center), pillarPoint(pillar11, zcorn[zbase + 7], coord, center)
+          pillarPoint(pillar00, corners[0], coord, center), pillarPoint(pillar10, corners[1], coord, center),
+          pillarPoint(pillar01, corners[2], coord, center), pillarPoint(pillar11, corners[3], coord, center),
+          pillarPoint(pillar00, corners[4], coord, center), pillarPoint(pillar10, corners[5], coord, center),
+          pillarPoint(pillar01, corners[6], coord, center), pillarPoint(pillar11, corners[7], coord, center)
         ]
         const centerPoint = points.reduce((sum, point) => sum.add(point), new THREE.Vector3()).multiplyScalar(1 / 8)
         normalized.push({ index: base, i: i + 1, j: j + 1, k: k + 1, points, center: centerPoint, value: null, rawCursor: rawCursor++ })
