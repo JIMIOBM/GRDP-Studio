@@ -36,7 +36,15 @@ class TemplateCreationJobStoreTests {
     private ObjectNode inputs() { return mapper.createObjectNode().put("a", 1).put("b", 2); }
     private ObjectNode successful() {
         var node = mapper.createObjectNode().put("requestId", id.toString()).put("status", "SUCCEEDED");
-        node.putObject("model").put("sha256", "a".repeat(64)); return node;
+        node.putObject("model").put("sha256", "a".repeat(64)).put("sizeBytes", 10);
+        var result = node.putObject("result").put("schemaVersion", "pipesim-template-profile-preflight/1")
+                .put("template", "Simple vertical").put("well", "Well").put("nativeState", "Completed")
+                .put("geometryOrigin", "official-template-inherited")
+                .put("fluidOrigin", "explicit-scalar-inputs-with-installed-SDK-default-correlations")
+                .put("calculationVerified", true).put("platformVerified", false);
+        result.set("inputs", inputs()); result.putArray("modelDiagnostics");
+        result.putArray("profile").addObject().put("depth", 0).put("pressure", 250).put("temperature", 92);
+        return node;
     }
     private void ready() { store.claim(1, id, "Well", inputs()); store.recover(id, successful()); }
 
@@ -97,6 +105,38 @@ class TemplateCreationJobStoreTests {
         assertThat(TemplateCreationJobStore.hasUnresolvedJobs(jdbc, 1)).isFalse();
         assertThat(store.claim(1, id, "Well", inputs()).newlyClaimed()).isFalse();
         assertThatThrownBy(() -> store.recover(id, successful())).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test void recoveryRejectsUnrelatedOrIncompleteSuccessAndKeepsClaimForInvestigation() {
+        store.claim(1, id, "Well", inputs()); store.markUncertain(id);
+        var foreignWell = successful(); ((ObjectNode) foreignWell.path("result")).put("well", "OtherWell");
+        var foreignInput = successful(); ((ObjectNode) foreignInput.path("result").path("inputs")).put("a", 3);
+        var missing = successful(); missing.remove("result");
+        var falseSuccess = successful(); ((ObjectNode) falseSuccess.path("result")).put("calculationVerified", false);
+        var badProfile = successful(); ((ObjectNode) badProfile.path("result").path("profile").get(0)).put("pressure", "not-a-number");
+        var badArtifact = successful(); ((ObjectNode) badArtifact.path("model")).put("sizeBytes", 0);
+        var stringInput = successful(); ((ObjectNode) stringInput.path("result").path("inputs")).put("a", "1");
+        for (var record : java.util.List.of(foreignWell, foreignInput, missing, falseSuccess, badProfile, badArtifact, stringInput)) {
+            assertThatThrownBy(() -> store.recover(id, record)).isInstanceOf(IllegalStateException.class);
+            assertThat(store.find(id).state()).isEqualTo("UNCERTAIN");
+            assertThat(store.find(id).workerRecord()).isNull();
+        }
+    }
+
+    @Test void inputEchoAcceptsNumericFormattingButNeverDifferentScalarValues() {
+        store.claim(1, id, "Well", inputs());
+        var record = successful(); ((ObjectNode) record.path("result").path("inputs")).put("a", 1.0).put("b", 2.0);
+        store.recover(id, record);
+        assertThat(store.find(id).state()).isEqualTo("SUCCEEDED");
+    }
+
+    @Test void cachedLegacySuccessIsRecheckedBeforeReadingOrRegistrationEvenWithBoundVersion() {
+        ready();
+        var record = successful(); ((ObjectNode) record.path("result").path("inputs")).put("a", 5);
+        jdbc.update("UPDATE software_integration_template_creation SET record_json=?,version_id=10 WHERE request_id=?", record.toString(), id.toString());
+        assertThatThrownBy(() -> new TemplateCreationJobStore(jdbc, mapper).find(id)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> store.register(id, 1, job -> { throw new AssertionError("unverified source must never upload"); }))
+                .isInstanceOf(IllegalStateException.class);
     }
 
     @Test void uncertainClaimIsRecoveredWithoutDispatchAndTerminalRecordIsImmutable() {

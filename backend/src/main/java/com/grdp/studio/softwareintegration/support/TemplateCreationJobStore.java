@@ -110,7 +110,16 @@ public class TemplateCreationJobStore implements ApplicationRunner {
                         rs.getString("fingerprint"), mapper.readTree(rs.getString("request_json")), rs.getString("state"),
                         rs.getString("record_json") == null ? null : mapper.readTree(rs.getString("record_json")),
                         rs.getObject("version_id") == null ? null : rs.getLong("version_id")), id.toString());
-        return jobs.isEmpty() ? null : jobs.getFirst();
+        if (jobs.isEmpty()) return null;
+        Job job = jobs.getFirst();
+        if ("SUCCEEDED".equals(job.state())) {
+            if (job.workerRecord() == null || !"SUCCEEDED".equals(job.workerRecord().path("status").asText())
+                    || !id.toString().equalsIgnoreCase(job.workerRecord().path("requestId").asText())) {
+                throw new IllegalStateException("Creation success record missing");
+            }
+            TemplateCreationSourceValidator.requireSuccess(job.request(), job.workerRecord());
+        }
+        return job;
     }
 
     public void markUncertain(UUID id) {
@@ -136,6 +145,7 @@ public class TemplateCreationJobStore implements ApplicationRunner {
             lockProject(known.projectId());
             Job locked = lockJob(id);
             if ("REJECTED".equals(locked.state())) throw new IllegalStateException("Rejected creation cannot adopt a Worker result");
+            TemplateCreationSourceValidator.requireSuccess(locked.request(), record);
             if (locked.versionId() != null || List.of("SUCCEEDED", "FAILED", "INTERRUPTED", "CANCELLED", "TIMED_OUT").contains(locked.state())) {
                 if (!locked.state().equals(state) || !locked.workerRecord().equals(record)) {
                     throw new IllegalStateException("Terminal creation record cannot be replaced");

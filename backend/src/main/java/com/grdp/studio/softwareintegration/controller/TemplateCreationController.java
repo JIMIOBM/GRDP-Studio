@@ -102,7 +102,7 @@ public class TemplateCreationController {
 
     private void authorizeJob(long projectId, UUID id, HttpServletRequest request) {
         authorize(projectId, request);
-        var job = store.find(id);
+        var job = checked(() -> store.find(id));
         if (job == null || job.projectId() != projectId) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "当前项目没有该建井记录");
         }

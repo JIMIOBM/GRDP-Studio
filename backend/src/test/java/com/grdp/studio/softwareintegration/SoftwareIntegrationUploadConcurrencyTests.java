@@ -348,8 +348,7 @@ public class SoftwareIntegrationUploadConcurrencyTests {
         creationStore.run(null);
         UUID creationId = UUID.randomUUID();
         byte[] content = bytes("CREATED");
-        var record = mapper.createObjectNode().put("requestId", creationId.toString()).put("status", "SUCCEEDED");
-        record.putObject("model").put("sha256", HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content)));
+        var record = templateSuccess(mapper, creationId, HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content)), content.length);
         creationStore.claim(projectId, creationId, "Well", mapper.createObjectNode()); creationStore.recover(creationId, record);
         var worker = mock(WorkerTemplateCreationClient.class);
         when(worker.download(creationId, record)).thenReturn(content);
@@ -373,8 +372,7 @@ public class SoftwareIntegrationUploadConcurrencyTests {
         var creationStore = new TemplateCreationJobStore(db.jdbc, mapper);
         creationStore.run(null);
         UUID creationId = UUID.randomUUID();
-        var record = mapper.createObjectNode().put("requestId", creationId.toString()).put("status", "SUCCEEDED");
-        record.putObject("model").put("sha256", "0".repeat(64));
+        var record = templateSuccess(mapper, creationId, "0".repeat(64), 5);
         creationStore.claim(projectId, creationId, "Well", mapper.createObjectNode()); creationStore.recover(creationId, record);
         assertThatThrownBy(() -> creationStore.register(creationId, projectId, job -> {
             var uploaded = service.uploadModel(projectId, file("created.pips", bytes("WRONG")));
@@ -383,6 +381,20 @@ public class SoftwareIntegrationUploadConcurrencyTests {
         assertThat(versions()).isEmpty(); assertThat(creationStore.find(creationId).versionId()).isNull();
         verify(dispatcher, never()).enqueue(anyLong());
         try { assertNoModelFiles(); } catch (IOException exception) { throw new AssertionError(exception); }
+    }
+
+    private tools.jackson.databind.node.ObjectNode templateSuccess(ObjectMapper mapper, UUID id, String hash, int size) {
+        var record = mapper.createObjectNode().put("requestId", id.toString()).put("status", "SUCCEEDED");
+        record.putObject("model").put("sha256", hash).put("sizeBytes", size);
+        var result = record.putObject("result");
+        result.put("schemaVersion", "pipesim-template-profile-preflight/1").put("template", "Simple vertical")
+                .put("well", "Well").put("nativeState", "Completed")
+                .put("geometryOrigin", "official-template-inherited")
+                .put("fluidOrigin", "explicit-scalar-inputs-with-installed-SDK-default-correlations")
+                .put("calculationVerified", true).put("platformVerified", false);
+        result.putObject("inputs"); result.putArray("modelDiagnostics");
+        result.putArray("profile").addObject().put("depth", 0).put("pressure", 250).put("temperature", 100);
+        return record;
     }
 
     private List<SoftwareIntegrationModelVersionEntity> versions() {
