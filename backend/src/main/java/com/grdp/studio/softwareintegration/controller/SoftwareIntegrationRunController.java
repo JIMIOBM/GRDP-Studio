@@ -84,8 +84,7 @@ public class SoftwareIntegrationRunController {
                 .contentType(contentType)
                 .contentLength(artifact.length())
                 .header(HttpHeaders.ACCEPT_RANGES, "bytes")
-                .header(HttpHeaders.CONTENT_RANGE,
-                        "bytes %d-%d/%d".formatted(artifact.offset(), artifact.offset() + artifact.length() - 1, artifact.sizeBytes()))
+                // ResourceRegionHttpMessageConverter owns Content-Range; setting it here duplicates it.
                 .body(region);
     }
 
