@@ -375,6 +375,51 @@ test('井筒压力方案提交精确快照，切换运行类型清空编辑', as
   await expect(page.getByRole('button', { name: '载入此方案参数' })).toBeDisabled()
 })
 
+test('压力字段空值就地提示，纠正后只提交一个准确方案', async ({ page }) => {
+  const state = await installMockBackend(page)
+  await openWorkspace(page)
+  await activateModel(page, '井筒演示模型')
+  await page.getByRole('radio', { name: '节点分析', exact: true }).check()
+  await page.getByText('使用地层压力方案', { exact: true }).click()
+  await page.getByRole('button', { name: '运行', exact: true }).click()
+  const fieldError = page.getByTestId('pressure-field-error')
+  await expect(fieldError).toContainText('平台编辑范围')
+  await expect(page.getByRole('group', { name: '方案地层压力校验' })).toHaveAttribute('aria-invalid', 'true')
+  expect(state.createPayloads).toHaveLength(0)
+  await expect(page.locator('.el-message')).toHaveCount(0)
+  await page.getByRole('spinbutton', { name: '方案地层压力' }).fill('4321.25')
+  await page.getByRole('spinbutton', { name: '方案地层压力' }).press('Tab')
+  await expect(fieldError).toHaveCount(0)
+  await page.getByRole('button', { name: '运行', exact: true }).click()
+  expect(state.createPayloads).toEqual([{ versionId: 101, payload: {
+    study: 'Base Case', runType: 'nodal', parameters: {
+      schemaVersion: 'pipesim-well-parameters/1', reservoirPressurePsi: 4321.25
+    }
+  } }])
+})
+
+test('切换任务或关闭压力方案清除字段错误，不影响原值计算', async ({ page }) => {
+  const state = await installMockBackend(page)
+  await openWorkspace(page)
+  await activateModel(page, '井筒演示模型')
+  await page.getByRole('radio', { name: '节点分析', exact: true }).check()
+  const enabled = page.getByRole('checkbox', { name: '使用地层压力方案' })
+  await page.getByText('使用地层压力方案', { exact: true }).click()
+  await page.getByRole('button', { name: '运行', exact: true }).click()
+  await expect(page.getByTestId('pressure-field-error')).toBeVisible()
+  await page.locator('.run-type-control').getByText('PT 剖面', { exact: true }).click()
+  await page.locator('.run-type-control').getByText('节点分析', { exact: true }).click()
+  await expect(enabled).not.toBeChecked()
+  await page.getByText('使用地层压力方案', { exact: true }).click()
+  await expect(page.getByTestId('pressure-field-error')).toHaveCount(0)
+  await page.getByRole('button', { name: '运行', exact: true }).click()
+  await expect(page.getByTestId('pressure-field-error')).toBeVisible()
+  await page.getByText('使用地层压力方案', { exact: true }).click()
+  await expect(page.getByTestId('pressure-field-error')).toHaveCount(0)
+  await page.getByRole('button', { name: '运行', exact: true }).click()
+  expect(state.createPayloads).toEqual([{ versionId: 101, payload: { study: 'Base Case', runType: 'nodal', parameters: null } }])
+})
+
 test('模型快速切换不会串入旧历史，并按模拟器契约创建运行', async ({ page }) => {
   const oldWellRun = {
     id: 7101,

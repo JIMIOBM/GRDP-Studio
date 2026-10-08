@@ -29,6 +29,8 @@ docs/
 !/docs/software-integration/acceptance/
 /docs/software-integration/acceptance/*
 !/docs/software-integration/acceptance/CC01-A.md
+!/docs/software-integration/acceptance/CC01-B.md
+!/docs/software-integration/acceptance/CC02-A.md
 # 本地损耗评价数据库备份包含业务数据，不纳入版本管理。
 /backups/storage-loss-*/
 

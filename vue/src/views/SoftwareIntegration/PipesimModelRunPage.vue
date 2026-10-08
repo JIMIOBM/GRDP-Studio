@@ -20,6 +20,7 @@ import EclipseRunResult from './EclipseRunResult.vue'
 import EclipseDataInspectionOverview from './EclipseDataInspectionOverview.vue'
 import PipesimPackageOverview from './PipesimPackageOverview.vue'
 import { sourceReservoirPressure, supportsPressureScenario } from './wellParameterPreview'
+import { buildPressureScenarioParameters } from './pressureScenarioParameters'
 import { filterDeployedRunTypeOptions } from './runTypeOptions'
 import { useRunFeedback } from './useRunFeedback'
 import { buildRunNotice } from './runNotice'
@@ -779,6 +780,15 @@ const changeVersion = async versionId => {
 const scenarioEnabled = ref(false)
 const scenarioPressure = ref(null)
 const supportsCurrentScenario = computed(() => supportsPressureScenario(activeVersion.value?.modelKind, runType.value))
+const pressureFieldTouched = ref(false)
+const pressureScenarioDraft = computed(() => buildPressureScenarioParameters({
+  enabled: scenarioEnabled.value,
+  modelKind: activeVersion.value?.modelKind,
+  runType: runType.value,
+  pressure: scenarioPressure.value
+}))
+const pressureFieldError = computed(() => pressureFieldTouched.value ? pressureScenarioDraft.value.fieldError : null)
+watch(scenarioEnabled, () => { pressureFieldTouched.value = false }, { flush: 'sync' })
 const eclipseScheduleEnabled = ref(false)
 const eclipseWconHistEnabled = ref(false)
 const eclipseWconInjeEnabled = ref(false)
@@ -1259,6 +1269,7 @@ const useSourcePressure = () => {
 watch([activeVersionId, runType], () => {
   scenarioEnabled.value = false
   scenarioPressure.value = null
+  pressureFieldTouched.value = false
   if (!isEclipseModel.value) {
     eclipseScheduleEnabled.value = false
     eclipseWconHistEnabled.value = false
@@ -1287,8 +1298,12 @@ const reuseScenario = () => {
 const submitRun = async () => {
   const feedback = beginFeedback()
   if (!canRun.value) return
-  if (scenarioEnabled.value && (!supportsCurrentScenario.value || !Number.isFinite(scenarioPressure.value) || scenarioPressure.value <= 0 || scenarioPressure.value > 100000)) {
-    feedback.error('当前模型或运行类型不支持压力方案，或压力不在大于 0 且不超过 100000 psia 的范围内')
+  if (pressureScenarioDraft.value.contextError) {
+    feedback.error(pressureScenarioDraft.value.contextError)
+    return
+  }
+  if (pressureScenarioDraft.value.fieldError) {
+    pressureFieldTouched.value = true
     return
   }
   if (legacyProfileRun.value && (!Number.isFinite(profileOutletPressure.value) || profileOutletPressure.value <= 0 || profileOutletPressure.value > 100000)) {
@@ -1325,7 +1340,7 @@ const submitRun = async () => {
   } else if (legacyProfileRun.value) {
     parameters = { schemaVersion: 'pipesim-well-profile-parameters/1', outletPressurePsi: profileOutletPressure.value }
   } else if (scenarioEnabled.value) {
-    parameters = { schemaVersion: 'pipesim-well-parameters/1', reservoirPressurePsi: scenarioPressure.value }
+    parameters = { ...pressureScenarioDraft.value.parameters }
   }
   if ((isGasLiftPerformanceRun.value || isGasLiftDiagnosticsRun.value || isVfpTablesRun.value) && parameters?.error) {
     feedback.error(parameters.error)
@@ -1643,7 +1658,10 @@ defineExpose({ eclipseRunRequest })
       <section v-if="supportsCurrentScenario" class="well-scenario" aria-label="井筒压力方案">
         <el-checkbox v-model="scenarioEnabled" :disabled="hasActiveRun || submittingRun">使用地层压力方案</el-checkbox>
         <template v-if="scenarioEnabled">
-          <label>地层压力 (psia) <el-input-number v-model="scenarioPressure" :min="0.000001" :max="100000" :disabled="hasActiveRun || submittingRun" aria-label="方案地层压力" /></label>
+          <div class="pressure-field" role="group" aria-label="方案地层压力校验" :aria-invalid="Boolean(pressureFieldError)" :aria-describedby="pressureFieldError ? 'reservoir-pressure-error' : undefined">
+            <label>地层压力 (psia) <el-input-number v-model="scenarioPressure" :min="0.000001" :max="100000" :disabled="hasActiveRun || submittingRun" aria-label="方案地层压力" @blur="pressureFieldTouched = true" /></label>
+            <small v-if="pressureFieldError" id="reservoir-pressure-error" role="alert" data-testid="pressure-field-error">{{ pressureFieldError }}</small>
+          </div>
           <span>仅修改本次计算副本；模型单位不匹配或设置失败时停止计算。</span>
           <span v-if="activeVersion?.modelKind === 'basic_gas' && runType !== 'nodal'">基础气井方案同时将该值用于 PT 入口压力，沿用桌面端计算方式。</span>
           <span v-if="sourcePressure !== null && Number.isFinite(scenarioPressure)" data-testid="pressure-scenario-comparison">原值 {{ sourcePressure }} → 方案值 {{ scenarioPressure }} psia</span>
@@ -2105,6 +2123,8 @@ defineExpose({ eclipseRunRequest })
 .well-scenario { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 8px 10px; border-bottom: 1px solid #deded9; font-size: 12px; }
 .well-scenario > span { color: #73777d; }
 .well-scenario > small { flex-basis: 100%; color: #73777d; }
+.pressure-field { display: flex; flex-direction: column; gap: 4px; }
+.pressure-field > small { color: #b23c3c; }
 .network-scenario { padding: 10px; border-bottom: 1px solid #deded9; font-size: 12px; }
 .network-scenario-hint { margin: 6px 0; color: #73777d; }
 .network-boundary-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 6px; }
