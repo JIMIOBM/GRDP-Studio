@@ -118,6 +118,7 @@ async function installMockBackend(page, options = {}) {
     if (path === '/software-integration/projects/1/model-versions/101/validate' && method === 'POST') {
       state.validationRequests.push(101)
       if (state.holdValidation) await new Promise(resolve => { state.releaseValidation = resolve })
+      if (options.validationFailure) return route.fulfill({ status: options.validationFailure.status, json: { code: 409, msg: '模型检查服务暂不可用', data: null } })
       state.models[0].versions[0].status = 'VALIDATING'
       state.models[0].versions[0].inspection = null
       return route.fulfill({ json: response({ project, models: state.models }) })
@@ -215,6 +216,49 @@ async function activateModel(page, name) {
   await page.getByText(name, { exact: true }).first().dblclick()
   await expect(page.getByRole('heading', { name, exact: true }).last()).toBeVisible()
 }
+
+for (const status of [200, 503]) {
+  test(`重新验证失败只显示一条内联提示（HTTP ${status}）`, async ({ page }) => {
+    const state = await installMockBackend(page, { validationFailure: { status } })
+    await openWorkspace(page)
+    await activateModel(page, '井筒演示模型')
+    const preview = page.getByRole('region', { name: '原模型参数', exact: true })
+    await preview.getByRole('button', { name: '重新验证并读取', exact: true }).click()
+    await expect(page.getByTestId('run-feedback')).toContainText('原模型参数读取请求失败')
+    await expect(page.getByTestId('run-feedback')).toHaveCount(1)
+    await expect(page.locator('.el-message')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: '运行', exact: true })).toBeEnabled()
+    expect(state.validationRequests).toEqual([101])
+  })
+}
+
+test('切换模型后旧验证失败不会污染当前运行提示', async ({ page }) => {
+  const state = await installMockBackend(page, { validationFailure: { status: 503 } })
+  state.holdValidation = true
+  await openWorkspace(page)
+  await activateModel(page, '井筒演示模型')
+  await page.getByRole('region', { name: '原模型参数', exact: true }).getByRole('button', { name: '重新验证并读取', exact: true }).click()
+  await expect.poll(() => Boolean(state.releaseValidation)).toBe(true)
+  await activateModel(page, '管网演示模型')
+  const finished = page.waitForResponse(response => response.url().endsWith('/model-versions/101/validate'))
+  state.releaseValidation()
+  await finished
+  await expect(page.getByTestId('run-feedback')).toHaveCount(0)
+  await expect(page.locator('.el-message')).toHaveCount(0)
+})
+
+test('运行任务选项跟随已部署执行能力，保留历史结果入口', async ({ page }) => {
+  const capabilities = availableCapabilities()
+  capabilities.pipesimNetwork.runTasks = ['network']
+  const state = await installMockBackend(page, { capabilities })
+  await openWorkspace(page)
+  await activateModel(page, '管网演示模型')
+  await expect(page.locator('label.el-radio-button').filter({ hasText: '管网模拟' })).toBeVisible()
+  await expect(page.locator('label.el-radio-button').filter({ hasText: '系统分析' })).toHaveCount(0)
+  await expect(page.locator('label.el-radio-button').filter({ hasText: '网络优化' })).toHaveCount(0)
+  await expect(page.getByRole('tab', { name: '运行记录', exact: true })).toBeVisible()
+  expect(state.createPayloads).toHaveLength(0)
+})
 
 test('软件集成工作区不初始化解析融合目录', async ({ page }) => {
   const parsingFusionRequests = []
@@ -620,6 +664,12 @@ test('ECLIPSE 部分成功诊断保留原文并按模式提供审阅分类', asy
   await activateModel(page, 'ECLIPSE演示模型')
   const diagnostics = page.locator('#eclipse-diagnostics-result')
   await expect(page.getByRole('navigation', { name: 'ECLIPSE 结果区域' })).toContainText('4 条消息')
+  await expect(diagnostics.locator('.diagnostic-counts')).toBeVisible()
+  await expect(diagnostics.locator('.diagnostic-counts')).toContainText('Problems 1')
+  await expect(diagnostics.locator('details')).not.toHaveAttribute('open', '')
+  await expect(diagnostics.getByText('POTENTIAL IN WELL PROD NOT CONVERGED IN 1 X 8 ITERATIONS.', { exact: true })).not.toBeVisible()
+  await diagnostics.locator('summary').click()
+  await expect(diagnostics.getByText('POTENTIAL IN WELL PROD NOT CONVERGED IN 1 X 8 ITERATIONS.', { exact: true })).toBeVisible()
   await expect(diagnostics).toContainText('井势与井求解 · 1 条')
   await expect(diagnostics).toContainText('线性方程收敛 · 1 条')
   await expect(diagnostics).toContainText('压力与 PVT 边界 · 1 条')

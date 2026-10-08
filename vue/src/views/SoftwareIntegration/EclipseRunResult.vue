@@ -611,19 +611,22 @@ watch(() => filteredFieldRows.value.length, total => {
     <section v-if="diagnosticMessages.length" class="result-panel eclipse-diagnostics">
       <div class="panel-heading"><div><span class="kicker">ECLIPSE DIAGNOSTICS</span><h2>求解诊断</h2><p>以下内容来自本次运行生成的 MSG 诊断文件；Problems 不会被隐藏或改写。</p></div><el-tag :type="isPartialResult ? 'warning' : 'info'">{{ isPartialResult ? '带问题完成' : '含诊断' }}</el-tag></div>
       <div class="diagnostic-counts"><span>Problems {{ diagnosticCounts.problems }}</span><span>Warnings {{ diagnosticCounts.warnings }}</span><span>Errors {{ diagnosticCounts.errors }}</span></div>
-      <div v-if="diagnosticGroupRows.length" class="diagnostic-groups" aria-label="ECLIPSE 诊断分类">
-        <article v-for="group in diagnosticGroupRows" :key="group.key" class="diagnostic-group-card">
-          <strong>{{ group.label }} · {{ group.count }} 条</strong>
-          <small>{{ group.review }}</small>
-        </article>
-      </div>
-      <el-alert type="info" :closable="false" title="以上分类依据本次 MSG 原始文本的可追溯模式，仅用于审阅导航；不会自动修改模型、求解器参数或诊断原文。" />
-      <el-table :data="diagnosticMessages" border size="small" max-height="360">
-        <el-table-column prop="severity" label="级别" width="110" />
-        <el-table-column prop="category" label="类别" width="110" />
-        <el-table-column prop="code" label="代码" width="170" />
-        <el-table-column prop="message" label="ECLIPSE 原始诊断" min-width="520" show-overflow-tooltip />
-      </el-table>
+      <details :key="run?.id" class="diagnostic-details">
+        <summary>查看原始诊断 · {{ diagnosticMessages.length }} 条</summary>
+        <div v-if="diagnosticGroupRows.length" class="diagnostic-groups" aria-label="ECLIPSE 诊断分类">
+          <article v-for="group in diagnosticGroupRows" :key="group.key" class="diagnostic-group-card">
+            <strong>{{ group.label }} · {{ group.count }} 条</strong>
+            <small>{{ group.review }}</small>
+          </article>
+        </div>
+        <p class="diagnostic-note">分类仅供审阅；不会自动修改模型、求解器参数或诊断原文。</p>
+        <el-table :data="diagnosticMessages" border size="small" max-height="360">
+          <el-table-column prop="severity" label="级别" width="110" />
+          <el-table-column prop="category" label="类别" width="110" />
+          <el-table-column prop="code" label="代码" width="170" />
+          <el-table-column prop="message" label="ECLIPSE 原始诊断" min-width="520" show-overflow-tooltip />
+        </el-table>
+      </details>
     </section>
     <el-empty v-else class="result-panel result-empty" description="本次运行没有结构化 ECLIPSE 诊断消息" :image-size="56" />
     </section>
@@ -704,6 +707,8 @@ watch(() => filteredFieldRows.value.length, total => {
 </template>
 
 <style lang="scss" scoped>
+.diagnostic-details summary { cursor: pointer; padding: 8px 0; font-size: 12px; color: #2b6cb3; }
+.diagnostic-note { color: #737a84; font-size: 12px; }
 .eclipse-comparison { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 10px; background: #f3f3f0; font-size: 12px; }
 .schedule-timeline-note { margin: 12px 0 0; color: #737a84; font-size: 12px; line-height: 1.6; }
 .scenario-acceptance { padding: 14px; }.scenario-metadata { display: grid; grid-template-columns: repeat(5, minmax(110px, 1fr)); gap: 8px; margin: 0 0 12px; }.scenario-metadata div { padding: 8px 10px; background: #f5f7fa; }.scenario-metadata dt { color: #909399; font-size: 12px; }.scenario-metadata dd { margin: 3px 0 0; color: #303133; font-size: 13px; font-weight: 600; }.scenario-count-strip { display: grid; grid-template-columns: repeat(5, minmax(90px, 1fr)); margin-top: 12px; border: 1px solid #e8edf3; }.scenario-count-strip div { padding: 9px 11px; border-right: 1px solid #e8edf3; }.scenario-count-strip div:last-child { border-right: 0; }.scenario-count-strip span, .scenario-count-strip small { display: block; color: #737a84; font-size: 12px; }.scenario-count-strip strong { display: block; margin: 2px 0; color: #2b3d52; font-size: 18px; }.scenario-output-diff { margin-top: 12px; color: #606266; font-size: 12px; }.scenario-output-diff .el-table { margin-top: 7px; } @media (max-width: 900px) { .scenario-metadata { grid-template-columns: repeat(3, minmax(110px, 1fr)); } } @media (max-width: 600px) { .scenario-metadata, .scenario-count-strip { grid-template-columns: repeat(2, minmax(90px, 1fr)); }.scenario-count-strip div:nth-child(2n) { border-right: 0; } }

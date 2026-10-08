@@ -2,7 +2,6 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { softwareIntegrationApi } from '@/api/softwareIntegration'
 import { storeToRefs } from 'pinia'
-import { ElMessage } from 'element-plus'
 import { useSoftwareIntegrationStore } from '@/stores/softwareIntegration'
 import PipesimNetworkResult from './PipesimNetworkResult.vue'
 import PipesimNetworkOptimizerResult from './PipesimNetworkOptimizerResult.vue'
@@ -21,6 +20,9 @@ import EclipseRunResult from './EclipseRunResult.vue'
 import EclipseDataInspectionOverview from './EclipseDataInspectionOverview.vue'
 import PipesimPackageOverview from './PipesimPackageOverview.vue'
 import { sourceReservoirPressure, supportsPressureScenario } from './wellParameterPreview'
+import { filterDeployedRunTypeOptions } from './runTypeOptions'
+import { useRunFeedback } from './useRunFeedback'
+import { buildRunNotice } from './runNotice'
 
 const props = defineProps({
   eclipsePresentation: { type: Boolean, default: true }
@@ -53,6 +55,7 @@ const {
   workerBusy,
   canCreateRunByCapability
 } = storeToRefs(store)
+const { notice: operationNotice, begin: beginFeedback } = useRunFeedback([activeProjectId, activeVersionId, selectedStudy, runType])
 
 const activeTab = ref('nodal')
 const profileOutletPressure = ref(100)
@@ -82,7 +85,7 @@ const wellRunTypeOptions = [
   { value: 'sensitivity', label: '敏感性分析' },
   { value: 'trajectory', label: '井轨迹' }
 ]
-const runTypeOptions = computed(() => {
+const modelRunTypeOptions = computed(() => {
   if (isNetworkModel.value) return [
     { value: 'network', label: '管网模拟' },
     { value: 'system-analysis', label: '系统分析' },
@@ -99,6 +102,14 @@ const runTypeOptions = computed(() => {
   }
   if (activeVersion.value?.modelKind === 'basic_gas') return [...wellRunTypeOptions, { value: 'esp-curves', label: 'ESP 曲线' }]
   return wellRunTypeOptions
+})
+const runTypeOptions = computed(() => filterDeployedRunTypeOptions(
+  modelRunTypeOptions.value,
+  capabilities.value?.pipesimWell?.status === 'AVAILABLE' ? capabilities.value.pipesimWell.runTasks : [],
+  capabilities.value?.pipesimNetwork?.status === 'AVAILABLE' ? capabilities.value.pipesimNetwork.runTasks : []
+))
+watch(runTypeOptions, options => {
+  if (options.length && !options.some(option => option.value === runType.value)) runType.value = options[0].value
 })
 const isEclipseRunPresentation = computed(() => props.eclipsePresentation && activeVersion.value?.modelKind === 'eclipse_100')
 const eclipsePresentationAvailable = computed(() => isEclipseRunPresentation.value &&
@@ -590,6 +601,7 @@ const networkTopologyUnavailable = computed(() => isNetworkModel.value &&
 const canRun = computed(() => !previewPending.value && activeVersion.value?.status === 'READY' &&
   (isNetworkModel.value || isWellModel.value || isEclipseModel.value) &&
   (isEclipseModel.value ? eclipsePresentationAvailable.value : persistedStudies.value.includes(selectedStudy.value)) &&
+  (isEclipseModel.value || runTypeOptions.value.some(option => option.value === runType.value)) &&
   !hasActiveRun.value && !submittingRun.value && canCreateRunByCapability.value)
 const capabilityReasonLabels = Object.freeze({
   WORKER_UNREACHABLE: 'Worker 无法连接',
@@ -697,6 +709,13 @@ const networkContractRejected = computed(() => isNetworkModel.value && !validNet
 const historicalSuccessfulNetworkRun = computed(() => runHistory.value.find(run => run.id !== selectedRun.value?.id &&
   run.runType === 'network' && run.status === 'SUCCEEDED' && run.resultContract === 'VALID_FULL'))
 
+const primaryNotice = computed(() => buildRunNotice({
+  operationNotice: operationNotice.value, pollingUnavailable: runPollingUnavailable.value,
+  terminalGuidance: terminalRunGuidance.value, resultExpired: displayRun.value?.resultExpired,
+  networkTopologyUnavailable: networkTopologyUnavailable.value, networkContractRejected: networkContractRejected.value,
+  isPartial: isPartial.value, isNetworkPartial: isNetworkPartial.value
+}))
+
 const formatElapsed = value => {
   const total = Math.max(0, Math.floor(Number(value || 0) / 1000))
   const hours = Math.floor(total / 3600)
@@ -749,8 +768,10 @@ const isEclipseVersion = versionId => {
 }
 
 const changeVersion = async versionId => {
-  try { await store.selectVersion(versionId) } catch (error) {
-    ElMessage.error(isEclipseVersion(versionId)
+  const selection = store.selectVersion(versionId)
+  const feedback = beginFeedback()
+  try { await selection } catch (error) {
+    feedback.error(isEclipseVersion(versionId)
       ? eclipseRequestErrorMessage(error, '切换 ECLIPSE 模型版本失败，请稍后重试')
       : errorMessage(error))
   }
@@ -897,12 +918,13 @@ const toggleEclipseForecast = value => { if (value) { disableOtherEclipseScenari
 const loadEclipseForecastHistory = async runId => {
   const id = Number(runId)
   if (!id || eclipseHistoryRunDetails.value[id]) return
+  const feedback = beginFeedback()
   try {
     const payload = await softwareIntegrationApi.getRun(id)
     const detail = payload?.data || payload
     if (detail?.id === id && detail.modelVersionId === activeVersionId.value) eclipseHistoryRunDetails.value = { ...eclipseHistoryRunDetails.value, [id]: detail }
   } catch {
-    ElMessage.error('历史运行 Artifact 读取失败，请重新选择历史运行')
+    feedback.error('历史运行 Artifact 读取失败，请重新选择历史运行')
   }
 }
 watch([activeVersionId, () => activeVersion.value?.inspection, () => runHistory.value.length], () => {
@@ -1199,28 +1221,30 @@ const canRevalidateActiveModel = computed(() => (isNetworkModel.value || isEclip
 const canUseSource = computed(() => isWellModel.value && !hasActiveRun.value && !submittingRun.value && !previewPending.value && sourcePressure.value > 0 && sourcePressure.value <= 100000)
 const readSourceParameters = async () => {
   if (!canReadSource.value) return
+  const feedback = beginFeedback()
   const projectId = activeProjectId.value
   const versionId = activeVersionId.value
   readingVersionId.value = versionId
   try {
     await store.revalidateModel(projectId, versionId)
-    if (activeProjectId.value === projectId && activeVersionId.value === versionId) ElMessage.success('已提交重新验证，完成后显示原模型参数')
+    if (activeProjectId.value === projectId && activeVersionId.value === versionId) feedback.success('已提交重新验证，完成后显示原模型参数')
   } catch {
-    if (activeProjectId.value === projectId && activeVersionId.value === versionId) ElMessage.error('原模型参数读取请求失败，请稍后重试')
+    if (activeProjectId.value === projectId && activeVersionId.value === versionId) feedback.error('原模型参数读取请求失败，请稍后重试')
   } finally {
     if (readingVersionId.value === versionId) readingVersionId.value = null
   }
 }
 const revalidateActiveModel = async () => {
   if (!canRevalidateActiveModel.value) return
+  const feedback = beginFeedback()
   const projectId = activeProjectId.value
   const versionId = activeVersionId.value
   readingVersionId.value = versionId
   try {
     await store.revalidateModel(projectId, versionId)
-    if (activeProjectId.value === projectId && activeVersionId.value === versionId) ElMessage.success('已提交重新验证，完成后显示最新模型检查信息')
+    if (activeProjectId.value === projectId && activeVersionId.value === versionId) feedback.success('已提交重新验证，完成后显示最新模型检查信息')
   } catch {
-    if (activeProjectId.value === projectId && activeVersionId.value === versionId) ElMessage.error('模型重新验证请求失败，请稍后重试')
+    if (activeProjectId.value === projectId && activeVersionId.value === versionId) feedback.error('模型重新验证请求失败，请稍后重试')
   } finally {
     if (readingVersionId.value === versionId) readingVersionId.value = null
   }
@@ -1257,16 +1281,18 @@ const reuseScenario = () => {
   runType.value = selectedRun.value.runType
   scenarioPressure.value = pressure
   scenarioEnabled.value = true
-  ElMessage.success('已载入方案参数，可修改后点击运行；不会修改历史记录')
+  const feedback = beginFeedback()
+  feedback.success('已载入方案参数，可修改后点击运行；不会修改历史记录')
 }
 const submitRun = async () => {
+  const feedback = beginFeedback()
   if (!canRun.value) return
   if (scenarioEnabled.value && (!supportsCurrentScenario.value || !Number.isFinite(scenarioPressure.value) || scenarioPressure.value <= 0 || scenarioPressure.value > 100000)) {
-    ElMessage.error('当前模型或运行类型不支持压力方案，或压力不在大于 0 且不超过 100000 psia 的范围内')
+    feedback.error('当前模型或运行类型不支持压力方案，或压力不在大于 0 且不超过 100000 psia 的范围内')
     return
   }
   if (legacyProfileRun.value && (!Number.isFinite(profileOutletPressure.value) || profileOutletPressure.value <= 0 || profileOutletPressure.value > 100000)) {
-    ElMessage.error('PT 剖面出口压力必须大于 0 且不超过 100000 psia')
+    feedback.error('PT 剖面出口压力必须大于 0 且不超过 100000 psia')
     return
   }
   let parameters = null
@@ -1302,14 +1328,14 @@ const submitRun = async () => {
     parameters = { schemaVersion: 'pipesim-well-parameters/1', reservoirPressurePsi: scenarioPressure.value }
   }
   if ((isGasLiftPerformanceRun.value || isGasLiftDiagnosticsRun.value || isVfpTablesRun.value) && parameters?.error) {
-    ElMessage.error(parameters.error)
+    feedback.error(parameters.error)
     return
   }
   if (isEclipseModel.value && (eclipseScheduleEnabled.value || eclipseWconHistEnabled.value) &&
     (!Number.isSafeInteger(parameters.baselineRunId) || parameters.baselineRunId <= 0 || !eclipseScheduleWells.value.includes(parameters.well) ||
       !eclipseScheduleDates.value.includes(parameters.date) || !['OPEN', 'SHUT'].includes(parameters.status) ||
       (eclipseWconHistEnabled.value && (!eclipseWconHistAvailable.value || parameters.controlMode !== 'ORAT' || !Number.isFinite(parameters.targetOilRate) || parameters.targetOilRate <= 0 || parameters.targetOilRate > 100000000)))) {
-    ElMessage.error(eclipseWconHistEnabled.value ? 'WCONHIST 方案必须选择已有成功基线、井、DATES 日期、OPEN/SHUT 状态和正数 ORAT 目标值' : '调度方案必须选择已有成功基线、井、DATES 日期和 OPEN/SHUT 状态')
+    feedback.error(eclipseWconHistEnabled.value ? 'WCONHIST 方案必须选择已有成功基线、井、DATES 日期、OPEN/SHUT 状态和正数 ORAT 目标值' : '调度方案必须选择已有成功基线、井、DATES 日期和 OPEN/SHUT 状态')
     return
   }
   if (isEclipseModel.value && eclipseWconInjeEnabled.value &&
@@ -1317,7 +1343,7 @@ const submitRun = async () => {
       !eclipseWconInjeWells.value.includes(parameters.well) || !eclipseScheduleDates.value.includes(parameters.date) ||
       parameters.injectionType !== eclipseWconInjeFluid.value || parameters.controlMode !== 'RATE' ||
       !Number.isFinite(parameters.targetInjectionRate) || parameters.targetInjectionRate <= 0 || parameters.targetInjectionRate > 100000000)) {
-    ElMessage.error('WCONINJE 方案必须选择已有成功基线、已有注入井、DATES 日期和正数 RATE 注入速率')
+    feedback.error('WCONINJE 方案必须选择已有成功基线、已有注入井、DATES 日期和正数 RATE 注入速率')
     return
   }
   if (isEclipseModel.value && eclipseWconProdEnabled.value &&
@@ -1325,7 +1351,7 @@ const submitRun = async () => {
       !eclipseWconProdAvailable.value || !eclipseWconProdWells.value.includes(parameters.well) ||
       parameters.phase !== 'FORECAST_INITIAL' || !['OPEN', 'SHUT'].includes(parameters.status) || parameters.controlMode !== 'ORAT' ||
       !Number.isFinite(parameters.targetOilRate) || parameters.targetOilRate <= 0 || parameters.targetOilRate > 100000000)) {
-    ElMessage.error('WCONPROD 方案必须选择已有成功基线、预测初始段已有 ORAT 井、OPEN/SHUT 状态和正数 ORAT 目标值')
+    feedback.error('WCONPROD 方案必须选择已有成功基线、预测初始段已有 ORAT 井、OPEN/SHUT 状态和正数 ORAT 目标值')
     return
   }
   if (isEclipseModel.value && eclipseCompletionEnabled.value &&
@@ -1335,7 +1361,7 @@ const submitRun = async () => {
       parameters.i !== eclipseCompletionRecord.value.i || parameters.j !== eclipseCompletionRecord.value.j ||
       parameters.k1 !== eclipseCompletionRecord.value.k1 || parameters.k2 !== eclipseCompletionRecord.value.k2 ||
       !['OPEN', 'SHUT'].includes(parameters.status) || parameters.status === eclipseCompletionRecord.value.status)) {
-    ElMessage.error('COMPDAT 完井方案必须选择已有成功基线、已有 COMPDAT 完井段和与原状态不同的 OPEN/SHUT 状态')
+    feedback.error('COMPDAT 完井方案必须选择已有成功基线、已有 COMPDAT 完井段和与原状态不同的 OPEN/SHUT 状态')
     return
   }
   if (isEclipseModel.value && eclipseCompletionFactorEnabled.value &&
@@ -1348,7 +1374,7 @@ const submitRun = async () => {
       Math.abs(parameters.originalConnectionFactor - eclipseCompletionFactorRecord.value.originalConnectionFactor) > Math.max(1e-12, Math.abs(parameters.originalConnectionFactor) * 1e-12) ||
       !Number.isFinite(parameters.targetConnectionFactor) || parameters.targetConnectionFactor <= 0 || parameters.targetConnectionFactor > 1000000000 ||
       parameters.targetConnectionFactor === parameters.originalConnectionFactor)) {
-    ElMessage.error('COMPDAT 连接因子方案必须选择已有成功基线、已有数值连接因子完井段，并输入与原值不同的正数目标值')
+    feedback.error('COMPDAT 连接因子方案必须选择已有成功基线、已有数值连接因子完井段，并输入与原值不同的正数目标值')
     return
   }
   if (isEclipseModel.value && eclipseForecastEnabled.value &&
@@ -1356,7 +1382,7 @@ const submitRun = async () => {
       !eclipseForecastDataFiles.value.includes(parameters.forecastDataFile) ||
       !eclipseForecastRestartArtifacts.value.some(artifact => artifact.name === parameters.restartArtifactName && artifact.sha256?.toLowerCase() === parameters.restartArtifactSha256) ||
       !Number.isSafeInteger(parameters.restartReport) || parameters.restartReport <= 0)) {
-    ElMessage.error('预测运行必须选择当前版本的预测 DATA、成功历史运行、FUNRST Artifact 和正整数重启报告')
+    feedback.error('预测运行必须选择当前版本的预测 DATA、成功历史运行、FUNRST Artifact 和正整数重启报告')
     return
   }
   if (isNetworkOptimizerRun.value) {
@@ -1369,7 +1395,7 @@ const submitRun = async () => {
   } else if (isSystemAnalysisRun.value) {
     const systemAnalysisParameters = buildSystemAnalysisParameters()
     if (systemAnalysisParameters?.error) {
-      ElMessage.error(systemAnalysisParameters.error)
+      feedback.error(systemAnalysisParameters.error)
       return
     }
     parameters = systemAnalysisParameters
@@ -1377,14 +1403,14 @@ const submitRun = async () => {
     if (networkChokeEnabled.value) {
       const networkChokeParameters = buildNetworkChokeParameters()
       if (networkChokeParameters?.error) {
-        ElMessage.error(networkChokeParameters.error)
+        feedback.error(networkChokeParameters.error)
         return
       }
       parameters = networkChokeParameters
     } else {
       const networkParameters = buildNetworkParameters()
       if (networkParameters?.error) {
-        ElMessage.error(networkParameters.error)
+        feedback.error(networkParameters.error)
         return
       }
       parameters = networkParameters
@@ -1394,12 +1420,12 @@ const submitRun = async () => {
     const values = sensitivityValuesText.value.split(/[,，\s]+/).filter(Boolean).map(Number)
     if (!['reservoirPressure', 'waterCut', 'gor', 'tubingInnerDiameter'].includes(sensitivityVariable.value) || values.length < 2 || values.length > 12 ||
       values.some(value => !Number.isFinite(value) || value <= 0) || values.some((value, index) => index > 0 && value <= values[index - 1])) {
-      ElMessage.error('敏感性分析需要 2 到 12 个严格递增的正数值')
+      feedback.error('敏感性分析需要 2 到 12 个严格递增的正数值')
       return
     }
     const max = sensitivityVariable.value === 'reservoirPressure' ? 100000 : (sensitivityVariable.value === 'waterCut' ? 100 : (sensitivityVariable.value === 'gor' ? 1000000 : 100))
     if (values.some(value => value > max) || (activeVersion.value?.modelKind === 'basic_gas' && ['waterCut', 'gor'].includes(sensitivityVariable.value))) {
-      ElMessage.error('敏感性变量或取值范围不适用于当前模型')
+      feedback.error('敏感性变量或取值范围不适用于当前模型')
       return
     }
     parameters = { schemaVersion: 'pipesim-well-sensitivity-parameters/1', targetVariable: sensitivityVariable.value, values }
@@ -1408,19 +1434,20 @@ const submitRun = async () => {
     const detail = await store.createRun(parameters)
     if (!detail) return
     activeTab.value = isEclipseModel.value ? 'eclipse' : (isNetworkOptimizerRun.value ? 'network-optimizer' : (isSystemAnalysisRun.value ? 'system-analysis' : (isNetworkModel.value ? 'network' : (runType.value === 'profile' ? 'profile' : (runType.value === 'sensitivity' ? 'sensitivity' : (runType.value === 'gas-lift-performance' ? 'gas-lift-performance' : (runType.value === 'gas-lift-diagnostics' ? 'gas-lift-diagnostics' : (runType.value === 'vfp-tables' ? 'vfp-tables' : (runType.value === 'esp-curves' ? 'esp-curves' : (runType.value === 'trajectory' ? 'trajectory' : 'nodal'))))))))))
-    ElMessage.success('运行任务已创建')
+    feedback.success('运行任务已创建')
   } catch (error) {
-    ElMessage.error(isEclipseModel.value
+    feedback.error(isEclipseModel.value
       ? eclipseRequestErrorMessage(error, '创建 ECLIPSE 运行失败，请稍后重试')
       : errorMessage(error))
   }
 }
 const cancelRun = async () => {
+  const feedback = beginFeedback()
   try {
     await store.cancelRun()
-    ElMessage.success('取消请求已提交')
+    feedback.success('取消请求已提交')
   } catch (error) {
-    ElMessage.error(errorMessage(error))
+    feedback.error(errorMessage(error))
   }
 }
 const canRetryRun = computed(() => Boolean(displayRun.value &&
@@ -1428,15 +1455,16 @@ const canRetryRun = computed(() => Boolean(displayRun.value &&
   (displayRun.value?.status === 'FAILED' && safeRunError.value?.retryable)))
 const retryRun = async () => {
   if (!canRetryRun.value || retryingRun.value) return
+  const feedback = beginFeedback()
   retryingRun.value = true
   try {
     const detail = await store.retryRun()
     if (detail) {
       activeTab.value = detail.runType === 'eclipse' ? 'eclipse' : (detail.runType === 'network-optimizer' ? 'network-optimizer' : (detail.runType === 'system-analysis' ? 'system-analysis' : (detail.runType === 'network' ? 'network' : (detail.runType === 'profile' ? 'profile' : (detail.runType === 'sensitivity' ? 'sensitivity' : (detail.runType === 'gas-lift-performance' ? 'gas-lift-performance' : (detail.runType === 'gas-lift-diagnostics' ? 'gas-lift-diagnostics' : (detail.runType === 'vfp-tables' ? 'vfp-tables' : (detail.runType === 'esp-curves' ? 'esp-curves' : (detail.runType === 'trajectory' ? 'trajectory' : 'nodal'))))))))))
-      ElMessage.success('已基于原运行参数重新提交，原运行记录保留不变')
+      feedback.success('已基于原运行参数重新提交，原运行记录保留不变')
     }
   } catch (error) {
-    ElMessage.error(isEclipseModel.value
+    feedback.error(isEclipseModel.value
       ? eclipseRequestErrorMessage(error, '重新提交 ECLIPSE 运行失败，请稍后重试')
       : errorMessage(error))
   } finally {
@@ -1446,6 +1474,7 @@ const retryRun = async () => {
 const downloadArtifact = async artifact => {
   const runId = displayRun.value?.id
   if (!runId || !artifact?.downloadable || artifactDownloadPending.value) return
+  const feedback = beginFeedback()
   artifactDownloadPending.value = artifact.id
   try {
     const payload = await softwareIntegrationApi.downloadArtifact(runId, artifact.id)
@@ -1459,12 +1488,13 @@ const downloadArtifact = async artifact => {
     anchor.remove()
     setTimeout(() => URL.revokeObjectURL(href), 0)
   } catch {
-    ElMessage.error('Artifact 下载失败，请检查运行记录和有效期。')
+    feedback.error('Artifact 下载失败，请检查运行记录和有效期。')
   } finally {
     artifactDownloadPending.value = null
   }
 }
 const selectHistoryRun = async runId => {
+  const feedback = beginFeedback()
   try {
     const detail = await store.selectRun(runId)
     if (!detail) return
@@ -1481,7 +1511,7 @@ const selectHistoryRun = async runId => {
     else if (detail.runType === 'trajectory') activeTab.value = 'trajectory'
   } catch (error) {
     const historyRun = runHistory.value.find(run => run.id === runId)
-    ElMessage.error(historyRun?.runType === 'eclipse'
+    feedback.error(historyRun?.runType === 'eclipse'
       ? eclipseRequestErrorMessage(error, '加载 ECLIPSE 运行记录失败，请稍后重试')
       : errorMessage(error))
   }
@@ -1493,14 +1523,15 @@ const selectHistoricalSuccessfulNetworkRun = () => {
 const refreshRunManually = async () => {
   const runId = displayRun.value?.id
   if (!runId || manualRefreshing.value) return
+  const feedback = beginFeedback()
   manualRefreshing.value = true
   try {
     await store.selectRun(runId)
     // Reload the persisted summary so a newly terminal run clears the stale active run.
     await store.loadRunHistory(activeVersionId.value, false)
-    ElMessage.success('运行状态已刷新')
+    feedback.success('运行状态已刷新')
   } catch (error) {
-    ElMessage.error(errorMessage(error))
+    feedback.error(errorMessage(error))
   } finally {
     manualRefreshing.value = false
   }
@@ -1574,6 +1605,7 @@ defineExpose({ eclipseRunRequest })
         <el-radio-group v-model="runType" :disabled="hasActiveRun">
           <el-radio-button v-for="option in runTypeOptions" :key="option.value" :value="option.value">{{ option.label }}</el-radio-button>
         </el-radio-group>
+        <small v-if="!runTypeOptions.length && activeVersion?.status === 'READY' && !runCapabilityMessage">当前 Study 或目标井没有可用任务，请检查模型对象或重新验证。</small>
       </div>
 
         <div v-if="!isEclipseRunPresentation || eclipsePresentationAvailable" class="control-actions">
@@ -1582,6 +1614,13 @@ defineExpose({ eclipseRunRequest })
           <el-button v-if="canRetryRun" type="warning" plain :loading="retryingRun" @click="retryRun">重新提交</el-button>
         </div>
       </div>
+
+      <p v-if="primaryNotice" class="inline-notice run-feedback" :class="primaryNotice.type"
+        :role="primaryNotice.type === 'danger' ? 'alert' : 'status'" aria-live="polite" aria-label="运行提示" data-testid="run-feedback">
+        <span>{{ primaryNotice.message }}</span>
+        <el-button v-if="primaryNotice.action === 'refresh'" link type="primary" :loading="manualRefreshing" @click="refreshRunManually">手动刷新</el-button>
+        <el-button v-else-if="primaryNotice.action === 'history'" link type="primary" @click="selectHistoricalSuccessfulNetworkRun">{{ historicalSuccessfulNetworkRun ? '选择历史成功运行' : '查看运行记录' }}</el-button>
+      </p>
 
       <section v-if="isWellModel" class="well-scenario" aria-label="原模型参数">
         <strong>原模型参数 · v{{ activeVersion?.versionNo }}</strong>
@@ -1910,15 +1949,6 @@ defineExpose({ eclipseRunRequest })
         </template>
       </section>
 
-    <p v-if="runPollingUnavailable" class="inline-notice warning" title="自动刷新已停止，可手动读取一次持久状态。">
-      运行状态暂时无法刷新 <el-button link type="primary" :loading="manualRefreshing" @click="refreshRunManually">手动刷新</el-button>
-    </p>
-    <p v-if="terminalRunGuidance" class="inline-notice warning" :title="terminalRunGuidance">
-      {{ statusMeta[displayRun.status]?.[0] || displayRun.status }}：{{ terminalRunGuidance }}
-    </p>
-    <p v-if="displayRun?.resultExpired" class="inline-notice warning" title="运行审计记录仍保留，但解析结果已超过 30 天保留期限。">
-      本次运行的解析结果已过期，保留运行状态、事件和审计信息；Artifact 需按各自到期时间判断是否仍可下载。
-    </p>
 
     <div v-if="(!isEclipseRunPresentation || eclipsePresentationAvailable) && displayRun && hasActiveRun" class="stage-strip" aria-label="真实运行阶段">
       <div v-for="(stage, index) in stages" :key="stage.status" class="stage" :class="{ active: currentStageIndex === index, done: currentStageIndex > index }">
@@ -1928,21 +1958,16 @@ defineExpose({ eclipseRunRequest })
       <span v-if="currentStageIndex < 0" class="queue-stage">{{ statusMeta[displayRun.status]?.[0] || displayRun.status }}</span>
     </div>
 
-    <p v-if="isPartial" class="inline-notice warning">组合运行部分成功：节点分析结果可用，PT 剖面失败。</p>
-    <p v-if="isNetworkPartial" class="inline-notice warning" title="仅展示实际返回并通过安全校验的数据。">部分真实计算结果：部分管网结果不可用。</p>
-    <p v-if="networkTopologyUnavailable" class="inline-notice danger" title="返回的拓扑或统计信息未通过安全展示校验。">管网结果不可用：已隐藏未通过校验的数据。</p>
 
-    <div v-if="safeRunError && !isEclipseModel" class="structured-error">
+    <details v-if="safeRunError && !isEclipseModel" :key="selectedRun?.id" :open="Boolean(safeRunError.diagnostics?.length)" class="structured-error">
+      <summary>运行诊断 · {{ safeRunError.code }}</summary>
       <dl>
         <div><dt>类别</dt><dd>{{ safeRunError.category }}</dd></div>
         <div><dt>代码</dt><dd>{{ safeRunError.code }}</dd></div>
         <div><dt>消息</dt><dd>运行失败详情已隐藏。</dd></div>
         <div><dt>可重试</dt><dd>{{ safeRunError.retryable ? '是' : '否' }}</dd></div>
       </dl>
-    </div>
-    <p v-if="networkContractRejected" class="inline-notice warning" title="返回数据未通过展示契约，未绘制图表或结果表。">
-      结果未通过展示契约 <el-button link type="primary" @click="selectHistoricalSuccessfulNetworkRun">{{ historicalSuccessfulNetworkRun ? '选择历史成功运行' : '查看运行记录' }}</el-button>
-    </p>
+    </details>
 
     <div v-if="isWellModel && validWellResult" class="comparison-controls">
       <span>{{ runLabel(selectedRun) }}</span>
@@ -2072,6 +2097,8 @@ defineExpose({ eclipseRunRequest })
 </template>
 
 <style lang="scss" scoped>
+.structured-error summary { cursor: pointer; font-size: 12px; }
+.run-feedback { align-items: center; gap: 8px; }
 .combined-results { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .combined-results > * { min-width: 0; }
 @media (max-width: 1200px) { .combined-results { grid-template-columns: 1fr; } }
