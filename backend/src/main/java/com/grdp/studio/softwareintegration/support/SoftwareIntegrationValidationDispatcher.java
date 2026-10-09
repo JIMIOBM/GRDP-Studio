@@ -38,7 +38,7 @@ public class SoftwareIntegrationValidationDispatcher {
     private final ObjectMapper objectMapper;
     private final SoftwareIntegrationStorageKeyNormalizer storageKeyNormalizer;
     private final SoftwareIntegrationValidationJobStore validationJobStore;
-    private final HttpClient httpClient;
+    private volatile HttpClient httpClient;
     private final Set<Long> validationInFlight = ConcurrentHashMap.newKeySet();
 
     public SoftwareIntegrationValidationDispatcher(SoftwareIntegrationModelVersionMapper versionMapper,
@@ -60,7 +60,6 @@ public class SoftwareIntegrationValidationDispatcher {
         this.objectMapper = objectMapper;
         this.storageKeyNormalizer = storageKeyNormalizer;
         this.validationJobStore = validationJobStore;
-        this.httpClient = HttpClient.newBuilder().connectTimeout(properties.getWorkerConnectTimeout()).build();
     }
 
     /** Enqueues validation durably; the five-argument test/direct constructor keeps legacy immediate behavior. */
@@ -179,7 +178,7 @@ public class SoftwareIntegrationValidationDispatcher {
                     + (eclipse ? "/api/models/inspect" : "/api/models/validate")))
                     .header("Content-Type", "application/json").timeout(Duration.ofMinutes(2))
                     .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8)).build();
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            HttpResponse<String> response = httpClient().send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             JsonNode payload = objectMapper.readTree(response.body());
             if (response.statusCode() == 200 && "READY".equals(payload.path("status").asText())) {
                 String modelKind = payload.path("modelKind").asText();
@@ -254,6 +253,20 @@ public class SoftwareIntegrationValidationDispatcher {
         } catch (Exception exception) {
             update(version, "ENVIRONMENT_ERROR", "无法连接软件集成 Worker", null);
         }
+    }
+
+    private HttpClient httpClient() {
+        HttpClient current = httpClient;
+        if (current == null) {
+            synchronized (this) {
+                current = httpClient;
+                if (current == null) {
+                    current = HttpClient.newBuilder().connectTimeout(properties.getWorkerConnectTimeout()).build();
+                    httpClient = current;
+                }
+            }
+        }
+        return current;
     }
 
     private boolean persistSimulatorType(long modelId, String simulatorType) {

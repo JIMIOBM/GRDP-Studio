@@ -2,7 +2,7 @@ import { ref } from 'vue'
 
 export function createStorageMaterialBalanceState(fetchAggregate, {
   keys = ['projectId', 'gasReservoirId', 'storageId'],
-  validate = data => Array.isArray(data?.wells) && Array.isArray(data?.rows) && Array.isArray(data?.skippedDates)
+  validate = data => Array.isArray(data?.wells) && Array.isArray(data?.rows) && Array.isArray(data?.partialDates)
 } = {}) {
   const result = ref(null)
   const loading = ref(false)

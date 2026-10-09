@@ -19,12 +19,11 @@ import java.util.List;
 public class HttpWorkerRunClient implements WorkerRunClient {
     private final SoftwareIntegrationProperties properties;
     private final ObjectMapper objectMapper;
-    private final HttpClient httpClient;
+    private volatile HttpClient httpClient;
 
     public HttpWorkerRunClient(SoftwareIntegrationProperties properties, ObjectMapper objectMapper) {
         this.properties = properties;
         this.objectMapper = objectMapper;
-        this.httpClient = HttpClient.newBuilder().connectTimeout(properties.getWorkerConnectTimeout()).build();
     }
 
     @Override
@@ -139,7 +138,7 @@ public class HttpWorkerRunClient implements WorkerRunClient {
 
     private JsonNode send(HttpRequest request, int... expectedStatuses) {
         try {
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            HttpResponse<String> response = httpClient().send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
             boolean expected = java.util.Arrays.stream(expectedStatuses).anyMatch(status -> status == response.statusCode());
             JsonNode body = response.body() == null || response.body().isBlank()
                     ? objectMapper.createObjectNode() : objectMapper.readTree(response.body());
@@ -158,6 +157,20 @@ public class HttpWorkerRunClient implements WorkerRunClient {
 
     private URI uri(String path) {
         return URI.create(properties.getWorkerBaseUrl().replaceAll("/+$", "") + path);
+    }
+
+    private HttpClient httpClient() {
+        HttpClient current = httpClient;
+        if (current == null) {
+            synchronized (this) {
+                current = httpClient;
+                if (current == null) {
+                    current = HttpClient.newBuilder().connectTimeout(properties.getWorkerConnectTimeout()).build();
+                    httpClient = current;
+                }
+            }
+        }
+        return current;
     }
 
     private static String text(JsonNode node, String field) {

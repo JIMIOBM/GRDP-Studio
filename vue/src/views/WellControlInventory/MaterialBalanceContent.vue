@@ -1169,8 +1169,6 @@ onBeforeUnmount(() => {
             <el-button size="small" @click="openProductionImport">导入</el-button>
           </div>
 <!--          <input ref="importFileInput" class="hidden-file-input" type="file" accept=".xlsx,.xls" @change="importProductionData"/>-->
-          <div v-if="readOnly" class="empty">智慧气藏已保存数据（只读），请在右侧“生产数据”查看。</div>
-
           <div class="output-section">
             <div class="section-title">输出结果</div>
             <div class="field-grid">

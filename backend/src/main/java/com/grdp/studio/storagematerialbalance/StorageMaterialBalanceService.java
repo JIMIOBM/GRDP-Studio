@@ -2,9 +2,15 @@ package com.grdp.studio.storagematerialbalance;
 
 import com.grdp.studio.common.BusinessException;
 import com.grdp.studio.reservoirloss.service.StorageCatalogService;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import java.sql.Statement;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.*;
 import static com.grdp.studio.storagematerialbalance.StorageMaterialBalanceCalculator.*;
 
@@ -12,17 +18,81 @@ import static com.grdp.studio.storagematerialbalance.StorageMaterialBalanceCalcu
 public class StorageMaterialBalanceService {
     private final JdbcTemplate jdbc;
     private final StorageCatalogService catalog;
-    public StorageMaterialBalanceService(JdbcTemplate jdbc, StorageCatalogService catalog) {
-        this.jdbc = jdbc; this.catalog = catalog;
+    private final ObjectMapper json;
+    public StorageMaterialBalanceService(JdbcTemplate jdbc, StorageCatalogService catalog, ObjectMapper json) {
+        this.jdbc = jdbc; this.catalog = catalog; this.json = json;
     }
 
     private record Record(long id, Long inputId, Integer reservoirType, Double volume,
                           Double rSquared, Integer reliability) {}
+    private record SnapshotRow(long id, String wellIdsJson, String resultJson, LocalDateTime savedAt) {}
+    public record SavedResult(long id, List<Long> selectedWellIds, Result result, String savedAt) {}
+
+    /** 服务端重新读取并汇总当前所选井，再将完整结果作为可恢复快照写入数据库。 */
+    @Transactional(isolation = org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
+    public SavedResult save(long projectId, long gasReservoirId, long storageId, List<Long> selectedWellIds) {
+        if (selectedWellIds == null) throw new BusinessException(400, "请选择参与汇总的井");
+        var result = aggregate(projectId, gasReservoirId, storageId, selectedWellIds);
+        var now = LocalDateTime.now(ZoneOffset.UTC);
+        var key = new GeneratedKeyHolder();
+        jdbc.update(connection -> {
+            var statement = connection.prepareStatement("""
+                    INSERT INTO storage_material_balance_snapshot
+                    (project_id,gas_reservoir_id,storage_id,selected_well_ids_json,result_json,saved_at)
+                    VALUES (?,?,?,?,?,?)
+                    """, Statement.RETURN_GENERATED_KEYS);
+            statement.setLong(1, projectId); statement.setLong(2, gasReservoirId); statement.setLong(3, storageId);
+            statement.setString(4, json.writeValueAsString(selectedWellIds));
+            statement.setString(5, json.writeValueAsString(result)); statement.setObject(6, now);
+            return statement;
+        }, key);
+        if (key.getKey() == null) throw new IllegalStateException("数据库未返回物质平衡保存记录ID");
+        return new SavedResult(key.getKey().longValue(), List.copyOf(selectedWellIds), result, now + "Z");
+    }
+
+    /** 返回当前库最近一次已保存的结果；尚未保存时返回 null。 */
+    @Transactional(readOnly = true)
+    public SavedResult latest(long projectId, long gasReservoirId, long storageId) {
+        catalog.wells(storageId, projectId, gasReservoirId);
+        var rows = jdbc.query("""
+                SELECT id,selected_well_ids_json,result_json,saved_at
+                FROM storage_material_balance_snapshot
+                WHERE project_id=? AND gas_reservoir_id=? AND storage_id=?
+                ORDER BY id DESC LIMIT 1
+                """, (rs, n) -> new SnapshotRow(rs.getLong("id"), rs.getString("selected_well_ids_json"),
+                rs.getString("result_json"), rs.getObject("saved_at", LocalDateTime.class)),
+                projectId, gasReservoirId, storageId);
+        if (rows.isEmpty()) return null;
+        var row = rows.getFirst();
+        var selectedWellIds = json.readValue(row.wellIdsJson(), new TypeReference<List<Long>>() {});
+        var result = json.readValue(row.resultJson(), Result.class);
+        return new SavedResult(row.id(), selectedWellIds, result, row.savedAt() + "Z");
+    }
 
     /** 只读一致性快照；既不调用原平台 calc，也不写入任何原始数据或分析结果。 */
     @Transactional(readOnly = true, isolation = org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
     public Result aggregate(long projectId, long gasReservoirId, long storageId) {
+        return aggregate(projectId, gasReservoirId, storageId, null);
+    }
+
+    /** 未传井 ID 时汇总全部库成员；传入井 ID 时只汇总经过当前库成员关系校验的所选井。 */
+    @Transactional(readOnly = true, isolation = org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
+    public Result aggregate(long projectId, long gasReservoirId, long storageId, List<Long> selectedWellIds) {
         var members = catalog.wells(storageId, projectId, gasReservoirId);
+        if (selectedWellIds != null) {
+            if (selectedWellIds.isEmpty() || selectedWellIds.size() > 2000
+                    || selectedWellIds.stream().anyMatch(id -> id == null || id <= 0)
+                    || new HashSet<>(selectedWellIds).size() != selectedWellIds.size()) {
+                throw new BusinessException(400, "请选择有效的库成员井");
+            }
+            Set<Long> memberIds = members.stream().map(StorageCatalogService.Well::id)
+                    .collect(java.util.stream.Collectors.toSet());
+            if (selectedWellIds.stream().anyMatch(id -> !memberIds.contains(id))) {
+                throw new BusinessException(400, "所选井不属于当前储气库");
+            }
+            Set<Long> selected = new HashSet<>(selectedWellIds);
+            members = members.stream().filter(well -> selected.contains(well.id())).toList();
+        }
         Integer active = jdbc.queryForObject("""
                 SELECT COUNT(*) FROM project_gas_reservoir g JOIN project_summaries p ON p.id=g.project_id
                 WHERE g.id=? AND g.project_id=? AND p.delete_status=0
