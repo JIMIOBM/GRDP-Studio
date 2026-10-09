@@ -17,6 +17,7 @@ import InjectionProductionComparison from './ProductivityEvaluation/InjectionPro
 import CapacityDesign from './CapacityDesign/CapacityDesign.vue'
 import MaterialBalance from './InventoryEvaluation/MaterialBalance.vue'
 import PressureGradient from './InventoryEvaluation/PressureGradient.vue'
+import PressureTestMethod from './InventoryEvaluation/PressureTestMethod.vue'
 import WaterInvasion from './InventoryEvaluation/WaterInvasion.vue'
 import MainFactorAnalysis from './InventoryEvaluation/MainFactorAnalysis.vue'
 import InterwellComparison from './WellboreConversion/InterwellComparison.vue'
@@ -61,6 +62,8 @@ const isMaterialBalance = computed(() => props.command?.group === '库存评估'
   && props.command?.parent === '物质平衡法' && props.command?.name === '物质平衡')
 const isPressureGradient = computed(() => props.command?.group === '库存评估'
   && props.command?.parent === '地层压力' && props.command?.name === '压力梯度')
+const isPressureTestMethod = computed(() => props.command?.group === '库存评估'
+  && props.command?.parent === '地层压力' && props.command?.name === '测试法')
 const isWaterInvasion = computed(() => props.command?.group === '库存评估'
   && props.command?.parent === '水侵动态分析' && props.command?.name === '水侵分析')
 // 主控因素分析：库存评估下的库级功能，四个因素的理论值与实际值对比。
@@ -121,6 +124,9 @@ const lossKey = computed(() => `${props.reservoir?.projectId}-${props.reservoir?
   </section>
   <MaterialBalance v-else-if="isMaterialBalance"
     :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-material-balance`"
+    :reservoir="reservoir" />
+  <PressureTestMethod v-else-if="isPressureTestMethod"
+    :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-pressure-test-method`"
     :reservoir="reservoir" />
   <PressureGradient v-else-if="isPressureGradient"
     :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-pressure-gradient`"

@@ -15,8 +15,8 @@ public final class StorageMaterialBalanceCalculator {
                        Double rSquared, boolean included, Double weight, String reason,
                        String warning, int discardedRows, List<Sample> samples) {}
     public record Row(LocalDate date, double pressure, double gas, double water) {}
-    public record SkippedDate(LocalDate date, List<String> missingWells) {}
-    public record Result(List<Well> wells, List<Row> rows, List<SkippedDate> skippedDates,
+    public record PartialDate(LocalDate date, List<String> missingWells) {}
+    public record Result(List<Well> wells, List<Row> rows, List<PartialDate> partialDates,
                          Double sourceGasVolume, int includedWellCount, String message) {}
 
     public static Result calculate(List<Source> sources) {
@@ -72,24 +72,28 @@ public final class StorageMaterialBalanceCalculator {
         SortedSet<LocalDate> allDates = new TreeSet<>();
         series.values().forEach(dates -> allDates.addAll(dates.keySet()));
         List<Row> rows = new ArrayList<>();
-        List<SkippedDate> skipped = new ArrayList<>();
+        List<PartialDate> partial = new ArrayList<>();
         for (LocalDate date : allDates) {
+            List<Well> available = included.stream().filter(w -> series.get(w.wellId()).containsKey(date)).toList();
             List<String> missing = included.stream().filter(w -> !series.get(w.wellId()).containsKey(date))
                     .map(Well::wellName).toList();
-            if (!missing.isEmpty()) { skipped.add(new SkippedDate(date, missing)); continue; }
+            if (!missing.isEmpty()) partial.add(new PartialDate(date, missing));
+            double dayTotal = available.stream().mapToDouble(Well::gasVolume).sum();
+            requireFinite(dayTotal);
+            if (!positive(dayTotal)) continue;
             double pressure = 0, gas = 0, water = 0;
-            for (Well well : included) {
+            for (Well well : available) {
                 Sample sample = series.get(well.wellId()).get(date);
-                pressure += (well.gasVolume() / total) * sample.pressure();
+                pressure += (well.gasVolume() / dayTotal) * sample.pressure();
                 gas += sample.gas();
                 water += sample.water();
             }
             requireFinite(pressure); requireFinite(gas); requireFinite(water);
             rows.add(new Row(date, pressure, gas, water));
         }
-        return new Result(wells, List.copyOf(rows), List.copyOf(skipped), total, included.size(),
-                rows.isEmpty() ? "参与井没有共同的有效日期，未生成汇总曲线；不插值、不补零。"
-                        : "按共同有效日期汇总；压力按动态储量加权，累产气量和累产水量求和。来源储量之和不是库级回归结果。");
+        return new Result(wells, List.copyOf(rows), List.copyOf(partial), total, included.size(),
+                rows.isEmpty() ? "参与井没有有效日期，未生成汇总曲线。"
+                        : "按日期并集汇总；各日压力按有数据井的动态储量重新归一化，累产气量和累产水量合计有数据井记录。来源储量之和不是库级回归结果。");
     }
 
     private static Double finite(Double value) { return value != null && Double.isFinite(value) ? value : null; }
