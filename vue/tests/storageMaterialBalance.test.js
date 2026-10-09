@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createStorageMaterialBalanceState, storageMaterialBalanceChart } from '../src/utils/storageMaterialBalance.js'
+import { storageMaterialBalanceDemoResult, storageMaterialBalanceDemoWells } from '../src/utils/storageMaterialBalanceDemo.js'
 import { toSharedMaterialBalanceResult, formatSourceNumber } from '../src/utils/storageMaterialBalanceSource.js'
 
 test('source formatting removes floating tails without mutating values or concealing tiny values', () => {
@@ -18,7 +19,7 @@ test('source formatting removes floating tails without mutating values or concea
 })
 
 const scope = { projectId: 7, gasReservoirId: 6, storageId: 1 }
-const payload = { wells: [], rows: [], skippedDates: [], includedWellCount: 0 }
+const payload = { wells: [], rows: [], partialDates: [], includedWellCount: 0 }
 test('invalid scope never makes a request', async () => {
   let calls = 0
   const state = createStorageMaterialBalanceState(async () => { calls++; return payload })
@@ -81,6 +82,29 @@ test('chart preserves true zero gas but does not turn missing or nonfinite field
   rows.push({ date: '2020-01-02', pressure: 15, gas: 0 })
   assert.deepEqual(storageMaterialBalanceChart(rows).series[0].data, [[0, 15, '2020-01-02']])
   assert.deepEqual(storageMaterialBalanceChart([]).series[0].data, [])
+})
+
+test('demo data supports selecting multiple wells and aligns dates by union', () => {
+  const wells = storageMaterialBalanceDemoWells()
+  const result = storageMaterialBalanceDemoResult(wells.map(well => well.wellId))
+  assert.equal(result.demo, true)
+  assert.equal(result.includedWellCount, 3)
+  assert.equal(result.wells.every(well => well.resultId === null), true)
+  assert.ok(result.rows.length > 0)
+  assert.ok(result.partialDates.length > 0)
+  assert.match(result.message, /演示数据/)
+})
+test('demo well selection recomputes the weighted series and empty selection fabricates no rows', () => {
+  const wells = storageMaterialBalanceDemoWells()
+  const oneWell = storageMaterialBalanceDemoResult([wells[0].wellId])
+  const twoWells = storageMaterialBalanceDemoResult(wells.slice(0, 2).map(well => well.wellId))
+  const empty = storageMaterialBalanceDemoResult([])
+  assert.equal(oneWell.includedWellCount, 1)
+  assert.equal(oneWell.rows.length, 5)
+  assert.equal(twoWells.includedWellCount, 2)
+  assert.notDeepEqual(twoWells.rows, oneWell.rows)
+  assert.equal(empty.rows.length, 0)
+  assert.equal(empty.sourceGasVolume, null)
 })
 
 const sourceDetail = () => ({

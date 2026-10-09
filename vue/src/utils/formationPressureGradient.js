@@ -50,6 +50,18 @@ export function calculatePressureIntercept({
 const dateFields = ['date', 'testDate', 'pressureDate', 'measuredDate', 'test_date', 'pressure_date', 'measured_date']
 const pressureFields = ['reserviorPressure', 'reservoirPressure', 'formationPressure', 'pressure', 'reservior_pressure', 'reservoir_pressure', 'formation_pressure']
 
+/** Keep persisted edits tied to a source record when the API provides its ID. */
+export function pressureSourceKeys(row, wellName, index) {
+  const rawDate = dateFields.map(field => row?.[field]).find(value => value !== null && value !== undefined && String(value).trim() !== '') ?? ''
+  const legacySourceKey = `source:${String(wellName)}:${String(rawDate)}:${index}`
+  const sourceId = [row?.id, row?.recordId, row?.record_id, row?.staticPressureId, row?.static_pressure_id]
+    .find(value => value !== null && value !== undefined && String(value).trim() !== '')
+  const sourceKey = sourceId === undefined
+    ? legacySourceKey
+    : `source:${encodeURIComponent(String(wellName))}:id:${encodeURIComponent(String(sourceId))}`
+  return { sourceKey, legacySourceKey }
+}
+
 export function pressureRecordDate(row) {
   const raw = dateFields.map(field => row?.[field]).find(value => value !== null && value !== undefined && String(value).trim() !== '')
   if (raw === undefined) return ''

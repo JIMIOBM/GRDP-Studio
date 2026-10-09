@@ -5,7 +5,8 @@ import {
   calculateDatumPressure,
   calculatePressureIntercept,
   isCalculablePressureRecord,
-  normalizePressureRecord
+  normalizePressureRecord,
+  pressureSourceKeys
 } from './formationPressureGradient.js'
 
 test('折算到统一基准深度并计算深度截距', () => {
@@ -31,6 +32,17 @@ test('读取智慧气藏实测静压接口常见的驼峰和下划线字段', ()
   assert.equal(normalized.measuredPressure, '19.65')
   assert.equal(normalized.measuredCoordinate, '')
   assert.equal(normalized.gradient, '')
+})
+
+test('源静压记录有 ID 时使用稳定标识，兼容旧版日期和顺序标识', () => {
+  const first = pressureSourceKeys({ id: 18, date: '2025-01-02' }, 'X-1', 0)
+  const reordered = pressureSourceKeys({ id: 18, date: '2025-01-02' }, 'X-1', 3)
+  assert.equal(first.sourceKey, reordered.sourceKey)
+  assert.equal(first.sourceKey, 'source:X-1:id:18')
+  assert.equal(first.legacySourceKey, 'source:X-1:2025-01-02:0')
+  assert.deepEqual(pressureSourceKeys({ date: '2025-01-02' }, 'X-1', 0), {
+    sourceKey: 'source:X-1:2025-01-02:0', legacySourceKey: 'source:X-1:2025-01-02:0'
+  })
 })
 
 test('不计算缺值、非法日期、负深度、负压力或负梯度', () => {
