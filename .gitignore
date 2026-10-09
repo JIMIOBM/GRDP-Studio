@@ -61,6 +61,7 @@ docs/
 !/backend/src/test/java/com/grdp/studio/storagematerialbalance/
 !/backend/src/test/java/com/grdp/studio/nodal/
 !/backend/src/test/java/com/grdp/studio/storagenetwork/
+!/backend/src/test/java/com/grdp/studio/storagemainfactor/
 !/vue/tests/storageMaterialBalance.test.js
 !/backend/sql/wellbore_erosion_sanding.sql
 !/backend/src/test/java/com/grdp/studio/wellbore/

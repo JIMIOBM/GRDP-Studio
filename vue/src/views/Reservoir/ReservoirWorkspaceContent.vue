@@ -66,6 +66,7 @@ const isPressureTestMethod = computed(() => props.command?.group === '库存评�
   && props.command?.parent === '地层压力' && props.command?.name === '测试法')
 const isWaterInvasion = computed(() => props.command?.group === '库存评估'
   && props.command?.parent === '水侵动态分析' && props.command?.name === '水侵分析')
+// 主控因素分析：库存评估下的库级功能，四个因素的理论值与实际值对比。
 const isMainFactor = computed(() =>
   props.command?.group === '库存评估' && props.command?.name === '主控因素分析')
 const isDiagnosticCurve = computed(() =>
@@ -133,6 +134,7 @@ const lossKey = computed(() => `${props.reservoir?.projectId}-${props.reservoir?
   <WaterInvasion v-else-if="isWaterInvasion"
     :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-water-invasion`"
     :reservoir="reservoir" />
+  <!-- 主控因素分析：必须放在下方 v-else 占位分支之前，否则会继续落到占位页。 -->
   <MainFactorAnalysis v-else-if="isMainFactor"
     :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-main-factor`"
     :reservoir="reservoir" />
