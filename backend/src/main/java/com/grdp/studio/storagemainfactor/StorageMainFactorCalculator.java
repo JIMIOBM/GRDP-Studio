@@ -8,20 +8,21 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-import static com.grdp.studio.storagemainfactor.StorageMainFactorDtos.FactorRow;
 import static com.grdp.studio.storagemainfactor.StorageMainFactorDtos.FactorValue;
 import static com.grdp.studio.storagemainfactor.StorageMainFactorDtos.GasPvtParam;
 import static com.grdp.studio.storagemainfactor.StorageMainFactorDtos.ToolboxInput;
 
 /**
- * 四因素计算、差异与工具箱载荷组装。全部是纯函数，不碰数据库也不碰 HTTP。
+ * 地层压力一项的计算与工具箱载荷组装。全部是纯函数，不碰数据库也不碰 HTTP。
  *
- * <p>数值口径：入参与出参都是**原平台口径**（Pa / K / 10⁸m³ / 小数 / 1/Pa）。
- * 数据库口径与原平台口径之间的换算由 {@link StorageMainFactorUnits} 在读取数据的那一步完成，
- * 这里再做一次就会把结果缩放错 10⁶ 或 10⁸ 倍。
+ * <p>口径：{@link ToolboxInput} 用应用口径（Pa / K / 10⁸m³ / 小数 / 1/Pa），
+ * {@link #toolboxPayload} 是**唯一**的换算边界——原平台 {@code calc} 接口收的是
+ * **界面单位**（MPa / ℃ / 10⁸m³ / % / MPa⁻¹，依据它自己返回的 {@code fields.unit_label}
+ * 与 {@code inputRange}，例如 {@code maxOriginalPressure=200}）。
+ * 在这条边界之外再做一次换算会把结果缩放错 10⁶ 或 10⁸ 倍。
  *
  * <p>缺值一律用 {@code null} 表达，不用 0 兜底：0 是一个合法数值，
- * 会让差异列显示出一个看似正常的错值。
+ * 会让差异显示出一个看似正常的错值。
  */
 public final class StorageMainFactorCalculator {
 
@@ -33,20 +34,6 @@ public final class StorageMainFactorCalculator {
     public static final String MANUAL = "MANUAL";
     /** 没有值，等待用户填写。 */
     public static final String MISSING = "MISSING";
-
-    /** 四个因素的固定顺序、显示名与单位。顺序即页面表格的行序。 */
-    private static final List<String> KEYS = List.of(
-            "formationPressure", "poreVolume", "gas", "gasSaturation");
-    private static final Map<String, String> LABELS = Map.of(
-            "formationPressure", "地层压力",
-            "poreVolume", "动用孔隙体积",
-            "gas", "天然气",
-            "gasSaturation", "气体饱和度");
-    private static final Map<String, String> UNITS = Map.of(
-            "formationPressure", "MPa",
-            "poreVolume", "10⁸m³",
-            "gas", "10⁸m³",
-            "gasSaturation", "小数");
 
     public static FactorValue auto(Double value, String note) {
         return value == null ? missing(note) : new FactorValue(value, AUTO, note);
@@ -68,20 +55,6 @@ public final class StorageMainFactorCalculator {
         return actual - theoretical;
     }
 
-    /** 差异方向。{@code null} 表示无法比较（缺值）。 */
-    public static String direction(Double difference) {
-        if (difference == null || !Double.isFinite(difference)) {
-            return null;
-        }
-        if (difference > 0) {
-            return "POSITIVE";
-        }
-        if (difference < 0) {
-            return "NEGATIVE";
-        }
-        return "ZERO";
-    }
-
     /**
      * 百分比偏差 = (实际 − 理论) / 理论 × 100。
      * 理论值为 0 或缺失时返回 {@code null}（不做除零，也不显示无穷大）。
@@ -92,52 +65,6 @@ public final class StorageMainFactorCalculator {
         }
         double percent = (actual - theoretical) / theoretical * 100d;
         return Double.isFinite(percent) ? percent : null;
-    }
-
-    /**
-     * 全库孔隙体积 Vp = G × Bg / (1 − Swi)。
-     * Swi ≥ 1 时 1 − Swi ≤ 0，会得到无穷大或负的孔隙体积，两者都没有物理意义，返回 {@code null}。
-     */
-    public static Double poreVolume(Double g, Double bg, Double swiFraction) {
-        if (g == null || bg == null || swiFraction == null) {
-            return null;
-        }
-        double gasSaturation = 1d - swiFraction;
-        if (gasSaturation <= 0d) {
-            return null;
-        }
-        double vp = g * bg / gasSaturation;
-        return Double.isFinite(vp) ? vp : null;
-    }
-
-    /**
-     * 气体饱和度 Sg = (G − Gp) × Bg / Vp，即剩余天然气地下体积占孔隙体积的比例。
-     * Vp 为 0 或缺失时返回 {@code null}。
-     */
-    public static Double gasSaturation(Double g, Double gp, Double bg, Double vp) {
-        if (g == null || gp == null || bg == null || vp == null || vp == 0d) {
-            return null;
-        }
-        double sg = (g - gp) * bg / vp;
-        return Double.isFinite(sg) ? sg : null;
-    }
-
-    /**
-     * 组装四因素行。固定顺序，缺值的因素也会出现在结果里（值为 null、来源 MISSING），
-     * 这样页面可以把它渲染成输入框而不是整行消失。
-     */
-    public static List<FactorRow> rows(Map<String, FactorValue> theoretical, Map<String, FactorValue> actual) {
-        Map<String, FactorValue> theo = theoretical == null ? Map.of() : theoretical;
-        Map<String, FactorValue> act = actual == null ? Map.of() : actual;
-        List<FactorRow> rows = new ArrayList<>(KEYS.size());
-        for (String key : KEYS) {
-            FactorValue t = theo.getOrDefault(key, missing(null));
-            FactorValue a = act.getOrDefault(key, missing(null));
-            Double diff = difference(a.value(), t.value());
-            rows.add(new FactorRow(key, LABELS.get(key), UNITS.get(key), t, a,
-                    diff, direction(diff), deviationPercent(a.value(), t.value())));
-        }
-        return List.copyOf(rows);
     }
 
     /**
@@ -247,9 +174,6 @@ public final class StorageMainFactorCalculator {
         return value;
     }
 
-    private static double zeroIfNull(Double value) {
-        return value == null ? 0d : value;
-    }
     /** 只在真有值时写入：0/缺值留给平台模板自己的默认值，避免把合法值覆盖成非法的 0。 */
     private static void putWhenMeaningful(Map<String, Object> payload, String key, Double value) {
         if (value != null && value != 0d && Double.isFinite(value)) {
