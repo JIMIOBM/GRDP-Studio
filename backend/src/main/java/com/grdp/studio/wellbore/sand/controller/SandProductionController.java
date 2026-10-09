@@ -1,6 +1,8 @@
 package com.grdp.studio.wellbore.sand.controller;
 
 import com.grdp.studio.common.ApiResponse;
+import com.grdp.studio.wellbore.sand.dto.SandCriticalVelocityRequest;
+import com.grdp.studio.wellbore.sand.dto.SandCriticalVelocityResult;
 import com.grdp.studio.wellbore.sand.dto.SandProductionRequest;
 import com.grdp.studio.wellbore.sand.dto.SandProductionResult;
 import com.grdp.studio.wellbore.sand.dto.SandProductionSaveRequest;
@@ -28,6 +30,11 @@ public class SandProductionController {
             @RequestHeader(value = "Cookie", required = false) String cookie,
             @RequestHeader(value = "Process-Env", required = false) String environment) {
         return ApiResponse.success(calculator.calculate(request));
+    }
+
+    @PostMapping("/sand-production/critical-velocity")
+    public ApiResponse<SandCriticalVelocityResult> criticalVelocity(@Valid @RequestBody SandCriticalVelocityRequest request) {
+        return ApiResponse.success(calculator.criticalVelocity(request));
     }
 
     @PostMapping("/sand-production/records/save")

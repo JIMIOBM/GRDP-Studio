@@ -1,6 +1,8 @@
 package com.grdp.studio.wellbore.sand;
 
 import com.grdp.studio.common.BusinessException;
+import com.grdp.studio.wellbore.sand.dto.SandCriticalVelocityRequest;
+import com.grdp.studio.wellbore.sand.dto.SandCriticalVelocityResult;
 import com.grdp.studio.wellbore.sand.dto.SandProductionRequest;
 import com.grdp.studio.wellbore.sand.dto.SandProductionResult;
 import com.grdp.studio.wellbore.sand.service.SandProductionCalculator;
@@ -102,6 +104,28 @@ class SandProductionCalculatorTests {
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> calculator.calculate(request("ceramic-sand", 30.0)));
         assertEquals(400, ex.getCode());
+    }
+
+    @Test
+    void criticalVelocityQueryMatchesCalculationInterpolation() {
+        // 页面自动回填与计算取值必须一致（同为 3 位舍入）
+        SandCriticalVelocityResult quartz = calculator.criticalVelocity(
+                new SandCriticalVelocityRequest("quartz-sand", 10.0));
+        assertEquals(0.125, quartz.criticalVelocityMS(), 1e-9);
+        assertNull(quartz.note());
+
+        SandCriticalVelocityResult composite = calculator.criticalVelocity(
+                new SandCriticalVelocityRequest("composite-sand", 20.0));
+        assertEquals(0.27, composite.criticalVelocityMS(), 1e-9);
+
+        // 超出实验范围时带回边界提示，与计算结果的 interpolationNote 一致
+        SandCriticalVelocityResult low = calculator.criticalVelocity(
+                new SandCriticalVelocityRequest("quartz-sand", 3.0));
+        assertEquals(0.11, low.criticalVelocityMS(), 1e-9);
+        assertNotNull(low.note());
+
+        assertThrows(BusinessException.class, () -> calculator.criticalVelocity(
+                new SandCriticalVelocityRequest("ceramic-sand", 30.0)));
     }
 
     @Test
