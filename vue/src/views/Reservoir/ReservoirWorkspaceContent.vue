@@ -17,7 +17,9 @@ import InjectionProductionComparison from './ProductivityEvaluation/InjectionPro
 import CapacityDesign from './CapacityDesign/CapacityDesign.vue'
 import MaterialBalance from './InventoryEvaluation/MaterialBalance.vue'
 import PressureGradient from './InventoryEvaluation/PressureGradient.vue'
+import PressureTestMethod from './InventoryEvaluation/PressureTestMethod.vue'
 import WaterInvasion from './InventoryEvaluation/WaterInvasion.vue'
+import MainFactorAnalysis from './InventoryEvaluation/MainFactorAnalysis.vue'
 import InterwellComparison from './WellboreConversion/InterwellComparison.vue'
 import GasReservoirDiagnosticCurveContent from './GasReservoirDiagnosticCurveContent.vue'
 import StorageNetworkTopology from './SurfaceNetwork/StorageNetworkTopology.vue'
@@ -60,8 +62,12 @@ const isMaterialBalance = computed(() => props.command?.group === '库存评估'
   && props.command?.parent === '物质平衡法' && props.command?.name === '物质平衡')
 const isPressureGradient = computed(() => props.command?.group === '库存评估'
   && props.command?.parent === '地层压力' && props.command?.name === '压力梯度')
+const isPressureTestMethod = computed(() => props.command?.group === '库存评估'
+  && props.command?.parent === '地层压力' && props.command?.name === '测试法')
 const isWaterInvasion = computed(() => props.command?.group === '库存评估'
   && props.command?.parent === '水侵动态分析' && props.command?.name === '水侵分析')
+const isMainFactor = computed(() =>
+  props.command?.group === '库存评估' && props.command?.name === '主控因素分析')
 const isDiagnosticCurve = computed(() =>
   props.command?.group === '库存评估' && props.command?.name === '诊断曲线'
 )
@@ -118,11 +124,17 @@ const lossKey = computed(() => `${props.reservoir?.projectId}-${props.reservoir?
   <MaterialBalance v-else-if="isMaterialBalance"
     :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-material-balance`"
     :reservoir="reservoir" />
+  <PressureTestMethod v-else-if="isPressureTestMethod"
+    :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-pressure-test-method`"
+    :reservoir="reservoir" />
   <PressureGradient v-else-if="isPressureGradient"
     :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-pressure-gradient`"
     :reservoir="reservoir" />
   <WaterInvasion v-else-if="isWaterInvasion"
     :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-water-invasion`"
+    :reservoir="reservoir" />
+  <MainFactorAnalysis v-else-if="isMainFactor"
+    :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-main-factor`"
     :reservoir="reservoir" />
   <!-- 库容设计的运行压力与库容参数共用一个界面（截图要求"合成一个界面"）。
        key 只跟库范围绑定：同一库内切换这几个菜单项不重建表单，未保存的编辑不会丢；
