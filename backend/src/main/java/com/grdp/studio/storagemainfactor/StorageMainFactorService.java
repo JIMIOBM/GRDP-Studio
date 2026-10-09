@@ -11,26 +11,29 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static com.grdp.studio.storagemainfactor.StorageMainFactorCalculator.AUTO;
-import static com.grdp.studio.storagemainfactor.StorageMainFactorCalculator.MANUAL;
+import static com.grdp.studio.storagemainfactor.StorageMainFactorCalculator.MISSING;
 import static com.grdp.studio.storagemainfactor.StorageMainFactorCalculator.auto;
-import static com.grdp.studio.storagemainfactor.StorageMainFactorCalculator.gasSaturation;
+import static com.grdp.studio.storagemainfactor.StorageMainFactorCalculator.deviationPercent;
+import static com.grdp.studio.storagemainfactor.StorageMainFactorCalculator.difference;
 import static com.grdp.studio.storagemainfactor.StorageMainFactorCalculator.missing;
-import static com.grdp.studio.storagemainfactor.StorageMainFactorCalculator.poreVolume;
-import static com.grdp.studio.storagemainfactor.StorageMainFactorCalculator.rows;
 import static com.grdp.studio.storagemainfactor.StorageMainFactorDtos.*;
 
 /**
- * 库级主控因素分析：读库预填四因素，调原平台算理论地层压力，算差异。
+ * 库级主控因素分析：读库预填工具箱入参并取实测静压，调原平台算理论地层压力，两者相减得差异。
  *
  * <p>数据来自原平台的物质平衡来源表。注意这三张表<b>本身没有 project / well 列</b>，
  * 靠外键串起来：{@code dynamic_original_gas_in_place} 持 project/well/时间戳，
  * {@code ..._by_mb_input} 持入参，{@code ..._by_mb_input_item} 持逐日期 p 与累产气量，
  * {@code ..._output} 持动态地质储量。
  *
- * <p>口径：{@link StorageMainFactorUnits} 负责把数据库单位换到展示/原平台单位，本类只负责编排。
- * 本页是**即算即看、不落库**，与库级物质平衡、库级诊断曲线一致。
+ * <p>口径：数据库单位（Pa / K / 小数 / 1/Pa）由 {@link StorageMainFactorCalculator#toolboxPayload}
+ * 在组装原平台载荷时换成平台的提交口径，本类只负责编排，不做单位换算。
+ *
+ * <p>计算结果即算即看；只有用户点「保存」时才写入
+ * {@code project_reservoir_main_factor}（一个库一份，UPSERT）。
  */
 @Service
 public class StorageMainFactorService {
@@ -38,11 +41,40 @@ public class StorageMainFactorService {
     private final JdbcTemplate jdbc;
     private final StorageCatalogService catalog;
     private final MaterialBalanceEquationClient client;
+    private final StorageMainFactorSavedStorage savedStorage;
 
-    public StorageMainFactorService(JdbcTemplate jdbc, StorageCatalogService catalog, MaterialBalanceEquationClient client) {
+    public StorageMainFactorService(JdbcTemplate jdbc, StorageCatalogService catalog,
+            MaterialBalanceEquationClient client, StorageMainFactorSavedStorage savedStorage) {
         this.jdbc = jdbc;
         this.catalog = catalog;
         this.client = client;
+        this.savedStorage = savedStorage;
+    }
+
+    /**
+     * 保存本库的一份分析（存在则更新）。
+     *
+     * <p>只存"本库一份"，所以没有记录名、没有记录列表、也不接左侧树——
+     * 那是微观损耗那种"同一口井多个比选方案"才需要的结构。
+     */
+    public void save(SaveRequest request) {
+        catalog.requireScope(jdbc, request.projectId(), request.gasReservoirId(), request.storageId());
+        savedStorage.save(request.projectId(), request.gasReservoirId(), request.storageId(),
+                new SavedMainFactor(request.inputs(), request.theoreticalPressure(), request.actualPressure()));
+    }
+
+    /**
+     * 读取本库已保存的一份；从未保存过返回 {@link Optional#empty()}。
+     *
+     * <p>差异与百分比偏差在这里**重新算**：它们不入库，读取时不重算，
+     * 页面上就会出现"两侧都有值、差异却是 —"的残缺结果。
+     */
+    public Optional<SavedAnalysis> loadSaved(long projectId, long gasReservoirId, long storageId) {
+        catalog.requireScope(jdbc, projectId, gasReservoirId, storageId);
+        return savedStorage.load(projectId, gasReservoirId, storageId).map(saved -> new SavedAnalysis(
+                saved.inputs(), saved.theoreticalPressure(), saved.actualPressure(),
+                difference(saved.actualPressure(), saved.theoreticalPressure()),
+                deviationPercent(saved.actualPressure(), saved.theoreticalPressure())));
     }
 
     /** 一口井的物质平衡输入，单位仍是**数据库口径**。 */
@@ -93,58 +125,7 @@ public class StorageMainFactorService {
             }
         }
 
-        Map<String, FactorValue> theoretical = new LinkedHashMap<>();
-        Map<String, FactorValue> actual = new LinkedHashMap<>();
-
-        // ① 地层压力：理论值等 calculate 调原平台；实际值取实测静压
-        theoretical.put("formationPressure", missing("需调用原平台物质平衡方程"));
-        Double measured = source == null ? null : loadLatestMeasuredPressure(source.inputId());
-        String measuredNote = source == null ? null : "实测静压：" + source.wellName();
-        if (measured == null) {
-            measured = loadLatestStaticPressure(projectId, gasReservoirId);
-            measuredNote = "静态压力数据表最新一条";
-        }
-        if (measured != null) {
-            actual.put("formationPressure", auto(measured, measuredNote));
-        } else {
-            actual.put("formationPressure", missing("没有可用的实测静压"));
-            warnings.add("没有可用的实测静压，请手动填写实际地层压力。");
-        }
-
-        // ③ 天然气：实际值取与入参同源的动态地质储量
-        GasVolume volume = source == null ? null : loadGasVolume(source.inputId());
-        if (volume != null) {
-            actual.put("gas", auto(volume.value(), volume.note()));
-        } else {
-            actual.put("gas", missing("没有可用的动态地质储量"));
-            if (source != null) {
-                warnings.add("没有可用的动态地质储量，请手动填写实际天然气量。");
-            }
-        }
-
-        // ② ③ ④ 的理论值库中没有对应字段。没有代表井时只给一条汇总说明，
-        // 不要每个因素各弹一条，否则空库页面上会堆四五条黄色提示。
-        if (source == null) {
-            if (!wells.isEmpty()) {
-                warnings.add("库内单井没有物质平衡方程输入，无法自动预填工具箱入参，也无法自动读取动态地质储量。");
-            }
-            warnings.add("②动用孔隙体积、③设计地质储量、④设计气体饱和度库中都没有字段，理论值需要手动填写。");
-        } else {
-            warnings.add("库容设计表没有地质储量字段，③天然气的理论值需要手动填写。");
-            warnings.add("②动用孔隙体积库中没有字段，理论值与实际值都需要手动填写。");
-        }
-        theoretical.put("gas", missing("设计地质储量需手动填写"));
-        theoretical.put("poreVolume", missing("设计孔隙体积需手动填写"));
-        actual.put("poreVolume", missing("需先填写 Bg，或手动填写"));
-        actual.put("gasSaturation", missing("需先填写 Bg，或手动填写"));
-
-        // ④ 气体饱和度：理论值默认 1 − 束缚水饱和度
-        Double swi = source == null ? null : source.waterSaturation();
-        if (swi != null) {
-            theoretical.put("gasSaturation", auto(1d - swi, "默认 1 − 束缚水饱和度"));
-        } else {
-            theoretical.put("gasSaturation", missing("设计气体饱和度需手动填写"));
-        }
+        FactorValue measured = measuredPressure(projectId, gasReservoirId, source, warnings);
 
         ToolboxInput inputs = source == null ? null : toToolboxInput(source, warnings);
         if (source != null) {
@@ -152,95 +133,79 @@ public class StorageMainFactorService {
             inputSources.put("formationTemperature", AUTO);
             inputSources.put("originalGasInPlace", AUTO);
             warnings.add("工具箱入参按库内第一口有完整输入的井（" + source.wellName() + "）预填，可手动修改。");
+        } else if (!wells.isEmpty()) {
+            warnings.add("库内单井没有物质平衡方程输入，无法自动预填工具箱入参，理论地层压力需要手动填写。");
         }
 
-        return new Context(rows(theoretical, actual), inputs, inputSources, dedupe(warnings));
+        return new Context(measured, inputs, inputSources, dedupe(warnings));
     }
 
     /**
-     * 计算四因素差异。
+     * 实测地层压力：优先取代表井的实测静压，退而取静态压力数据表最新一条。
+     *
+     * <p>两者都没有时返回 {@code MISSING} 并给出中文提示，绝不用 0 顶替——
+     * 0 会让差异显示出一个看似正常的错值。
+     */
+    private FactorValue measuredPressure(long projectId, long gasReservoirId, Source source, List<String> warnings) {
+        if (source != null) {
+            Double measured = loadLatestMeasuredPressure(source.inputId());
+            if (measured != null) {
+                return auto(measured, "实测静压：" + source.wellName());
+            }
+        }
+        Double fallback = loadLatestStaticPressure(projectId, gasReservoirId);
+        if (fallback != null) {
+            return auto(fallback, "静态压力数据表最新一条");
+        }
+        warnings.add("没有可用的实测静压，请手动填写实际地层压力。");
+        return missing("没有可用的实测静压");
+    }
+
+    /**
+     * 计算地层压力的理论值与差异。
      *
      * <p>刻意<b>不</b>加 {@code @Transactional}：这里会发起最长 60 秒的原平台 HTTP 调用，
      * 包在事务里会一直占着数据库连接（连接池上限 10），把不相关的请求一起拖住。
-     * 方法本身只读一次库（作用域校验），不需要事务。
+     * 方法本身只读库（作用域校验与实测静压），不需要事务。
      *
-     * <p>平台调用与差异计算是解耦的：库级没有入参（本机现状）或原平台不可用时，
-     * 仍然要用回传/手输的值把四行差异算出来，只有"入参非空但不完整"才报 400。
+     * <p>平台调用与实际值读取是解耦的：原平台不可用时理论值为空、来源为 {@code MISSING}，
+     * **实际值仍照常读出并显示**，差异为 null。只有"入参非空但不完整"才报 400。
      */
     public CalculateResult calculate(CalculateRequest request, Map<String, String> headers) {
         catalog.requireScope(jdbc, request.projectId(), request.gasReservoirId(), request.storageId());
         List<String> warnings = new ArrayList<>();
-        Map<String, FactorValue> theoretical = asValues(request.theoretical());
-        Map<String, FactorValue> actual = asValues(request.actual());
 
         Double pressure = null;
         if (request.inputs() == null) {
-            // 不去调原平台：没有入参就打不通，而且这不该让整个请求失败——
-            // 用户还要手工填四个值看差异（spec §8 / §11-5）。
             warnings.add("库内没有物质平衡方程输入，无法自动计算理论地层压力，请手动填写。");
         } else {
             pressure = client.calculateFormationPressure(request.projectId(), request.inputs(), headers);
             if (pressure == null) {
-                warnings.add("原平台未登录或不可用，请手动填写理论地层压力。");
-            }
-        }
-        if (pressure != null) {
-            // 原平台算出来的理论地层压力优先于用户手输值：用户点"读取并计算"就是要它。
-            theoretical.put("formationPressure", auto(pressure, "原平台物质平衡方程"));
-        }
-
-        ToolboxInput inputs = request.inputs();
-        Double bg = request.volumeFactor();
-        if (bg == null) {
-            warnings.add("未填写天然气体积系数 Bg，②动用孔隙体积与④气体饱和度无法自动计算。");
-        } else if (inputs != null) {
-            if (!hasValue(actual, "poreVolume")) {
-                Double vp = poreVolume(inputs.originalGasInPlace(), bg, inputs.waterSaturation());
-                if (vp != null) {
-                    actual.put("poreVolume", auto(vp, "Vp = G·Bg/(1−Swi)"));
-                }
-            }
-            if (!hasValue(actual, "gasSaturation")) {
-                Double sg = gasSaturation(inputs.originalGasInPlace(), inputs.cumulativeGasProduction(),
-                        bg, valueOf(actual, "poreVolume"));
-                if (sg != null) {
-                    actual.put("gasSaturation", auto(sg, "Sg = (G−Gp)·Bg/Vp"));
-                }
+                warnings.add("原平台未登录或不可用，理论地层压力暂时算不出来。");
             }
         }
 
-        return new CalculateResult(pressure, pressure != null ? AUTO : MANUAL,
-                rows(theoretical, actual), dedupe(warnings));
+        // 实际值每次都从库里重新读，不接受前端回传的结果值：
+        // 否则页面上的旧值会被当成实测静压再显示回给用户。
+        List<StorageCatalogService.Well> wells = catalog.wells(
+                request.storageId(), request.projectId(), request.gasReservoirId());
+        FactorValue measured = measuredPressure(request.projectId(), request.gasReservoirId(),
+                firstSourceWithInput(request.projectId(), request.gasReservoirId(), wells), warnings);
+
+        Double actual = measured.value();
+        return new CalculateResult(pressure, pressure != null ? AUTO : MISSING, measured,
+                difference(actual, pressure), deviationPercent(actual, pressure), dedupe(warnings));
     }
 
-    /**
-     * 回传的取值**原样保留来源**：只有调用方没给来源（或给的是裸值）时才当作手动填写。
-     * 这样"实测静压：X-1"这类溯源信息不会因为点了一次计算就退化成"手动填写"。
-     */
-    private static Map<String, FactorValue> asValues(Map<String, FactorValue> values) {
-        Map<String, FactorValue> mapped = new LinkedHashMap<>();
-        if (values == null) {
-            return mapped;
-        }
-        values.forEach((key, value) -> {
-            if (value == null || value.value() == null) {
-                mapped.put(key, missing(value == null ? null : value.note()));
-                return;
+    /** 代表井：库内第一口有完整物质平衡输入的单井。 */
+    private Source firstSourceWithInput(long projectId, long gasReservoirId, List<StorageCatalogService.Well> wells) {
+        for (StorageCatalogService.Well well : wells) {
+            Source candidate = loadSource(projectId, gasReservoirId, well.wellName());
+            if (candidate != null) {
+                return candidate;
             }
-            String source = value.source() == null || value.source().isBlank() ? MANUAL : value.source();
-            mapped.put(key, new FactorValue(value.value(), source, value.note()));
-        });
-        return mapped;
-    }
-
-    private static boolean hasValue(Map<String, FactorValue> values, String key) {
-        FactorValue value = values.get(key);
-        return value != null && value.value() != null;
-    }
-
-    private static Double valueOf(Map<String, FactorValue> values, String key) {
-        FactorValue value = values.get(key);
-        return value == null ? null : value.value();
+        }
+        return null;
     }
 
     /** 同一句话只留一条，避免空库页面上堆一串重复的黄色提示。 */
@@ -400,8 +365,9 @@ public class StorageMainFactorService {
                 StorageMainFactorUnits.gasTypeCode(source.gasType()),
                 nz(source.specificGravity()),
                 source.modificationMethod() == null ? 0 : source.modificationMethod(),
-                // 三个组分保持**小数**：原平台自己存下的 MBE 调用记录就是
-                // "h2SMoleFraction":0.1462 这种小数，乘 100 会被范围校验挡回 400。
+                // 三个组分保持**小数**（应用口径）。toolboxPayload 是唯一的换算边界，
+                // 它统一乘 100 变成原平台 calc 要求的百分数——
+                // 依据是平台自己返回的 inputRange 里 maxH2SMoleFraction=100。
                 nz(source.hydrogenSulfide()),
                 nz(source.carbonDioxide()),
                 nz(source.nitrogen()),

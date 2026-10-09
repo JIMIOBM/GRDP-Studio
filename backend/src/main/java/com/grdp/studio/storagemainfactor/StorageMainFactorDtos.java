@@ -17,17 +17,6 @@ public final class StorageMainFactorDtos {
     /** 单个因素一侧的取值。{@code source} 取 {@code AUTO} / {@code MANUAL} / {@code MISSING}。 */
     public record FactorValue(Double value, String source, String note) {}
 
-    /** 一个因素的一行：理论值、实际值、差异、差异方向与百分比偏差。 */
-    public record FactorRow(
-            String key,
-            String label,
-            String unit,
-            FactorValue theoretical,
-            FactorValue actual,
-            Double difference,
-            String direction,
-            Double deviationPercent) {}
-
     /**
      * 原平台 {@code gasPvtParam}，字段名与取值都与原平台一致。
      *
@@ -64,40 +53,81 @@ public final class StorageMainFactorDtos {
             Double langmuirVolume,
             GasPvtParam gasPvtParam) {}
 
-    /** 页面初次加载的预填结果：四因素行 + 工具箱入参 + 入参来源 + 缺失说明。 */
+    /**
+     * 页面初次加载的预填结果：实测地层压力 + 工具箱入参 + 入参来源 + 缺失说明。
+     *
+     * <p>改造后本功能只比较**地层压力**一个因素，所以这里不再有四因素行；
+     * 实测静压单独给出，并保留它的出处说明（例如"实测静压：X-1"）。
+     */
     public record Context(
-            List<FactorRow> factors,
+            FactorValue measuredPressure,
             ToolboxInput inputs,
             Map<String, String> inputSources,
             List<String> warnings) {}
 
     /**
-     * 计算请求：四因素的理论/实际值由前端回传（用户可能改过），入参同样回传。
+     * 读取已保存的一份：入参 + 两侧压力 + **后端重新算出的**差异与百分比偏差。
      *
-     * <p>两侧都传 {@link FactorValue} 而不是裸数值：页面会把 context 读到的自动值原样回传，
-     * 如果只传数字，后端就无法区分"这是数据库读来的"还是"用户手输的"，
-     * 点一次计算之后所有来源都会退化成"手动填写"（spec 要求每个值都标明来源）。
+     * <p>差异不入库（它是两个压力推导出来的）。若读取时不重算，重新打开页面就会看到
+     * "理论值 19.65 / 实际值 13.56 / 差异 —"，看起来像坏了。
+     */
+    public record SavedAnalysis(
+            ToolboxInput inputs,
+            Double theoreticalPressure,
+            Double actualPressure,
+            Double difference,
+            Double deviationPercent) {}
+
+    /**
+     * 计算请求：只输入工具箱入参。
      *
-     * <p>{@code volumeFactor} 是天然气体积系数 Bg。库级没有 Bg 字段（井级为
-     * {@code project_well_pvt_gas_result.volume_factor}），spec 把它定为页面上的手输项；
-     * ② 动用孔隙体积与 ④ 气体饱和度都要用它，所以必须随请求带上来。
+     * <p>理论值由原平台算、实际值由后端读库，两者都不需要前端回传，
+     * 所以这里既没有 Bg，也没有"理论/实际值回传"的映射。
      */
     public record CalculateRequest(
             long projectId,
             long gasReservoirId,
             long storageId,
-            Double volumeFactor,
-            Map<String, FactorValue> theoretical,
-            Map<String, FactorValue> actual,
             ToolboxInput inputs) {}
 
     /**
-     * 计算结果。{@code formationPressure} 为 null 表示原平台不可用或未登录，
-     * 此时前端应把理论地层压力切换为手输，{@code formationPressureSource} 会说明原因。
+     * 已保存的一份分析：工具箱入参 + 两侧地层压力。
+     *
+     * <p>只存"本库一份"，所以没有记录名与记录编号——那是微观损耗那种
+     * "同一口井多个比选方案"才需要的结构。保存即更新同一行。
+     *
+     * <p>页岩气藏专属入参（孔隙度 / 岩石密度 / Langmuir）**不入库**：
+     * 它们不在界面上，由原平台模板兜底，存下来只会造成"库里有一份、
+     * 实际算的是另一份"的错觉。
+     */
+    public record SavedMainFactor(ToolboxInput inputs, Double theoreticalPressure, Double actualPressure) {}
+
+    /**
+     * 保存请求：工具箱入参 + 当前算出的两侧压力。
+     *
+     * <p>压力由前端回传而不是后端重算：用户点"保存"时要存下的正是**他看到的那个结果**，
+     * 重算一次可能因为平台抖动而存进另一个值。
+     */
+    public record SaveRequest(
+            long projectId,
+            long gasReservoirId,
+            long storageId,
+            ToolboxInput inputs,
+            Double theoreticalPressure,
+            Double actualPressure) {}
+
+    /**
+     * 计算结果：理论值（原平台工具箱）、实际值（库内实测静压）、差异与百分比偏差。
+     *
+     * <p>{@code formationPressure} 为 null 表示原平台不可用或未登录，此时
+     * {@code formationPressureSource} 为 {@code MISSING}，前端把理论值显示为空。
+     * 三个派生量（差异、百分比偏差）只要有一侧缺失就为 null，绝不拿 0 顶替。
      */
     public record CalculateResult(
             Double formationPressure,
             String formationPressureSource,
-            List<FactorRow> factors,
+            FactorValue measuredPressure,
+            Double difference,
+            Double deviationPercent,
             List<String> warnings) {}
 }

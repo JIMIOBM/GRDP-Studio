@@ -2,37 +2,34 @@
 /**
  * 库级「主控因素分析」。
  *
- * 对四个因素同时展示理论值与实际值并给出差异：
- *   ① 地层压力 —— 理论值来自原平台「物质平衡方程 → 计算地层压力」工具箱，实际值取实测静压
- *   ② 动用的孔隙体积 —— 实际值由 Vp = G·Bg/(1−Swi) 计算
- *   ③ 天然气 —— 理论值是设计地质储量（手输），实际值是动态地质储量
- *   ④ 气体饱和度 —— 实际值由 Sg = (G−Gp)·Bg/Vp 计算
+ * 只比较**地层压力**一个因素：
+ *   理论值 —— 原平台「物质平衡方程 → 计算地层压力」工具箱
+ *   实际值 —— 库内实测静压（没有则退到静态压力数据表）
+ *   差异   —— 实际 − 理论，另附百分比偏差
  *
- * 单位换算全部在后端完成：左侧参数栏里的入参是**原平台口径**（Pa / K / 小数 / 1/Pa），
- * 右侧结果表里是工程单位（MPa / 10⁸m³ / 小数）。前端只做展示格式化。
+ * 布局与交互照「微观损耗」：顶部功能区（导入PVT / 保存）+ 参数网格 + 计算/重置 + 计算结果。
  *
- * 本页即算即看、不落库，与库级物质平衡、库级诊断曲线一致。
+ * 参数在界面上用**界面口径**（MPa / ℃ / 10⁸m³ / % / MPa⁻¹），与微观损耗以及原平台
+ * 自己的表单一致——用户看到的量级应该是 50 MPa，而不是 50000000 Pa。
+ * 提交前由 toAppInputs 换算回后端口径；**提交给原平台的载荷仍由后端
+ * StorageMainFactorCalculator.toolboxPayload 一处组装**，前端不参与。
  */
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
 import { storageMainFactorApi } from '@/api/storageMainFactor'
 import {
-  FACTOR_LABELS,
-  FACTOR_UNITS,
-  buildAbsoluteSeries,
-  buildRelativeSeries,
+  buildPressureChartSeries,
   differenceDirection,
   formatComputedValue,
-  formatFactorValue,
-  sourceLabel,
-  toNumberOrNull
+  toAppInputs,
+  toDisplayInputs
 } from '@/utils/storageMainFactor'
+import NaturalGasImportDialog from '@/views/DataManagement/NaturalGasImportDialog.vue'
 
 const props = defineProps({
   reservoir: { type: Object, default: null }
 })
-
-const unwrap = response => response?.data ?? response
 
 const scope = computed(() => ({
   projectId: props.reservoir?.projectId,
@@ -40,664 +37,381 @@ const scope = computed(() => ({
   storageId: props.reservoir?.storageId
 }))
 
+const title = computed(() => `${props.reservoir?.label || '未选择库'}-主控因素分析`)
+
+/**
+ * 参数一律是界面口径。下拉框用原生 select（与微观损耗一致），
+ * 取值就是后端 GasPvtParam 的枚举码。
+ */
+const form = reactive({
+  gasReservoirType: 0,
+  originalPressure: '',
+  formationTemperature: '',
+  originalGasInPlace: '',
+  cumulativeGasProduction: '',
+  rockCompressionCoefficient: '',
+  waterCompressionCoefficient: '',
+  waterSaturation: '',
+  gasType: 0,
+  specificGravity: '',
+  h2SMoleFraction: '',
+  co2MoleFraction: '',
+  n2MoleFraction: '',
+  modificationMethod: 0,
+  deviationFactorMethod: 0
+})
+
+const importDialogVisible = ref(false)
+const importedFileName = ref('')
 const loading = ref(false)
 const calculating = ref(false)
+const saving = ref(false)
 const error = ref('')
-const warnings = ref([])
-// 只有点过「读取并计算」才有柱子；之前保留坐标轴、分类、图例，但不出数据
-const calculated = ref(false)
+/** 上次计算的结果（CalculateResult）。理论值、实际值、差异只在点过「计算」之后才有。 */
+const result = ref(null)
+/** 结果是否因为参数被改过而作废（与"从没算过"要分开说，用户的下一步动作不同）。 */
+const resultStale = ref(false)
 
-/**
- * 画图用的因素数据：没点过计算就把理论/实际值清空，
- * 分类（四个因素名）仍来自 factors，所以坐标轴和图例照常显示。
- */
-const chartFactors = computed(() => calculated.value ? factors.value : factors.value.map(factor => ({
-  ...factor,
-  theoretical: { ...factor.theoretical, value: null },
-  actual: { ...factor.actual, value: null }
-})))
-const factors = ref([])
-// 必须始终是对象：参数栏在 loading 分支之外渲染，inputs 为 null 时模板里
-// 的 inputs[field.key] 会直接抛错，整个页面白屏。
-const inputs = ref({ gasPvtParam: {} })
-const volumeFactor = ref('')
+/** 地层压力对比图：相对理论值 / 绝对值两口径可切换。序列由 utils 的纯函数给出。 */
 const chartMode = ref('relative')
-const theoreticalDraft = ref({})
-const actualDraft = ref({})
-
-let controller = null
-
-/** 参数栏里可编辑的入参；单位即原平台口径，标签上写清楚，避免被当成 MPa 误解。 */
-const INPUT_FIELDS = [
-  { key: 'originalPressure', label: '原始地层压力', unit: 'Pa' },
-  { key: 'formationTemperature', label: '地层温度', unit: 'K' },
-  { key: 'originalGasInPlace', label: '动态地质储量', unit: '10⁸m³' },
-  { key: 'cumulativeGasProduction', label: '累产气量', unit: '10⁸m³' },
-  { key: 'rockCompressionCoefficient', label: '岩石压缩系数', unit: '1/Pa' },
-  { key: 'waterCompressionCoefficient', label: '地层水压缩系数', unit: '1/Pa' },
-  { key: 'waterSaturation', label: '束缚水饱和度', unit: '小数' },
-  { key: 'gasReservoirType', label: '气藏类型', unit: '0/1/2' }
-]
-
-const PVT_FIELDS = [
-  { key: 'gasType', label: '天然气类型', unit: '0干气/1湿气/2凝析气' },
-  { key: 'specificGravity', label: '天然气比重', unit: '小数' },
-  { key: 'modificationMethod', label: '非烃修正方法', unit: '0 Wichert-Aziz / 1 Carr' },
-  { key: 'deviationFactorMethod', label: '偏差系数方法', unit: '0 DAK / 1 DPR / 2 Hall' },
-  { key: 'h2SMoleFraction', label: 'H₂S 摩尔百分含量', unit: '%' },
-  { key: 'co2MoleFraction', label: 'CO₂ 摩尔百分含量', unit: '%' },
-  { key: 'n2MoleFraction', label: 'N₂ 摩尔百分含量', unit: '%' }
-]
-
-const rows = computed(() => factors.value.map(factor => ({
-  ...factor,
-  label: FACTOR_LABELS[factor.key] || factor.key,
-  unit: FACTOR_UNITS[factor.key] || '',
-  theoreticalText: formatFactorValue(factor.theoretical?.value, null),
-  actualText: formatFactorValue(factor.actual?.value, null),
-  theoreticalSource: sourceLabel(factor.theoretical?.source),
-  actualSource: sourceLabel(factor.actual?.source),
-  theoreticalSourceType: factor.theoretical?.source || 'MISSING',
-  actualSourceType: factor.actual?.source || 'MISSING',
-  differenceText: formatComputedValue(factor.difference),
-  direction: differenceDirection(factor.difference),
-  deviationText: factor.deviationPercent === null || factor.deviationPercent === undefined
-    ? '—'
-    : `${factor.deviationPercent.toFixed(2)} %`
-})))
-
-/**
- * 表格里每个格子都是输入框：自动读取来的值也允许改。
- *
- * 原来只有"待填写"的格子才是输入框，一旦填过、点过计算，那一格就变成只读文本，
- * 打错一个数字只能刷新页面——这对"人工对比"的用法是硬伤。
- */
-const draftOf = side => (side === 'theoretical' ? theoreticalDraft : actualDraft)
-
-const cellValue = (row, side) => {
-  const draft = draftOf(side).value
-  if (draft[row.key] !== undefined) return draft[row.key]
-  const current = row[side]?.value
-  return current === null || current === undefined ? '' : String(current)
-}
-
-const onCellInput = (side, key, event) => {
-  const draft = draftOf(side)
-  draft.value = { ...draft.value, [key]: event.target.value }
-}
-
-/** 用户动过的格子标成"手动填写"，没动过的沿用自动读取/待填写。 */
-const cellSourceType = (row, side) => {
-  const text = draftOf(side).value[row.key]
-  if (text !== undefined && String(text).trim() !== '') return 'MANUAL'
-  return row[`${side}SourceType`]
-}
-
-const cellSourceLabel = (row, side) => sourceLabel(cellSourceType(row, side))
-
-/**
- * 例子值只用于输入框占位提示，来源是本库真实数据，不是随便写的：
- *  - 地层压力·理论值 ≈ 原始压力 50 × (1 − 累产气量 12.306 / 动态地质储量 23.398) ≈ 23.70 MPa
- *  - 动用孔隙体积·实际值由 G·Bg/(1−Swi) 算出，Bg 取 0.0065 时约 0.206（这里提示设计值量级）
- *  - 天然气·实际值 23.4，设计值通常略大
- *  - 气体饱和度·理论值 = 1 − 束缚水饱和度 = 1 − 0.2616 ≈ 0.74
- */
-const PLACEHOLDER_HINTS = {
-  formationPressure: '如 23.70',
-  poreVolume: '如 0.220',
-  gas: '如 25.0',
-  gasSaturation: '如 0.74'
-}
-
-const placeholderFor = key => PLACEHOLDER_HINTS[key] || '待填写'
-
-/**
- * 理论值没值时的提示：①地层压力既可能手填、也可能由原平台自动读回，
- * ②动用孔隙体积与③天然气库里根本没有，只能手填。
- */
-const missingHint = key => (key === 'formationPressure' ? '需手填/自动读取' : '需手填')
-
 const chartRef = ref(null)
-const facetRefs = ref([])
 let chart = null
-let facetCharts = []
 
-const disposeChart = () => {
-  if (chart) {
-    chart.dispose()
-    chart = null
-  }
-  facetCharts.forEach(instance => instance.dispose())
-  facetCharts = []
-}
-
-const setFacetRef = (el, index) => {
-  if (el) facetRefs.value[index] = el
-}
-
-/**
- * ECharts 的画布尺寸在 init 时定死，容器之后变宽就会把画布拉伸，文字发虚。
- * 只监听 window.resize 不够：滚动条出现、参数栏稳定、标签页切换都会改变容器宽度。
- * 用 ResizeObserver 盯住容器本身，尺寸一变就重算画布。
- */
-let chartObserver = null
-const observeChartSize = el => {
-  chartObserver?.disconnect()
-  chartObserver = null
-  if (!el || typeof ResizeObserver === 'undefined') return
-  chartObserver = new ResizeObserver(() => {
-    chart?.resize()
-    facetCharts.forEach(instance => instance?.resize())
+const renderChart = () => {
+  if (!chartRef.value) return
+  chart?.dispose()
+  chart = echarts.init(chartRef.value)
+  const series = buildPressureChartSeries(
+    result.value?.formationPressure,
+    result.value?.measuredPressure?.value,
+    chartMode.value
+  )
+  chart.setOption({
+    tooltip: { trigger: 'axis' },
+    legend: { bottom: 0, data: ['理论值', '实际值'] },
+    grid: { left: 64, right: 24, top: 40, bottom: 44 },
+    xAxis: { type: 'category', data: ['地层压力'] },
+    yAxis: { type: 'value', name: series.yName },
+    series: [
+      { name: '理论值', type: 'bar', barWidth: 44, data: [series.theoretical] },
+      { name: '实际值', type: 'bar', barWidth: 44, data: [series.actual] }
+    ]
   })
-  chartObserver.observe(el)
 }
 
-const renderChart = async () => {
+const setChartMode = async mode => {
+  chartMode.value = mode
   await nextTick()
-  disposeChart()
-  chartObserver?.disconnect()
-  chartObserver = null
-
-  if (chartMode.value === 'relative') {
-    if (!chartRef.value) return
-    chart = echarts.init(chartRef.value)
-    const series = buildRelativeSeries(chartFactors.value)
-    chart.setOption({
-      tooltip: { trigger: 'axis' },
-      legend: { bottom: 0, data: ['理论值', '实际值'] },
-      grid: { left: 60, right: 24, top: 40, bottom: 40 },
-      xAxis: { type: 'category', data: series.map(item => item.label) },
-      // 四个因素单位不同，绝对值不可同图比较，因此以理论值 100% 为基准
-      yAxis: { type: 'value', name: '相对理论值 (%)' },
-      series: [
-        { name: '理论值', type: 'bar', data: series.map(item => item.theoretical) },
-        { name: '实际值', type: 'bar', data: series.map(item => item.actual) }
-      ]
-    }, true)
-    observeChartSize(chartRef.value)
-    return
-  }
-
-  // 绝对值模式**按因素分面**：MPa 的 32 与小数的 0.74 画在同一根轴上，小的那几根根本看不见，
-  // 所以每个因素一张小图，各自带自己的单位与量纲。
-  const series = buildAbsoluteSeries(chartFactors.value)
-  facetCharts = series.map((item, index) => {
-    const el = facetRefs.value[index]
-    if (!el) return null
-    const instance = echarts.init(el)
-    instance.setOption({
-      tooltip: { trigger: 'axis' },
-      grid: { left: 56, right: 12, top: 28, bottom: 26 },
-      xAxis: { type: 'category', data: ['理论值', '实际值'] },
-      yAxis: { type: 'value', name: item.unit },
-      series: [{
-        type: 'bar',
-        barWidth: 26,
-        data: [
-          { value: item.theoretical, itemStyle: { color: '#909399' } },
-          { value: item.actual, itemStyle: { color: '#f4d000' } }
-        ]
-      }]
-    })
-    return instance
-  }).filter(Boolean)
+  renderChart()
 }
 
-const applyContext = data => {
-  factors.value = data?.factors || []
-  inputs.value = data?.inputs || { gasPvtParam: {} }
-  warnings.value = data?.warnings || []
-  theoreticalDraft.value = {}
-  actualDraft.value = {}
+let active = true
+let loadVersion = 0
+onBeforeUnmount(() => {
+  active = false
+  loadVersion++
+  chart?.dispose()
+  chart = null
+})
+
+const unwrap = response => response?.data ?? response
+
+const applyInputs = inputs => {
+  const display = toDisplayInputs(inputs)
+  if (display) Object.assign(form, display)
+}
+
+/** 重置只撤销本次计算结果，保留用户已填写或已导入的全部参数。 */
+const resetCalculation = () => {
+  result.value = null
+  error.value = ''
 }
 
 const load = async () => {
-  if (controller) controller.abort()
-  controller = new AbortController()
+  const version = ++loadVersion
   loading.value = true
   error.value = ''
-  let loaded = false
+  result.value = null
+  importedFileName.value = ''
+  resultStale.value = false
   try {
-    applyContext(unwrap(await storageMainFactorApi.context(scope.value, controller.signal)))
-    loaded = true
-  } catch (cause) {
-    // 后端用 silentError，页面自己显示中文原因
-    error.value = cause?.msg || cause?.message || '读取主控因素分析数据失败'
+    // 这一趟**只用来校验库范围**，并在库数据异常时立刻报错；
+    // 刻意**不预填表单**：参数表与原平台 MBE 表单对齐后，用户从"请输入"开始自己填
+    // （与「微观损耗」一致）。理论值、实际值、差异也都要点过「计算」才出现。
+    await storageMainFactorApi.context(scope.value)
+    if (!active || version !== loadVersion) return
+
+    // 保存过就用保存值覆盖预填：用户上次看到的参数与结果要能原样恢复。
+    //
+    // 这一段**单独 catch**：读"已保存记录"失败（迁移脚本还没执行、或该库从未保存过）
+    // 是正常状态，不能把上面已经读到的库内数据一起判死——否则每次打开页面都是一片红。
+    try {
+      const saved = unwrap(await storageMainFactorApi.saved(scope.value))
+      if (!active || version !== loadVersion || !saved) return
+      applyInputs(saved.inputs)
+      // 差异与百分比偏差由后端在读取时重算（它们不入库）：
+      // 不带上这两个字段，重新打开就会看到"两侧都有值、差异却是 —"。
+      result.value = {
+        formationPressure: saved.theoreticalPressure,
+        measuredPressure: { value: saved.actualPressure, source: 'AUTO', note: null },
+        difference: saved.difference,
+        deviationPercent: saved.deviationPercent
+      }
+    } catch (e) {
+      // 忽略：没有已保存记录不影响本次读取
+    }
+  } catch (e) {
+    if (active && version === loadVersion) error.value = e?.message || '读取库内物质平衡输入失败'
   } finally {
-    loading.value = false
+    if (active && version === loadVersion) loading.value = false
   }
-  // 必须在 loading 关掉之后才画图：图表所在的 v-else 分支在 loading 期间根本不存在，
-  // 提前调用会拿到空的 chartRef 然后静默 return，图表永远不出现。
-  if (loaded) await renderChart()
-}
-
-/**
- * 构造要回传的工具箱入参。
- *
- * 必须深拷一层再转换：直接改 inputs.value.gasPvtParam 会把用户清空的输入框就地改成 0，
- * 界面上看起来"自己变成了 0"，而且之后再提交就是那个 0。空值保持 null，
- * 由后端（Jackson 对原始类型）按 0 处理。
- */
-const buildInputs = () => {
-  const current = inputs.value
-  if (!current) return null
-  const merged = { ...current }
-  INPUT_FIELDS.forEach(field => {
-    merged[field.key] = toNumberOrNull(merged[field.key])
-  })
-  const pvt = { ...(current.gasPvtParam || {}) }
-  PVT_FIELDS.forEach(field => {
-    pvt[field.key] = toNumberOrNull(pvt[field.key])
-  })
-  merged.gasPvtParam = pvt
-  return merged
-}
-
-/**
- * 汇总某一侧要回传的取值：用户改过的按"手动填写"，否则把当前值**连同来源**原样回传。
- *
- * 两个必须点：一是不能只发手输值，否则 context 读到的实际地层压力/实际天然气量
- * 会在点一次计算后变成 MISSING；二是必须带上 source/note，
- * 否则"实测静压：X-1"这类溯源信息会被统一冲成"手动填写"。
- */
-const effectiveValues = (draft, side) => {
-  const collected = {}
-  factors.value.forEach(factor => {
-    const typed = toNumberOrNull(draft[factor.key])
-    if (typed !== null) {
-      collected[factor.key] = { value: typed, source: 'MANUAL', note: '手动填写' }
-      return
-    }
-    const current = factor[side]
-    if (current && current.value !== null && current.value !== undefined) {
-      collected[factor.key] = { value: current.value, source: current.source, note: current.note }
-    }
-  })
-  return collected
 }
 
 const calculate = async () => {
+  if (calculating.value || saving.value) return
+  if (!(scope.value.storageId > 0)) {
+    ElMessage.warning('请先选择具体储气库')
+    return
+  }
+  // 与「微观损耗」同一套校验：先看必填、再看数值格式，不过就同一句提示。
+  // 放在调接口之前，是为了不用户等一次 400 往返才知道少填了东西。
+  const raw = Object.values(form)
+  if (raw.some(value => value === '' || value === null || value === undefined)
+    || !raw.every(value => Number.isFinite(Number(value)))) {
+    ElMessage.warning('请完整填写计算参数')
+    return
+  }
   calculating.value = true
   error.value = ''
+  result.value = null
   try {
-    const result = unwrap(await storageMainFactorApi.calculate({
+    const response = unwrap(await storageMainFactorApi.calculate({
       ...scope.value,
-      volumeFactor: toNumberOrNull(volumeFactor.value),
-      theoretical: effectiveValues(theoreticalDraft.value, 'theoretical'),
-      actual: effectiveValues(actualDraft.value, 'actual'),
-      inputs: buildInputs()
+      inputs: toAppInputs(form)
     }))
-    factors.value = result?.factors || factors.value
-    calculated.value = true
-    warnings.value = result?.warnings || []
-    await renderChart()
-  } catch (cause) {
-    error.value = cause?.msg || cause?.message || '计算失败'
+    if (!active) return
+    result.value = response
+    resultStale.value = false
+  } catch (e) {
+    if (active) error.value = e?.message || '计算失败'
   } finally {
-    calculating.value = false
+    if (active) calculating.value = false
   }
 }
 
-const onResize = () => {
-  chart?.resize()
-  facetCharts.forEach(instance => instance.resize())
+const save = async () => {
+  if (!result.value) {
+    // 两种"没结果"要说清楚是哪一种：参数改过（旧结果已作废）与从没算过，
+    // 用户的下一步动作不一样。
+    ElMessage.warning(resultStale.value ? '参数已修改，请重新计算后再保存' : '请先计算，再保存')
+    return
+  }
+  saving.value = true
+  try {
+    await storageMainFactorApi.save({
+      ...scope.value,
+      inputs: toAppInputs(form),
+      theoreticalPressure: result.value.formationPressure ?? null,
+      actualPressure: result.value.measuredPressure?.value ?? null
+    })
+    // 理论值为空也允许保存（平台可能只是暂时不可用），但要说明存下去的是什么。
+    if (result.value.formationPressure === null || result.value.formationPressure === undefined) {
+      ElMessage.warning('已保存；本次没有理论地层压力（原平台不可用），该字段存为空')
+    } else {
+      ElMessage.success('已保存')
+    }
+  } catch (e) {
+    ElMessage.error(e?.message || '保存失败')
+  } finally {
+    saving.value = false
+  }
 }
 
-watch(() => [props.reservoir?.projectId, props.reservoir?.gasReservoirId, props.reservoir?.storageId], () => {
-  load()
-}, { immediate: true })
+/**
+ * 导入的是「天然气基础数据」：第一列气型，随后四列比重与三个组分（百分数）。 */
+const handleGasImport = async ({ file, options }) => {
+  try {
+    const extension = file.name.split('.').pop()?.toLowerCase()
+    if (!['xlsx', 'xls', 'csv'].includes(extension)) throw new Error('仅支持 .xlsx、.xls、.csv 表格文件')
+    const XLSX = await import('xlsx')
+    const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' })
+    const sheet = workbook.Sheets[workbook.SheetNames[0]]
+    let rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: '' })
+    if (options?.removeEmptyRows) rows = rows.filter(row => row.some(value => String(value).trim()))
+    const row = rows.slice(1).find(item => item.some(value => String(value).trim()))
+    if (!row) throw new Error('文件中没有可导入的天然气基础数据')
+    const gasTypes = { 干气: 0, 湿气: 1, 凝析气: 2 }
+    if (!(String(row[0]).trim() in gasTypes)) throw new Error('天然气类型只能为干气、湿气或凝析气')
+    const numbers = row.slice(1, 5).map(Number)
+    if (!numbers.every(Number.isFinite)) throw new Error('天然气比重及气体组分必须是有效数字')
+    Object.assign(form, {
+      gasType: gasTypes[String(row[0]).trim()],
+      specificGravity: numbers[0],
+      h2SMoleFraction: numbers[1],
+      co2MoleFraction: numbers[2],
+      n2MoleFraction: numbers[3]
+    })
+    importedFileName.value = file.name
+    result.value = null
+    ElMessage.success('PVT基础数据导入成功')
+  } catch (e) {
+    ElMessage.error(e?.message || 'PVT数据导入失败')
+  }
+}
 
-watch(chartMode, () => renderChart())
+/** 参数一改，上次结果就作废，避免"保存"把改动前的计算值一起存下去。 */
+watch(form, () => {
+  if (result.value) resultStale.value = true
+  result.value = null
+}, { deep: true, flush: 'sync' })
 
-if (typeof window !== 'undefined') window.addEventListener('resize', onResize)
-
-onBeforeUnmount(() => {
-  if (controller) controller.abort()
-  if (typeof window !== 'undefined') window.removeEventListener('resize', onResize)
-  disposeChart()
+// 结果一出现就画图；结果作废时容器被 v-if 移除，实例同时释放。
+watch(result, async value => {
+  if (!value) {
+    chart?.dispose()
+    chart = null
+    return
+  }
+  await nextTick()
+  renderChart()
 })
+watch(() => [scope.value.projectId, scope.value.gasReservoirId, scope.value.storageId], load, { immediate: true })
 </script>
 
 <template>
-  <section class="storage-main-factor" aria-label="主控因素分析">
-    <div class="module-tabs">
-      <div class="module-title">主控因素分析</div>
-    </div>
+  <section class="main-factor">
+    <!-- 顶部功能区：标题、PVT 导入入口、保存。与「微观损耗」同一套结构。 -->
+    <header class="result-tabs">
+      <div class="result-tab" :title="title"><span>{{ title }}</span></div>
+      <div class="header-actions">
+        <button class="secondary" type="button" @click="importDialogVisible = true">导入PVT</button>
+        <button class="primary" type="button" :disabled="saving" @click="save">{{ saving ? '保存中…' : '保存' }}</button>
+      </div>
+    </header>
 
-    <div class="workspace">
-      <aside class="params-panel">
-        <div class="panel-head">参数设置</div>
-        <div class="panel-body">
-          <!-- 左侧唯一必须手填的就是 Bg，放最前面 -->
-          <label class="field">
-            <span>天然气体积系数 Bg（必填项）</span>
-            <input v-model="volumeFactor" inputmode="decimal" autocomplete="off" placeholder="例如 0.0065" />
-          </label>
+    <main class="form-canvas">
+      <div class="form-title">请输入计算参数</div>
 
-          <label v-for="field in INPUT_FIELDS" :key="field.key" class="field">
-            <span>{{ field.label }}（{{ field.unit }}）</span>
-            <input v-model="inputs[field.key]" inputmode="decimal" autocomplete="off" />
-          </label>
+      <div v-if="error" class="form-error" role="alert">{{ error }}</div>
+      <div v-else-if="loading" class="form-loading" role="status">正在读取库内井的物质平衡输入…</div>
 
-          <div class="group-title">气体 PVT 参数</div>
-          <label v-for="field in PVT_FIELDS" :key="field.key" class="field">
-            <span>{{ field.label }}（{{ field.unit }}）</span>
-            <input v-model="inputs.gasPvtParam[field.key]" inputmode="decimal" autocomplete="off" />
-          </label>
+      <div class="parameter-grid">
+        <!-- 气藏类型与天然气物性用下拉框，其余按公式需要的量手填或由库内预填。 -->
+        <label class="field"><span>气藏类型</span>
+          <select v-model.number="form.gasReservoirType">
+            <option :value="0">封闭气藏</option>
+            <option :value="1">定容气藏</option>
+            <option :value="2">页岩气藏</option>
+          </select>
+        </label>
+        <label class="field"><span>原始地层压力（MPa）</span><input v-model="form.originalPressure" placeholder="请输入" inputmode="decimal" /></label>
+        <label class="field"><span>地层温度（℃）</span><input v-model="form.formationTemperature" placeholder="请输入" inputmode="decimal" /></label>
+        <label class="field"><span>动态地质储量（10⁸m³）</span><input v-model="form.originalGasInPlace" placeholder="请输入" inputmode="decimal" /></label>
+        <label class="field"><span>累产气量（10⁸m³）</span><input v-model="form.cumulativeGasProduction" placeholder="请输入" inputmode="decimal" /></label>
+        <label class="field"><span>岩石压缩系数（MPa⁻¹）</span><input v-model="form.rockCompressionCoefficient" placeholder="请输入" inputmode="decimal" /></label>
+        <label class="field"><span>地层水压缩系数（MPa⁻¹）</span><input v-model="form.waterCompressionCoefficient" placeholder="请输入" inputmode="decimal" /></label>
+        <label class="field"><span>束缚水饱和度（%）</span><input v-model="form.waterSaturation" placeholder="请输入" inputmode="decimal" /></label>
+        <label class="field"><span>天然气类型</span>
+          <select v-model.number="form.gasType">
+            <option :value="0">干气</option>
+            <option :value="1">湿气</option>
+            <option :value="2">凝析气</option>
+          </select>
+        </label>
+        <label class="field"><span>天然气比重（dless）</span><input v-model="form.specificGravity" placeholder="请输入" inputmode="decimal" /></label>
+        <label class="field"><span>H₂S摩尔百分含量（%）</span><input v-model="form.h2SMoleFraction" placeholder="请输入" inputmode="decimal" /></label>
+        <label class="field"><span>CO₂摩尔百分含量（%）</span><input v-model="form.co2MoleFraction" placeholder="请输入" inputmode="decimal" /></label>
+        <label class="field"><span>N₂摩尔百分含量（%）</span><input v-model="form.n2MoleFraction" placeholder="请输入" inputmode="decimal" /></label>
+        <label class="field"><span>非烃气体修正方法</span>
+          <select v-model.number="form.modificationMethod">
+            <option :value="0">Wichert-Aziz 修正方法</option>
+            <option :value="1">Carr-Kobayashi-Burrows 方法</option>
+          </select>
+        </label>
+        <label class="field"><span>天然气偏差系数计算方法</span>
+          <select v-model.number="form.deviationFactorMethod">
+            <option :value="0">Dranchuk-Abu-Kassem 方法</option>
+            <option :value="1">Dranchuk-Purvis-Robinson 方法</option>
+            <option :value="2">Hall-Yarborough 方法</option>
+          </select>
+        </label>
+      </div>
 
+      <div v-if="importedFileName" class="import-note">已导入：{{ importedFileName }}</div>
+
+      <div class="calculation-actions">
+        <button class="calculate" type="button" :disabled="calculating" @click="calculate">{{ calculating ? '计算中…' : '计 算' }}</button>
+        <button class="reset" type="button" @click="resetCalculation">重 置</button>
+      </div>
+
+      <!-- 计算结果：只保留地层压力的理论值 / 实际值 / 差异。 -->
+      <section class="result-card">
+        <h3>计算结果</h3>
+        <div class="result-line">
+          <span>地层压力（MPa）：</span>
+          <span>理论值 <strong>{{ formatComputedValue(result?.formationPressure) }}</strong></span>
+          <span>实际值 <strong>{{ formatComputedValue(result?.measuredPressure?.value) }}</strong></span>
+          <span class="difference" :class="(differenceDirection(result?.difference) || '').toLowerCase()">
+            差异 <strong>{{ formatComputedValue(result?.difference) }}</strong>
+            <template v-if="result?.deviationPercent !== null && result?.deviationPercent !== undefined">
+              （{{ formatComputedValue(result.deviationPercent) }}%）
+            </template>
+          </span>
         </div>
+        <!-- 结果区只保留数值与对比图：不显示任何解释性文字。 -->
+        <template v-if="result">
+          <div class="chart-head">
+            <span>理论 vs 实际</span>
+            <button class="mode" :class="{ active: chartMode === 'relative' }" type="button" @click="setChartMode('relative')">相对理论值</button>
+            <button class="mode" :class="{ active: chartMode === 'absolute' }" type="button" @click="setChartMode('absolute')">绝对值</button>
+          </div>
+          <div ref="chartRef" class="chart"></div>
+        </template>
+      </section>
+    </main>
 
-        <!-- 按钮与滚动区分离：滚动的只有 .panel-body -->
-        <div class="panel-footer">
-          <button class="calculate" :disabled="loading || calculating" @click="calculate">
-            {{ calculating ? '计算中…' : '读取并计算' }}
-          </button>
-        </div>
-      </aside>
-
-      <main class="result-area">
-        <div class="result-tabs">
-          <div class="result-tab">{{ reservoir?.label || '当前库' }} · 主控因素分析</div>
-        </div>
-
-        <div class="result-body">
-          <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon />
-          <div v-else-if="loading" class="status" role="status">正在读取库内井的物质平衡输入…</div>
-
-          <template v-else>
-            <table class="factor-table">
-              <thead>
-                <tr>
-                  <th>因素</th>
-                  <th>理论值</th>
-                  <th>实际值</th>
-                  <th>差异（实际 − 理论）</th>
-                  <th>百分比偏差</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="row in rows" :key="row.key">
-                  <td class="factor-name">
-                    {{ row.label }}
-                    <span class="unit">（{{ row.unit }}）</span>
-                  </td>
-                  <td>
-                    <input :value="cellValue(row, 'theoretical')"
-                      @input="onCellInput('theoretical', row.key, $event)"
-                      inputmode="decimal" autocomplete="off" :placeholder="placeholderFor(row.key)" />
-                    <!-- 理论值：没有值就明说"需手填"，有值才显示来源 -->
-                    <span v-if="cellSourceType(row, 'theoretical') === 'MISSING'"
-                      class="source missing">{{ missingHint(row.key) }}</span>
-                    <span v-else class="source" :class="cellSourceType(row, 'theoretical').toLowerCase()">
-                      {{ cellSourceLabel(row, 'theoretical') }}
-                    </span>
-                  </td>
-                  <td>
-                    <input :value="cellValue(row, 'actual')"
-                      @input="onCellInput('actual', row.key, $event)"
-                      inputmode="decimal" autocomplete="off" />
-                    <!-- 实际值都是自动算出来的，只标"自动读取"；手改过的就不标了 -->
-                    <span v-if="cellSourceType(row, 'actual') === 'AUTO'" class="source auto">自动读取</span>
-                  </td>
-                  <td :class="['difference', row.direction ? row.direction.toLowerCase() : '']">
-                    {{ row.differenceText }}
-                  </td>
-                  <td>{{ row.deviationText }}</td>
-                </tr>
-              </tbody>
-            </table>
-
-            <div class="chart-head">
-              <span>理论 vs 实际</span>
-              <button class="mode" :class="{ active: chartMode === 'relative' }" @click="chartMode = 'relative'">相对理论值</button>
-              <button class="mode" :class="{ active: chartMode === 'absolute' }" @click="chartMode = 'absolute'">绝对值</button>
-            </div>
-            <div v-if="chartMode === 'relative'" ref="chartRef" class="chart"></div>
-            <div v-else class="facet-grid">
-              <div v-for="(item, index) in buildAbsoluteSeries(factors)" :key="item.key" class="facet">
-                <div class="facet-title">{{ item.label }}（{{ item.unit }}）</div>
-                <div :ref="el => setFacetRef(el, index)" class="facet-chart"></div>
-              </div>
-            </div>
-          </template>
-        </div>
-      </main>
-    </div>
+    <NaturalGasImportDialog v-model="importDialogVisible" import-kind="data" @confirm="handleGasImport" />
   </section>
 </template>
 
 <style scoped>
-.storage-main-factor {
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  background: #fff;
-}
-.module-tabs {
-  height: 34px;
-  flex: 0 0 34px;
-  display: flex;
-  align-items: center;
-  background: #fafafa;
-  border-bottom: 1px solid #e4e7ed;
-}
-.module-title {
-  height: 34px;
-  padding: 0 12px;
-  display: flex;
-  align-items: center;
-  background: #f4d000;
-  color: #202020;
-  font: 600 14px Arial, sans-serif;
-}
-.workspace {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-}
-.params-panel {
-  width: 280px;
-  flex: 0 0 280px;
-  border-right: 1px solid #e4e7ed;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  /* 上级容器有时给不出确定高度，整栏会比视口高一点，最下方的按钮就被裁掉。
-     这里留出底部余量，把按钮往上提，保证完整可见。 */
-  padding-bottom: 24px;
-}
-.panel-head {
-  height: 32px;
-  flex: 0 0 32px;
-  display: flex;
-  align-items: center;
-  padding: 0 12px;
-  background: #fafafa;
-  border-bottom: 1px solid #e4e7ed;
-  font-weight: 600;
-  font-size: 13px;
-}
-/* 参数栏页脚：与滚动区分离，按钮始终完整可见 */
-.panel-footer {
-  flex: 0 0 auto;
-  padding: 10px 12px;
-  border-top: 1px solid #e4e7ed;
-  background: #fff;
-}
-.panel-body {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  /* 覆盖式滚动条会浮在内容之上：按钮 width:100% 会把它底部压住，
-     看起来"只有上方箭头"。预留滚动条槽位即可。 */
-  scrollbar-gutter: stable;
-  padding: 12px;
-}
-.panel-note {
-  margin: 0 0 10px;
-  color: #909399;
-  font-size: 12px;
-  line-height: 1.6;
-}
-/* 整栏里只有 Bg 必须手输，单独框出来，避免用户以为整栏都要填 */
-.required-block {
-  margin-bottom: 16px;
-  padding: 10px;
-  border: 1px solid #f4d000;
-  border-radius: 2px;
-  background: #fffdf0;
-}
-.required-title {
-  margin-bottom: 8px;
-  color: #8d6e00;
-  font-size: 12px;
-  font-weight: 600;
-}
-.group-title {
-  margin: 14px 0 8px;
-  color: #606266;
-  font-size: 12px;
-  font-weight: 600;
-}
-.field {
-  display: block;
-  margin-bottom: 10px;
-}
-.field > span {
-  display: block;
-  margin-bottom: 4px;
-  color: #606266;
-  font-size: 12px;
-}
-.field input,
-.factor-table input {
-  width: 100%;
-  height: 28px;
-  box-sizing: border-box;
-  padding: 0 8px;
-  border: 1px solid #dcdfe6;
-  border-radius: 2px;
-  font-size: 12px;
-}
-.calculate {
-  width: 100%;
-  height: 36px;
-  /* 用 flex 居中：原来只给了 height，标签位置由继承行高决定，文字会贴底被裁 */
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  margin: 12px 0 0;
-  border: none;
-  border-radius: 2px;
-  background: #f4d000;
-  color: #202020;
-  font-size: 13px;
-  line-height: 1;
-  font-weight: 600;
-  cursor: pointer;
-}
-.calculate:disabled { opacity: .6; cursor: default; }
-.result-area {
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-.result-tabs {
-  height: 34px;
-  flex: 0 0 34px;
-  display: flex;
-  align-items: center;
-  background: #fafafa;
-  border-bottom: 1px solid #e4e7ed;
-}
-.result-tab {
-  height: 34px;
-  padding: 0 12px;
-  display: flex;
-  align-items: center;
-  background: #f4d000;
-  color: #202020;
-  font: 600 14px Arial, sans-serif;
-}
-.result-body {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 16px;
-}
-.status { color: #606266; font-size: 13px; }
-.warning { margin-bottom: 8px; }
-.factor-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 12px 0 20px;
-  font-size: 13px;
-}
-.factor-table th,
-.factor-table td {
-  border: 1px solid #e4e7ed;
-  padding: 8px 10px;
-  text-align: left;
-  vertical-align: middle;
-}
-.factor-table th { background: #fafafa; font-weight: 600; }
-.factor-name .unit { color: #909399; font-size: 12px; }
-.source {
-  display: inline-block;
-  margin-left: 6px;
-  padding: 0 4px;
-  border-radius: 2px;
-  font-size: 11px;
-  background: #f0f2f5;
-  color: #606266;
-}
-.source.auto { background: #e8f5e9; color: #2e7d32; }
-.source.manual { background: #fff8e1; color: #8d6e00; }
-.source.missing { background: #fdecea; color: #c62828; }
-.difference.positive { color: #c62828; }
-.difference.negative { color: #2e7d32; }
-.chart-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  font-weight: 600;
-  color: #606266;
-}
-.mode {
-  height: 24px;
-  padding: 0 10px;
-  border: 1px solid #dcdfe6;
-  border-radius: 2px;
-  background: #fff;
-  font-size: 12px;
-  cursor: pointer;
-}
-.mode.active { background: #f4d000; border-color: #f4d000; color: #202020; }
-.chart-note { margin: 6px 0 8px; color: #909399; font-size: 12px; }
-.chart { width: 100%; height: 320px; }
-/* 绝对值模式：四个因素单位不同，分面显示，各自带单位 */
-.facet-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-.facet {
-  border: 1px solid #e4e7ed;
-  border-radius: 2px;
-  padding: 8px;
-}
-.facet-title {
-  margin-bottom: 4px;
-  color: #606266;
-  font-size: 12px;
-  font-weight: 600;
-}
-.facet-chart { width: 100%; height: 200px; }
+/* 与「微观损耗」同一套字体基线与控件尺寸，两个页面看起来才是同一套设计。 */
+.main-factor { height: 100%; min-width: 760px; overflow: auto; background: #fff; color: #202020; font-family: Arial, sans-serif; font-size: 13px; }
+.result-tabs { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; height: 34px; padding: 0 8px 0 0; border-bottom: 1px solid #e4e7ed; background: #fafafa; box-sizing: border-box; }
+.result-tab { display: flex; align-self: stretch; align-items: center; justify-content: center; max-width: 430px; min-width: 190px; padding: 0 12px; overflow: hidden; border: 0; border-right: 1px solid #e4e7ed; background: #f4d000; color: #202020; font: 600 13px Arial, sans-serif; text-align: center; text-overflow: ellipsis; white-space: nowrap; box-sizing: border-box; }
+.result-tab > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.header-actions, .calculation-actions { display: flex; gap: 10px; }
+button { height: 27px; padding: 0 16px; border: 1px solid #c9cdd3; border-radius: 4px; background: #fff; color: #292929; font: inherit; cursor: pointer; }
+button:hover { border-color: #b49a00; }
+button:disabled { cursor: wait; opacity: .65; }
+button.primary { min-width: 74px; border-color: #202020; background: #202020; color: #fff; }
+.form-canvas { padding: 20px 18px 34px; }
+.form-title { margin-bottom: 20px; font-size: 13px; font-weight: 600; }
+.form-error { margin-bottom: 16px; padding: 8px 12px; border: 1px solid #fde2e2; border-radius: 4px; background: #fef0f0; color: #f56c6c; }
+.form-loading { margin-bottom: 16px; color: #909399; }
+.parameter-grid { display: grid; grid-template-columns: repeat(4, minmax(170px, 1fr)); gap: 20px 24px; }
+.field { display: grid; gap: 8px; min-width: 0; color: #333; }
+.field input, .field select { width: 100%; height: 34px; padding: 0 11px; border: 1px solid #d4d7dc; border-radius: 4px; background: #fff; box-sizing: border-box; color: #303133; font: inherit; outline: none; }
+.field input:focus, .field select:focus { border-color: #b49a00; box-shadow: 0 0 0 2px rgba(244,208,0,.14); }
+.import-note { margin-top: 14px; color: #777; font-size: 12px; }
+.calculation-actions { margin-top: 24px; }
+.calculation-actions button { height: 32px; }
+.calculate { min-width: 72px; border-color: #d5b900; background: #f4d000; }
+.reset { min-width: 72px; }
+.result-card { min-height: 142px; margin-top: 36px; padding: 18px 18px 26px; border: 1px solid #ececec; border-radius: 4px; background: #f5f5f5; box-sizing: border-box; }
+.result-card h3 { margin: 0 0 24px; font-size: 13px; }
+.result-line { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 22px; color: #333; }
+.result-line strong { font-size: 15px; font-weight: 500; }
+/* 实际低于理论为负：绿色；高于理论为正：红色。 */
+.difference.negative strong { color: #2f9e44; }
+.difference.positive strong { color: #e03131; }
+.result-note { margin: 14px 0 0; color: #909399; font-size: 12px; }
+/* 对比图压缩到左侧：只有一个因素，铺满整行会留下大片空白，横线也拉得过长。 */
+.chart-head { display: flex; align-items: center; gap: 8px; margin: 24px 0 0; color: #333; }
+.chart-head > span { margin-right: 4px; }
+button.mode { height: 24px; padding: 0 12px; font-size: 12px; }
+button.mode.active { border-color: #d5b900; background: #f4d000; }
+.chart { width: 380px; max-width: 100%; height: 260px; margin-top: 10px; }
+@media (max-width: 1250px) { .parameter-grid { grid-template-columns: repeat(3, minmax(170px, 1fr)); } }
+@media (max-width: 920px) { .parameter-grid { grid-template-columns: repeat(2, minmax(170px, 1fr)); } }
 </style>
