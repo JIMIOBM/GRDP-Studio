@@ -19,7 +19,9 @@ public final class PipelineDtos {
             @Positive double pressureRatio, @Positive @DecimalMax("1") double efficiency,
             @Positive double maxPressureMpa, @Positive double maxPowerKw) {}
     /** Water availability for hydrate screening; the correlation assumes pure, uninhibited water. */
-    public record Constraints(String waterState) {}
+    public record Constraints(String waterState, PipelineErosion.Configuration erosion) {
+        public Constraints(String waterState) { this(waterState,null); }
+    }
     @JsonIgnoreProperties(ignoreUnknown=true)
     public record BoundaryNode(String nodeId,Double supplyRate10k,Double withdrawalRate10k,
             Double pressureMpa,Double temperatureC) {}

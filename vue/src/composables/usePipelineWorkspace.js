@@ -3,12 +3,13 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { pipelineCapacityApi as api } from '@/api/pipelineCapacity'
 import { createPipelineInput, fingerprint, pipelineDrafts, statusLabels } from '@/utils/pipelineDefaults'
 import { pipelinePageTitles, pipelineTemperaturePages, resolvePipelinePage } from '@/utils/pipelineNavigation'
-import { pipelineSectionFields, normalizePipelineInput, sectionInput, reconcilePipelinePage } from '@/utils/pipelinePageState'
+import { pipelineSectionFields, normalizePipelineInput, sectionInput, reconcilePipelinePage, erosionLiquidSourceChanged } from '@/utils/pipelinePageState'
 import { hydrateBoundary, boundaryTimeIssue } from '@/utils/pipelineBoundary'
 import { pipelinePvtChanged } from '@/utils/pipelinePvtModel'
 import { constraintDataRows, topologyEquipment } from '@/utils/pipelineConstraintResults'
 import { boundaryComparisonRows } from '@/utils/pipelineBoundaryComparison'
 import { flowThermalSourceChanged } from '@/utils/pipelineFlowThermal'
+import { erosionInputIssue } from '@/utils/pipelineErosion'
 import { PIPELINE_BATCH_VERSION, resolveSavedNetworkTopology, batchInputMark, batchDataRows as makeBatchRows, batchChartSeries as makeBatchCharts, batchExportRows } from '@/utils/pipelineBatch'
 
 export function usePipelineWorkspace(props) {
@@ -20,11 +21,13 @@ export function usePipelineWorkspace(props) {
   const savedGraph = ref(null), topologyError = ref(''), topologyLoading = ref(false)
   const boundaryTopologyNotice = ref('')
   const gasPropertyConfig = ref(null), gasPropertyError = ref('')
+  const erosionLiquidSources = ref([]), erosionLiquidLoading = ref(false), erosionLiquidError = ref('')
   const thermalConfig = ref(null), thermalSourceError = ref(''), thermalSourceLoading = ref(false)
   const gasPropertyLoading = ref(false)
   let thermalLoadId = 0
   let boundaryLoadId = 0
   let gasLoadId = 0
+  let erosionLiquidLoadId = 0
   let topologyLoadId = 0
   const loaded = ref(false)
   const activePage = ref(resolvePipelinePage(props.initialSection)), panel = ref('data')
@@ -33,10 +36,12 @@ export function usePipelineWorkspace(props) {
   const batchResult = computed(() => batchDetail.value?.result || null)
   const batchBusy = computed(() => busy.value || topologyLoading.value || gasPropertyLoading.value || (form.value.thermalMode === 'heat' && thermalSourceLoading.value))
   const batchError = computed(() => error.value)
-  const batchStale = computed(() => !!batchDetail.value && (batchResult.value?.algorithmVersion !== PIPELINE_BATCH_VERSION
+  const batchStale = computed(() => !!batchDetail.value && (batchDetail.value.stale || batchResult.value?.algorithmVersion !== PIPELINE_BATCH_VERSION
     || !!topologyError.value || !!gasPropertyError.value
     || batchInputMark(batchDetail.value.input, batchDetail.value.topologyRevision) !== batchInputMark(form.value, topologyRevision.value)
     || pipelinePvtChanged(gasPropertyConfig.value, batchDetail.value.input?.gasModel)
+    || (batchDetail.value.input?.constraints?.erosion?.liquidPvt?.pvtId && (!!erosionLiquidError.value
+      || erosionLiquidSourceChanged(erosionLiquidSources.value, batchDetail.value.input.constraints.erosion.liquidPvt)))
     || (form.value.thermalMode === 'heat' && (!!thermalSourceError.value
       || flowThermalSourceChanged(thermalConfig.value, batchDetail.value.input?.thermalModel, topologyRevision.value)))))
   const currentBatch = computed(() => !!batchResult.value && !batchStale.value && !batchBusy.value)
@@ -57,8 +62,10 @@ export function usePipelineWorkspace(props) {
   const comparisonRows = computed(() => boundaryComparisonRows(batchDetail.value, currentBatch.value))
   const batchSaved = computed(() => !!batchDetail.value?.id)
   const batchGasModel = computed(() => batchDetail.value?.input?.gasModel || null)
-  const resultPages = ['flow', 'equipment', 'hydrate', 'comparison']
+  const resultPages = ['flow', 'equipment', 'hydrate', 'erosion', 'comparison']
   const errorText = e => e?.response?.data?.msg || e?.msg || e?.message || '操作失败'
+  const preferredResultPanel = (result = batchResult.value) => activePage.value === 'erosion'
+    && !result?.cases?.some(condition => condition.erosion?.some(row => Number.isFinite(row.criticalVelocityMs))) ? 'data' : 'analysis'
 
   async function openSection() {
     activePage.value = resolvePipelinePage(props.initialSection)
@@ -68,12 +75,13 @@ export function usePipelineWorkspace(props) {
       await loadTopology()
       if (resultPages.includes(activePage.value)) {
         await refreshThermalSource()
-        if (batchResult.value && !batchStale.value) panel.value = 'analysis'
+        await refreshErosionLiquidSources()
+        if (batchResult.value && !batchStale.value) panel.value = preferredResultPanel()
       }
     }
   }
   watch(() => [props.commandKey, props.initialSection], openSection)
-  watch(activePage, () => { panel.value = resultPages.includes(activePage.value) && batchResult.value && !batchStale.value ? 'analysis' : 'data' })
+  watch(activePage, () => { panel.value = resultPages.includes(activePage.value) && batchResult.value && !batchStale.value ? preferredResultPanel() : 'data' })
 
   async function mayDiscard() {
     if (!dirty.value) return true
@@ -115,6 +123,7 @@ export function usePipelineWorkspace(props) {
     if (loaded.value && !busy.value) {
       refreshGasProperties()
       refreshThermalSource()
+      refreshErosionLiquidSources()
       if (resultPages.includes(activePage.value)) refreshBoundarySource().then(ok => { if (ok) loadTopology() })
       else if (activePage.value === 'boundary') loadTopology()
     }
@@ -156,6 +165,30 @@ export function usePipelineWorkspace(props) {
       return false
     } finally { if (requestId === gasLoadId) gasPropertyLoading.value = false }
   }
+  async function refreshErosionLiquidSources() {
+    const requestId = ++erosionLiquidLoadId
+    const selectedId = form.value.constraints?.erosion?.liquidPvtId
+    erosionLiquidLoading.value = true
+    try {
+      let sources = [], listError = null
+      try { sources = (await api.erosionLiquidSources(context.value)).data || [] }
+      catch (e) { listError = e }
+      // A deleted/incomplete source has a stable issue snapshot too. A fresh unevaluated
+      // batch remains saveable, while a formerly valid source still invalidates old results.
+      if (selectedId && !sources.some(source => Number(source.pvtId) === Number(selectedId))) {
+        const selected = (await api.erosionLiquidSource(context.value, selectedId)).data
+        if (selected) { sources.push(selected); listError = null }
+      }
+      if (listError) throw listError
+      if (requestId !== erosionLiquidLoadId) return false
+      erosionLiquidSources.value = sources.map(source => ({ ...source, id: source.pvtId, name: source.pvtName || `PVT ${source.pvtId}` }))
+      erosionLiquidError.value = ''
+      return true
+    } catch (e) {
+      if (requestId === erosionLiquidLoadId) erosionLiquidError.value = '地层水 PVT 来源加载失败：' + errorText(e)
+      return false
+    } finally { if (requestId === erosionLiquidLoadId) erosionLiquidLoading.value = false }
+  }
   async function refreshThermalSource() {
     const requestId = ++thermalLoadId
     thermalSourceLoading.value = true
@@ -183,10 +216,11 @@ export function usePipelineWorkspace(props) {
       }
       await loadTopology()
       await refreshGasProperties()
+      await refreshErosionLiquidSources()
       await refreshThermalSource()
       if (!preserveDraft || manual) batchDetail.value = (await api.latestBatch(context.value)).data || null
       loaded.value = true
-      if (resultPages.includes(activePage.value) && batchResult.value && !batchStale.value) panel.value = 'analysis'
+      if (resultPages.includes(activePage.value) && batchResult.value && !batchStale.value) panel.value = preferredResultPanel()
     } catch (e) { storageError.value = errorText(e) } finally { busy.value = false }
   }
   async function calculate() {
@@ -194,13 +228,23 @@ export function usePipelineWorkspace(props) {
     try {
       if (!(await refreshBoundarySource())) return
       if (!(await refreshGasProperties())) { error.value = gasPropertyError.value; return }
+      await refreshErosionLiquidSources()
       if (!(await loadTopology())) { error.value = topologyError.value; return }
+      if (activePage.value === 'erosion') {
+        const issue = erosionInputIssue(savedGraph.value, form.value.boundary.cases, form.value.constraints?.erosion)
+        if (issue) { error.value = issue; panel.value = 'data'; ElMessage.warning(issue); return }
+      }
       if (form.value.thermalMode === 'heat' && !(await refreshThermalSource())) { error.value = thermalSourceError.value; return }
       const { data } = await api.calculateBatch({ ...context.value, revision: revision.value,
         topologyRevision: topologyRevision.value, input: JSON.parse(fingerprint(form.value)) })
       batchDetail.value = data; form.value = normalizePipelineInput(data.input)
-      panel.value = data.result.successCount > 0 ? 'analysis' : 'data'
-      ElMessage.success(`全部工况已处理：成功 ${data.result.successCount} 组，失败 ${data.result.failureCount} 组`)
+      panel.value = data.result.successCount > 0 ? preferredResultPanel(data.result) : 'data'
+      if (activePage.value === 'erosion') {
+        const evaluated = data.result.cases.flatMap(condition => condition.status === 'success' ? condition.erosion || [] : [])
+          .filter(row => Number.isFinite(row.criticalVelocityMs)).length
+        const remaining = form.value.boundary.cases.length * savedGraph.value.edges.length - evaluated
+        ElMessage[remaining > 0 ? 'warning' : 'success'](`冲蚀计算完成：已评价 ${evaluated} 条，未评价 ${remaining} 条`)
+      } else ElMessage.success(`全部工况已处理：成功 ${data.result.successCount} 组，失败 ${data.result.failureCount} 组`)
     } catch (e) { error.value = errorText(e) } finally { busy.value = false }
   }
   async function save() {
@@ -209,13 +253,14 @@ export function usePipelineWorkspace(props) {
     try {
       if (!(await refreshBoundarySource())) return
       if (!(await refreshGasProperties())) { error.value = gasPropertyError.value; return }
+      await refreshErosionLiquidSources()
       if (!(await loadTopology())) { error.value = topologyError.value; return }
       if (form.value.thermalMode === 'heat' && !(await refreshThermalSource())) { error.value = thermalSourceError.value; return }
       if (batchStale.value) { error.value = '计算参数或数据来源已变化，请重新计算全部工况后保存。'; return }
       const { data } = await api.saveBatch({ ...context.value, calculationToken: batchDetail.value.calculationToken })
       batchDetail.value = data; form.value = normalizePipelineInput(data.input); revision.value = data.revision
       savedMark.value = fingerprint(form.value); savedTopologyRevision.value = data.topologyRevision
-      panel.value = 'analysis'; ElMessage.success('全部工况参数及本批计算结果已保存')
+      panel.value = preferredResultPanel(data.result); ElMessage.success('全部工况参数及本批计算结果已保存')
     } catch (e) { error.value = errorText(e) } finally { busy.value = false }
   }
   function exportResult() {
@@ -241,11 +286,11 @@ export function usePipelineWorkspace(props) {
   onBeforeUnmount(() => {
     if (loaded.value) pipelineDrafts.set(cacheKey, JSON.parse(JSON.stringify(Object.fromEntries(Object.entries(draftFields).map(([key, state]) => [key, state.value])))))
     window.removeEventListener('beforeunload', protectReload)
-    window.removeEventListener('focus', refreshTopologyOnFocus); ++topologyLoadId; ++gasLoadId; ++thermalLoadId; ++boundaryLoadId
+    window.removeEventListener('focus', refreshTopologyOnFocus); ++topologyLoadId; ++gasLoadId; ++thermalLoadId; ++boundaryLoadId; ++erosionLiquidLoadId
   })
 
   const pageDirty = computed(() => {
-    if (!pipelineSectionFields[activePage.value]) return ['flow', 'hydrate'].includes(activePage.value) && dirty.value
+    if (!pipelineSectionFields[activePage.value]) return ['flow', 'hydrate', 'erosion'].includes(activePage.value) && dirty.value
     const savedInput = savedMark.value ? JSON.parse(savedMark.value) : createPipelineInput()
     return fingerprint(sectionInput(form.value, activePage.value)) !== fingerprint(sectionInput(savedInput, activePage.value))
   })
@@ -273,7 +318,7 @@ export function usePipelineWorkspace(props) {
   }
   async function savePage() {
     const page = activePage.value
-    if (['flow', 'hydrate'].includes(page)) return save()
+    if (['flow', 'hydrate', 'erosion'].includes(page)) return save()
     if (!pipelineSectionFields[page]) return
     busy.value = true; error.value = ''
     try {
@@ -290,6 +335,7 @@ export function usePipelineWorkspace(props) {
   }
 
   return reactive({ context, temperaturePage, form, name, revision, topologyRevision, savedTopologyRevision,
+    erosionLiquidSources, erosionLiquidLoading, erosionLiquidError, refreshErosionLiquidSources,
     gasPropertyConfig, gasPropertyError, refreshGasProperties, thermalConfig, thermalSourceError, thermalSourceLoading, refreshThermalSource,
     batchResult, batchStale, batchError, batchBusy, batchDataRows, batchChartSeries, canBatchSave,
     batchSaved, batchGasModel, equipmentCatalog, equipmentRows, hydrateRows, comparisonRows,

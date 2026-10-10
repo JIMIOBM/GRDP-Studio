@@ -19,12 +19,13 @@ import java.nio.charset.StandardCharsets;
 import java.time.*;
 import java.time.format.DateTimeParseException;
 import java.util.*;
+import java.util.function.BiFunction;
 import static com.grdp.studio.pipeline.PipelineDtos.*;
 
 /** Each batch uses one immutable set of well sources; saving never accepts client-calculated results. */
 @Service
 public class PipelineBatch {
-    public static final String VERSION="network-batch-2.0";
+    public static final String VERSION="network-batch-2.2";
     public record Calculate(@Positive long projectId,@Positive long gasReservoirId,@NotBlank @Size(max=100) String wellName,
             @PositiveOrZero int revision,@Positive int topologyRevision,@NotNull Input input) {}
     public record Save(@Positive long projectId,@Positive long gasReservoirId,@NotBlank @Size(max=100) String wellName,
@@ -32,11 +33,22 @@ public class PipelineBatch {
     @JsonInclude(JsonInclude.Include.ALWAYS)
     public record CaseResult(String caseId,String operatingAt,String status,String error,
             List<PipelineNetworkCalculator.PipeResult> pipes,List<PipelineNetworkCalculator.DeviceResult> equipment,
-            List<PipelineNetworkCalculator.HydrateResult> hydrate,List<String> notes) {}
+            List<PipelineNetworkCalculator.HydrateResult> hydrate,List<PipelineErosion.Result> erosion,List<String> notes) {
+        public CaseResult { erosion=erosion==null?List.of():List.copyOf(erosion); }
+        public CaseResult(String caseId,String operatingAt,String status,String error,
+                List<PipelineNetworkCalculator.PipeResult> pipes,List<PipelineNetworkCalculator.DeviceResult> equipment,
+                List<PipelineNetworkCalculator.HydrateResult> hydrate,List<String> notes) {
+            this(caseId,operatingAt,status,error,pipes,equipment,hydrate,List.of(),notes);
+        }
+    }
     public record Result(String algorithmVersion,PipelineHydrateModel.Metadata hydrateModel,List<CaseResult> cases,int successCount,int failureCount) {}
     @JsonInclude(JsonInclude.Include.ALWAYS)
     public record Detail(Long id,int revision,int topologyRevision,Input input,Result result,
-            String calculationToken,PipelineTopology.Graph graph) {}
+            String calculationToken,PipelineTopology.Graph graph,boolean stale,String staleReason) {
+        public Detail(Long id,int revision,int topologyRevision,Input input,Result result,String calculationToken,PipelineTopology.Graph graph) {
+            this(id,revision,topologyRevision,input,result,calculationToken,graph,false,null);
+        }
+    }
     private record Scope(long projectId,long gasReservoirId,String wellName) {}
     private record TimedCase(BoundaryCase condition,LocalDateTime time,String error,int order) {}
     private static final class Cached {
@@ -49,24 +61,40 @@ public class PipelineBatch {
     private final JdbcTemplate jdbc;private final ObjectMapper json;private final PipelineWellContext wells;
     private final PipelineTopology topology;private final PipelineGasModel gas;private final PipelineTemperature temperature;
     private final PipelineNetworkCalculator network;private final TransactionTemplate write;
+    private final PipelineErosionLiquidSource liquidSource;
     private final Clock clock;private final long ttlMillis,maxBytes;private final int maxEntries;
     private final LinkedHashMap<String,Cached> cache=new LinkedHashMap<>();private long cachedBytes;
     @Autowired
     public PipelineBatch(JdbcTemplate jdbc,ObjectMapper json,PipelineWellContext wells,PipelineTopology topology,
+            PipelineGasModel gas,PipelineTemperature temperature,PipelineNetworkCalculator network,PlatformTransactionManager transactions,
+            PipelineErosionLiquidSource liquidSource) {
+        this(jdbc,json,wells,topology,gas,temperature,network,transactions,Clock.systemUTC(),30*60_000L,16,64*1024*1024L,liquidSource);
+    }
+    public PipelineBatch(JdbcTemplate jdbc,ObjectMapper json,PipelineWellContext wells,PipelineTopology topology,
             PipelineGasModel gas,PipelineTemperature temperature,PipelineNetworkCalculator network,PlatformTransactionManager transactions) {
-        this(jdbc,json,wells,topology,gas,temperature,network,transactions,Clock.systemUTC(),30*60_000L,16,64*1024*1024L);
+        this(jdbc,json,wells,topology,gas,temperature,network,transactions,null);
     }
     PipelineBatch(JdbcTemplate jdbc,ObjectMapper json,PipelineWellContext wells,PipelineTopology topology,
             PipelineGasModel gas,PipelineTemperature temperature,PipelineNetworkCalculator network,PlatformTransactionManager transactions,
             Clock clock,long ttlMillis,int maxEntries,long maxBytes) {
+        this(jdbc,json,wells,topology,gas,temperature,network,transactions,clock,ttlMillis,maxEntries,maxBytes,null);
+    }
+    PipelineBatch(JdbcTemplate jdbc,ObjectMapper json,PipelineWellContext wells,PipelineTopology topology,
+            PipelineGasModel gas,PipelineTemperature temperature,PipelineNetworkCalculator network,PlatformTransactionManager transactions,
+            Clock clock,long ttlMillis,int maxEntries,long maxBytes,PipelineErosionLiquidSource liquidSource) {
         this.jdbc=jdbc;this.json=json;this.wells=wells;this.topology=topology;this.gas=gas;this.temperature=temperature;this.network=network;
         this.clock=clock;this.ttlMillis=ttlMillis;this.maxEntries=maxEntries;this.maxBytes=maxBytes;
+        this.liquidSource=liquidSource;
         write=new TransactionTemplate(transactions);
         // Commit before recording the cached ID, including when a caller already owns a transaction.
         write.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
     @Transactional(readOnly=true)
     public Detail calculate(Calculate request) {
+        return calculate(request,null,null,null);
+    }
+    @Transactional(readOnly=true)
+    public Detail calculate(Calculate request,String token,String cookie,String environment) {
         require(request!=null&&request.input()!=null,"请填写管流计算输入");
         var well=wells.require(request.projectId(),request.gasReservoirId(),request.wellName());
         var scope=new Scope(request.projectId(),request.gasReservoirId(),well.name());
@@ -84,15 +112,27 @@ public class PipelineBatch {
         var thermal="heat".equals(request.input().thermalMode())
                 ?temperature.snapshot(scope.projectId(),scope.gasReservoirId(),scope.wellName(),stored.revision()):null;
         require(!"heat".equals(request.input().thermalMode())||thermal!=null,"请先保存各管段的完整温度模型参数");
-        Input input=snapshotInput(request.input(),stored.graph(),gasSnapshot,thermal);
+        var erosion=erosionSnapshot(scope,request.input().constraints()==null?null:request.input().constraints().erosion(),
+                stored.graph(),boundary.cases());
+        Input input=snapshotInput(request.input(),stored.graph(),gasSnapshot,thermal,erosion);
+        BiFunction<Double,Double,Double> liquidDensity=null;
+        if(liquidSource!=null&&erosion!=null&&erosion.liquidPvt()!=null&&erosion.liquidPvt().issue()==null) {
+            try {liquidDensity=liquidSource.open(erosion.liquidPvt(),token,cookie,environment);}
+            catch(RuntimeException ex) {
+                String message=ex.getMessage()==null?"水相物性服务不可用":ex.getMessage();
+                liquidDensity=(p,t)->{throw new IllegalArgumentException(message);};
+            }
+        }
         var rows=new ArrayList<CaseResult>();int successes=0;
         for(var row:orderedCases(input.boundary().cases())) {
             var condition=row.condition();String id=condition==null?null:condition.id(),at=condition==null?null:condition.operatingAt();
             try {
                 require(row.error()==null,row.error());
-                var solved=network.calculate(stored.graph(),input,thermal,gasSnapshot,condition,stored.revision());
+                var solved=liquidDensity==null?network.calculate(stored.graph(),input,thermal,gasSnapshot,condition,stored.revision())
+                        :network.calculate(stored.graph(),input,thermal,gasSnapshot,condition,stored.revision(),liquidDensity);
                 require(solved!=null&&solved.pipes()!=null&&!solved.pipes().isEmpty(),"本工况未产生管道计算结果");
                 rows.add(new CaseResult(id,at,"success",null,List.copyOf(solved.pipes()),List.copyOf(solved.equipment()),List.copyOf(solved.hydrate()),
+                        solved.erosion()==null?List.of():List.copyOf(solved.erosion()),
                         solved.notes()==null?List.of():List.copyOf(solved.notes())));successes++;
             } catch(RuntimeException ex) {
                 String error=(ex instanceof BusinessException||ex instanceof IllegalArgumentException)&&ex.getMessage()!=null
@@ -100,15 +140,15 @@ public class PipelineBatch {
                 rows.add(new CaseResult(id,at,"error",error,List.of(),List.of(),List.of(),List.of()));
             }
         }
-        String token=UUID.randomUUID().toString();
+        String calculationToken=UUID.randomUUID().toString();
         var result=new Result(VERSION,PipelineHydrateModel.prepare(gasSnapshot).metadata(),List.copyOf(rows),successes,rows.size()-successes);
-        var detail=new Detail(null,request.revision(),stored.revision(),input,result,token,stored.graph());
+        var detail=new Detail(null,request.revision(),stored.revision(),input,result,calculationToken,stored.graph());
         String serialized=json.writeValueAsString(detail);long bytes=serialized.getBytes(StandardCharsets.UTF_8).length;
         require(bytes<=maxBytes/2,"批量结果过大，请减少工况数量后重新计算");
         synchronized(cache) {
             prune();
             while(!cache.isEmpty()&&(cache.size()>=maxEntries||cachedBytes+bytes>maxBytes))remove(cache.keySet().iterator().next());
-            cache.put(token,new Cached(scope,well.id(),clock.millis()+ttlMillis,bytes,serialized));cachedBytes+=bytes;
+            cache.put(calculationToken,new Cached(scope,well.id(),clock.millis()+ttlMillis,bytes,serialized));cachedBytes+=bytes;
         }
         return json.readValue(serialized,Detail.class);
     }
@@ -145,6 +185,7 @@ public class PipelineBatch {
         if(!Objects.equals(gas.snapshot(scope.projectId(),scope.gasReservoirId(),scope.wellName()),calculated.input().gasModel()))throw changed("PVT 模型");
         if(calculated.input().thermalModel()!=null&&!Objects.equals(temperature.snapshot(scope.projectId(),scope.gasReservoirId(),
                 scope.wellName(),calculated.topologyRevision()),calculated.input().thermalModel()))throw changed("温度模型");
+        if(!liquidSourceCurrent(calculated.input()))throw changed("冲蚀液相 PVT 来源");
         int revision=calculated.revision()+1;
         String inputJson=json.writeValueAsString(calculated.input());
         if(calculated.revision()==0)jdbc.update("INSERT INTO pipeline_model(well_id,revision,topology_revision,input_json) VALUES(?,1,?,?)",
@@ -165,7 +206,30 @@ public class PipelineBatch {
         var rows=jdbc.query("SELECT id,model_revision,topology_revision,input_json,result_json,topology_json FROM pipeline_batch_run WHERE well_id=? ORDER BY id DESC LIMIT 1",
                 (rs,n)->new Detail(rs.getLong(1),rs.getInt(2),rs.getInt(3),json.readValue(rs.getString(4),Input.class),
                         json.readValue(rs.getString(5),Result.class),null,json.readValue(rs.getString(6),PipelineTopology.Graph.class)),wellId);
-        return rows.isEmpty()?null:rows.getFirst();
+        if(rows.isEmpty())return null;
+        var detail=rows.getFirst();String staleReason=null;
+        if(!VERSION.equals(detail.result().algorithmVersion()))staleReason="算法版本已更新，请重新计算全部工况";
+        else if(!liquidSourceCurrent(detail.input()))staleReason="冲蚀液相 PVT 来源已变化，请重新计算全部工况";
+        return staleReason==null?detail:new Detail(detail.id(),detail.revision(),detail.topologyRevision(),detail.input(),detail.result(),
+                null,detail.graph(),true,staleReason);
+    }
+    private PipelineErosion.Configuration erosionSnapshot(Scope scope,PipelineErosion.Configuration submitted,
+            PipelineTopology.Graph graph,List<BoundaryCase> boundaryCases) {
+        if(submitted==null)return null;
+        // Never accept a client-supplied density/source snapshot as a trusted calculation source.
+        var snapshot=liquidSource==null||submitted.liquidPvtId()==null?null:
+                liquidSource.snapshot(scope.projectId(),scope.gasReservoirId(),scope.wellName(),submitted.liquidPvtId());
+        var edgeIds=new HashSet<>(graph.edges().stream().map(PipelineTopology.Edge::id).toList());
+        var caseIds=new HashSet<>(boundaryCases.stream().filter(Objects::nonNull).map(BoundaryCase::id).toList());
+        var segments=submitted.segments()==null?List.<PipelineErosion.SegmentInput>of():submitted.segments().stream()
+                .filter(row->row!=null&&edgeIds.contains(row.edgeId())).toList();
+        var cases=submitted.cases()==null?List.<PipelineErosion.CaseInput>of():submitted.cases().stream()
+                .filter(row->row!=null&&edgeIds.contains(row.edgeId())&&caseIds.contains(row.caseId())).toList();
+        return new PipelineErosion.Configuration(submitted.liquidPvtId(),snapshot,segments,cases);
+    }
+    private boolean liquidSourceCurrent(Input input) {
+        var erosion=input.constraints()==null?null:input.constraints().erosion();
+        return erosion==null||erosion.liquidPvtId()==null||liquidSource!=null&&erosion.liquidPvt()!=null&&liquidSource.verifySnapshot(erosion.liquidPvt());
     }
     private void requireRevision(long wellId,int expected) {
         var values=jdbc.queryForList("SELECT revision FROM pipeline_model WHERE well_id=?",Integer.class,wellId);
@@ -199,7 +263,7 @@ public class PipelineBatch {
         }).sorted(Comparator.comparing(TimedCase::time,Comparator.nullsLast(Comparator.naturalOrder())).thenComparingInt(TimedCase::order)).toList();
     }
     private static Input snapshotInput(Input original,PipelineTopology.Graph graph,PipelineGasModel.Snapshot gas,
-            PipelineTemperature.Snapshot thermal) {
+            PipelineTemperature.Snapshot thermal,PipelineErosion.Configuration erosion) {
         require(graph!=null&&graph.nodes()!=null&&graph.edges()!=null&&!graph.edges().isEmpty(),"请保存包含有效管道的拓扑");
         var nodes=new HashMap<String,PipelineTopology.Node>();graph.nodes().forEach(n->nodes.put(n.id(),n));
         var segments=new ArrayList<Segment>();var equipment=new ArrayList<Equipment>();
@@ -228,7 +292,7 @@ public class PipelineBatch {
         require(Set.of("available","unknown").contains(waterState),"请选择有效的水状态：存在可用水或水状态未知");
         return new Input(null,original.thermalMode(),original.frictionMethod(),null,null,null,null,null,null,null,null,
                 original.jtKmpa(),original.standardPressurePa(),original.standardTemperatureK(),original.standardZ(),
-                List.copyOf(segments),List.copyOf(equipment),new Constraints(waterState),gas,normalizedBoundary,thermal);
+                List.copyOf(segments),List.copyOf(equipment),new Constraints(waterState,erosion),gas,normalizedBoundary,thermal);
     }
     private static Equipment equipment(String name,String type,Map<String,Object> p,int index) {
         return PipelineFlowTopology.device(name,type,p,index);
@@ -250,8 +314,10 @@ class PipelineBatchController {
     @GetMapping("/latest") public ApiResponse<PipelineBatch.Detail> latest(@RequestParam long projectId,@RequestParam long gasReservoirId,@RequestParam String wellName) {
         return ApiResponse.success(batch.latest(projectId,gasReservoirId,wellName));
     }
-    @PostMapping("/calculate") public ApiResponse<PipelineBatch.Detail> calculate(@Valid @RequestBody PipelineBatch.Calculate request) {
-        return ApiResponse.success(batch.calculate(request));
+    @PostMapping("/calculate") public ApiResponse<PipelineBatch.Detail> calculate(@Valid @RequestBody PipelineBatch.Calculate request,
+            @RequestHeader(value="token",required=false) String token,@RequestHeader(value="Cookie",required=false) String cookie,
+            @RequestHeader(value="Process-Env",required=false) String environment) {
+        return ApiResponse.success(batch.calculate(request,token,cookie,environment));
     }
     @PostMapping("/save") public ApiResponse<PipelineBatch.Detail> save(@Valid @RequestBody PipelineBatch.Save request) {
         return ApiResponse.success(batch.save(request));

@@ -105,7 +105,7 @@ public class PipelineCalculator {
                 List.of(in.gasModel()==null ? "稳态单相气体、串联管线；使用给定的固定 Z、黏度、比热和焦耳—汤姆逊系数。"
                         : "稳态单相气体、串联管线；"+in.gasModel().method()+" 按每步平均温压迭代更新 Z、密度和 Cp；Standing（资料原式）同时更新黏度与摩阻。气体导热系数和 JT 按给定值。",
                         "Darcy 摩阻模型；Re 2300～4000 使用连续过渡插值；忽略加速项，限制局部等效马赫数 < 0.3。",
-                        "设备校核包含允许压力与压缩机额定功率；水合物由管网层按同点温压作经验筛查，冲蚀、冻堵暂不启用。"));
+                        "设备校核包含允许压力与压缩机额定功率；水合物由管网层按同点温压作经验筛查；冲蚀由管网层采用井筒现有 P110 公式作参考比较，冻堵暂不启用。"));
     }
 
     // In inverse solves, exceeding the subsonic model range is a lower terminal-pressure bracket.

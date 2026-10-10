@@ -6,9 +6,17 @@
 -- 工况时间 YYYY/MM/DD HH:mm，自由输入，保存时校验，合法值存yyyy-MM-ddTHH:mm，允许任意分钟。
 -- nodes按nodeId存supplyRate10k/withdrawalRate10k/pressureMpa/temperatureC，不保存数据用途。
 -- 拓扑是几何和设备参数唯一编辑来源；批量input_json/topology_json保存实际计算使用的不可变快照。
--- pipeline_batch_run.result_json记录全部工况的pipes/equipment/hydrate和计算状态，失败工况不补零。
+-- pipeline_batch_run.result_json记录全部工况的pipes/equipment/hydrate/erosion和计算状态，失败工况不补零。
 -- constraints.waterState仅为available或unknown；水合物采用明确版本的经验模型，纯水且未加抑制剂。
 -- 水合物按沿程真实采样点的同点压力计算平衡温度并比较实际温度，完整覆盖时保存最小温度裕度。
+-- constraints.erosion保存liquidPvtId、服务端液相来源快照liquidPvt、管道默认segments与工况覆盖cases。
+-- segments按edgeId保存liquidHoldupPercent/sandContentPercent/sandDensityKgM3；cases加caseId，空字段继承默认，0不继承。
+-- 百分数输入0.01代表0.01%，f/k使用该百分数数值，混合密度权重另除以100；不接受客户端密度快照。
+-- 冲蚀补录参数仅为持液率、含砂率、砂粒密度；采用井筒现行P110研究公式作参考比较，不以管材作为计算输入。
+-- 冲蚀气体密度/流速来自同次管流的管内采样点（排除设备点），液体密度来自所选同井水相PVT的当地温压计算。
+-- erosion保存同点v/vc最大的物性与公式参数、参考比较结果、适用范围和公式版本，不发布安全等级或临界输量。
+-- 冲蚀缺少输入、无砂或液相服务异常仅产生未评价/不适用记录，不使成功的管流工况失败。
+-- network-batch-2.2统一冲蚀输入；液相输入/算法来源变化的批次标记需重算；新增字段均在现有JSON内，无新增表。
 -- 温度settings_json按edgeId保存材料层、环境、PVT引用、λ；密度/Cp/黏度由统一物性服务计算。
 -- 气体组成composition_json为[{code,moleFraction}]；Z/Cp检查点不作为后续计算前置条件。
 -- 修改来源后须重算；算法版本不一致的历史批量结果不作为当前有效结果。
@@ -19,7 +27,7 @@ CREATE TABLE IF NOT EXISTS pipeline_model (
     revision INT NOT NULL DEFAULT 1 COMMENT '乐观锁版本',
     topology_revision INT NOT NULL DEFAULT 0 COMMENT '输入快照对应的已保存拓扑版本，0表示尚未关联',
     schema_version INT NOT NULL DEFAULT 1,
-    input_json JSON NOT NULL COMMENT '全部边界工况、计算参数与实际来源快照，含水合物水条件',
+    input_json JSON NOT NULL COMMENT '全部边界工况、计算参数与来源快照，含水合物水条件及冲蚀参数、液相来源',
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uk_pipeline_model_well (well_id),
@@ -54,7 +62,7 @@ CREATE TABLE IF NOT EXISTS pipeline_topology_edge (
     source_key VARCHAR(64) NOT NULL,
     target_key VARCHAR(64) NOT NULL,
     name VARCHAR(100) NOT NULL,
-    parameters_json JSON NOT NULL COMMENT '管段几何及传热参数，PVT由井级模型统一提供',
+    parameters_json JSON NOT NULL COMMENT '管段几何与传热参数；气体PVT由井级模型统一提供',
     PRIMARY KEY(topology_id,edge_key),
     CONSTRAINT fk_topology_edge_source FOREIGN KEY(topology_id,source_key) REFERENCES pipeline_topology_node(topology_id,node_key),
     CONSTRAINT fk_topology_edge_target FOREIGN KEY(topology_id,target_key) REFERENCES pipeline_topology_node(topology_id,node_key),

@@ -77,6 +77,70 @@ class PipelineBatchTests {
         return new PipelineNetworkCalculator.NetworkResult(List.of(new PipelineNetworkCalculator.PipeResult("e","管道1","w","s",8,7,40,39,8,15,3)),List.of(),List.of(),List.of("计算工况："+c.id()));
     }
     private int count(String table) {return jdbc.queryForObject("SELECT COUNT(*) FROM "+table,Integer.class);}
+    @Test void realNetworkErosionUsesServerSourceForEveryCaseAndPersistsTheExactParametersAndResults() {
+        var source=mock(PipelineErosionLiquidSource.class);var water=PipelineErosionTests.water();
+        when(source.snapshot(6,4,"测试井",12L)).thenReturn(water);
+        when(source.open(water,"auth","session","prod")).thenReturn((p,t)->1000.0);
+        when(source.verifySnapshot(water)).thenReturn(true);
+        var properties=new PipelineGasProperties();
+        network=new PipelineNetworkCalculator(new PipelineCalculator(),new PipelineTemperatureCalculator(),properties,gas);
+        batch=new PipelineBatch(jdbc,json,wells,topology,gas,temperature,network,transactions,clock,60_000,16,4*1024*1024,source);
+        var original=input("isothermal",condition("early","2026-09-10T01:17"),condition("later","2026-09-10T02:49"));
+        var untrusted=new PipelineErosionLiquidSource.Snapshot(99L,"客户端快照",99L,99L,"其他井",0.0,1.0,0,0,"untrusted",null);
+        var submitted=new PipelineErosion.Configuration(12L,untrusted,List.of(new PipelineErosion.SegmentInput("e",.005,.01,2650.0),
+                new PipelineErosion.SegmentInput("deleted-pipe",.005,.01,2650.0)),
+                List.of(new PipelineErosion.CaseInput("later","e",null,0.0,null),
+                        new PipelineErosion.CaseInput("deleted-case","e",.007,.02,2600.0),
+                        new PipelineErosion.CaseInput("later","deleted-pipe",.007,.02,2600.0)));
+        var node=(tools.jackson.databind.node.ObjectNode)json.valueToTree(original);
+        node.set("constraints",json.valueToTree(new Constraints("available",submitted)));
+        var calculated=batch.calculate(request(json.treeToValue(node,Input.class)),"auth","session","prod");
+        assertEquals(2,calculated.result().successCount());assertEquals(water,calculated.input().constraints().erosion().liquidPvt());
+        assertEquals(1,calculated.input().constraints().erosion().segments().size());
+        assertEquals(1,calculated.input().constraints().erosion().cases().size());
+        var reference=calculated.result().cases().getFirst().erosion().getFirst();
+        assertTrue(reference.status().startsWith("reference_"));
+        assertNotNull(reference.criticalVelocityMs());assertEquals(41,reference.evaluatedPoints());
+        var zeroSand=calculated.result().cases().getLast().erosion().getFirst();
+        assertEquals("not_applicable",zeroSand.status());assertEquals(0,zeroSand.sandContentPercent());
+        when(source.verifySnapshot(water)).thenReturn(false);
+        assertTrue(assertThrows(BusinessException.class,()->batch.save(saveRequest(calculated))).getMessage().contains("液相 PVT"));
+        assertEquals(0,count("pipeline_batch_run"));
+        when(source.verifySnapshot(water)).thenReturn(true);
+        var saved=batch.save(saveRequest(calculated));var reloaded=batch.latest(6,4,"测试井");
+        assertEquals(saved.result(),reloaded.result());assertEquals(saved.input(),reloaded.input());assertEquals(saved.graph(),reloaded.graph());
+        assertFalse(reloaded.stale());assertEquals(PipelineBatch.VERSION,saved.result().algorithmVersion());
+        verify(source).open(water,"auth","session","prod");
+        when(source.verifySnapshot(water)).thenReturn(false);
+        var changed=batch.latest(6,4,"测试井");assertTrue(changed.stale());assertTrue(changed.staleReason().contains("液相 PVT"));
+        assertEquals(saved.result(),changed.result());
+    }
+    @Test void failedLiquidServiceLeavesHydraulicsSuccessfulAndDoesNotFabricateOrDropErosionRows() {
+        var source=mock(PipelineErosionLiquidSource.class);var water=PipelineErosionTests.water();
+        when(source.snapshot(6,4,"测试井",12L)).thenReturn(water);
+        when(source.open(water,null,null,null)).thenReturn((p,t)->{throw new BusinessException(502,"液相物性服务不可用");});
+        when(source.verifySnapshot(water)).thenReturn(true);
+        var properties=new PipelineGasProperties();
+        var real=new PipelineNetworkCalculator(new PipelineCalculator(),new PipelineTemperatureCalculator(),properties,gas);
+        batch=new PipelineBatch(jdbc,json,wells,topology,gas,temperature,real,transactions,clock,60_000,16,4*1024*1024,source);
+        var original=input("isothermal",condition("early","2026-09-10T01:17"),condition("later","2026-09-10T02:49"));
+        var node=(tools.jackson.databind.node.ObjectNode)json.valueToTree(original);
+        node.set("constraints",json.valueToTree(new Constraints("unknown",PipelineErosionTests.configuration())));
+        var calculated=batch.calculate(request(json.treeToValue(node,Input.class)));
+        assertEquals(2,calculated.result().successCount());
+        for(var row:calculated.result().cases()) {
+            assertEquals(1,row.pipes().size());assertEquals(1,row.erosion().size());
+            assertEquals("not_evaluated",row.erosion().getFirst().status());assertNull(row.erosion().getFirst().criticalVelocityMs());
+        }
+        batch.save(saveRequest(calculated));assertFalse(batch.latest(6,4,"测试井").stale());
+    }
+    @Test void oldBatchVersionIsExplicitlyStaleButRetainsHistoricalResults() {
+        var calculated=batch.calculate(request(input("isothermal",condition("one","2026-09-10T01:17"))));
+        var saved=batch.save(saveRequest(calculated));
+        var old=new PipelineBatch.Result("network-batch-2.1",saved.result().hydrateModel(),saved.result().cases(),1,0);
+        jdbc.update("UPDATE pipeline_batch_run SET result_json=?",json.writeValueAsString(old));
+        var loaded=batch.latest(6,4,"测试井");assertTrue(loaded.stale());assertEquals(old,loaded.result());
+    }
     @Test void calculatesEveryCaseInTimeOrderWithoutWritingAndContinuesAfterOneFailure() {
         var input=input("isothermal",condition("later","2026-09-10T03:00"),condition("bad","2026-09-10T02:00"),condition("early","2026-09-10T01:00"));
         var detail=batch.calculate(request(input));
