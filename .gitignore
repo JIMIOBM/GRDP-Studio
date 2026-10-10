@@ -82,3 +82,6 @@ docs/
 !/vue/tests/nodal.playwright.config.js
 !/vue/tests/e2e/nodal.spec.js
 !/vue/tests/fixtures/nodal.html
+
+# 删除库功能所需的安全标记迁移。
+!/backend/sql/storage_delete_guard.sql

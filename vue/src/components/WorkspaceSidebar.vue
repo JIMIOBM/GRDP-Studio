@@ -11,10 +11,16 @@ import TreeNode from '@/views/TreeNode.vue'
 import { ensurePipelineNavigation } from '@/utils/pipelineNavigation'
 import { ensureNodalNavigation } from '@/utils/nodalNavigation'
 import { ensureWellboreNavigation } from '@/utils/wellboreNavigation'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { useRoute, useRouter } from 'vue-router'
+import { storageCatalogApi } from '@/api/storageCatalog'
 import StorageCreateDialog from './StorageCreateDialog.vue'
 import StorageWellsDialog from './StorageWellsDialog.vue'
-import { workspaceTreeData, refreshWorkspaceStorages } from '@/utils/workspaceTreeState'
+import { workspaceTreeData, refreshWorkspaceStorages, removeWorkspaceStorage } from '@/utils/workspaceTreeState'
+
+const route = useRoute()
+const router = useRouter()
+const deletingStorage = ref(false)
 
 const storageDialog = ref(null)
 const storageWellsDialog = ref(null)
@@ -64,6 +70,31 @@ const viewStorageWells = () => {
   closeStorageMenu()
   if (node?.type === 'reservoir') storageWellsDialog.value?.open(node)
 }
+const deleteStorage = async () => {
+  const node = storageMenu.value.node
+  closeStorageMenu()
+  if (deletingStorage.value || node?.type !== 'reservoir') return
+  // 固定右击目标，不使用当前高亮井/库；等待确认时切换目录也不能改变删除对象。
+  const target = { storageId: Number(node.storageId), projectId: Number(node.projectId), gasReservoirId: Number(node.gasReservoirId) }
+  if (!Object.values(target).every(id => Number.isSafeInteger(id) && id > 0)) return
+  deletingStorage.value = true
+  try {
+    try {
+      await ElMessageBox.confirm(
+        `确定永久删除储气库“${node.label}”吗？该库的库容设计、损耗评价、水侵分析历史及明细、包含单井的关联将一并删除，无法撤销。井本身、单井数据和单井计算结果以及其他库的数据不会删除。`,
+        '删除库', { type: 'warning', confirmButtonText: '永久删除', cancelButtonText: '取消',
+          confirmButtonClass: 'el-button--danger', autofocus: false, distinguishCancelAndClose: true })
+    } catch { return }
+    try {
+      await storageCatalogApi.delete(target.storageId, target.projectId, target.gasReservoirId)
+    } catch { return } // 请求层统一显示失败原因；失败时保留目录和当前页面。
+    removeWorkspaceStorage(target)
+    ElMessage.success(`储气库“${node.label}”及其库级数据已删除，单井数据已保留`)
+    if (route.query.scope === 'reservoir' && Object.keys(target).every(key => Number(route.query[key]) === target[key])) {
+      await router.replace({ name: 'IprInterface', query: { projectId: target.projectId, gasReservoirId: target.gasReservoirId } })
+    }
+  } finally { deletingStorage.value = false }
+}
 const handleNodeContextMenu = (node, event) => {
   closeStorageMenu()
   // 保留原有记录的右键操作，也让父页面关闭之前打开的菜单。
@@ -73,7 +104,7 @@ const handleNodeContextMenu = (node, event) => {
     visible: true,
     node,
     x: Math.max(8, Math.min(event.clientX, window.innerWidth - 198)),
-    y: Math.max(8, Math.min(event.clientY, window.innerHeight - 54))
+    y: Math.max(8, Math.min(event.clientY, window.innerHeight - (node.id === 'g-reservoir' ? 54 : 86)))
   }
 }
 const handleMenuKeydown = event => {
@@ -138,18 +169,8 @@ function startResize (event) {
 }
 watch(() => props.collapsed, stopResize)
 onMounted(() => {
-  // 重新进入工作台时，井下板块和子目录默认收起，不沿用上次整片展开的状态。
-  // 保留井列表/井节点本身的位置和当前选中记录，不影响右侧已打开的分析。
-  const collapseFolders = nodes => {
-    for (const node of nodes || []) {
-      node.expanded = false
-      node.defaultExpanded = false
-      collapseFolders(node.children)
-    }
-  }
-  const wells = props.nodes.find(node => node.id === 'g-well')?.children || []
-  for (const well of wells) collapseFolders(well.children)
-
+  // 新建目录由节点的 defaultExpanded 控制默认收起。
+  // 工作台路由切换也会重新挂载侧栏，不能因此清除用户已展开的公共目录状态。
   window.addEventListener('pointerdown', closeStorageMenu)
   window.addEventListener('keydown', handleMenuKeydown)
   window.addEventListener('resize', closeStorageMenu)
@@ -228,7 +249,10 @@ onBeforeUnmount(() => {
       :style="{ left: `${storageMenu.x}px`, top: `${storageMenu.y}px` }"
       @pointerdown.stop @click.stop @contextmenu.prevent.stop>
       <button v-if="storageMenu.node?.id === 'g-reservoir'" type="button" role="menuitem" @click="createStorage">新建储气库</button>
-      <button v-else type="button" role="menuitem" @click="viewStorageWells">查看包含单井</button>
+      <template v-else>
+        <button type="button" role="menuitem" @click="viewStorageWells">查看包含单井</button>
+        <button type="button" role="menuitem" class="danger" :disabled="deletingStorage" @click="deleteStorage">删除库</button>
+      </template>
     </div>
   </Teleport>
   <StorageCreateDialog ref="storageDialog" :scope="storageScope" @created="storageCreated" />
@@ -259,6 +283,8 @@ onBeforeUnmount(() => {
     font-size: 13px;
     cursor: pointer;
     &:hover, &:focus-visible { background: #f5f7fa; }
+    &.danger { color: #bc504b; }
+    &:disabled { opacity: .45; cursor: not-allowed; }
   }
 }
 

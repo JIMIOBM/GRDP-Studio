@@ -64,6 +64,7 @@ import { theoreticalProductivityApi } from '@/api/theoreticalProductivity'
 import { createPvtDraftRecord } from '@/utils/pvtRecords'
 import { acquireNotifySocket } from '@/utils/notifySocket'
 import { loadAllModifiedIsochronalTreeNodes, loadModifiedIsochronalTreeNodes } from '@/utils/modifiedIsochronalTree'
+import { PRODUCTIVITY_TEST_METHOD_NODE_TYPES } from '@/utils/productivityTestTree'
 import {
   loadAllOwnedProductivityTestTreeNodes,
   loadOwnedProductivityTestTreeNodes,
@@ -127,7 +128,7 @@ import {
 
 // 当前工作台所使用的项目和气藏。
 const route = useRoute()
-const PROJECT_ID = resolveWorkspaceContextId(route.query.projectId, import.meta.env.VITE_WORKSPACE_PROJECT_ID, 6)
+const PROJECT_ID = resolveWorkspaceContextId(route.query.projectId, import.meta.env.VITE_WORKSPACE_PROJECT_ID, 7)
 const GAS_RESERVOIR_ID = resolveWorkspaceContextId(route.query.gasReservoirId, import.meta.env.VITE_WORKSPACE_GAS_RESERVOIR_ID, 4)
 const SOFTWARE_INTEGRATION_WORKSPACE = 'software-integration'
 const SOFTWARE_INTEGRATION_IMPORT_INTENTS = {
@@ -4379,7 +4380,8 @@ const handleSelect = async (node) => { // 点击左侧树节点
     DYNAMIC_STABLE_METHOD_NODE_TYPE,
     DYNAMIC_UNSTABLE_METHOD_NODE_TYPE
   ].includes(node.type)
-  if (node.type === NODETYPE.NodeType_Well || isWellMenuGroup || isProductivityDirectory || node.type === 'pipeline-temperature-group') return
+  if (node.type === NODETYPE.NodeType_Well || isWellMenuGroup || isProductivityDirectory || node.type === 'pipeline-temperature-group'
+    || node.type === 'productivity-test' || PRODUCTIVITY_TEST_METHOD_NODE_TYPES.has(node.type)) return
 
   // 只有真正打开某条记录/功能节点时，才同步右侧使用的井名。
   if (nodeWellName) selectedWellName.value = nodeWellName

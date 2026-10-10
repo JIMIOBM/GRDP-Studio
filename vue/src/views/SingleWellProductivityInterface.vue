@@ -24,6 +24,7 @@ import RibbonMenu from '@/components/RibbonMenu.vue'
 import WorkspaceSidebar from '@/components/WorkspaceSidebar.vue'
 import { isLossRecord, lossRecordLabel, deleteLossRecord, removeSavedTreeRecord } from '@/utils/lossRecordActions'
 import { isProductivityTestRecord, deleteProductivityTestRecord } from '@/utils/productivityTestRecordActions'
+import { PRODUCTIVITY_TEST_METHOD_NODE_TYPES } from '@/utils/productivityTestTree'
 import BinomialPressureContent from '@/views/WellControlInventory/BinomialPressureContent.vue'
 import ModifiedIsochronalContent from '@/views/SingleWellProductivity/ModifiedIsochronalContent.vue'
 import ExponentialContent from '@/views/SingleWellProductivity/ExponentialContent.vue'
@@ -43,7 +44,10 @@ import {
   WORKSPACE_GAS_RESERVOIR_ID,
   resolveWorkspaceContextId
 } from '@/constants/workspaceContext'
-import { wellApi } from '@/api/docker'
+import { wellApi, nodeApi, materialBalanceApi } from '@/api/docker'
+import { waterInvasionApi } from '@/api/waterInvasion'
+import { diagnosticCurveApi } from '@/api/diagnosticCurve'
+import { ensureWorkspaceWellNavigation, applyWorkspacePvtRecords, loadWorkspaceWellInventory } from '@/utils/workspaceWellNavigation'
 import { pvtStorageApi } from '@/api/pvtStorage'
 import { isPvtRecord, deletePvtTreeRecord, deletedPvtRecord, matchesPvtScope } from '@/utils/pvtRecordActions'
 import { selectDefaultPvtRecord } from '@/utils/pvtSelection'
@@ -397,6 +401,8 @@ const loadPvtOptions = async (preferredPvtId = null) => {
     // 列表直接来自当前井的数据库记录，与左侧目录是否展开无关，不限制 PVT 编号。
     const usableRecords = Array.isArray(records) ? records : []
     databasePvtRecords.value = usableRecords
+    applyWorkspacePvtRecords(workspaceTreeData.value,
+      { projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName }, usableRecords)
     const match = selectDefaultPvtRecord(usableRecords, preferredId)
     selectedPvtTable.value = String(match?.pvtId || '')
     await loadSelectedPvtDetail()
@@ -636,6 +642,22 @@ const handleSidebarExpand = async node => {
   try {
     if (node.type === NODAL_TYPE) {
       await loadNodalRecords(workspaceTreeData.value, { projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName: node.wellName }, nodalApi.list)
+      return
+    }
+    if (node.type === 'well-data-pvt-group') {
+      const response = await pvtStorageApi.list(PROJECT_ID, GAS_RESERVOIR_ID, node.wellName)
+      const records = unwrapData(response)
+      applyWorkspacePvtRecords(workspaceTreeData.value,
+        { projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName: node.wellName },
+        Array.isArray(records) ? records : [])
+      return
+    }
+    if (node.type === 'well-control-inventory') {
+      if (!node.loaded) {
+        await loadWorkspaceWellInventory(workspaceTreeData.value,
+          { projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName: node.wellName },
+          { waterInvasionApi, diagnosticCurveApi, nodeApi, materialBalanceApi })
+      }
       return
     }
     if ([COEFFICIENT_GROUP, COEFFICIENT_METHOD].includes(node.type)) {
@@ -898,6 +920,7 @@ const handleRibbonTabChange = async tabName => {
 const loadWells = async () => {
   const existingWellNodes = workspaceTreeData.value.find(node => node.id === 'g-well')?.children || []
   if (existingWellNodes.length) {
+    ensureWorkspaceWellNavigation(workspaceTreeData.value, PROJECT_ID, GAS_RESERVOIR_ID)
     wells.value = existingWellNodes.map((well, index) => ({
       id: well.id ?? well.nodeId ?? `${well.wellName || well.label || 'well'}-${index}`,
       wellName: String(well.wellName || well.label || '').trim()
@@ -930,6 +953,7 @@ const loadWells = async () => {
         }))
       }))
     }
+    ensureWorkspaceWellNavigation(workspaceTreeData.value, PROJECT_ID, GAS_RESERVOIR_ID)
   } catch (error) {
     ElMessage.error(error.response?.data?.message || error.message || '井列表加载失败')
   } finally {
@@ -1017,6 +1041,11 @@ const handleSidebarSelect = async node => {
     return
   }
 
+  // 数据管理和井控库存中的子目录只展开内容；点击具体数据或结果时才返回 IPR。
+  if (['well-data-pvt-group', 'well-data-static-pressure',
+    'well-data-relative-permeability-group', 'well-data-diagnostic-curve-group'
+  ].includes(node.type) || node.type === NODETYPE.NodeType_TypicalCurve) return
+
   // 理论计算/动态产能及其“稳定流”都是纯目录节点：TreeNode 自己负责展开、收起，
   // 这里不能改变右侧页面，也不能覆盖当前具体记录的高亮状态。
   if ([
@@ -1074,7 +1103,7 @@ const handleSidebarSelect = async node => {
   }
 
   // “产能试井”仅作为目录层级，不代表一条真实试井记录。
-  if (isProductivityTestNode || node.type === ISOCHRONAL_METHOD_NODE_TYPE || OWNED_PRODUCTIVITY_METHOD_NODE_TYPES.has(node.type)) return
+  if (isProductivityTestNode || PRODUCTIVITY_TEST_METHOD_NODE_TYPES.has(node.type)) return
 
   if (node.type === OWNED_PRODUCTIVITY_METHOD_NODE_TYPE ||
     OWNED_PRODUCTIVITY_METHOD_NODE_TYPES.has(node.type)) {
