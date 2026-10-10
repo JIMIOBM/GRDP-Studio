@@ -134,7 +134,10 @@ public class StorageCatalogService {
             if (tables.contains(table) && tables.contains(table + "_segment"))
                 jdbc.update("DELETE FROM " + table + "_segment WHERE " + type + "_loss_id IN (SELECT id FROM " + table + " WHERE storage_id=?)", storageId);
         }
-        for (String table : List.of("project_reservoir_wellbore_loss", "project_reservoir_surface_loss",
+        // 新增库级模块中，物质平衡快照与压力梯度表没有级联外键，必须在删除父库前清理。
+        for (String table : List.of("storage_material_balance_snapshot", "storage_pressure_gradient_point",
+                "storage_pressure_gradient_config", "project_reservoir_main_factor", "project_storage_network_topology",
+                "project_reservoir_wellbore_loss", "project_reservoir_surface_loss",
                 "project_reservoir_microscopic_loss", "project_reservoir_escape_loss", "project_storage_capacity_design", "project_storage_well")) {
             if (tables.contains(table)) jdbc.update("DELETE FROM " + table + " WHERE storage_id=?", storageId);
         }
