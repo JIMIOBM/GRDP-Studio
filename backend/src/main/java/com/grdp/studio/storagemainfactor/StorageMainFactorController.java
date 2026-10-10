@@ -14,6 +14,9 @@ import java.util.Map;
 import static com.grdp.studio.storagemainfactor.StorageMainFactorDtos.CalculateRequest;
 import static com.grdp.studio.storagemainfactor.StorageMainFactorDtos.CalculateResult;
 import static com.grdp.studio.storagemainfactor.StorageMainFactorDtos.Context;
+import static com.grdp.studio.storagemainfactor.StorageMainFactorDtos.SaveRequest;
+import static com.grdp.studio.storagemainfactor.StorageMainFactorDtos.SavedAnalysis;
+import static com.grdp.studio.storagemainfactor.StorageMainFactorDtos.SavedMainFactor;
 
 /**
  * 库级主控因素分析接口。薄层：只做参数绑定与 {@link ApiResponse} 包装。
@@ -46,5 +49,20 @@ public class StorageMainFactorController {
         Map<String, String> headers = MaterialBalanceEquationClient.forwardedHeaders(
                 token, cookie, processEnv, request.projectId());
         return ApiResponse.success(service.calculate(request, headers));
+    }
+
+    /** 保存本库的一份分析：存在则更新，不产生第二条记录。 */
+    @PostMapping("/save")
+    public ApiResponse<Void> save(@RequestBody SaveRequest request) {
+        service.save(request);
+        return ApiResponse.success(null);
+    }
+
+    /** 读取本库已保存的一份；从未保存过返回 data 为 null 的成功响应。 */
+    @GetMapping("/saved")
+    public ApiResponse<SavedAnalysis> saved(@RequestParam long projectId,
+            @RequestParam long gasReservoirId,
+            @RequestParam long storageId) {
+        return ApiResponse.success(service.loadSaved(projectId, gasReservoirId, storageId).orElse(null));
     }
 }

@@ -19,13 +19,25 @@ import static com.grdp.studio.waterinvasion.WaterInvasionResultMapper.*;
 /** 单井水侵专用旧平台适配器；只转发当前用户会话，不使用全局 Cookie 或保存凭据。 */
 @Component
 public class WaterInvasionLegacyGateway {
-    private final HttpClient http=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).followRedirects(HttpClient.Redirect.NEVER).build();
+    private volatile HttpClient http;
     private final ObjectMapper json;
     private final String base,authBase,cookieName;
     public WaterInvasionLegacyGateway(OriginalPlatformProperties properties,ObjectMapper json,
         @Value("${grdp.water-invasion.auth-base-url:http://127.0.0.1:9919}") String authBase,
         @Value("${grdp.water-invasion.session-cookie-name:}") String cookieName) {
         this.base=properties.baseUrl().replaceAll("/$",""); this.json=json; this.authBase=authBase.replaceAll("/$",""); this.cookieName=cookieName;
+    }
+    private HttpClient http() {
+        HttpClient current = http;
+        if (current == null) synchronized (this) {
+            current = http;
+            if (current == null) {
+                current = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5))
+                    .followRedirects(HttpClient.Redirect.NEVER).build();
+                http = current;
+            }
+        }
+        return current;
     }
     public String credentials(String cookie) {
         var allowed=cookieName.isBlank()?Set.of("ahksoil_identity_session","grdp_identity_session"):Set.of(cookieName);
@@ -54,7 +66,7 @@ public class WaterInvasionLegacyGateway {
             "isUseActualStaticPressure",s.isUseActualStaticPressure(),"waterGasRatioLimit",s.waterGasRatioLimit());
         var request=request(base+"/api/projectanalysis/waterinvasionanalysis",cookie,Duration.ofMinutes(10))
             .header("Content-Type","application/json").POST(HttpRequest.BodyPublishers.ofString(json.writeValueAsString(body))).build();
-        return http.sendAsync(request,HttpResponse.BodyHandlers.ofString()).thenAccept(response->{check(response);});
+        return http().sendAsync(request,HttpResponse.BodyHandlers.ofString()).thenAccept(response->{check(response);});
     }
     public List<Map<String,Object>> logs(long startMillis,String cookie) {
         var result=getAbsolute(base+"/api/common/notify/logs?start_time="+startMillis+"&keyword="+encode("水侵动态分析")+"&order=asc&page=1&page_size=2000",cookie);
@@ -67,11 +79,11 @@ public class WaterInvasionLegacyGateway {
     public CompletableFuture<Void> calculate(String wellName,Map<String,Object> payload,String cookie) {
         var request=request(base+"/api/projectanalysis/waterinvasionanalysis/"+encode(wellName)+"/calc",cookie,Duration.ofMinutes(10))
             .header("Content-Type","application/json").POST(HttpRequest.BodyPublishers.ofString(json.writeValueAsString(payload))).build();
-        return http.sendAsync(request,HttpResponse.BodyHandlers.ofString()).thenAccept(this::check);
+        return http().sendAsync(request,HttpResponse.BodyHandlers.ofString()).thenAccept(this::check);
     }
     private Map<String,Object> getAbsolute(String url,String cookie) {
         try {
-            var response=http.send(request(url,cookie,Duration.ofSeconds(15)).GET().build(),HttpResponse.BodyHandlers.ofString()); check(response);
+            var response=http().send(request(url,cookie,Duration.ofSeconds(15)).GET().build(),HttpResponse.BodyHandlers.ofString()); check(response);
             return json.readValue(response.body(),Map.class);
         } catch(InterruptedException e){Thread.currentThread().interrupt();throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE,"后台任务已中断");}
         catch(ResponseStatusException e){throw e;}

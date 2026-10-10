@@ -1,6 +1,8 @@
 package com.grdp.studio.wellbore.sand.service;
 
 import com.grdp.studio.common.BusinessException;
+import com.grdp.studio.wellbore.sand.dto.SandCriticalVelocityRequest;
+import com.grdp.studio.wellbore.sand.dto.SandCriticalVelocityResult;
 import com.grdp.studio.wellbore.sand.dto.SandProductionRequest;
 import com.grdp.studio.wellbore.sand.dto.SandProductionResult;
 import org.springframework.stereotype.Service;
@@ -37,19 +39,29 @@ public class SandProductionCalculator {
     private static final String QUARTZ_LABEL = "70/140目石英砂";
     private static final String COMPOSITE_LABEL = "复合压裂砂(70/140目石英砂:40/70目陶粒=6:4)";
 
-    /** 支撑剂类型对应的默认堆积密度（g/cm³）。 */
-    public static double defaultDensity(String proppantType) {
-        if (COMPOSITE_TYPE.equals(proppantType)) return DEFAULT_DENSITY_COMPOSITE;
-        if (QUARTZ_TYPE.equals(proppantType)) return DEFAULT_DENSITY_QUARTZ;
+    /** 校验并返回是否为复合压裂砂。 */
+    private static boolean compositeType(String proppantType) {
+        if (COMPOSITE_TYPE.equals(proppantType)) return true;
+        if (QUARTZ_TYPE.equals(proppantType)) return false;
         throw new BusinessException(400, "支撑剂类型仅支持 70/140目石英砂 与 复合压裂砂(6:4)");
     }
 
+    /** 支撑剂类型对应的默认堆积密度（g/cm³）。 */
+    public static double defaultDensity(String proppantType) {
+        return compositeType(proppantType) ? DEFAULT_DENSITY_COMPOSITE : DEFAULT_DENSITY_QUARTZ;
+    }
+
+    /** 按支撑剂类型与闭合压力查表插值，供页面在填写闭合压力后自动回填流速输入框。 */
+    public SandCriticalVelocityResult criticalVelocity(SandCriticalVelocityRequest input) {
+        boolean composite = compositeType(input.proppantType());
+        Point[] table = composite ? COMPOSITE : QUARTZ;
+        return new SandCriticalVelocityResult(
+                round(interpolate(table, input.closurePressureMpa()), 3),
+                boundaryNote(table, input.closurePressureMpa(), composite));
+    }
+
     public SandProductionResult calculate(SandProductionRequest input) {
-        boolean composite = COMPOSITE_TYPE.equals(input.proppantType());
-        boolean quartz = QUARTZ_TYPE.equals(input.proppantType());
-        if (!composite && !quartz) {
-            throw new BusinessException(400, "支撑剂类型仅支持 70/140目石英砂 与 复合压裂砂(6:4)");
-        }
+        boolean composite = compositeType(input.proppantType());
         double density = input.densityGCm3() != null
                 ? input.densityGCm3() : defaultDensity(input.proppantType());
         if (!Double.isFinite(density) || density <= 0) throw new BusinessException(400, "支撑剂堆积密度必须大于 0");

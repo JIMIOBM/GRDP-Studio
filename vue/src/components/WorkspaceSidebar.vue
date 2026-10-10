@@ -175,7 +175,14 @@ onMounted(() => {
   window.addEventListener('keydown', handleMenuKeydown)
   window.addEventListener('resize', closeStorageMenu)
   window.addEventListener('scroll', closeStorageMenu, true)
-  refreshWorkspaceStorages().catch(() => ElMessage.warning('储气库目录加载失败，请确认已执行储气库建表迁移'))
+  refreshWorkspaceStorages().catch(error => {
+    const response = error?.response
+    const detail = response?.data?.msg || response?.data?.message
+    const reason = typeof detail === 'string' && detail.trim()
+      ? detail.trim().slice(0, 120)
+      : response?.status ? `HTTP ${response.status}` : '连接失败'
+    ElMessage.error(`储气库目录加载失败：${reason}`)
+  })
   updateWidthLimit()
   parentObserver = new ResizeObserver(updateWidthLimit)
   if (panelEl.value?.parentElement) parentObserver.observe(panelEl.value.parentElement)

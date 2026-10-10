@@ -20,10 +20,14 @@ const form = reactive({
   densityGCm3: 1.7,
   halfLengthM: null,
   closurePressureMpa: null,
-  velocityOverride: false,
-  criticalVelocityOverrideMS: null,
+  criticalVelocityMS: null,
   actualRate1e4M3d: null
 })
+
+// 流速由闭合压力自动插值回填，用户仍可直接编辑输入框。
+const velocityAuto = ref(true)
+const velocityNote = ref(null)
+let velocitySequence = 0
 
 const result = ref(null)
 const calculatedInput = ref(null)
@@ -44,7 +48,8 @@ const payload = () => ({
   densityGCm3: Number(form.densityGCm3),
   halfLengthM: Number(form.halfLengthM),
   closurePressureMpa: Number(form.closurePressureMpa),
-  criticalVelocityOverrideMS: form.velocityOverride ? Number(form.criticalVelocityOverrideMS) : null,
+  // 自动插值时提交 null，由后端按同一实验表取值；手动编辑后才提交输入值
+  criticalVelocityOverrideMS: velocityAuto.value ? null : velocityValue(),
   actualRate1e4M3d: form.actualRate1e4M3d == null || form.actualRate1e4M3d === '' ? null : Number(form.actualRate1e4M3d)
 })
 
@@ -59,13 +64,41 @@ const displayValue = value => {
 const riskClass = levelKey => ({ danger: 'high', warn: 'critical', ok: 'safe' })[levelKey] || ''
 
 const defaultDensityOf = type => PROPPANT_OPTIONS.find(item => item.value === type)?.density
+const velocityValue = () => (form.criticalVelocityMS == null || form.criticalVelocityMS === '')
+  ? null : Number(form.criticalVelocityMS)
+
+// 闭合压力或支撑剂类型变化后按实验表插值回填流速；回填后用户仍可直接编辑输入框。
+async function refreshCriticalVelocity () {
+  const pressure = Number(form.closurePressureMpa)
+  if (!Number.isFinite(pressure) || pressure <= 0) return
+  const sequence = ++velocitySequence
+  try {
+    const response = await sandProductionApi.criticalVelocity({
+      proppantType: form.proppantType,
+      closurePressureMpa: pressure
+    })
+    if (sequence !== velocitySequence) return
+    form.criticalVelocityMS = response?.criticalVelocityMS ?? null
+    velocityNote.value = response?.note ?? null
+    velocityAuto.value = true
+  } catch {
+    if (sequence !== velocitySequence) return
+    velocityNote.value = null
+  }
+}
+
+function onVelocityInput () {
+  velocityAuto.value = false
+  velocityNote.value = null
+}
 
 function onProppantTypeChange () {
   const density = defaultDensityOf(form.proppantType)
   if (density != null) form.densityGCm3 = density
+  refreshCriticalVelocity()
 }
 
-function applyInput (input) {
+function applyInput (input, snapshot) {
   if (!input) return
   form.proppantType = input.proppantType ?? 'quartz-sand'
   form.massT = input.massT ?? null
@@ -73,8 +106,10 @@ function applyInput (input) {
   form.halfLengthM = input.halfLengthM ?? null
   form.closurePressureMpa = input.closurePressureMpa ?? null
   form.actualRate1e4M3d = input.actualRate1e4M3d ?? null
-  form.velocityOverride = input.criticalVelocityOverrideMS != null
-  form.criticalVelocityOverrideMS = input.criticalVelocityOverrideMS ?? null
+  const override = input.criticalVelocityOverrideMS ?? null
+  velocityAuto.value = override == null
+  velocityNote.value = null
+  form.criticalVelocityMS = override ?? snapshot?.criticalVelocityMS ?? null
 }
 
 async function calculate () {
@@ -89,13 +124,8 @@ async function calculate () {
   if ([form.massT, form.densityGCm3, form.halfLengthM, form.closurePressureMpa].some(value => Number(value) <= 0)) {
     return ElMessage.warning('支撑剂质量、堆积密度、平均裂缝半长和闭合压力必须大于 0')
   }
-  if (form.velocityOverride) {
-    if (form.criticalVelocityOverrideMS == null || form.criticalVelocityOverrideMS === '') {
-      return ElMessage.warning('勾选手动覆盖后请输入临界出砂流速')
-    }
-    if (Number(form.criticalVelocityOverrideMS) <= 0) {
-      return ElMessage.warning('临界出砂流速必须大于 0')
-    }
+  if (!velocityAuto.value && velocityValue() != null && velocityValue() <= 0) {
+    return ElMessage.warning('临界出砂流速必须大于 0')
   }
   if (form.actualRate1e4M3d != null && form.actualRate1e4M3d !== '' && Number(form.actualRate1e4M3d) < 0) {
     return ElMessage.warning('实际日产气量不能小于 0')
@@ -103,6 +133,8 @@ async function calculate () {
 
   busy.value = true
   try {
+    // 自动模式下先补齐流速输入框，保证页面显示与实际取值一致
+    if (velocityAuto.value) await refreshCriticalVelocity()
     const calculation = payload()
     const currentResult = await sandProductionApi.calculate(calculation)
     await nextTick()
@@ -137,8 +169,9 @@ async function loadHistory () {
 
 async function openRecord (row) {
   const detail = await sandProductionApi.detail(row.id, ...Object.values(context()))
-  result.value = parseResult(detail)
-  applyInput(parseJson(detail?.input_json ?? detail?.inputJson))
+  const snapshot = parseResult(detail)
+  result.value = snapshot
+  applyInput(parseJson(detail?.input_json ?? detail?.inputJson), snapshot)
   historyVisible.value = false
 }
 
@@ -226,22 +259,20 @@ watch(() => [props.projectId, props.gasReservoirId, props.node.wellName], () => 
           min="0"
           step="any"
           placeholder="5~50 查表线性插值"
+          @change="refreshCriticalVelocity()"
         >
       </label>
       <label class="field">
         <span>临界出砂流速（m/s）</span>
-        <div class="velocity-field">
-          <el-checkbox v-model="form.velocityOverride">手动覆盖</el-checkbox>
-          <input
-            v-if="form.velocityOverride"
-            v-model.number="form.criticalVelocityOverrideMS"
-            type="number"
-            min="0"
-            step="any"
-            placeholder="请输入"
-          >
-          <span v-else class="velocity-hint">按闭合压力查表插值</span>
-        </div>
+        <input
+          v-model.number="form.criticalVelocityMS"
+          type="number"
+          min="0"
+          step="any"
+          placeholder="输入闭合压力后自动计算"
+          @input="onVelocityInput"
+        >
+        <small v-if="velocityNote" class="field-hint">{{ velocityNote }}</small>
       </label>
       <label class="field">
         <span>实际日产气量（10⁴m³/d，可选）</span>
@@ -280,7 +311,7 @@ watch(() => [props.projectId, props.gasReservoirId, props.node.wellName], () => 
           <div class="result-label">临界出砂流速（m/s）</div>
           <div class="result-value">
             {{ displayValue(result.criticalVelocityMS) }}
-            <span class="tag">{{ result.velocityOverridden ? '手动覆盖' : '查表插值' }}</span>
+            <span class="tag">{{ result.velocityOverridden ? '手动输入' : '查表插值' }}</span>
           </div>
         </article>
         <article class="result-metric">
@@ -342,9 +373,7 @@ button.primary { min-width: 74px; border-color: #202020; background: #202020; co
 .field :deep(.el-select) { width: 100%; }
 .field :deep(.el-select__wrapper) { min-height: 34px; padding: 0 11px; border-radius: 4px; box-sizing: border-box; box-shadow: 0 0 0 1px #d4d7dc inset; }
 .field :deep(.el-select__wrapper.is-focused) { box-shadow: 0 0 0 1px #b49a00 inset, 0 0 0 2px rgba(244,208,0,.14); }
-.velocity-field { display: flex; align-items: center; gap: 10px; min-height: 34px; }
-.velocity-field input { flex: 1; }
-.velocity-hint { color: #a8abb2; }
+.field-hint { color: #a8abb2; line-height: 1.5; }
 .calculation-actions { margin-top: 24px; }
 .calculation-actions button { height: 32px; min-width: 72px; }
 .calculate { border-color: #d5b900; background: #f4d000; }

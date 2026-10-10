@@ -6,6 +6,7 @@ import org.junit.jupiter.api.*;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import org.springframework.web.server.ResponseStatusException;
+import tools.jackson.databind.json.JsonMapper;
 import static org.junit.jupiter.api.Assertions.*;
 
 class StorageMaterialBalanceServiceTests {
@@ -20,6 +21,7 @@ class StorageMaterialBalanceServiceTests {
         jdbc.execute("CREATE TABLE project_storage(id BIGINT PRIMARY KEY,project_id BIGINT,gas_reservoir_id BIGINT)");
         jdbc.execute("CREATE TABLE project_well_heads(id BIGINT PRIMARY KEY,project_id BIGINT,project_gas_reservoir_id BIGINT,well_name VARCHAR(100))");
         jdbc.execute("CREATE TABLE project_storage_well(storage_id BIGINT,well_id BIGINT)");
+        jdbc.execute("CREATE TABLE storage_material_balance_snapshot(id BIGINT AUTO_INCREMENT PRIMARY KEY,project_id BIGINT,gas_reservoir_id BIGINT,storage_id BIGINT,selected_well_ids_json CLOB,result_json CLOB,saved_at TIMESTAMP)");
         jdbc.execute("CREATE TABLE dynamic_original_gas_in_place(id BIGINT PRIMARY KEY,project_id BIGINT,project_gas_reservoir_id BIGINT,well_name VARCHAR(100),dynamic_original_gas_inplace_method BIGINT,update_time TIMESTAMP,create_time TIMESTAMP)");
         jdbc.execute("CREATE TABLE dynamic_original_gas_in_place_by_mb_input(id BIGINT PRIMARY KEY,dynamic_original_gas_in_place_id BIGINT,gas_reservoir_type INT)");
         jdbc.execute("CREATE TABLE dynamic_original_gas_in_place_output(dynamic_original_gas_in_place_id BIGINT,project_id BIGINT,project_gas_reservoir_id BIGINT,well_name VARCHAR(100),dynamic_original_gas_inplace_method BIGINT,original_gas_volume DOUBLE,rsquared DOUBLE,reliablity INT)");
@@ -29,7 +31,7 @@ class StorageMaterialBalanceServiceTests {
         jdbc.update("INSERT INTO project_storage VALUES(1,7,6)");
         jdbc.update("INSERT INTO project_well_heads VALUES(21,7,6,'X-1'),(22,7,6,'X-2'),(25,7,6,'X-5'),(99,9,9,'X-1')");
         jdbc.update("INSERT INTO project_storage_well VALUES(1,21),(1,22)");
-        service = new StorageMaterialBalanceService(jdbc, new StorageCatalogService(jdbc));
+        service = new StorageMaterialBalanceService(jdbc, new StorageCatalogService(jdbc), JsonMapper.builder().build());
     }
     @AfterEach void cleanup() { dataSource.destroy(); }
     void source(long id, long p, long g, String well, int method, double volume, int reliability) {
@@ -56,6 +58,17 @@ class StorageMaterialBalanceServiceTests {
         assertEquals(0, service.aggregate(7,6,1).includedWellCount());
         assertThrows(ResponseStatusException.class, () -> service.aggregate(9,9,1));
     }
+    @Test void selectedAggregationOnlyUsesRequestedCurrentStorageMembers() {
+        source(1,7,6,"X-1",1,10e8,2);
+        source(2,7,6,"X-2",1,20e8,2);
+        var result = service.aggregate(7,6,1,java.util.List.of(22L));
+        assertEquals(1, result.wells().size());
+        assertEquals("X-2", result.wells().getFirst().wellName());
+        assertEquals(1, result.includedWellCount());
+        assertEquals(20, result.sourceGasVolume());
+        assertThrows(BusinessException.class, () -> service.aggregate(7,6,1,java.util.List.of(25L)));
+        assertThrows(BusinessException.class, () -> service.aggregate(7,6,1,java.util.List.of(22L,22L)));
+    }
     @Test void deletedProjectIsRejected() {
         jdbc.update("UPDATE project_summaries SET delete_status=1 WHERE id=7");
         assertThrows(BusinessException.class, () -> service.aggregate(7,6,1));
@@ -80,5 +93,38 @@ class StorageMaterialBalanceServiceTests {
         source(2,7,6,"X-1",1,20e8,1);
         var result = service.aggregate(7,6,1);
         assertEquals(20, result.sourceGasVolume()); assertTrue(result.wells().getFirst().warning().contains("偏低"));
+    }
+    @Test void saveRecalculatesAndLatestRestoresTheFullSelectedWellSnapshot() {
+        source(1,7,6,"X-1",1,10e8,2);
+        source(2,7,6,"X-2",1,20e8,2);
+
+        var saved = service.save(7,6,1,java.util.List.of(22L));
+        var restored = service.latest(7,6,1);
+
+        assertNotNull(restored);
+        assertEquals(saved.id(), restored.id());
+        assertEquals(java.util.List.of(22L), restored.selectedWellIds());
+        assertEquals(saved.result(), restored.result());
+        assertEquals("X-2", restored.result().wells().getFirst().wellName());
+        assertEquals(1, restored.result().rows().size());
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM storage_material_balance_snapshot", Integer.class));
+    }
+    @Test void invalidSelectionDoesNotCreateASnapshot() {
+        assertThrows(BusinessException.class, () -> service.save(7,6,1,java.util.List.of(25L)));
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM storage_material_balance_snapshot", Integer.class));
+    }
+    @Test void snapshotsAreScopedToTheStorageAndLatestSaveWinsWithoutDeletingHistory() {
+        source(1,7,6,"X-1",1,10e8,2);
+        source(2,7,6,"X-2",1,20e8,2);
+        jdbc.update("INSERT INTO project_storage VALUES(2,7,6)");
+        jdbc.update("INSERT INTO project_storage_well VALUES(2,22)");
+
+        var first = service.save(7,6,1,java.util.List.of(22L));
+        var second = service.save(7,6,1,java.util.List.of(21L));
+
+        assertTrue(second.id() > first.id());
+        assertEquals(java.util.List.of(21L), service.latest(7,6,1).selectedWellIds());
+        assertNull(service.latest(7,6,2));
+        assertEquals(2, jdbc.queryForObject("SELECT COUNT(*) FROM storage_material_balance_snapshot WHERE storage_id=1", Integer.class));
     }
 }

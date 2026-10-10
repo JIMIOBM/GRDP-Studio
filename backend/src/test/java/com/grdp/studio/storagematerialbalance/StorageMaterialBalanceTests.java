@@ -32,17 +32,23 @@ class StorageMaterialBalanceTests {
         var result = calculate(List.of(well(1, 0d, row(1, 30d, 1d, .1))));
         assertNull(result.sourceGasVolume()); assertTrue(result.rows().isEmpty()); assertEquals(0, result.includedWellCount());
     }
-    @Test void matchesDatesNotRowIndicesAndDoesNotInterpolateOrChangeWeights() {
+    @Test void unionsDatesAndRenormalizesPressureWeightsForAvailableWells() {
         var result = calculate(List.of(well(1, 10d, row(2, 20d, 2d, .2), row(1, 30d, 1d, .1)),
                 well(2, 30d, row(2, 10d, 3d, .3), row(3, 8d, 4d, .4))));
-        assertEquals(1, result.rows().size()); assertEquals(LocalDate.of(2020, 1, 2), result.rows().getFirst().date());
-        assertEquals(12.5, result.rows().getFirst().pressure()); assertEquals(5, result.rows().getFirst().gas());
-        assertEquals(List.of("X-2"), result.skippedDates().getFirst().missingWells());
-        assertEquals(List.of("X-1"), result.skippedDates().getLast().missingWells());
+        assertEquals(3, result.rows().size());
+        assertEquals(LocalDate.of(2020, 1, 1), result.rows().getFirst().date());
+        assertEquals(30, result.rows().getFirst().pressure()); assertEquals(1, result.rows().getFirst().gas());
+        assertEquals(12.5, result.rows().get(1).pressure()); assertEquals(5, result.rows().get(1).gas());
+        assertEquals(8, result.rows().getLast().pressure()); assertEquals(4, result.rows().getLast().gas());
+        assertEquals(List.of("X-2"), result.partialDates().getFirst().missingWells());
+        assertEquals(List.of("X-1"), result.partialDates().getLast().missingWells());
     }
-    @Test void noCommonDatesDoesNotPretendToHaveAStorageCurve() {
+    @Test void wellsWithDisjointDatesStillProduceUnionRowsWithoutInterpolation() {
         var result = calculate(List.of(well(1, 10d, row(1, 30d, 1d, 0d)), well(2, 30d, row(2, 10d, 2d, 0d))));
-        assertTrue(result.rows().isEmpty()); assertEquals(2, result.skippedDates().size());
+        assertEquals(2, result.rows().size());
+        assertEquals(30, result.rows().getFirst().pressure());
+        assertEquals(10, result.rows().getLast().pressure());
+        assertEquals(2, result.partialDates().size());
     }
     @Test void invalidWeightsAreExcludedIncludingNonFinite() {
         for (Double weight : new Double[]{null, 0d, -1d, Double.NaN, Double.POSITIVE_INFINITY}) {

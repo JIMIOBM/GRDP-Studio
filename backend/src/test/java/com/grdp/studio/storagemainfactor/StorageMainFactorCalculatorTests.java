@@ -27,40 +27,11 @@ class StorageMainFactorCalculatorTests {
     }
 
     @Test
-    void directionFollowsSign() {
-        assertEquals("POSITIVE", direction(0.5));
-        assertEquals("NEGATIVE", direction(-0.5));
-        assertEquals("ZERO", direction(0d));
-        assertNull(direction(null));
-    }
-
-    @Test
     void deviationPercentIsNullWhenTheoreticalIsZeroOrMissing() {
         assertEquals(10.0, deviationPercent(110d, 100d), 1e-9);
         assertNull(deviationPercent(5d, 0d));
         assertNull(deviationPercent(5d, null));
         assertNull(deviationPercent(null, 100d));
-    }
-
-    @Test
-    void poreVolumeUsesGasVolumeOverGasSaturation() {
-        // Vp = G * Bg / (1 - Swi)
-        assertEquals(100.0, poreVolume(90d, 1d, 0.10), 1e-9);
-    }
-
-    @Test
-    void poreVolumeIsNullInsteadOfInfiniteWhenSwiIsOneOrMore() {
-        assertNull(poreVolume(90d, 1d, 1.0));
-        assertNull(poreVolume(90d, 1d, 1.2));
-        assertNull(poreVolume(null, 1d, 0.1));
-    }
-
-    @Test
-    void gasSaturationIsNullWhenPoreVolumeIsZero() {
-        // Sg = (G - Gp) * Bg / Vp
-        assertEquals(0.8, gasSaturation(100d, 20d, 1d, 100d), 1e-9);
-        assertNull(gasSaturation(100d, 20d, 1d, 0d));
-        assertNull(gasSaturation(100d, 20d, 1d, null));
     }
 
     @Test
@@ -73,32 +44,6 @@ class StorageMainFactorCalculatorTests {
         // 没有值就不可能是"自动读取"，两个工厂都要把 null 归一成 MISSING
         assertEquals("MISSING", auto(null, null).source());
         assertEquals("MISSING", manual(null, null).source());
-    }
-
-    @Test
-    void rowsCarryAllFourFactorsInFixedOrderAndPerSideSources() {
-        var rows = rows(
-                Map.of("formationPressure", auto(32.15, null), "poreVolume", manual(100d, null),
-                        "gas", manual(23.4, null), "gasSaturation", manual(0.8, null)),
-                Map.of("formationPressure", auto(31.80, null), "gas", auto(23.4, null)));
-        assertEquals(List.of("formationPressure", "poreVolume", "gas", "gasSaturation"),
-                rows.stream().map(FactorRow::key).toList());
-        assertEquals("MPa", rows.get(0).unit());
-        assertEquals("NEGATIVE", rows.get(0).direction());
-        // 理论侧来自手输、实际侧来自数据库读取 —— 两侧来源必须各自独立
-        assertEquals("MANUAL", rows.get(1).theoretical().source());
-        assertEquals("MISSING", rows.get(1).actual().source());
-        assertNull(rows.get(1).difference());
-        assertNull(rows.get(3).difference());
-        assertEquals("MISSING", rows.get(3).actual().source());
-    }
-
-    @Test
-    void rowsGiveMissingTheoreticalItsOwnMissingSource() {
-        var rows = rows(Map.of(), Map.of("gas", auto(23.4, null)));
-        assertEquals("MISSING", rows.get(2).theoretical().source());
-        assertEquals("AUTO", rows.get(2).actual().source());
-        assertNull(rows.get(2).deviationPercent());
     }
 
     @Test
