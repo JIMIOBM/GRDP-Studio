@@ -62,3 +62,69 @@ export function storageMaterialBalanceChart(rows) {
       data: valid.map(row => [row.gas, row.pressure, row.date]) }]
   }
 }
+
+/** Rebuild the library summary from a saved snapshot for the currently selected wells. */
+export function selectStorageMaterialBalanceWells(result, selectedWellIds) {
+  const selected = new Set((selectedWellIds || []).map(Number))
+  const sourceWells = (result?.wells || []).filter(well => selected.has(Number(well.wellId)))
+  const usable = sourceWells.map(well => {
+    const grouped = new Map()
+    const duplicates = new Set()
+    for (const sample of Array.isArray(well.samples) ? well.samples : []) {
+      const date = String(sample?.date || '')
+      const pressure = Number(sample?.pressure)
+      const gas = Number(sample?.gas)
+      const water = Number(sample?.water)
+      if (sample?.deleted === true || !/^\d{4}-\d{2}-\d{2}$/.test(date)
+        || !Number.isFinite(pressure) || pressure <= 0
+        || !Number.isFinite(gas) || gas < 0
+        || !Number.isFinite(water) || water < 0) continue
+      if (grouped.has(date)) duplicates.add(date)
+      else grouped.set(date, { date, pressure, gas, water })
+    }
+    duplicates.forEach(date => grouped.delete(date))
+    const gasVolume = Number(well.gasVolume)
+    const valid = well.included !== false && Number.isFinite(gasVolume) && gasVolume > 0 && grouped.size > 0
+    return {
+      ...well,
+      included: valid,
+      weight: null,
+      reason: valid ? '参与汇总' : (well.reason || '没有有效数据'),
+      warning: /演示|测试数据|补录/.test(String(well.warning || '')) ? '' : well.warning,
+      samples: [...grouped.values()].sort((a, b) => a.date.localeCompare(b.date)),
+      gasVolume: Number.isFinite(gasVolume) ? gasVolume : null
+    }
+  })
+  const included = usable.filter(well => well.included)
+  const sourceGasVolume = included.reduce((sum, well) => sum + well.gasVolume, 0)
+  for (const well of included) well.weight = well.gasVolume / sourceGasVolume
+
+  const dates = [...new Set(included.flatMap(well => well.samples.map(sample => sample.date)))].sort()
+  const rows = []
+  const partialDates = []
+  for (const date of dates) {
+    const available = included.flatMap(well => {
+      const sample = well.samples.find(item => item.date === date)
+      return sample ? [{ well, sample }] : []
+    })
+    const missingWells = included.filter(well => !well.samples.some(sample => sample.date === date)).map(well => well.wellName)
+    if (missingWells.length) partialDates.push({ date, missingWells })
+    const dailyGasVolume = available.reduce((sum, item) => sum + item.well.gasVolume, 0)
+    if (!(dailyGasVolume > 0)) continue
+    rows.push({
+      date,
+      pressure: available.reduce((sum, item) => sum + item.well.gasVolume / dailyGasVolume * item.sample.pressure, 0),
+      gas: available.reduce((sum, item) => sum + item.sample.gas, 0),
+      water: available.reduce((sum, item) => sum + item.sample.water, 0)
+    })
+  }
+  return {
+    ...result,
+    wells: usable,
+    rows,
+    partialDates,
+    sourceGasVolume: included.length ? sourceGasVolume : null,
+    includedWellCount: included.length,
+    message: ''
+  }
+}

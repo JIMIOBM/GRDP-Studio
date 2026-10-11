@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import * as XLSX from 'xlsx'
-import { buildPressureTestComparison } from './pressureTestMethod.js'
+import { buildPressureTestComparison, mergePressureTestRows } from './pressureTestMethod.js'
 import { mergePressureTestImportRows, parsePressureTestRows, pressureTestImportColumns } from './pressureTestImport.js'
 
 test('test method chart uses actual pressures, averages duplicate same-day measurements and leaves gaps blank', () => {
@@ -18,6 +18,26 @@ test('test method chart uses actual pressures, averages duplicate same-day measu
   assert.deepEqual(model.categories, ['X-1', 'X-2'])
   assert.deepEqual(model.series.map(row => row.data), [[21, null], [null, 18]])
   assert.equal(model.maxPressure, 21)
+})
+
+test('partial platform response keeps saved wells and overlays edits for matching measurements', () => {
+  const savedRows = [
+    { id: 'x1-old', sourceKey: 'legacy:X-1', wellName: 'X-1', date: '2010-06-10', measuredPressure: '18', manual: false },
+    { id: 'x2-old', sourceKey: 'legacy:X-2', wellName: 'X-2', date: '2010-06-10', measuredPressure: '18.5', manual: false },
+    { id: 'x5-edit', sourceKey: 'source:X-5:id:5', wellName: 'X-5', date: '2010-06-10', measuredPressure: '19.7', manual: false }
+  ]
+  const rows = mergePressureTestRows([
+    { item: { id: 5, date: '2010-06-10', reservior_pressure: 19.65 }, wellName: 'X-5', index: 0 }
+  ], savedRows)
+
+  assert.equal(rows.length, 3)
+  assert.deepEqual(rows.map(row => row.wellName), ['X-5', 'X-1', 'X-2'])
+  assert.equal(rows[0].measuredPressure, '19.7')
+  const model = buildPressureTestComparison({
+    rows, selectedWells: ['X-1', 'X-2', 'X-3', 'X-4', 'X-5'], dateRange: 'all'
+  })
+  assert.deepEqual(model.categories, ['X-1', 'X-2', 'X-3', 'X-4', 'X-5'])
+  assert.deepEqual(model.series[0].data, [18, 18.5, null, null, 19.7])
 })
 
 test('test method table import accepts only current member well pressure measurements', () => {
