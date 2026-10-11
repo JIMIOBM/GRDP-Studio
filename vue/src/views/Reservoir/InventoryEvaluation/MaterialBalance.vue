@@ -2,19 +2,17 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import * as echarts from 'echarts'
 import { storageMaterialBalanceApi } from '@/api/storageMaterialBalance'
-import { createStorageMaterialBalanceState, storageMaterialBalanceChart } from '@/utils/storageMaterialBalance'
-import { storageMaterialBalanceDemoResult, storageMaterialBalanceDemoWells } from '@/utils/storageMaterialBalanceDemo'
+import { createStorageMaterialBalanceState, selectStorageMaterialBalanceWells, storageMaterialBalanceChart } from '@/utils/storageMaterialBalance'
 import MaterialBalanceContent from '@/views/WellControlInventory/MaterialBalanceContent.vue'
 import { toSharedMaterialBalanceResult } from '@/utils/storageMaterialBalanceSource'
 
 const props = defineProps({ reservoir: { type: Object, default: null } })
 const selectedWellIds = ref([])
-const demoMode = ref(false)
 const saving = ref(false)
 const savedSnapshot = ref(null)
 const isSavedResult = ref(false)
+const snapshotSelection = ref(false)
 const databaseError = ref('')
-const demoWells = storageMaterialBalanceDemoWells()
 const { result, loading, error, load, clear } = createStorageMaterialBalanceState(
   (params, signal) => storageMaterialBalanceApi.aggregate({ ...params, wellIds: [...selectedWellIds.value] }, signal)
 )
@@ -29,6 +27,7 @@ const { result: availability, error: availabilityError, load: loadAvailability, 
 const tab = ref('chart')
 const detailsVisible = ref(false)
 const sourceVisible = ref(false)
+const sourceWell = ref(null)
 const detailsTab = ref('wells')
 const page = ref(1)
 const skippedPage = ref(1)
@@ -43,10 +42,12 @@ const pageRows = computed(() => rows.value.slice((page.value - 1) * 50, page.val
 const partialDates = computed(() => result.value?.partialDates || [])
 const partialRows = computed(() => partialDates.value.slice((skippedPage.value - 1) * 20, skippedPage.value * 20))
 const selectedWellSet = computed(() => new Set(selectedWellIds.value.map(String)))
-const canSave = computed(() => !demoMode.value && !!result.value && !loading.value && !saving.value
-  && !isSavedResult.value && selectedWellIds.value.length > 0)
+const canSave = computed(() => !!result.value && !loading.value && !saving.value
+  && !isSavedResult.value && !snapshotSelection.value && selectedWellIds.value.length > 0)
 const source = computed(() => result.value?.wells.find(well => well.wellId === sourceId.value))
-const memberWells = computed(() => demoMode.value ? demoWells : (availability.value || []).filter(well => well.inStorage))
+const memberWells = computed(() => (availability.value || []).filter(well => well.inStorage))
+const sampleCountForWell = wellId => (savedSnapshot.value?.result || result.value)?.wells
+  ?.find(well => Number(well.wellId) === Number(wellId))?.samples?.length || 0
 const sharedSourceResult = computed(() => toSharedMaterialBalanceResult(detail.value))
 const sourceNode = computed(() => detail.value ? { wellName: detail.value.wellName } : null)
 const format = value => Number.isFinite(value) ? value.toLocaleString('zh-CN', { maximumFractionDigits: 4 }) : '—'
@@ -60,8 +61,8 @@ const setWellSelected = (wellId, checked) => {
 const reload = async () => {
   const current = ++reloadVersion
   saving.value = false
-  demoMode.value = false
   isSavedResult.value = false
+  snapshotSelection.value = false
   savedSnapshot.value = null
   databaseError.value = ''
   selectedWellIds.value = []
@@ -79,10 +80,12 @@ const reload = async () => {
     const savedIds = Array.isArray(snapshot?.selectedWellIds) ? snapshot.selectedWellIds.map(Number) : []
     const savedResult = snapshot?.result
     if (snapshot?.id && savedIds.length && savedIds.every(id => Number.isSafeInteger(id) && memberIds.has(id))
-      && Array.isArray(savedResult?.wells) && Array.isArray(savedResult?.rows) && Array.isArray(savedResult?.partialDates)) {
+      && Array.isArray(savedResult?.wells) && savedResult.wells.every(well => Array.isArray(well?.samples))
+      && Array.isArray(savedResult?.rows) && Array.isArray(savedResult?.partialDates)) {
       selectedWellIds.value = savedIds
-      result.value = savedResult
+      result.value = selectStorageMaterialBalanceWells(savedResult, savedIds)
       savedSnapshot.value = snapshot
+      snapshotSelection.value = true
       isSavedResult.value = true
       restored = true
     }
@@ -102,33 +105,26 @@ const reload = async () => {
 const selectionChanged = ids => {
   reloadVersion++
   saving.value = false
-  isSavedResult.value = false
-  savedSnapshot.value = null
   databaseError.value = ''
   selectedWellIds.value = (ids || []).map(Number)
   page.value = 1; skippedPage.value = 1; sourceId.value = null
   sourceVisible.value = false
   clearDetail()
-  if (demoMode.value) {
+  const snapshotIds = Array.isArray(savedSnapshot.value?.selectedWellIds)
+    ? savedSnapshot.value.selectedWellIds.map(Number) : []
+  if (savedSnapshot.value?.result && selectedWellIds.value.every(id => snapshotIds.includes(id))) {
     clear()
-    result.value = storageMaterialBalanceDemoResult(selectedWellIds.value)
+    snapshotSelection.value = true
+    isSavedResult.value = selectedWellIds.value.length === snapshotIds.length
+      && snapshotIds.every(id => selectedWellIds.value.includes(id))
+    result.value = selectStorageMaterialBalanceWells(savedSnapshot.value.result, selectedWellIds.value)
     return
   }
+  savedSnapshot.value = null
+  snapshotSelection.value = false
+  isSavedResult.value = false
   if (!selectedWellIds.value.length) { clear(); return }
   return load(scope())
-}
-const loadDemo = () => {
-  reloadVersion++
-  saving.value = false
-  demoMode.value = true
-  isSavedResult.value = false
-  savedSnapshot.value = null
-  databaseError.value = ''
-  selectedWellIds.value = demoWells.map(well => well.wellId)
-  page.value = 1; skippedPage.value = 1; sourceId.value = null
-  sourceVisible.value = false
-  clear(); clearDetail()
-  result.value = storageMaterialBalanceDemoResult(selectedWellIds.value)
 }
 const saveResult = async () => {
   if (!canSave.value) return
@@ -147,8 +143,9 @@ const saveResult = async () => {
       throw new Error('数据库返回的保存结果格式不正确')
     }
     selectedWellIds.value = snapshot.selectedWellIds.map(Number)
-    result.value = snapshot.result
+    result.value = selectStorageMaterialBalanceWells(snapshot.result, snapshot.selectedWellIds)
     savedSnapshot.value = snapshot
+    snapshotSelection.value = true
     isSavedResult.value = true
   } catch (cause) {
     if (current === reloadVersion && !destroyed) {
@@ -163,10 +160,13 @@ watch(() => [props.reservoir?.projectId, props.reservoir?.gasReservoirId, props.
   reload()
 }, { immediate: true })
 const viewSource = well => {
-  if (!well?.resultId) { sourceId.value = null; clearDetail(); return }
-  sourceId.value = well.wellId
+  if (!well) return
   detailsVisible.value = false
   sourceVisible.value = true
+  sourceWell.value = well
+  sourceId.value = well.resultId ? well.wellId : null
+  clearDetail()
+  if (!well.resultId) return
   return loadDetail({ ...scope(), wellId: well.wellId, resultId: well.resultId })
 }
 const disposeChart = () => { observer?.disconnect(); observer = null; chart?.dispose(); chart = null }
@@ -202,10 +202,10 @@ onBeforeUnmount(() => { destroyed = true; reloadVersion++; clear(); clearDetail(
         <div class="section-heading">参与井 <span>{{ selectedWellIds.length }} / {{ memberWells.length }}</span></div>
         <div v-if="memberWells.length" class="well-list">
           <label v-for="well in memberWells" :key="well.wellId" class="well-item">
-            <el-checkbox :model-value="selectedWellSet.has(String(well.wellId))" :disabled="loading && !demoMode"
+            <el-checkbox :model-value="selectedWellSet.has(String(well.wellId))" :disabled="loading"
               @change="value => setWellSelected(well.wellId, value)" />
             <span class="well-name">{{ well.wellName }}</span>
-            <span class="well-count">{{ demoMode ? `${well.measuredCount} 个测点` : (well.measuredCount ? `${well.measuredCount} 个实测结果` : '无实测结果') }}</span>
+            <span class="well-count">{{ sampleCountForWell(well.wellId) || well.measuredCount ? `${sampleCountForWell(well.wellId) || well.measuredCount} 个测点` : '—' }}</span>
           </label>
         </div>
         <div v-else-if="loading" class="subtle-message">正在读取当前库成员井…</div>
@@ -222,8 +222,7 @@ onBeforeUnmount(() => { destroyed = true; reloadVersion++; clear(); clearDetail(
 
       <div v-show="tab === 'chart'" class="chart-view">
         <div class="chart-toolbar">
-          <span class="chart-summary">{{ demoMode ? '演示数据 · ' : '' }}已选 {{ selectedWellIds.length }} / {{ memberWells.length }} 口井 · {{ rows.length }} 个日期</span>
-          <el-button size="small" @click="demoMode ? reload() : loadDemo()">{{ demoMode ? '返回真实数据' : '演示数据' }}</el-button>
+          <span class="chart-summary">已选 {{ selectedWellIds.length }} / {{ memberWells.length }} 口井 · {{ rows.length }} 个日期</span>
           <span v-if="isSavedResult" class="save-status">已保存到数据库</span>
           <el-button size="small" type="primary" plain :loading="saving" :disabled="!canSave" @click="saveResult">保存到数据库</el-button>
           <el-button size="small" :disabled="!result && !error" @click="detailsVisible = true">查看明细</el-button>
@@ -232,14 +231,13 @@ onBeforeUnmount(() => { destroyed = true; reloadVersion++; clear(); clearDetail(
           <div v-if="rows.length" ref="chartEl" class="pressure-chart" aria-label="库物质平衡压力对比图" />
           <div v-else class="chart-empty">
             <span>{{ loading ? '正在读取压力数据…' : error || result?.message || '暂无可绘制数据' }}</span>
-            <el-button v-if="!loading && !demoMode" size="small" type="primary" plain @click="loadDemo">载入演示数据</el-button>
           </div>
         </div>
       </div>
 
       <div v-show="tab === 'data'" class="table-view">
         <div class="table-toolbar">
-          <span class="chart-summary">{{ demoMode ? '演示数据' : '当前库实测汇总' }} · {{ rows.length }} 个日期</span>
+          <span class="chart-summary">当前库汇总 · {{ rows.length }} 个日期</span>
           <span v-if="isSavedResult" class="save-status">已保存到数据库</span>
           <el-button size="small" type="primary" plain :loading="saving" :disabled="!canSave" @click="saveResult">保存到数据库</el-button>
           <el-button size="small" :disabled="!result && !error" @click="detailsVisible = true">查看明细</el-button>
@@ -259,20 +257,19 @@ onBeforeUnmount(() => { destroyed = true; reloadVersion++; clear(); clearDetail(
 
     <el-dialog v-model="detailsVisible" title="库物质平衡 · 数据明细" width="88%" top="6vh" append-to-body class="storage-mb-details">
       <el-tabs v-model="detailsTab">
-        <el-tab-pane label="井与数据来源" name="wells">
+        <el-tab-pane label="井数据" name="wells">
           <el-table :data="result?.wells || []" border max-height="420" empty-text="该库没有可显示的成员数据">
             <el-table-column prop="wellName" label="井名" width="90" />
-            <el-table-column prop="resultId" label="实测结果ID" width="105" />
+            <el-table-column label="测点数" width="95"><template #default="{ row }">{{ row.samples?.length || 0 }}</template></el-table-column>
             <el-table-column label="动态储量 (10⁸m³)" width="155"><template #default="{ row }">{{ format(row.gasVolume) }}</template></el-table-column>
             <el-table-column label="权重" width="90"><template #default="{ row }">{{ Number.isFinite(row.weight) ? `${format(row.weight * 100)}%` : '—' }}</template></el-table-column>
-            <el-table-column label="R²" width="85"><template #default="{ row }">{{ format(row.rSquared) }}</template></el-table-column>
             <el-table-column label="状态 / 原因" min-width="240"><template #default="{ row }">
               <span>{{ row.reason }}</span>
-              <div v-if="row.warning" class="excluded">{{ row.warning }}</div>
+              <div v-if="row.warning && !/(演示|测试数据|补录)/.test(row.warning)" class="excluded">{{ row.warning }}</div>
               <div v-if="row.discardedRows">跳过 {{ row.discardedRows }} 条已排除、重复日期或无效输入行</div>
             </template></el-table-column>
-            <el-table-column label="智慧气藏来源" width="165"><template #default="{ row }">
-              <el-button link type="primary" :disabled="!row.resultId" @click="viewSource(row)">查看参数、数据和图</el-button>
+            <el-table-column label="数据" width="110"><template #default="{ row }">
+              <el-button link type="primary" :disabled="!(row.samples?.length) && !row.resultId" @click="viewSource(row)">查看数据</el-button>
             </template></el-table-column>
           </el-table>
         </el-tab-pane>
@@ -283,20 +280,26 @@ onBeforeUnmount(() => { destroyed = true; reloadVersion++; clear(); clearDetail(
           </el-table>
           <el-pagination v-model:current-page="skippedPage" :total="partialDates.length" :page-size="20" layout="total, prev, pager, next" />
         </el-tab-pane>
-        <el-tab-pane label="项目数据覆盖" name="coverage">
+        <el-tab-pane label="数据覆盖" name="coverage">
           <p v-if="availabilityError" class="excluded">{{ availabilityError }}</p>
-          <el-table :data="availability || []" border max-height="420" empty-text="暂无覆盖信息">
+          <el-table :data="result?.wells || []" border max-height="420" empty-text="暂无覆盖信息">
             <el-table-column prop="wellName" label="井名" width="100" />
-            <el-table-column label="当前库成员" width="120"><template #default="{ row }">{{ row.inStorage ? '是' : '否' }}</template></el-table-column>
-            <el-table-column prop="measuredCount" label="实测静压结果数" />
-            <el-table-column prop="calculatedCount" label="计算静压结果数（不参与汇总）" />
+            <el-table-column label="测点数" width="100"><template #default="{ row }">{{ row.samples?.length || 0 }}</template></el-table-column>
+            <el-table-column label="动态储量 (10⁸m³)" width="170"><template #default="{ row }">{{ format(row.gasVolume) }}</template></el-table-column>
+            <el-table-column label="状态"><template #default="{ row }">{{ row.reason }}</template></el-table-column>
           </el-table>
         </el-tab-pane>
       </el-tabs>
       <template #footer><el-button @click="detailsVisible = false">关闭</el-button></template>
     </el-dialog>
 
-    <el-dialog v-model="sourceVisible" :title="`智慧气藏实测来源 · ${source?.wellName || ''}`" width="94%" top="4vh" append-to-body destroy-on-close class="storage-mb-source">
+    <el-dialog v-model="sourceVisible" :title="`井数据 · ${sourceWell?.wellName || ''}`" width="94%" top="4vh" append-to-body destroy-on-close class="storage-mb-source">
+      <el-table :data="sourceWell?.samples || []" border max-height="38vh" empty-text="当前没有测点数据">
+        <el-table-column prop="date" label="日期" width="140" />
+        <el-table-column label="静压 (MPa)" min-width="130"><template #default="{ row }">{{ format(row.pressure) }}</template></el-table-column>
+        <el-table-column label="累产气量 (10⁸m³)" min-width="160"><template #default="{ row }">{{ format(row.gas) }}</template></el-table-column>
+        <el-table-column label="累产水量 (10⁴m³)" min-width="160"><template #default="{ row }">{{ format(row.water) }}</template></el-table-column>
+      </el-table>
       <p v-if="detailLoading" role="status">正在读取智慧气藏保存的实测来源…</p>
       <el-alert v-if="detailError" :title="detailError" type="error" :closable="false" show-icon />
       <template v-if="detail">

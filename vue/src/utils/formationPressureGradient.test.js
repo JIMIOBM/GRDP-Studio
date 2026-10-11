@@ -101,3 +101,28 @@ test('时间横轴时按井生成序列，并且全部日期选项保留完整�
   assert.deepEqual(result.seriesKeys, ['X-1'])
   assert.deepEqual(result.series[0].data, [10, 11])
 })
+
+test('压力梯度图按井显示直接折算压力 P，不再折算到另一个基准深度', () => {
+  const rows = [
+    { wellName: 'X-1', date: '2024-03-01', measuredPressure: '21', measuredCoordinate: '2000', gradient: '0.01' },
+    { wellName: 'X-2', date: '2024-03-01', measuredPressure: '23', measuredCoordinate: '2000', gradient: '0.01' }
+  ]
+  const result = buildPressureGradientComparison({
+    rows, selectedWells: ['X-1', 'X-2'], referenceCoordinate: '2500', dateRange: 'all', directPressure: true
+  })
+  assert.deepEqual(result.categories, ['X-1', 'X-2'])
+  assert.deepEqual(result.series.map(item => item.data), [[21, 23]])
+})
+
+test('直接压力图保留没有 PGD 和 H 的原始静压记录', () => {
+  const rows = [
+    { wellName: 'X-4', date: '2010-06-10', measuredPressure: '20.1', measuredCoordinate: '2000', gradient: '0.01' },
+    { wellName: 'X-5', date: '2010-06-10', measuredPressure: '19.65', measuredCoordinate: '', gradient: '' }
+  ]
+  const result = buildPressureGradientComparison({
+    rows, selectedWells: ['X-4', 'X-5'], dateRange: 'all', directPressure: true
+  })
+  assert.deepEqual(result.categories, ['X-4', 'X-5'])
+  assert.deepEqual(result.series[0].data, [20.1, 19.65])
+  assert.equal(result.validRows.length, 2)
+})

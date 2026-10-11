@@ -6,7 +6,7 @@ import { Document } from '@element-plus/icons-vue'
 import { dataManagementApi } from '@/api/docker'
 import { storageCatalogApi } from '@/api/storageCatalog'
 import { storagePressureGradientApi } from '@/api/storagePressureGradient'
-import { buildPressureGradientComparison, calculateDatumPressure, calculatePressureIntercept, isCalculablePressureRecord, normalizePressureRecord, pressureRecordDate, pressureSourceKeys } from '@/utils/formationPressureGradient'
+import { buildPressureGradientComparison, calculatePressureIntercept, normalizePressureRecord, pressureRecordDate, pressureSourceKeys } from '@/utils/formationPressureGradient'
 import { cleanPressureGradientImportRows, mergePressureGradientImportRows, parsePressureGradientRows, pressureGradientImportColumns } from '@/utils/pressureGradientImport'
 import { assertNoSpreadsheetFormulaCells } from '@/utils/spreadsheetImport'
 
@@ -17,7 +17,6 @@ const selectedWells = ref([])
 const referenceCoordinate = ref('2000')
 const coordinateMode = ref('depth')
 const dateRange = ref('recent3')
-const chartAxis = ref('well')
 const activeTab = ref('chart')
 const loading = ref(false)
 const loadError = ref('')
@@ -53,30 +52,30 @@ const createRowId = prefix => `${prefix}:${globalThis.crypto?.randomUUID?.() || 
 const storageScope = computed(() => [props.reservoir?.projectId, props.reservoir?.gasReservoirId, props.reservoir?.storageId].map(value => value ?? 'none').join(':'))
 const draftKey = computed(() => `grdp:formation-pressure-gradient:${storageScope.value}`)
 const selectedWellSet = computed(() => new Set(selectedWells.value.map(String)))
-const referenceValue = computed(() => Number(referenceCoordinate.value))
 const format = value => Number.isFinite(value) ? value.toLocaleString('zh-CN', { maximumFractionDigits: 4 }) : '—'
-const depthLabel = computed(() => coordinateMode.value === 'elevation' ? '海拔高程' : '测压垂深')
-const formulaText = computed(() => coordinateMode.value === 'elevation'
-  ? 'P基准 = P实测 + G × (E测压 − E基准)'
-  : 'P基准 = P实测 + G × (H基准 − H测压)')
-const interceptText = computed(() => coordinateMode.value === 'elevation'
-  ? 'P₀ = P实测 + G × E测压'
-  : 'P₀ = P实测 − G × H测压')
-
-const rowPressure = row => calculateDatumPressure({
-  measuredPressure: row.measuredPressure,
-  measuredCoordinate: row.measuredCoordinate,
-  gradient: row.gradient,
-  referenceCoordinate: referenceValue.value,
-  coordinateMode: coordinateMode.value
-})
-const rowIntercept = row => calculatePressureIntercept({
-  measuredPressure: row.measuredPressure,
-  measuredCoordinate: row.measuredCoordinate,
-  gradient: row.gradient,
-  coordinateMode: coordinateMode.value
-})
-const isRowCalculable = row => isCalculablePressureRecord(row, referenceCoordinate.value, coordinateMode.value)
+const optionalNumber = value => value === null || value === undefined || String(value).trim() === ''
+  ? null : Number.isFinite(Number(value)) ? Number(value) : null
+const rowPressure = row => {
+  const p0 = optionalNumber(row.p0)
+  const gradient = optionalNumber(row.gradient)
+  const height = optionalNumber(row.measuredCoordinate)
+  if ([p0, gradient, height].some(value => value === null)) return null
+  const pressure = p0 + gradient * height
+  return Number.isFinite(pressure) ? pressure : null
+}
+const rowIntercept = row => optionalNumber(row.p0)
+const isRowCalculable = row => {
+  const pressure = rowPressure(row)
+  return pressure !== null && pressure >= 0 && optionalNumber(row.p0) >= 0
+    && optionalNumber(row.gradient) >= 0 && optionalNumber(row.measuredCoordinate) >= 0
+    && pressureRecordDate({ date: row.date }) === String(row.date)
+}
+const deriveP0 = row => {
+  const derived = row.p0 !== undefined && row.p0 !== null && String(row.p0).trim() !== ''
+    ? Number(row.p0)
+    : calculatePressureIntercept({ measuredPressure: row.measuredPressure, measuredCoordinate: row.measuredCoordinate, gradient: row.gradient })
+  return { ...row, p0: Number.isFinite(derived) ? String(derived) : '' }
+}
 const validRows = computed(() => rows.value.filter(isRowCalculable))
 const selectedRows = computed(() => rows.value.filter(row => selectedWellSet.value.has(String(row.wellName)) && row.deleted !== true))
 const calculableSelectedRows = computed(() => validRows.value.filter(row => selectedWellSet.value.has(String(row.wellName))))
@@ -88,7 +87,8 @@ const chartModel = computed(() => buildPressureGradientComparison({
   referenceCoordinate: referenceCoordinate.value,
   coordinateMode: coordinateMode.value,
   dateRange: dateRange.value,
-  chartAxis: chartAxis.value
+  chartAxis: 'well',
+  directPressure: true
 }))
 const chartRows = computed(() => chartModel.value.validRows)
 const chartHasData = computed(() => chartModel.value.series.some(series => series.data.some(Number.isFinite)))
@@ -115,7 +115,6 @@ const saveDraft = pendingDatabaseSave => {
       referenceCoordinate: referenceCoordinate.value,
       coordinateMode: coordinateMode.value,
       dateRange: dateRange.value,
-      chartAxis: chartAxis.value,
       selectedWells: [...selectedWells.value],
       rows: rows.value
     }))
@@ -135,18 +134,21 @@ const databaseRows = () => rows.value.map((row, index) => {
   const measuredPressure = numericValue(row.measuredPressure, `第 ${line} 行实测静压`)
   const measuredCoordinate = numericValue(row.measuredCoordinate, `第 ${line} 行测压坐标`)
   const gradient = numericValue(row.gradient, `第 ${line} 行压力梯度`)
-  if (measuredPressure !== null && measuredPressure < 0) throw new Error(`第 ${line} 行实测静压不能为负数`)
+  const p0 = numericValue(row.p0, `第 ${line} 行 P₀`)
+  const calculatedPressure = [p0, gradient, measuredCoordinate].every(value => value !== null)
+    ? p0 + gradient * measuredCoordinate : measuredPressure
+  if (calculatedPressure !== null && !Number.isFinite(calculatedPressure)) throw new Error(`第 ${line} 行计算压力超出有效范围`)
+  if (calculatedPressure !== null && calculatedPressure < 0) throw new Error(`第 ${line} 行压力不能为负数`)
+  if (p0 !== null && p0 < 0) throw new Error(`第 ${line} 行 P₀ 不能为负数`)
   if (gradient !== null && gradient < 0) throw new Error(`第 ${line} 行压力梯度不能为负数`)
-  if (coordinateMode.value === 'depth' && measuredCoordinate !== null && measuredCoordinate < 0) {
-    throw new Error(`第 ${line} 行测压垂深不能为负数`)
-  }
+  if (measuredCoordinate !== null && measuredCoordinate < 0) throw new Error(`第 ${line} 行 H 不能为负数`)
   if (row.date && pressureRecordDate({ date: row.date }) !== row.date) throw new Error(`第 ${line} 行日期无效`)
   return {
     id: String(row.id || row.sourceKey || `manual:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`),
     sourceKey: row.sourceKey || null,
     wellName: String(row.wellName || ''),
     date: row.date || null,
-    measuredPressure,
+    measuredPressure: calculatedPressure,
     measuredCoordinate,
     gradient,
     manual: row.manual === true,
@@ -212,7 +214,7 @@ const loadData = async () => {
   referenceCoordinate.value = draft.referenceCoordinate ?? '2000'
   coordinateMode.value = draft.coordinateMode === 'elevation' ? 'elevation' : 'depth'
   dateRange.value = draft.dateRange === 'all' ? 'all' : 'recent3'
-  chartAxis.value = draft.chartAxis === 'time' ? 'time' : 'well'
+  coordinateMode.value = 'depth'
   try {
     const { projectId, gasReservoirId, storageId } = props.reservoir || {}
     if (![projectId, gasReservoirId, storageId].every(value => Number(value) > 0)) throw new Error('请先打开一个具体储气库')
@@ -230,7 +232,7 @@ const loadData = async () => {
       databaseSaveState.value = 'saved'
       const savedSettings = storedPayload && !Array.isArray(storedPayload) ? storedPayload : null
       if (draft.pendingDatabaseSave !== true && Number.isFinite(Number(savedSettings?.referenceCoordinate))) referenceCoordinate.value = String(savedSettings.referenceCoordinate)
-      if (draft.pendingDatabaseSave !== true && ['depth', 'elevation'].includes(savedSettings?.coordinateMode)) coordinateMode.value = savedSettings.coordinateMode
+      coordinateMode.value = 'depth'
       const sourceStoredRows = Array.isArray(savedSettings?.rows) ? savedSettings.rows : Array.isArray(storedPayload) ? storedPayload : []
       storedRows = sourceStoredRows.map(row => ({
         ...row,
@@ -238,7 +240,7 @@ const loadData = async () => {
         measuredCoordinate: row.measuredCoordinate == null ? '' : String(row.measuredCoordinate),
         gradient: row.gradient == null ? '' : String(row.gradient),
         date: row.date || ''
-      }))
+      })).map(deriveP0)
     } catch (error) {
       storageReadError = `数据库测点读取失败：${errorMessage(error)}`
       storedRows = Array.isArray(draft.rows) ? draft.rows : []
@@ -266,7 +268,7 @@ const loadData = async () => {
         const keys = pressureSourceKeys(item, wellName, index)
         const normalized = normalizePressureRecord(item, wellName, keys.sourceKey)
         const saved = savedBySource.get(keys.sourceKey) || savedBySource.get(keys.legacySourceKey)
-        fetchedRows.push({ ...normalized, ...(saved || {}), id: normalized.id, sourceKey: normalized.sourceKey })
+        fetchedRows.push(deriveP0({ ...normalized, ...(saved || {}), id: normalized.id, sourceKey: normalized.sourceKey }))
       })
     })
     const fetchedKeys = new Set(fetchedRows.map(row => row.sourceKey))
@@ -329,6 +331,7 @@ const addPoint = () => {
     sourceKey: null,
     wellName: selectedWells.value[0] || wells.value[0].wellName,
     date: today,
+    p0: '',
     measuredPressure: '',
     measuredCoordinate: '',
     gradient: '',
@@ -344,6 +347,20 @@ const deletePoint = row => {
   }
 }
 const onInput = () => scheduleDatabaseSave()
+const updatePressureParameters = row => {
+  const gradient = optionalNumber(row.gradient)
+  const height = optionalNumber(row.measuredCoordinate)
+  let p0 = optionalNumber(row.p0)
+  const existingPressure = optionalNumber(row.measuredPressure)
+  if (p0 === null && existingPressure !== null && gradient !== null && height !== null) {
+    p0 = existingPressure - gradient * height
+    row.p0 = String(p0)
+  }
+  if (p0 !== null && gradient !== null && height !== null) {
+    row.measuredPressure = String(p0 + gradient * height)
+  }
+  onInput()
+}
 const reload = () => loadData()
 
 const downloadTemplate = async () => {
@@ -410,11 +427,10 @@ const buildChartOption = () => {
   const categoryWells = chartWells.value
   const model = chartModel.value
   const activeDates = model.dates
-  const byTime = chartAxis.value === 'time'
   const categories = model.categories
   const series = model.series.map(({ key, data }) => {
     return {
-      name: byTime ? key : `${key.slice(0, 4)}.${Number(key.slice(5, 7))} 折算地层压力`,
+      name: key,
       type: 'line',
       data,
       connectNulls: false,
@@ -427,35 +443,37 @@ const buildChartOption = () => {
   return {
     animation: false,
     color: ['#568df5', '#ff9b21', '#f05252', '#31a6a0', '#9a6de8', '#4aaf5d'],
-    title: { text: '统一基准深度地层压力对比', left: 'center', top: 12, textStyle: { fontSize: 17, fontWeight: 600, color: '#303133' } },
+    title: { text: '地层压力梯度对比', left: 'center', top: 12, textStyle: { fontSize: 17, fontWeight: 600, color: '#303133' } },
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'line' },
       formatter: params => {
         const first = params?.[0]
         if (!first) return ''
-        const date = byTime ? activeDates[first.dataIndex] : activeDates[first.seriesIndex]
-        const wellName = byTime ? model.seriesKeys[first.seriesIndex] : categoryWells[first.dataIndex]
+        const date = activeDates[first.seriesIndex]
+        const wellName = categoryWells[first.dataIndex]
         const sourceRows = chartRows.value.filter(row => row.date === date && row.wellName === wellName)
-        const pointLines = sourceRows.map(row => `实测 ${format(Number(row.measuredPressure))} MPa（截距 ${format(rowIntercept(row))} MPa）`)
-        const averageNote = sourceRows.length > 1 ? `同井同日 ${sourceRows.length} 个有效测点取折算压力均值` : ''
-        return [`<strong>${wellName}</strong>`, `${date} 折算压力：${format(Number(first.value))} MPa`, averageNote, ...pointLines].filter(Boolean).join('<br/>')
+        const pointLines = sourceRows.filter(row => [row.p0, row.gradient, row.measuredCoordinate]
+          .every(value => value !== null && value !== undefined && String(value).trim() !== ''))
+          .map(row => `P₀ ${format(rowIntercept(row))} MPa，PGD ${format(optionalNumber(row.gradient))} MPa/m，H ${format(optionalNumber(row.measuredCoordinate))} m`)
+        const averageNote = sourceRows.length > 1 ? `同井同日 ${sourceRows.length} 个测点取压力均值` : ''
+        return [`<strong>${wellName}</strong>`, `${date} 压力 P：${format(Number(first.value))} MPa`, averageNote, ...pointLines].filter(Boolean).join('<br/>')
       }
     },
     legend: { top: 42, type: 'scroll' },
     grid: { top: 88, left: 76, right: 34, bottom: 68, containLabel: false },
     xAxis: {
       type: 'category',
-      name: byTime ? '时间' : '井号',
+      name: '井号',
       nameLocation: 'middle',
-      nameGap: byTime ? 34 : 42,
+      nameGap: 42,
       data: categories,
       axisTick: { alignWithLabel: true },
-      axisLabel: { interval: byTime ? 'auto' : 0, rotate: byTime && categories.length > 8 ? 30 : 0 }
+      axisLabel: { interval: 0 }
     },
     yAxis: {
       type: 'value',
-      name: '统一基准地层压力 (MPa)',
+      name: '压力 P (MPa)',
       nameLocation: 'middle',
       nameGap: 54,
       min: 0,
@@ -471,7 +489,7 @@ const renderChart = () => {
   if (!chart) chart = echarts.init(chartElement.value)
   chart.setOption(chartHasData.value ? buildChartOption() : {
     animation: false,
-    title: { text: '统一基准深度地层压力对比', left: 'center', top: 12, textStyle: { fontSize: 17, fontWeight: 600 } },
+    title: { text: '地层压力梯度对比', left: 'center', top: 12, textStyle: { fontSize: 17, fontWeight: 600 } },
     xAxis: { type: 'category', data: [] },
     yAxis: { type: 'value', name: '压力 (MPa)' },
     series: []
@@ -488,7 +506,7 @@ const scheduleResize = () => {
 
 watch(() => [props.reservoir?.projectId, props.reservoir?.gasReservoirId, props.reservoir?.storageId], loadData, { immediate: true })
 watch(rows, scheduleDatabaseSave, { deep: true })
-watch([selectedWells, referenceCoordinate, coordinateMode, dateRange, chartAxis], () => {
+watch([selectedWells, dateRange], () => {
   saveDraft()
   nextTick(renderChart)
 }, { deep: true })
@@ -532,20 +550,8 @@ onBeforeUnmount(() => {
           <label>当前储气库</label>
           <el-input size="small" readonly :model-value="reservoir?.label || '未选择储气库'" />
         </div>
-        <div class="field">
-          <label>统一基准坐标 (m)</label>
-          <el-input v-model="referenceCoordinate" size="small" inputmode="decimal" @input="onInput" />
-        </div>
-        <div class="field">
-          <label>坐标类型</label>
-          <el-select v-model="coordinateMode" size="small" @change="onInput">
-            <el-option label="测压垂深（向下为正）" value="depth" />
-            <el-option label="海拔高程（向上为正）" value="elevation" />
-          </el-select>
-        </div>
         <div class="formula-card">
-          <div>{{ formulaText }}</div>
-          <small>{{ interceptText }} · 梯度 G 单位 MPa/m</small>
+          <div>P = P₀ + PGD × H</div>
         </div>
 
         <div class="section-heading">参与井 <span>{{ selectedWells.length }} / {{ wells.length }}</span></div>
@@ -575,15 +581,10 @@ onBeforeUnmount(() => {
             <el-option label="最近 3 期" value="recent3" />
             <el-option label="全部日期" value="all" />
           </el-select>
-          <label>横轴</label>
-          <el-select v-model="chartAxis" size="small" style="width: 128px">
-            <el-option label="井号（按日期对比）" value="well" />
-            <el-option label="时间（按井趋势）" value="time" />
-          </el-select>
           <span class="chart-summary">{{ selectionCountText }}</span>
         </div>
         <div class="chart-frame">
-          <div ref="chartElement" class="pressure-chart" aria-label="统一基准深度地层压力对比图" />
+          <div ref="chartElement" class="pressure-chart" aria-label="地层压力梯度对比图" />
           <div v-if="!chartHasData" class="chart-empty">
             <span>{{ loading ? '正在读取压力数据…' : '暂无可绘制测点' }}</span>
             <button v-if="!loading" type="button" @click="activeTab = 'table'">录入测点参数</button>
@@ -612,20 +613,20 @@ onBeforeUnmount(() => {
             <el-table-column label="日期" min-width="132">
               <template #default="scope"><el-input v-model="scope.row.date" type="date" size="small" @input="onInput" /></template>
             </el-table-column>
-            <el-table-column label="实测静压 (MPa)" min-width="142">
-              <template #default="scope"><el-input v-model="scope.row.measuredPressure" size="small" inputmode="decimal" @input="onInput" /></template>
+            <el-table-column label="P₀ (MPa)" min-width="132">
+              <template #default="scope"><el-input v-model="scope.row.p0" size="small" inputmode="decimal" @input="updatePressureParameters(scope.row)" /></template>
             </el-table-column>
-            <el-table-column :label="`${depthLabel} (m)`" min-width="142">
-              <template #default="scope"><el-input v-model="scope.row.measuredCoordinate" size="small" inputmode="decimal" @input="onInput" /></template>
+            <el-table-column label="PGD (MPa/m)" min-width="145">
+              <template #default="scope"><el-input v-model="scope.row.gradient" size="small" inputmode="decimal" @input="updatePressureParameters(scope.row)" /></template>
             </el-table-column>
-            <el-table-column label="压力梯度 (MPa/m)" min-width="150">
-              <template #default="scope"><el-input v-model="scope.row.gradient" size="small" inputmode="decimal" @input="onInput" /></template>
+            <el-table-column label="H (m)" min-width="132">
+              <template #default="scope"><el-input v-model="scope.row.measuredCoordinate" size="small" inputmode="decimal" @input="updatePressureParameters(scope.row)" /></template>
             </el-table-column>
-            <el-table-column label="截距 P₀ (MPa)" min-width="130">
-              <template #default="scope">{{ format(rowIntercept(scope.row)) }}</template>
-            </el-table-column>
-            <el-table-column label="统一基准压力 (MPa)" min-width="155">
+            <el-table-column label="计算压力 P (MPa)" min-width="155">
               <template #default="scope"><span :class="{ 'missing-value': !isRowCalculable(scope.row) }">{{ format(rowPressure(scope.row)) }}</span></template>
+            </el-table-column>
+            <el-table-column label="来源" width="100">
+              <template #default="scope">{{ scope.row.manual ? '补录' : '平台实测' }}</template>
             </el-table-column>
             <el-table-column label="操作" fixed="right" width="80">
               <template #default="scope"><el-button link type="danger" @click="deletePoint(scope.row)">删除</el-button></template>
@@ -633,7 +634,7 @@ onBeforeUnmount(() => {
           </el-table>
         </div>
         <div class="table-footer">
-          <span :class="{ 'load-notice': displayedMissingCount > 0 }">{{ displayedMissingCount ? `${displayedMissingCount} 行待补测点数据，暂不参与图表` : `已折算 ${displayedValidCount} 个测点` }}</span>
+          <span :class="{ 'load-notice': displayedMissingCount > 0 }">{{ displayedMissingCount ? `${displayedMissingCount} 行待补参数，暂不参与图表` : `已计算 ${displayedValidCount} 个测点` }}</span>
           <span>共 {{ displayedRows.length }} 条测点</span>
         </div>
       </div>

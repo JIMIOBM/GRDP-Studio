@@ -4,17 +4,16 @@ import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
 import { dataManagementApi } from '@/api/docker'
 import { storageCatalogApi } from '@/api/storageCatalog'
-import { storagePressureGradientApi } from '@/api/storagePressureGradient'
-import { normalizePressureRecord, pressureRecordDate, pressureSourceKeys } from '@/utils/formationPressureGradient'
+import { storagePressureTestMethodApi } from '@/api/storagePressureTestMethod'
+import { pressureRecordDate } from '@/utils/formationPressureGradient'
 import { assertNoSpreadsheetFormulaCells } from '@/utils/spreadsheetImport'
 import { mergePressureTestImportRows, parsePressureTestRows, pressureTestImportColumns } from '@/utils/pressureTestImport'
-import { buildPressureTestComparison } from '@/utils/pressureTestMethod'
+import { buildPressureTestComparison, mergePressureTestRows } from '@/utils/pressureTestMethod'
 
 const props = defineProps({ reservoir: { type: Object, default: null } })
 const wells = ref([])
 const rows = ref([])
 const dateRange = ref('recent3')
-const chartAxis = ref('well')
 const activeTab = ref('chart')
 const loading = ref(false)
 const loadError = ref('')
@@ -53,7 +52,7 @@ const clearDraft = () => {
 }
 const selectedWells = computed(() => wells.value.map(well => well.wellName))
 const chartModel = computed(() => buildPressureTestComparison({
-  rows: rows.value, selectedWells: selectedWells.value, dateRange: dateRange.value, chartAxis: chartAxis.value
+  rows: rows.value, selectedWells: selectedWells.value, dateRange: dateRange.value, chartAxis: 'well'
 }))
 const chartHasData = computed(() => chartModel.value.series.some(series => series.data.some(Number.isFinite)))
 const shownRows = computed(() => rows.value.filter(row => row.deleted !== true))
@@ -77,8 +76,6 @@ const toDbRows = () => rows.value.map((row, index) => {
     wellName: String(row.wellName || ''),
     date: /^\d{4}-\d{2}-\d{2}$/.test(String(row.date || '')) ? row.date : null,
     measuredPressure,
-    measuredCoordinate: numberOrNull(row.measuredCoordinate, '测压坐标'),
-    gradient: numberOrNull(row.gradient, '压力梯度'),
     manual: row.manual === true,
     deleted: row.deleted === true
   }
@@ -101,7 +98,7 @@ const saveDatabase = (notify = false) => {
   writeDraft()
   const scope = { projectId: props.reservoir?.projectId, gasReservoirId: props.reservoir?.gasReservoirId, storageId: props.reservoir?.storageId }
   saveState.value = 'saving'
-  const task = saveQueue.catch(() => {}).then(() => storagePressureGradientApi.save(scope, { rows: data }))
+  const task = saveQueue.catch(() => {}).then(() => storagePressureTestMethodApi.save(scope, { rows: data }))
   saveQueue = task
   return task.then(() => {
     if (currentSave === saveVersion) {
@@ -154,7 +151,7 @@ const load = async () => {
     wells.value = wellPayload.map(well => ({ id: Number(well.id), wellName: String(well.wellName || '').trim() })).filter(well => well.wellName)
     let savedRows = []
     try {
-      const saved = responseData(await storagePressureGradientApi.list({ projectId, gasReservoirId, storageId }))
+      const saved = responseData(await storagePressureTestMethodApi.list({ projectId, gasReservoirId, storageId }))
       if (!saved || !Array.isArray(saved.rows)) throw new Error('数据库测点返回格式不正确')
       databaseLoaded.value = true
       saveState.value = 'saved'
@@ -169,33 +166,33 @@ const load = async () => {
       saveState.value = 'failed'
       loadError.value = `数据库测点读取失败：${message(error)}`
     }
-    const savedBySource = new Map(savedRows.filter(row => row.sourceKey).map(row => [row.sourceKey, row]))
     const requests = await Promise.allSettled(wells.value.map(well =>
       dataManagementApi.getStaticPressure(projectId, gasReservoirId, well.wellName, { silentError: true })
     ))
     if (current !== version) return
-    const fetched = []
+    const sourceRecords = []
     requests.forEach((result, index) => {
       if (result.status !== 'fulfilled') return
       const wellName = wells.value[index].wellName
       responseRows(result.value).forEach((item, itemIndex) => {
-        const keys = pressureSourceKeys(item, wellName, itemIndex)
-        const normalized = normalizePressureRecord(item, wellName, keys.sourceKey)
-        const saved = savedBySource.get(keys.sourceKey) || savedBySource.get(keys.legacySourceKey)
-        fetched.push({ ...normalized, ...(saved || {}), id: normalized.id, sourceKey: normalized.sourceKey })
+        sourceRecords.push({ item, wellName, index: itemIndex })
       })
     })
-    const failedWells = new Set(requests.flatMap((result, index) => result.status === 'rejected' ? [wells.value[index].wellName] : []))
-    const fetchedKeys = new Set(fetched.map(row => row.sourceKey))
-    const savedFailed = savedRows.filter(row => row.sourceKey && failedWells.has(row.wellName))
-    const manual = savedRows.filter(row => row.manual === true)
-    const deletedMissing = savedRows.filter(row => row.deleted && row.sourceKey && !fetchedKeys.has(row.sourceKey))
-    rows.value = [...fetched, ...savedFailed, ...manual, ...deletedMissing]
-    if (failedWells.size) loadError.value = [loadError.value, `${failedWells.size} 口井的实测静压读取失败`].filter(Boolean).join('；')
+    const failedWells = requests.flatMap((result, index) => result.status === 'rejected' ? [wells.value[index].wellName] : [])
+    const fetched = mergePressureTestRows(sourceRecords, savedRows)
+    rows.value = fetched
+    if (failedWells.length) loadError.value = [loadError.value, `${failedWells.length} 口井的实测静压读取失败`].filter(Boolean).join('；')
     if (!wells.value.length) loadError.value = [loadError.value, '当前储气库没有成员井'].filter(Boolean).join('；')
-    if (!fetched.length && !manual.length && !loadError.value) loadError.value = '当前库暂无实测静压'
+    if (!fetched.length && !loadError.value) loadError.value = '当前库暂无实测静压'
     if (draft?.pendingDatabaseSave === true && Array.isArray(draft.rows)) {
-      rows.value = draft.rows
+      const mergedDraftRows = [...rows.value]
+      draft.rows.forEach(draftRow => {
+        const existingIndex = mergedDraftRows.findIndex(row => row.id === draftRow.id
+          || (draftRow.sourceKey && row.sourceKey === draftRow.sourceKey))
+        if (existingIndex >= 0) mergedDraftRows[existingIndex] = { ...mergedDraftRows[existingIndex], ...draftRow }
+        else mergedDraftRows.push(draftRow)
+      })
+      rows.value = mergedDraftRows
       saveState.value = 'failed'
       loadError.value = [loadError.value, '已恢复本机未保存的测点修改，请核对后保存'].filter(Boolean).join('；')
     }
@@ -241,7 +238,6 @@ const importFile = async event => {
 
 const chartOption = () => {
   const model = chartModel.value
-  const byTime = chartAxis.value === 'time'
   return {
     animation: false,
     color: ['#568df5', '#ff9b21', '#f05252', '#31a6a0', '#9a6de8', '#4aaf5d'],
@@ -249,9 +245,9 @@ const chartOption = () => {
     tooltip: { trigger: 'axis', formatter: params => params.filter(item => item.value !== null && item.value !== undefined && Number.isFinite(Number(item.value))).map(item => `${item.axisValue}<br/>${item.marker}${item.seriesName}：${format(Number(item.value))} MPa`).join('<br/>') },
     legend: { top: 42, type: 'scroll' },
     grid: { top: 88, left: 76, right: 34, bottom: 68 },
-    xAxis: { type: 'category', name: byTime ? '日期' : '井号', nameLocation: 'middle', nameGap: 40, data: model.categories },
+    xAxis: { type: 'category', name: '井号', nameLocation: 'middle', nameGap: 40, data: model.categories },
     yAxis: { type: 'value', name: '实测静压 (MPa)', nameLocation: 'middle', nameGap: 54, min: 0, max: Math.max(5, Math.ceil(model.maxPressure / 5) * 5), interval: 5, splitLine: { lineStyle: { color: '#e4e9f2' } } },
-    series: model.series.map(({ key, data }) => ({ name: byTime ? key : key, type: 'line', data, connectNulls: false, symbol: 'circle', symbolSize: 8, lineStyle: { width: 2 } }))
+    series: model.series.map(({ key, data }) => ({ name: key, type: 'line', data, connectNulls: false, symbol: 'circle', symbolSize: 8, lineStyle: { width: 2 } }))
   }
 }
 const renderChart = async () => {
@@ -267,7 +263,7 @@ const renderChart = async () => {
 }
 watch(() => [props.reservoir?.projectId, props.reservoir?.gasReservoirId, props.reservoir?.storageId], load, { immediate: true })
 watch(rows, scheduleSave, { deep: true })
-watch([dateRange, chartAxis, activeTab, chartModel], renderChart)
+watch([dateRange, activeTab, chartModel], renderChart)
 onBeforeUnmount(() => {
   if (saveTimer) {
     clearTimeout(saveTimer)
@@ -291,8 +287,6 @@ onBeforeUnmount(() => {
       <div class="chart-controls">
         <label>测压期</label>
         <el-select v-model="dateRange" size="small" style="width: 140px"><el-option label="最近 3 期" value="recent3" /><el-option label="全部日期" value="all" /></el-select>
-        <label>横轴</label>
-        <el-select v-model="chartAxis" size="small" style="width: 135px"><el-option label="井号" value="well" /><el-option label="时间" value="time" /></el-select>
         <span>{{ chartModel.validRows.length }} 个有效测点</span>
       </div>
       <div class="chart-frame"><div v-if="loading" class="chart-empty">正在读取智慧气藏实测静压…</div><div v-else-if="!chartHasData" class="chart-empty">暂无可绘制的实测数据</div><div ref="chartElement" class="pressure-chart" /></div>
@@ -312,9 +306,10 @@ onBeforeUnmount(() => {
         <el-table-column label="井号" min-width="140"><template #default="{ row }"><el-select v-model="row.wellName" size="small" :disabled="!databaseLoaded"><el-option v-for="well in wells" :key="well.id" :label="well.wellName" :value="well.wellName" /></el-select></template></el-table-column>
         <el-table-column label="日期" min-width="150"><template #default="{ row }"><el-input v-model="row.date" type="date" size="small" :disabled="!databaseLoaded" /></template></el-table-column>
         <el-table-column label="实测静压 (MPa)" min-width="180"><template #default="{ row }"><el-input v-model="row.measuredPressure" size="small" inputmode="decimal" :disabled="!databaseLoaded" /></template></el-table-column>
+        <el-table-column label="来源" width="100"><template #default="{ row }">{{ row.manual ? '补录' : '平台实测' }}</template></el-table-column>
         <el-table-column label="操作" width="90" fixed="right"><template #default="{ row }"><el-button link type="danger" :disabled="!databaseLoaded" @click="removePoint(row)">删除</el-button></template></el-table-column>
       </el-table>
-      <div class="table-footer"><span>{{ shownRows.length }} 个测点</span><span>使用智慧气藏实测静压</span></div>
+      <div class="table-footer"><span>{{ shownRows.length }} 个测点</span></div>
     </div>
   </section>
 </template>

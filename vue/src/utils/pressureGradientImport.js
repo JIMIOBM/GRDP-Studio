@@ -1,4 +1,7 @@
 export const pressureGradientImportColumns = [
+  '井号', '日期', 'P₀ (MPa)', 'PGD (MPa/m)', 'H (m)'
+]
+const legacyPressureGradientImportColumns = [
   '井号', '日期', '实测静压 (MPa)', '测压坐标 (m)', '压力梯度 (MPa/m)'
 ]
 
@@ -63,10 +66,11 @@ const optionalNumber = (value, line, label, minimum = null) => {
 export function parsePressureGradientRows(rows, allowedWellNames) {
   if (!Array.isArray(rows) || !rows.length) throw new Error('文件中没有可读取的表格')
   const headers = normalizedHeaders(rows[0])
-  if (headers.length !== pressureGradientImportColumns.length
-    || pressureGradientImportColumns.some((column, index) => headers[index] !== column)) {
-    throw new Error(`表头必须依次为：${pressureGradientImportColumns.join('、')}`)
-  }
+  const parameterFormat = headers.length === pressureGradientImportColumns.length
+    && pressureGradientImportColumns.every((column, index) => headers[index] === column)
+  const legacyFormat = headers.length === legacyPressureGradientImportColumns.length
+    && legacyPressureGradientImportColumns.every((column, index) => headers[index] === column)
+  if (!parameterFormat && !legacyFormat) throw new Error(`表头必须依次为：${pressureGradientImportColumns.join('、')}`)
   const wells = new Set(allowedWellNames.map(name => String(name).trim()))
   const output = []
   rows.slice(1).forEach((row, index) => {
@@ -79,13 +83,31 @@ export function parsePressureGradientRows(rows, allowedWellNames) {
     if (!wells.has(wellName)) throw new Error(`第 ${line} 行：井号“${wellName}”不是当前储气库成员井`)
     const date = dateText(row[1])
     if (!date) throw new Error(`第 ${line} 行：日期无效，请使用 YYYY-MM-DD`)
+    if (parameterFormat) {
+      const p0 = optionalNumber(row[2], line, 'P₀', 0)
+      const gradient = optionalNumber(row[3], line, 'PGD', 0)
+      const measuredCoordinate = optionalNumber(row[4], line, 'H', 0)
+      if ([p0, gradient, measuredCoordinate].some(value => value === '')) {
+        throw new Error(`第 ${line} 行：P₀、PGD、H 均需填写`)
+      }
+      const measuredPressure = Number(p0) + Number(gradient) * Number(measuredCoordinate)
+      if (!Number.isFinite(measuredPressure)) throw new Error(`第 ${line} 行：计算压力超出有效范围`)
+      output.push({
+        wellName, date, p0,
+        measuredPressure: String(measuredPressure),
+        measuredCoordinate, gradient
+      })
+      return
+    }
     const measuredPressure = optionalNumber(row[2], line, '实测静压', 0)
-    const measuredCoordinate = optionalNumber(row[3], line, '测压坐标')
+    const measuredCoordinate = optionalNumber(row[3], line, '测压坐标', 0)
     const gradient = optionalNumber(row[4], line, '压力梯度', 0)
     if ([measuredPressure, measuredCoordinate, gradient].every(value => value === '')) {
       throw new Error(`第 ${line} 行：至少填写实测静压、测压坐标或压力梯度中的一项`)
     }
-    output.push({ wellName, date, measuredPressure, measuredCoordinate, gradient })
+    const p0 = [measuredPressure, measuredCoordinate, gradient].every(value => value !== '')
+      ? String(Number(measuredPressure) - Number(gradient) * Number(measuredCoordinate)) : ''
+    output.push({ wellName, date, p0, measuredPressure, measuredCoordinate, gradient })
   })
   if (!output.length) throw new Error('模板中没有可导入的测点行')
   return output
@@ -113,6 +135,7 @@ export function mergePressureGradientImportRows(existingRows, importedRows, crea
     }
     if (target) {
       claimed.add(target)
+      if (item.p0 !== '') target.p0 = item.p0
       if (item.measuredPressure !== '') target.measuredPressure = item.measuredPressure
       if (item.measuredCoordinate !== '') target.measuredCoordinate = item.measuredCoordinate
       if (item.gradient !== '') target.gradient = item.gradient

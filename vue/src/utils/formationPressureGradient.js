@@ -94,6 +94,13 @@ export function isCalculablePressureRecord(row, referenceCoordinate, coordinateM
   return Number.isFinite(folded) && folded >= 0
 }
 
+function isValidDirectPressureRecord(row) {
+  if (!row || row.deleted === true || !String(row.wellName || '').trim()) return false
+  const date = pressureRecordDate({ date: row.date })
+  const pressure = finiteInput(row.measuredPressure)
+  return date !== '' && date === String(row.date) && pressure !== null && pressure >= 0
+}
+
 /** Build the exact values plotted by the well/date comparison, leaving absent pairs blank. */
 export function buildPressureGradientComparison({
   rows = [],
@@ -101,11 +108,14 @@ export function buildPressureGradientComparison({
   referenceCoordinate,
   coordinateMode = 'depth',
   dateRange = 'recent3',
-  chartAxis = 'well'
+  chartAxis = 'well',
+  directPressure = false
 }) {
   const selected = new Set(selectedWells.map(String))
   const validRows = rows.filter(row => selected.has(String(row.wellName))
-    && isCalculablePressureRecord(row, referenceCoordinate, coordinateMode))
+    && (directPressure
+      ? isValidDirectPressureRecord(row)
+      : isCalculablePressureRecord(row, referenceCoordinate, coordinateMode)))
   const allDates = [...new Set(validRows.map(row => row.date))].sort((a, b) => a.localeCompare(b))
   const dates = dateRange === 'all' ? allDates : allDates.slice(-3)
   const activeRows = validRows.filter(row => dates.includes(row.date))
@@ -116,13 +126,15 @@ export function buildPressureGradientComparison({
   activeRows.forEach(row => {
     const key = JSON.stringify([String(row.wellName), row.date])
     const sum = grouped.get(key) || { total: 0, count: 0 }
-    sum.total += calculateDatumPressure({
-      measuredPressure: row.measuredPressure,
-      measuredCoordinate: row.measuredCoordinate,
-      gradient: row.gradient,
-      referenceCoordinate,
-      coordinateMode
-    })
+    sum.total += directPressure
+      ? Number(row.measuredPressure)
+      : calculateDatumPressure({
+          measuredPressure: row.measuredPressure,
+          measuredCoordinate: row.measuredCoordinate,
+          gradient: row.gradient,
+          referenceCoordinate,
+          coordinateMode
+        })
     sum.count++
     grouped.set(key, sum)
   })

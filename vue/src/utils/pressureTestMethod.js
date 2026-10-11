@@ -1,4 +1,18 @@
-import { pressureRecordDate } from './formationPressureGradient.js'
+import { normalizePressureRecord, pressureRecordDate, pressureSourceKeys } from './formationPressureGradient.js'
+
+/** Merge platform readings with persisted edits, preserving readings absent from a partial platform response. */
+export function mergePressureTestRows(sourceRecords = [], savedRows = []) {
+  const savedBySource = new Map(savedRows.filter(row => row.sourceKey).map(row => [row.sourceKey, row]))
+  const matchedSavedRows = new Set()
+  const fetchedRows = sourceRecords.map(({ item, wellName, index }) => {
+    const keys = pressureSourceKeys(item, wellName, index)
+    const normalized = normalizePressureRecord(item, wellName, keys.sourceKey)
+    const saved = savedBySource.get(keys.sourceKey) || savedBySource.get(keys.legacySourceKey)
+    if (saved) matchedSavedRows.add(saved)
+    return { ...normalized, ...(saved || {}), id: normalized.id, sourceKey: normalized.sourceKey }
+  })
+  return [...fetchedRows, ...savedRows.filter(row => !matchedSavedRows.has(row))]
+}
 
 /** 按真实实测静压构建测试法对比，不插值、不模拟缺失值。 */
 export function buildPressureTestComparison({ rows = [], selectedWells = [], dateRange = 'recent3', chartAxis = 'well' }) {
