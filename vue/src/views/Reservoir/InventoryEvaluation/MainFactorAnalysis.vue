@@ -2,12 +2,16 @@
 /**
  * 库级「主控因素分析」。
  *
- * 只比较**地层压力**一个因素：
- *   理论值 —— 原平台「物质平衡方程 → 计算地层压力」工具箱
- *   实际值 —— 库内实测静压（没有则退到静态压力数据表）
- *   差异   —— 实际 − 理论，另附百分比偏差
+ * 只比较**地层压力**一个因素，而且是**随时间**比较：
+ *   实际值 —— 本库导入的时序数据里的实测地层压力
+ *   理论值 —— 用同一个点的累产气量调原平台「物质平衡方程 → 计算地层压力」工具箱
+ *   差异   —— 实际 − 理论，逐点算，另附百分比偏差
  *
- * 布局与交互照「微观损耗」：顶部功能区（导入PVT / 保存）+ 参数网格 + 计算/重置 + 计算结果。
+ * 时序数据（日期 / 累产气量 / 地层压力）由页面**导入**，存在本模块自己的表里；
+ * 运行时不读原平台或团队其他模块的任何表。整条序列共用一组参数，**只有累产气量在变**，
+ * 所以工具箱会话只开一次、串行提交每个点。
+ *
+ * 布局与交互照「微观损耗」：顶部功能区（导入PVT / 导入数据 / 保存）+ 参数网格 + 计算/重置 + 计算结果。
  *
  * 参数在界面上用**界面口径**（MPa / ℃ / 10⁸m³ / % / MPa⁻¹），与微观损耗以及原平台
  * 自己的表单一致——用户看到的量级应该是 50 MPa，而不是 50000000 Pa。
@@ -19,9 +23,8 @@ import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
 import { storageMainFactorApi } from '@/api/storageMainFactor'
 import {
-  buildPressureChartSeries,
-  differenceDirection,
-  formatComputedValue,
+  buildPressureLines,
+  parseSeriesFile,
   toAppInputs,
   toDisplayInputs
 } from '@/utils/storageMainFactor'
@@ -42,13 +45,15 @@ const title = computed(() => `${props.reservoir?.label || '未选择库'}-主控
 /**
  * 参数一律是界面口径。下拉框用原生 select（与微观损耗一致），
  * 取值就是后端 GasPvtParam 的枚举码。
+ *
+ * **没有累产气量**：它逐点来自导入的时序数据，由后端按点替换。
+ * 界面上再留一个手填框，就会出现"我填的这个值到底用没用"的歧义。
  */
 const form = reactive({
   gasReservoirType: 0,
   originalPressure: '',
   formationTemperature: '',
   originalGasInPlace: '',
-  cumulativeGasProduction: '',
   rockCompressionCoefficient: '',
   waterCompressionCoefficient: '',
   waterSaturation: '',
@@ -62,40 +67,49 @@ const form = reactive({
 })
 
 const importDialogVisible = ref(false)
-const importedFileName = ref('')
+/** 本库已导入的时序数据点数。不足两个画不出折线，也不该去调平台。 */
+const seriesPointCount = ref(0)
 const loading = ref(false)
 const calculating = ref(false)
 const saving = ref(false)
 const error = ref('')
-/** 上次计算的结果（CalculateResult）。理论值、实际值、差异只在点过「计算」之后才有。 */
+/** 上次计算的结果（SeriesResult）。理论值、实际值、差异只在点过「计算」之后才有。 */
 const result = ref(null)
 /** 结果是否因为参数被改过而作废（与"从没算过"要分开说，用户的下一步动作不同）。 */
 const resultStale = ref(false)
 
-/** 地层压力对比图：相对理论值 / 绝对值两口径可切换。序列由 utils 的纯函数给出。 */
-const chartMode = ref('relative')
+/** 结果卡显示的是**最后一点**，与图上最后一点严格一致。 */
+const lastPoint = computed(() => result.value?.points?.at(-1) ?? null)
+
+/** 地层压力对比图：绝对值 / 偏差两口径可切换。序列由 utils 的纯函数给出。 */
+const chartMode = ref('absolute')
 const chartRef = ref(null)
+const seriesInput = ref(null)
 let chart = null
 
 const renderChart = () => {
   if (!chartRef.value) return
+  const lines = buildPressureLines(result.value?.points, chartMode.value)
   chart?.dispose()
   chart = echarts.init(chartRef.value)
-  const series = buildPressureChartSeries(
-    result.value?.formationPressure,
-    result.value?.measuredPressure?.value,
-    chartMode.value
-  )
+  const deviation = lines.mode === 'deviation'
   chart.setOption({
     tooltip: { trigger: 'axis' },
-    legend: { bottom: 0, data: ['理论值', '实际值'] },
+    legend: { bottom: 0, data: deviation ? ['偏差'] : ['理论值', '实际值'] },
     grid: { left: 64, right: 24, top: 40, bottom: 44 },
-    xAxis: { type: 'category', data: ['地层压力'] },
-    yAxis: { type: 'value', name: series.yName },
-    series: [
-      { name: '理论值', type: 'bar', barWidth: 44, data: [series.theoretical] },
-      { name: '实际值', type: 'bar', barWidth: 44, data: [series.actual] }
-    ]
+    xAxis: { type: 'category', data: lines.dates },
+    // scale: true 让 y 轴不强制从 0 起。库级压力在 40~50 MPa 之间，从 0 起画会把
+    // 1 MPa 的间距压成屏幕高度的 2%，看着像两条线重合——而"间距多大、是否单调"
+    // 恰恰是这张图要回答的问题。刻度仍标出真实范围，不会假装数据更夸张。
+    yAxis: { type: 'value', name: lines.yName, scale: true },
+    series: deviation
+      ? [{ name: '偏差', type: 'line', data: lines.deviation, connectNulls: false }]
+      : [
+          // connectNulls 保持 false：原平台对某个点失败时该点是 null，线要断开。
+          // 补 0 会在图上多出一个假的压力谷底，比断开更容易误读。
+          { name: '理论值', type: 'line', data: lines.theoretical, connectNulls: false },
+          { name: '实际值', type: 'line', data: lines.actual, connectNulls: false }
+        ]
   })
 }
 
@@ -132,14 +146,14 @@ const load = async () => {
   loading.value = true
   error.value = ''
   result.value = null
-  importedFileName.value = ''
   resultStale.value = false
   try {
-    // 这一趟**只用来校验库范围**，并在库数据异常时立刻报错；
+    // 这一趟**只用来校验库范围并取到已导入的点数**；
     // 刻意**不预填表单**：参数表与原平台 MBE 表单对齐后，用户从"请输入"开始自己填
     // （与「微观损耗」一致）。理论值、实际值、差异也都要点过「计算」才出现。
-    await storageMainFactorApi.context(scope.value)
+    const data = unwrap(await storageMainFactorApi.seriesData(scope.value))
     if (!active || version !== loadVersion) return
+    seriesPointCount.value = Array.isArray(data) ? data.length : 0
 
     // 保存过就用保存值覆盖预填：用户上次看到的参数与结果要能原样恢复。
     //
@@ -149,19 +163,14 @@ const load = async () => {
       const saved = unwrap(await storageMainFactorApi.saved(scope.value))
       if (!active || version !== loadVersion || !saved) return
       applyInputs(saved.inputs)
-      // 差异与百分比偏差由后端在读取时重算（它们不入库）：
-      // 不带上这两个字段，重新打开就会看到"两侧都有值、差异却是 —"。
-      result.value = {
-        formationPressure: saved.theoreticalPressure,
-        measuredPressure: { value: saved.actualPressure, source: 'AUTO', note: null },
-        difference: saved.difference,
-        deviationPercent: saved.deviationPercent
-      }
+      // 序列里每个点的差异与百分比偏差由后端在读取时重算（它们不入库）：
+      // 不带上，重新打开就会看到"两侧都有值、差异却是 —"。
+      result.value = { points: saved.points ?? [], warnings: [] }
     } catch (e) {
       // 忽略：没有已保存记录不影响本次读取
     }
   } catch (e) {
-    if (active && version === loadVersion) error.value = e?.message || '读取库内物质平衡输入失败'
+    if (active && version === loadVersion) error.value = e?.message || '读取库内时序数据失败'
   } finally {
     if (active && version === loadVersion) loading.value = false
   }
@@ -171,6 +180,10 @@ const calculate = async () => {
   if (calculating.value || saving.value) return
   if (!(scope.value.storageId > 0)) {
     ElMessage.warning('请先选择具体储气库')
+    return
+  }
+  if (seriesPointCount.value < 2) {
+    ElMessage.warning('请先导入时序数据')
     return
   }
   // 与「微观损耗」同一套校验：先看必填、再看数值格式，不过就同一句提示。
@@ -185,7 +198,7 @@ const calculate = async () => {
   error.value = ''
   result.value = null
   try {
-    const response = unwrap(await storageMainFactorApi.calculate({
+    const response = unwrap(await storageMainFactorApi.series({
       ...scope.value,
       inputs: toAppInputs(form)
     }))
@@ -211,12 +224,19 @@ const save = async () => {
     await storageMainFactorApi.save({
       ...scope.value,
       inputs: toAppInputs(form),
-      theoreticalPressure: result.value.formationPressure ?? null,
-      actualPressure: result.value.measuredPressure?.value ?? null
+      // 存的是用户**看到的**那份序列，而不是让后端重算：重算一次可能因为平台抖动
+      // 而存进另一组值。差异与百分比偏差不回传——它们是推导量，后端读取时重算。
+      points: (result.value.points ?? []).map(point => ({
+        date: point.date,
+        cumulativeGasProduction: point.cumulativeGasProduction,
+        measuredPressure: point.measuredPressure,
+        theoreticalPressure: point.theoreticalPressure ?? null
+      }))
     })
     // 理论值为空也允许保存（平台可能只是暂时不可用），但要说明存下去的是什么。
-    if (result.value.formationPressure === null || result.value.formationPressure === undefined) {
-      ElMessage.warning('已保存；本次没有理论地层压力（原平台不可用），该字段存为空')
+    const theory = lastPoint.value?.theoreticalPressure
+    if (theory === null || theory === undefined) {
+      ElMessage.warning('已保存；本次没有理论地层压力（原平台不可用），该列存为空')
     } else {
       ElMessage.success('已保存')
     }
@@ -224,6 +244,39 @@ const save = async () => {
     ElMessage.error(e?.message || '保存失败')
   } finally {
     saving.value = false
+  }
+}
+
+/** 导入的是「时序数据」：三列——日期、累产气量（10⁸m³）、地层压力（MPa）。 */
+const handleSeriesImport = async event => {
+  const file = event.target.files?.[0]
+  // 清空选择：同一个文件再选一次也要能触发 change
+  event.target.value = ''
+  if (!file) return
+  try {
+    const extension = file.name.split('.').pop()?.toLowerCase()
+    if (!['xlsx', 'xls', 'csv'].includes(extension)) throw new Error('仅支持 .xlsx、.xls、.csv 表格文件')
+    const XLSX = await import('xlsx')
+    const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' })
+    const sheet = workbook.Sheets[workbook.SheetNames[0]]
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: '' })
+    const { points, error: parseError } = parseSeriesFile(rows, {
+      // Mac 版 Excel 的 1904 日期系统：不认这个标志，每个日期都会静默偏 1462 天
+      date1904: workbook.Workbook?.WBProps?.date1904 === true
+    })
+    if (parseError) {
+      ElMessage.error(parseError)
+      return
+    }
+    const imported = unwrap(await storageMainFactorApi.importSeriesData({ ...scope.value, points }))
+    if (!active) return
+    seriesPointCount.value = Number(imported) || points.length
+    // 换了数据，上一次的结果就不作数了
+    result.value = null
+    resultStale.value = false
+    ElMessage.success(`已导入 ${seriesPointCount.value} 个时间点`)
+  } catch (e) {
+    ElMessage.error(e?.message || '时序数据导入失败')
   }
 }
 
@@ -251,7 +304,6 @@ const handleGasImport = async ({ file, options }) => {
       co2MoleFraction: numbers[2],
       n2MoleFraction: numbers[3]
     })
-    importedFileName.value = file.name
     result.value = null
     ElMessage.success('PVT基础数据导入成功')
   } catch (e) {
@@ -280,11 +332,13 @@ watch(() => [scope.value.projectId, scope.value.gasReservoirId, scope.value.stor
 
 <template>
   <section class="main-factor">
-    <!-- 顶部功能区：标题、PVT 导入入口、保存。与「微观损耗」同一套结构。 -->
+    <!-- 顶部功能区：标题、PVT 导入入口、时序数据导入入口、保存。与「微观损耗」同一套结构。 -->
     <header class="result-tabs">
       <div class="result-tab" :title="title"><span>{{ title }}</span></div>
       <div class="header-actions">
         <button class="secondary" type="button" @click="importDialogVisible = true">导入PVT</button>
+        <button class="secondary" type="button" @click="seriesInput.click()">导入数据</button>
+        <input ref="seriesInput" type="file" accept=".xlsx,.xls,.csv" hidden @change="handleSeriesImport" />
         <button class="primary" type="button" :disabled="saving" @click="save">{{ saving ? '保存中…' : '保存' }}</button>
       </div>
     </header>
@@ -293,10 +347,10 @@ watch(() => [scope.value.projectId, scope.value.gasReservoirId, scope.value.stor
       <div class="form-title">请输入计算参数</div>
 
       <div v-if="error" class="form-error" role="alert">{{ error }}</div>
-      <div v-else-if="loading" class="form-loading" role="status">正在读取库内井的物质平衡输入…</div>
+      <div v-else-if="loading" class="form-loading" role="status">正在读取库内时序数据…</div>
 
       <div class="parameter-grid">
-        <!-- 气藏类型与天然气物性用下拉框，其余按公式需要的量手填或由库内预填。 -->
+        <!-- 气藏类型与天然气物性用下拉框，其余按公式需要的量手填。 -->
         <label class="field"><span>气藏类型</span>
           <select v-model.number="form.gasReservoirType">
             <option :value="0">封闭气藏</option>
@@ -307,7 +361,6 @@ watch(() => [scope.value.projectId, scope.value.gasReservoirId, scope.value.stor
         <label class="field"><span>原始地层压力（MPa）</span><input v-model="form.originalPressure" placeholder="请输入" inputmode="decimal" /></label>
         <label class="field"><span>地层温度（℃）</span><input v-model="form.formationTemperature" placeholder="请输入" inputmode="decimal" /></label>
         <label class="field"><span>动态地质储量（10⁸m³）</span><input v-model="form.originalGasInPlace" placeholder="请输入" inputmode="decimal" /></label>
-        <label class="field"><span>累产气量（10⁸m³）</span><input v-model="form.cumulativeGasProduction" placeholder="请输入" inputmode="decimal" /></label>
         <label class="field"><span>岩石压缩系数（MPa⁻¹）</span><input v-model="form.rockCompressionCoefficient" placeholder="请输入" inputmode="decimal" /></label>
         <label class="field"><span>地层水压缩系数（MPa⁻¹）</span><input v-model="form.waterCompressionCoefficient" placeholder="请输入" inputmode="decimal" /></label>
         <label class="field"><span>束缚水饱和度（%）</span><input v-model="form.waterSaturation" placeholder="请输入" inputmode="decimal" /></label>
@@ -337,33 +390,19 @@ watch(() => [scope.value.projectId, scope.value.gasReservoirId, scope.value.stor
         </label>
       </div>
 
-      <div v-if="importedFileName" class="import-note">已导入：{{ importedFileName }}</div>
-
       <div class="calculation-actions">
         <button class="calculate" type="button" :disabled="calculating" @click="calculate">{{ calculating ? '计算中…' : '计 算' }}</button>
         <button class="reset" type="button" @click="resetCalculation">重 置</button>
       </div>
 
-      <!-- 计算结果：只保留地层压力的理论值 / 实际值 / 差异。 -->
+      <!-- 计算结果：**只用折线图表示**，不放数值读数。 -->
       <section class="result-card">
         <h3>计算结果</h3>
-        <div class="result-line">
-          <span>地层压力（MPa）：</span>
-          <span>理论值 <strong>{{ formatComputedValue(result?.formationPressure) }}</strong></span>
-          <span>实际值 <strong>{{ formatComputedValue(result?.measuredPressure?.value) }}</strong></span>
-          <span class="difference" :class="(differenceDirection(result?.difference) || '').toLowerCase()">
-            差异 <strong>{{ formatComputedValue(result?.difference) }}</strong>
-            <template v-if="result?.deviationPercent !== null && result?.deviationPercent !== undefined">
-              （{{ formatComputedValue(result.deviationPercent) }}%）
-            </template>
-          </span>
-        </div>
-        <!-- 结果区只保留数值与对比图：不显示任何解释性文字。 -->
         <template v-if="result">
           <div class="chart-head">
             <span>理论 vs 实际</span>
-            <button class="mode" :class="{ active: chartMode === 'relative' }" type="button" @click="setChartMode('relative')">相对理论值</button>
-            <button class="mode" :class="{ active: chartMode === 'absolute' }" type="button" @click="setChartMode('absolute')">绝对值</button>
+            <button class="mode" :class="{ active: chartMode === 'absolute' }" type="button" @click="setChartMode('absolute')">绝对值(MPa)</button>
+            <button class="mode" :class="{ active: chartMode === 'deviation' }" type="button" @click="setChartMode('deviation')">偏差(%)</button>
           </div>
           <div ref="chartRef" class="chart"></div>
         </template>
@@ -393,25 +432,18 @@ button.primary { min-width: 74px; border-color: #202020; background: #202020; co
 .field { display: grid; gap: 8px; min-width: 0; color: #333; }
 .field input, .field select { width: 100%; height: 34px; padding: 0 11px; border: 1px solid #d4d7dc; border-radius: 4px; background: #fff; box-sizing: border-box; color: #303133; font: inherit; outline: none; }
 .field input:focus, .field select:focus { border-color: #b49a00; box-shadow: 0 0 0 2px rgba(244,208,0,.14); }
-.import-note { margin-top: 14px; color: #777; font-size: 12px; }
 .calculation-actions { margin-top: 24px; }
 .calculation-actions button { height: 32px; }
 .calculate { min-width: 72px; border-color: #d5b900; background: #f4d000; }
 .reset { min-width: 72px; }
 .result-card { min-height: 142px; margin-top: 36px; padding: 18px 18px 26px; border: 1px solid #ececec; border-radius: 4px; background: #f5f5f5; box-sizing: border-box; }
 .result-card h3 { margin: 0 0 24px; font-size: 13px; }
-.result-line { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 22px; color: #333; }
-.result-line strong { font-size: 15px; font-weight: 500; }
-/* 实际低于理论为负：绿色；高于理论为正：红色。 */
-.difference.negative strong { color: #2f9e44; }
-.difference.positive strong { color: #e03131; }
-.result-note { margin: 14px 0 0; color: #909399; font-size: 12px; }
-/* 对比图压缩到左侧：只有一个因素，铺满整行会留下大片空白，横线也拉得过长。 */
 .chart-head { display: flex; align-items: center; gap: 8px; margin: 24px 0 0; color: #333; }
 .chart-head > span { margin-right: 4px; }
 button.mode { height: 24px; padding: 0 12px; font-size: 12px; }
 button.mode.active { border-color: #d5b900; background: #f4d000; }
-.chart { width: 380px; max-width: 100%; height: 260px; margin-top: 10px; }
+/* 时间序列横轴要摆 20 个日期，铺满整行才看得清；高度给到 300px 让两条线分得开。 */
+.chart { width: 100%; height: 300px; margin-top: 10px; }
 @media (max-width: 1250px) { .parameter-grid { grid-template-columns: repeat(3, minmax(170px, 1fr)); } }
 @media (max-width: 920px) { .parameter-grid { grid-template-columns: repeat(2, minmax(170px, 1fr)); } }
 </style>

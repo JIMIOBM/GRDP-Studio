@@ -9,46 +9,59 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
 import java.util.Map;
 
-import static com.grdp.studio.storagemainfactor.StorageMainFactorDtos.CalculateRequest;
-import static com.grdp.studio.storagemainfactor.StorageMainFactorDtos.CalculateResult;
-import static com.grdp.studio.storagemainfactor.StorageMainFactorDtos.Context;
 import static com.grdp.studio.storagemainfactor.StorageMainFactorDtos.SaveRequest;
 import static com.grdp.studio.storagemainfactor.StorageMainFactorDtos.SavedAnalysis;
-import static com.grdp.studio.storagemainfactor.StorageMainFactorDtos.SavedMainFactor;
+import static com.grdp.studio.storagemainfactor.StorageMainFactorDtos.SeriesDataRequest;
+import static com.grdp.studio.storagemainfactor.StorageMainFactorDtos.SeriesPointInput;
+import static com.grdp.studio.storagemainfactor.StorageMainFactorDtos.SeriesRequest;
+import static com.grdp.studio.storagemainfactor.StorageMainFactorDtos.SeriesResult;
 
 /**
  * 库级主控因素分析接口。薄层：只做参数绑定与 {@link ApiResponse} 包装。
  *
- * <p>原平台调用需要当前用户的会话，因此把浏览器带来的 {@code Cookie} / {@code token} /
- * {@code Process-Env} 原样再转发给原平台，不使用任何全局凭据。
+ * <p>时序数据由页面**导入**、存在本模块自己的表里；序列计算逐点调用原平台工具箱，
+ * 因此把浏览器带来的 {@code Cookie} / {@code token} / {@code Process-Env} 原样再转发给原平台，
+ * 不使用任何全局凭据。
  */
 @RestController
 @RequestMapping("/storage-main-factor")
 public class StorageMainFactorController {
 
     private final StorageMainFactorService service;
+    private final StorageMainFactorSeriesService seriesService;
 
-    public StorageMainFactorController(StorageMainFactorService service) {
+    public StorageMainFactorController(StorageMainFactorService service,
+            StorageMainFactorSeriesService seriesService) {
         this.service = service;
+        this.seriesService = seriesService;
     }
 
-    @GetMapping("/context")
-    public ApiResponse<Context> context(@RequestParam long projectId,
+    /** 本库已导入的时序数据，按日期升序；没导入过返回空表。 */
+    @GetMapping("/series-data")
+    public ApiResponse<List<SeriesPointInput>> seriesData(@RequestParam long projectId,
             @RequestParam long gasReservoirId,
             @RequestParam long storageId) {
-        return ApiResponse.success(service.context(projectId, gasReservoirId, storageId));
+        return ApiResponse.success(seriesService.points(projectId, gasReservoirId, storageId));
     }
 
-    @PostMapping("/calculate")
-    public ApiResponse<CalculateResult> calculate(@RequestBody CalculateRequest request,
+    /** 导入时序数据（**整体替换**本库已有的一份），返回写入的点数。 */
+    @PostMapping("/series-data")
+    public ApiResponse<Integer> importSeriesData(@RequestBody SeriesDataRequest request) {
+        return ApiResponse.success(seriesService.importPoints(request));
+    }
+
+    /** 逐点计算理论地层压力，返回整条序列。 */
+    @PostMapping("/series")
+    public ApiResponse<SeriesResult> series(@RequestBody SeriesRequest request,
             @RequestHeader(value = "Cookie", required = false) String cookie,
             @RequestHeader(value = "token", required = false) String token,
             @RequestHeader(value = "Process-Env", required = false) String processEnv) {
         Map<String, String> headers = MaterialBalanceEquationClient.forwardedHeaders(
                 token, cookie, processEnv, request.projectId());
-        return ApiResponse.success(service.calculate(request, headers));
+        return ApiResponse.success(seriesService.calculate(request, headers));
     }
 
     /** 保存本库的一份分析：存在则更新，不产生第二条记录。 */
