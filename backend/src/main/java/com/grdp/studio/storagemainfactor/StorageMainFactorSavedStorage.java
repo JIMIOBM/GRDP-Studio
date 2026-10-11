@@ -1,7 +1,11 @@
 package com.grdp.studio.storagemainfactor;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -10,6 +14,7 @@ import java.util.Optional;
 
 import static com.grdp.studio.storagemainfactor.StorageMainFactorDtos.GasPvtParam;
 import static com.grdp.studio.storagemainfactor.StorageMainFactorDtos.SavedMainFactor;
+import static com.grdp.studio.storagemainfactor.StorageMainFactorDtos.StoredPoint;
 import static com.grdp.studio.storagemainfactor.StorageMainFactorDtos.ToolboxInput;
 
 /**
@@ -29,16 +34,25 @@ import static com.grdp.studio.storagemainfactor.StorageMainFactorDtos.ToolboxInp
 @Component
 public class StorageMainFactorSavedStorage {
 
-    private final JdbcTemplate jdbc;
+    private static final Logger log = LoggerFactory.getLogger(StorageMainFactorSavedStorage.class);
 
-    public StorageMainFactorSavedStorage(JdbcTemplate jdbc) {
+    private final JdbcTemplate jdbc;
+    private final ObjectMapper json;
+
+    public StorageMainFactorSavedStorage(JdbcTemplate jdbc, ObjectMapper json) {
         this.jdbc = jdbc;
+        this.json = json;
     }
 
     /** 保存（存在则更新）。 */
     public void save(long projectId, long gasReservoirId, long storageId, SavedMainFactor saved) {
         ToolboxInput in = saved.inputs();
         GasPvtParam pvt = in == null ? null : in.gasPvtParam();
+        List<StoredPoint> points = saved.points() == null ? List.of() : saved.points();
+        // 整条序列以快照形式存下来，它就是这个库唯一的结果来源：
+        // 结果卡不再显示数值读数（只画折线图），所以原来的两个标量压力列已废弃，
+        // 由 015 的条件式 ALTER 删掉。
+        String seriesJson = json.writeValueAsString(points);
 
         int changed = jdbc.update("""
                 UPDATE project_reservoir_main_factor SET
@@ -47,7 +61,7 @@ public class StorageMainFactorSavedStorage {
                   rock_compression_coefficient=?, water_compression_coefficient=?, water_saturation=?,
                   gas_type=?, specific_gravity=?, h2s_mole_fraction=?, co2_mole_fraction=?,
                   n2_mole_fraction=?, modification_method=?, deviation_factor_method=?, viscosity_method=?,
-                  theoretical_pressure=?, actual_pressure=?, updated_at=CURRENT_TIMESTAMP
+                  series_json=?, updated_at=CURRENT_TIMESTAMP
                 WHERE project_id=? AND gas_reservoir_id=? AND storage_id=?
                 """,
                 in == null ? null : in.gasReservoirType(),
@@ -66,7 +80,7 @@ public class StorageMainFactorSavedStorage {
                 pvt == null ? null : pvt.modificationMethod(),
                 pvt == null ? null : pvt.deviationFactorMethod(),
                 pvt == null ? null : pvt.viscosityMethod(),
-                saved.theoreticalPressure(), saved.actualPressure(),
+                seriesJson,
                 projectId, gasReservoirId, storageId);
 
         if (changed > 0) {
@@ -79,8 +93,8 @@ public class StorageMainFactorSavedStorage {
                  rock_compression_coefficient, water_compression_coefficient, water_saturation,
                  gas_type, specific_gravity, h2s_mole_fraction, co2_mole_fraction, n2_mole_fraction,
                  modification_method, deviation_factor_method, viscosity_method,
-                 theoretical_pressure, actual_pressure, created_at, updated_at)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+                 series_json, created_at, updated_at)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
                 """,
                 projectId, gasReservoirId, storageId,
                 in == null ? null : in.gasReservoirType(),
@@ -99,7 +113,7 @@ public class StorageMainFactorSavedStorage {
                 pvt == null ? null : pvt.modificationMethod(),
                 pvt == null ? null : pvt.deviationFactorMethod(),
                 pvt == null ? null : pvt.viscosityMethod(),
-                saved.theoreticalPressure(), saved.actualPressure());
+                seriesJson);
     }
 
     /** 读取本库已保存的一份；从未保存过返回 {@link Optional#empty()}。 */
@@ -110,7 +124,7 @@ public class StorageMainFactorSavedStorage {
                        water_compression_coefficient, water_saturation, gas_reservoir_type,
                        gas_type, specific_gravity, h2s_mole_fraction, co2_mole_fraction, n2_mole_fraction,
                        modification_method, deviation_factor_method, viscosity_method,
-                       theoretical_pressure, actual_pressure
+                       series_json
                 FROM project_reservoir_main_factor
                 WHERE project_id=? AND gas_reservoir_id=? AND storage_id=?
                 """, (rs, n) -> new SavedMainFactor(
@@ -123,9 +137,27 @@ public class StorageMainFactorSavedStorage {
                                 new GasPvtParam(intOrZero(rs, 9), zeroIfNull(rs, 10), intOrZero(rs, 15),
                                         zeroIfNull(rs, 11), zeroIfNull(rs, 12), zeroIfNull(rs, 13),
                                         intOrZero(rs, 14), intOrZero(rs, 16))),
-                        doubleOrNull(rs, 17), doubleOrNull(rs, 18)),
+                        readSeries(rs.getString(17))),
                 projectId, gasReservoirId, storageId);
         return found.isEmpty() ? Optional.empty() : Optional.of(found.getFirst());
+    }
+
+    /**
+     * 读回序列快照。
+     *
+     * <p>快照为空或解析失败时返回空表而不是抛异常：迁移还没执行、或者某一行是历史遗留的
+     * 空快照，都只是"这一份没有序列可恢复"，不该把整个页面判死——参数和结果卡仍然可用。
+     */
+    private List<StoredPoint> readSeries(String seriesJson) {
+        if (seriesJson == null || seriesJson.isBlank()) {
+            return List.of();
+        }
+        try {
+            return json.readValue(seriesJson, new TypeReference<List<StoredPoint>>() {});
+        } catch (RuntimeException e) {
+            log.warn("主控因素分析的序列快照解析失败，本次按空序列返回：{}", e.getMessage());
+            return List.of();
+        }
     }
 
     /**

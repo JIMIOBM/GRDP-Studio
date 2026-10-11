@@ -30,6 +30,11 @@ import static com.grdp.studio.storagemainfactor.StorageMainFactorDtos.ToolboxInp
  * </ol>
  * 工具箱是**有状态**的：同一个 id 必须 calc 后立即 GET，不能并发复用。
  *
+ * <p><b>一条地层压力序列要算几十个点，每个点只差一个累产气量。</b>因此把三步拆成
+ * {@link #openToolbox}（建箱 + 取入参模板，整条序列只做一次）与
+ * {@link #calculateWith}（复用同一个 id 逐点提交），请求数从约 4~6 次/点降到约 2 次/点。
+ * 复用必须**串行**：工具箱有状态，并发提交会互相覆盖结果。
+ *
  * <p><b>降级是需求，不是异常</b>：原平台不可用、会话过期、超时、结果缺失，
  * 一律返回 {@code null} 交给前端切手输；只有"入参不齐"才抛错（那是用户还没填完，
  * 应该告诉他缺什么，而不是悄悄降级）。
@@ -60,6 +65,15 @@ public class MaterialBalanceEquationClient {
         this.platform = platform;
         this.json = json;
     }
+
+    /**
+     * 一次工具箱会话：整条地层压力序列共用同一个工具箱 id。
+     *
+     * <p>{@code contract} 是平台的参数契约（{@code fields} + {@code inputRange}）压成的一行，
+     * 随会话带着走，只为了在某个点提交失败时能一次说清"哪个键、什么单位、什么区间"——
+     * 靠对比入参反推一个内部算法的契约是不收敛的。
+     */
+    public record ToolboxSession(long toolboxId, Map<String, Object> template, String contract) {}
 
     /**
      * 组装转发给原平台的请求头。{@code x-project-id} 必须带：原平台用它校验项目权限，
@@ -133,22 +147,14 @@ public class MaterialBalanceEquationClient {
     }
 
     /**
-     * 三步法取理论地层压力。原平台侧的任何失败都返回 {@code null}（降级为手输）。
+     * 建工具箱并取回入参模板，供整条地层压力序列复用。
      *
-     * @return 理论地层压力；原平台不可用或没有结果时为 {@code null}
-     * @throws com.grdp.studio.common.BusinessException 入参不齐（400），此时不降级
+     * <p>原平台侧的任何失败（建箱被拒、取模板失败、连接异常）都返回 {@code null}，
+     * 由调用方把整条序列的理论值降级为空；异常不往上抛。
+     *
+     * @return 会话；原平台不可用时为 {@code null}
      */
-    public Double calculateFormationPressure(long projectId, ToolboxInput input, Map<String, String> headers) {
-        // 入参校验发生在 try 之外，因此它的 BusinessException 不会被下面的 catch 吞掉：
-        // "用户没填完" 与 "原平台不可用" 是两件事，前者要报出缺哪个字段，后者才降级为手输。
-        Map<String, Object> payload = StorageMainFactorCalculator.toolboxPayload(input);
-        // 记录**真正发给原平台**的那份入参：合并模板之后它和 payload 不是一回事，
-        // 日志里打 payload 会让人误判成"我发的就是这些字段"。
-        Map<String, Object> sent = payload;
-        // 平台的参数契约：fields 给出每个参数的键与单位，inputRange 给出取值范围。
-        // 出现"参数校验失败"时，这两样是唯一能一次说清原因的凭据——
-        // 靠对比入参反推一个内部算法的契约是不收敛的。
-        String contract = "";
+    public ToolboxSession openToolbox(long projectId, Map<String, String> headers) {
         String step = "创建工具箱";
         try {
             JsonNode created = platform.post("/api/toolbox",
@@ -163,38 +169,87 @@ public class MaterialBalanceEquationClient {
                 return null;
             }
 
-            // 以**平台自己返回的入参对象**为底再覆盖（原平台前端就是这么做的：
-            // 它 clone 服务端返回的 input，只改其中几个字段）。
-            // 工具箱的参数集是平台按算法声明的；自己从零拼一份不完整的，
-            // 缺的字段会被当成 0，于是报"某某 取值范围 (0, ...]"——之前两轮
-            // 只修我们发出去的字段，所以怎么改都没用，因为问题在**没发的字段**。
             step = "读取入参模板";
             JsonNode templateState = platform.get("/api/toolbox/" + toolboxId, JsonNode.class, headers);
             if (isLegacyErrorEnvelope(templateState)) {
                 log.warn("读取物质平衡方程入参模板失败：{}", templateState.path("msg").asText("原平台返回错误"));
                 return null;
             }
-            Map<String, Object> template = asMap(templateState.path("input"));
-            contract = describeContract(templateState);
+            return new ToolboxSession(toolboxId, asMap(templateState.path("input")), describeContract(templateState));
+        } catch (RuntimeException e) {
+            log.warn("打开物质平衡方程工具箱失败（{}），整条序列的理论地层压力降级为空：{}", step, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 用已有会话算**一个点**的理论地层压力。
+     *
+     * <p>入参校验发生在 try 之外，因此它的 {@code BusinessException} 不会被 catch 吞掉：
+     * "用户没填完" 与 "原平台不可用" 是两件事，前者要报出缺哪个字段，后者才降级为 null。
+     *
+     * @return 该点的理论地层压力；原平台不可用或没有结果时为 {@code null}
+     * @throws com.grdp.studio.common.BusinessException 入参不齐（400），此时不降级
+     */
+    public Double calculateWith(ToolboxSession session, ToolboxInput input, Map<String, String> headers) {
+        return submit(session, StorageMainFactorCalculator.toolboxPayload(input), headers);
+    }
+
+    /**
+     * 平台回显的 {@code input} 是否就是本次提交的那一份。
+     *
+     * <p>只比**累产气量**这一个逐点变化的量：它不同，结果必然属于别的点。
+     * 其余参数整条序列都一样，比了也没有区分力。
+     *
+     * <p>平台没有回显 {@code input}（或其中没有这个字段）时返回 {@code true}——
+     * 没有证据就不能据此判定失败，否则平台一改响应形状，整条序列会全部变空。
+     * 也就是说这个守卫只在能拿到证据时收紧，不会把"平台不回声"变成"功能不可用"。
+     */
+    static boolean echoesSubmittedInput(JsonNode state, Map<String, Object> submitted) {
+        JsonNode echoed = state.path("input");
+        if (!echoed.isObject()) {
+            return true;
+        }
+        JsonNode gas = echoed.path("cumulativeGasProduction");
+        if (!gas.isNumber()) {
+            return true;
+        }
+        Object sent = submitted.get("cumulativeGasProduction");
+        if (!(sent instanceof Number number)) {
+            return true;
+        }
+        double expected = number.doubleValue();
+        return Math.abs(gas.asDouble() - expected) <= Math.max(1e-9, Math.abs(expected) * 1e-12);
+    }
+
+    /** 提交一个点并取回结果。payload 已由调用方校验并组装（见 {@link #calculateWith}）。 */
+    private Double submit(ToolboxSession session, Map<String, Object> payload, Map<String, String> headers) {
+        // 记录**真正发给原平台**的那份入参：合并模板之后它和 payload 不是一回事，
+        // 日志里打 payload 会让人误判成"我发的就是这些字段"。
+        Map<String, Object> sent = payload;
+        String step = "提交计算";
+        try {
+            // 以**平台自己返回的入参对象**为底再覆盖（原平台前端就是这么做的：
+            // 它 clone 服务端返回的 input，只改其中几个字段）。
+            // 工具箱的参数集是平台按算法声明的；自己从零拼一份不完整的，
+            // 缺的字段会被当成 0，于是报"某某 取值范围 (0, ...]"——之前两轮
+            // 只修我们发出去的字段，所以怎么改都没用，因为问题在**没发的字段**。
+            //
             // 模板与我们的 payload 都是**界面单位**（fields.unit_label 为 MPa/℃/%），
             // 直接合并即可，不要再做换算——上一版把模板的 20 当成 MPa 乘了 10⁶，
             // 反而把 maxOriginalPressure=200 撑爆。
-            Map<String, Object> effective = mergeOverTemplate(template, payload);
+            Map<String, Object> effective = mergeOverTemplate(session.template(), payload);
             sent = effective;
-            // 平台模板替我们补上的参数必须让用户知道：这些值来自平台的**示例默认值**
-            // （本机实测：储层孔隙度 0.0514、岩石密度 2700、langmuir 4000000/3000、
-            //  formationPressure 2e7 等），算出的理论地层压力会依赖它们。
-            // 页岩气藏且库里没有孔隙度/langmuir 时尤其重要——结果看着正常，其实用的是别人的样例值。
             // 平台模板替我们补的参数（库里没有对应数据）只记 DEBUG：
             // 这是正常兜底，不是故障，但排查页岩气藏压力异常时用得上。
-            List<String> fromTemplate = templateSuppliedKeys(template, payload);
+            List<String> fromTemplate = templateSuppliedKeys(session.template(), payload);
             if (!fromTemplate.isEmpty() && log.isDebugEnabled()) {
                 log.debug("物质平衡方程入参中以下参数取自平台模板默认值（本库没有对应数据）：{}", fromTemplate);
             }
 
-            step = "提交计算";
             JsonNode calculated = platform.post("/api/toolbox/calc",
-                    Map.of("id", toolboxId, "input", json.writeValueAsString(effective)), JsonNode.class, headers);
+                    Map.of("id", session.toolboxId(), "input", json.writeValueAsString(effective)),
+                    JsonNode.class, headers);
             if (isLegacyErrorEnvelope(calculated)) {
                 log.warn("物质平衡方程计算失败：{}", calculated.path("msg").asText("原平台返回错误"));
                 return null;
@@ -206,12 +261,20 @@ public class MaterialBalanceEquationClient {
             // 工具箱计算异步落结果：calc 之后立即 GET 可能仍是上一次的值或空结果，
             // 所以这里给几次机会；直接把第一次读到的值当成"自动算出来的"会展示一个过期结果。
             for (int attempt = 0; attempt < RESULT_ATTEMPTS; attempt++) {
-                state = platform.get("/api/toolbox/" + toolboxId, JsonNode.class, headers);
+                state = platform.get("/api/toolbox/" + session.toolboxId(), JsonNode.class, headers);
                 if (isLegacyErrorEnvelope(state)) {
                     log.warn("读取物质平衡方程结果失败：{}", state.path("msg").asText("原平台返回错误"));
                     return null;
                 }
                 pressure = extractFormationPressure(state);
+                if (pressure != null && !echoesSubmittedInput(state, effective)) {
+                    // 工具箱是有状态的：calc 之后立即 GET 可能拿到**上一个点**的结果。
+                    // 单点时代"上一次"意味着"什么都没有"；现在 20 个点共用一个会话，
+                    // 它意味着一个看着正常、却属于别的累产气量的压力——静默地把差异算错。
+                    // 平台只要回显了提交的入参，就用它确认这次结果确实属于这次提交。
+                    log.debug("工具箱返回的结果还属于上一次提交，继续等待本次结果");
+                    pressure = null;
+                }
                 if (pressure != null) {
                     break;
                 }
@@ -237,7 +300,7 @@ public class MaterialBalanceEquationClient {
             // 带上**失败的步骤**和**实际发出的入参**：原平台只回状态码时，
             // 这两样是唯一能定位原因的东西（原平台自己的说明由 OriginalPlatformClient 带在消息里）。
             log.warn("原平台物质平衡方程工具箱调用失败（{}），降级为手动填写理论地层压力：{}；已发送入参 {}；平台参数契约 {}",
-                    step, e.getMessage(), sent, contract);
+                    step, e.getMessage(), sent, session.contract());
             return null;
         }
     }

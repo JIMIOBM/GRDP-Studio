@@ -8,8 +8,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-import static com.grdp.studio.storagemainfactor.StorageMainFactorDtos.FactorValue;
 import static com.grdp.studio.storagemainfactor.StorageMainFactorDtos.GasPvtParam;
+import static com.grdp.studio.storagemainfactor.StorageMainFactorDtos.SeriesPoint;
+import static com.grdp.studio.storagemainfactor.StorageMainFactorDtos.SeriesPointInput;
 import static com.grdp.studio.storagemainfactor.StorageMainFactorDtos.ToolboxInput;
 
 /**
@@ -27,25 +28,6 @@ import static com.grdp.studio.storagemainfactor.StorageMainFactorDtos.ToolboxInp
 public final class StorageMainFactorCalculator {
 
     private StorageMainFactorCalculator() {}
-
-    /** 值来自数据库或原平台自动读取。 */
-    public static final String AUTO = "AUTO";
-    /** 值由用户在页面上手动填写。 */
-    public static final String MANUAL = "MANUAL";
-    /** 没有值，等待用户填写。 */
-    public static final String MISSING = "MISSING";
-
-    public static FactorValue auto(Double value, String note) {
-        return value == null ? missing(note) : new FactorValue(value, AUTO, note);
-    }
-
-    public static FactorValue manual(Double value, String note) {
-        return value == null ? missing(note) : new FactorValue(value, MANUAL, note);
-    }
-
-    public static FactorValue missing(String note) {
-        return new FactorValue(null, MISSING, note);
-    }
 
     /** 差异 = 实际 − 理论。任一侧缺值则无差异可言，返回 {@code null}。 */
     public static Double difference(Double actual, Double theoretical) {
@@ -65,6 +47,18 @@ public final class StorageMainFactorCalculator {
         }
         double percent = (actual - theoretical) / theoretical * 100d;
         return Double.isFinite(percent) ? percent : null;
+    }
+
+    /**
+     * 把"时序数据的一个点 + 该点算出来的理论值"组装成序列点。
+     *
+     * <p>差异与偏差复用 {@link #difference} / {@link #deviationPercent}，而不是就地再写一遍：
+     * 序列与单点必须共用同一个定义，两处各写一份迟早会算出两个不同的偏差。
+     */
+    public static SeriesPoint seriesPoint(SeriesPointInput input, Double theoreticalPressure) {
+        double measured = input.measuredPressure();
+        return new SeriesPoint(input.date(), input.cumulativeGasProduction(), measured, theoreticalPressure,
+                difference(measured, theoreticalPressure), deviationPercent(measured, theoreticalPressure));
     }
 
     /**

@@ -1,10 +1,14 @@
 package com.grdp.studio.storagemainfactor;
 
+import com.grdp.studio.integration.OriginalPlatformClient;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import static com.grdp.studio.storagemainfactor.StorageMainFactorDtos.GasPvtParam;
@@ -123,16 +127,223 @@ class MaterialBalanceEquationClientTests {
         assertEquals(Map.of(), MaterialBalanceEquationClient.mergeOverTemplate(null, null));
     }
 
-    @Test
-    void incompleteInputFailsLoudlyInsteadOfSilentlyFallingBack() {
-        // 入参不齐 ≠ 原平台不可用：前者要告诉用户缺哪个字段（400），
-        // 后者才降级为手输。两者混为一谈会把"没填完"变成一个查不出原因的静默降级。
-        // platform 传 null：若实现吞掉校验异常，这里会退化成返回 null，断言即失败。
-        var client = new MaterialBalanceEquationClient(null, M);
-        var noGasInPlace = new ToolboxInput(null, 353.15, 23.398270898104453, 12.306372768,
+    // ------------------------------------------------------------------
+    // 会话复用：一条地层压力序列要算 20 个点，不能建 20 个工具箱
+    // ------------------------------------------------------------------
+
+    /** 与 ServiceTests 同一组可用入参。 */
+    static ToolboxInput inputs(double cumulativeGasProduction) {
+        return new ToolboxInput(50_000_000d, 353.15, 50_000_000_000d, cumulativeGasProduction,
                 1.0E-10, 3.744512763331313E-10, 0.26158040988077613, 1, 0d, 0d, 0d, 0d,
                 new GasPvtParam(0, 0.58, 0, 0.0462, 0.0396, 0, 0, 0));
+    }
+
+    /**
+     * 假原平台：记录收到的请求，GET 一律回一份带 input 模板与 output 结果的工具箱状态。
+     *
+     * <p>刻意手写而不是用 Mockito：原平台交互的形状（同一个 id 交替被当模板源和结果源读）
+     * 是这里要验证的东西，用真实可读的假实现比一堆 when(...) 更能说清它在模拟什么。
+     */
+    private static final class FakePlatform extends OriginalPlatformClient {
+
+        final List<Map<String, Object>> createBodies = new ArrayList<>();
+        /** 每次 calc 发出的 input 载荷（JSON 字符串）。 */
+        final List<String> calcInputs = new ArrayList<>();
+        Double pressure = 40.5;
+        RuntimeException failure;
+        /** GET 时在 {@code input} 里回显的累产气量；null 表示平台不回显。 */
+        Double echoGas = null;
+        /** true：回显上一次提交的累产气量（模拟正常平台）。 */
+        boolean mirrorSubmittedGas = false;
+        Double lastSubmittedGas = null;
+
+        FakePlatform() {
+            super(null);
+        }
+
+        @SuppressWarnings("unchecked")
+        @Override
+        public <B, T> T post(String relativePath, B body, Class<T> responseType, Map<String, String> headers) {
+            if (failure != null) {
+                throw failure;
+            }
+            Map<String, Object> sent = (Map<String, Object>) body;
+            if ("/api/toolbox".equals(relativePath)) {
+                createBodies.add(sent);
+                return responseType.cast(parse("{\"id\":7}"));
+            }
+            String payload = String.valueOf(sent.get("input"));
+            calcInputs.add(payload);
+            lastSubmittedGas = node(payload).path("cumulativeGasProduction").asDouble();
+            if (mirrorSubmittedGas) {
+                echoGas = lastSubmittedGas;
+            }
+            return responseType.cast(parse("{\"status\":200}"));
+        }
+
+        @Override
+        public <T> T get(String relativePath, Class<T> responseType, Map<String, String> headers) {
+            if (failure != null) {
+                throw failure;
+            }
+            String echoedGas = echoGas == null ? "" : ",\"cumulativeGasProduction\":" + echoGas;
+            return responseType.cast(parse("{\"input\":{\"formationPressure\":20000000" + echoedGas
+                    + ",\"gasPvtParam\":{\"pressure\":20000000,\"pseudoPressure\":40000000}},"
+                    + "\"output\":{\"formationPressure\":" + (pressure == null ? "null" : pressure) + "}}"));
+        }
+
+        /** 每次提交的累产气；用来证明"变的只有这一个量"。 */
+        List<Double> gasValues() {
+            return calcInputs.stream().map(text -> node(text).path("cumulativeGasProduction").asDouble()).toList();
+        }
+
+        /** 每次提交的入参**抹掉累产气**后的字符串；全都一样才说明其余参数全程未变。 */
+        List<String> payloadsWithoutGas() {
+            return calcInputs.stream().map(text -> {
+                ObjectNode copy = node(text).deepCopy();
+                copy.remove("cumulativeGasProduction");
+                return copy.toString();
+            }).toList();
+        }
+
+        private static ObjectNode node(String text) {
+            return (ObjectNode) parse(text);
+        }
+
+        private static JsonNode parse(String text) {
+            try {
+                return M.readTree(text);
+            } catch (Exception e) {
+                throw new IllegalStateException("假原平台遇到了无法解析的 JSON：" + text, e);
+            }
+        }
+    }
+
+    @Test
+    void openToolboxThenCalculateWithReusesOneToolboxId() {
+        var platform = new FakePlatform();
+        var client = new MaterialBalanceEquationClient(platform, M);
+
+        var session = client.openToolbox(8, Map.of());
+        assertNotNull(session, "工具箱建起来了就应该有会话，否则整个序列都算不出理论值");
+        assertEquals(7L, session.toolboxId());
+
+        Double first = client.calculateWith(session, inputs(0.0012918), Map.of());
+        Double second = client.calculateWith(session, inputs(37.356667794), Map.of());
+        Double third = client.calculateWith(session, inputs(57.43970823), Map.of());
+
+        assertEquals(40.5, first, 1e-9);
+        assertEquals(40.5, third, 1e-9);
+        assertNotNull(second);
+        assertEquals(1, platform.createBodies.size(),
+                "20 个点只建一个工具箱：每个点都新建会让请求数翻倍，而且平台侧会堆一堆无用记录");
+        assertEquals(List.of(0.0012918, 37.356667794, 57.43970823), platform.gasValues(),
+                "累产气必须逐点换成该点的值，不能被第一个点定住");
+        assertEquals(1, platform.payloadsWithoutGas().stream().distinct().count(),
+                "除累产气外其余参数全程不能变——这是「只有累产气随时间变化」这条要求的落点");
+    }
+
+    @Test
+    void calculateWithKeepsThePlatformTemplateParameters() {
+        var platform = new FakePlatform();
+        var client = new MaterialBalanceEquationClient(platform, M);
+
+        client.calculateWith(client.openToolbox(8, Map.of()), inputs(1.0), Map.of());
+
+        var sent = FakePlatform.node(platform.calcInputs.getFirst());
+        // 发出去的是**原平台界面口径**：50_000_000 Pa 在载荷里是 50 MPa。
+        // 写成 50000000 会让参数校验报"取值范围 (0, 200]"，这正是之前两轮排查的那个坑。
+        assertEquals(50, sent.path("originalPressure").asLong(),
+                "工具箱载荷是界面单位（MPa / ℃ / %），不是库里的 Pa / K / 小数");
+        assertEquals(20000000, sent.path("formationPressure").asLong(),
+                "平台模板里我们没给过的参数必须原样带上，否则会被参数校验判为不合法");
+        assertEquals(20000000, sent.path("gasPvtParam").path("pressure").asLong());
+    }
+
+    @Test
+    void calculateWithRejectsIncompleteInputInsteadOfReturningNull() {
+        // 入参不齐 ≠ 原平台不可用：前者要报出缺哪个字段（400），后者才降级为 null。
+        var platform = new FakePlatform();
+        var client = new MaterialBalanceEquationClient(platform, M);
+        var session = client.openToolbox(8, Map.of());
+        var noGasInPlace = new ToolboxInput(null, 353.15, 50_000_000_000d, 12.306372768,
+                1.0E-10, 3.744512763331313E-10, 0.26158040988077613, 1, 0d, 0d, 0d, 0d,
+                new GasPvtParam(0, 0.58, 0, 0.0462, 0.0396, 0, 0, 0));
+
         assertThrows(com.grdp.studio.common.BusinessException.class,
-                () -> client.calculateFormationPressure(8, noGasInPlace, Map.of()));
+                () -> client.calculateWith(session, noGasInPlace, Map.of()));
+    }
+
+    @Test
+    void openToolboxReturnsNullWhenThePlatformIsUnavailable() {
+        var platform = new FakePlatform();
+        platform.failure = new IllegalStateException("原平台连接被拒绝");
+        var client = new MaterialBalanceEquationClient(platform, M);
+
+        assertNull(client.openToolbox(8, Map.of()),
+                "原平台不可用时返回 null（降级为「理论值算不出来」），不能把异常抛到页面上");
+    }
+
+    @Test
+    void calculateWithReturnsNullWhenThePlatformIsUnavailable() {
+        var platform = new FakePlatform();
+        var client = new MaterialBalanceEquationClient(platform, M);
+        var session = client.openToolbox(8, Map.of());
+
+        platform.failure = new IllegalStateException("原平台连接被拒绝");
+
+        assertNull(client.calculateWith(session, inputs(1.0), Map.of()),
+                "某一个点算失败只能是该点理论值为空，不能让整条序列崩掉");
+    }
+
+    @Test
+    void calculateWithRejectsImplausiblePressure() {
+        var platform = new FakePlatform();
+        var client = new MaterialBalanceEquationClient(platform, M);
+        var session = client.openToolbox(8, Map.of());
+
+        platform.pressure = 0.0;
+        assertNull(client.calculateWith(session, inputs(1.0), Map.of()),
+                "平台回 0 必须当成「没有结果」，否则折线图上会画出一个假的压力谷底");
+        platform.pressure = 19650000.0;
+        assertNull(client.calculateWith(session, inputs(1.0), Map.of()),
+                "量级到了 Pa，说明口径变了，宁可降级也不要当成 MPa 显示出去");
+        platform.pressure = null;
+        assertNull(client.calculateWith(session, inputs(1.0), Map.of()));
+    }
+
+    @Test
+    void acceptsTheResultOnlyWhenThePlatformEchoesTheSubmittedGas() {
+        var platform = new FakePlatform();
+        platform.mirrorSubmittedGas = true; // 正常平台：回显本次提交的累产气量
+        var client = new MaterialBalanceEquationClient(platform, M);
+
+        Double pressure = client.calculateWith(client.openToolbox(8, Map.of()), inputs(57.43970823), Map.of());
+
+        assertEquals(40.5, pressure, 1e-9, "回显与提交一致时正常采信");
+    }
+
+    @Test
+    void rejectsAStaleResultThatStillBelongsToThePreviousPoint() {
+        var platform = new FakePlatform();
+        platform.echoGas = 0.0012918; // 回显的是第一个点的累产气量
+        var client = new MaterialBalanceEquationClient(platform, M);
+
+        // 20 个点共用一个工具箱，"上一次的结果"不再意味着"什么都没有"，
+        // 而是一个看着正常、却属于别的累产气量的压力——差异会被静默算错。
+        // 宁可该点为空（线断开），也不能采信它。
+        assertNull(client.calculateWith(client.openToolbox(8, Map.of()), inputs(57.43970823), Map.of()));
+        assertEquals(1, platform.createBodies.size(), "只是不采信结果，不该重建工具箱");
+    }
+
+    @Test
+    void acceptsResultsWhenThePlatformDoesNotEchoTheInput() {
+        // 平台不回显 input 时不能据此判失败：否则平台一改响应形状，
+        // 整条序列会全部变空——那是把"没法核对"当成了"核对失败"。
+        var platform = new FakePlatform();
+        platform.echoGas = null;
+        var client = new MaterialBalanceEquationClient(platform, M);
+
+        assertEquals(40.5, client.calculateWith(client.openToolbox(8, Map.of()), inputs(1.0), Map.of()), 1e-9);
     }
 }

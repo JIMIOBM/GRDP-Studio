@@ -4,6 +4,7 @@ import com.grdp.studio.common.BusinessException;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.ObjectMapper;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
@@ -32,18 +33,6 @@ class StorageMainFactorCalculatorTests {
         assertNull(deviationPercent(5d, 0d));
         assertNull(deviationPercent(5d, null));
         assertNull(deviationPercent(null, 100d));
-    }
-
-    @Test
-    void factorValueFactoriesCarryTheirOwnSource() {
-        assertEquals(1d, auto(1d, null).value());
-        assertEquals("AUTO", auto(1d, null).source());
-        assertEquals("MANUAL", manual(1d, null).source());
-        assertEquals("MISSING", missing(null).source());
-        assertNull(missing(null).value());
-        // 没有值就不可能是"自动读取"，两个工厂都要把 null 归一成 MISSING
-        assertEquals("MISSING", auto(null, null).source());
-        assertEquals("MISSING", manual(null, null).source());
     }
 
     @Test
@@ -137,5 +126,33 @@ class StorageMainFactorCalculatorTests {
         var noPvt = new ToolboxInput(50_000_000d, 353.15, 23.398270898104453, 12.306372768,
                 1.0E-10, 3.744512763331313E-10, 0.26158040988077613, 1, 0d, 0d, 0d, 0d, null);
         assertThrows(BusinessException.class, () -> toolboxPayload(noPvt));
+    }
+
+    @Test
+    void seriesPointCarriesTheDifferenceAndDeviationOfThatPoint() {
+        // 库 5 的真实末点：实测 41.4795 MPa、理论 40.5345 MPa。
+        // 差异与偏差必须逐点算，不能全序列共用一个值——那样折线图上的差异线就是一条水平线。
+        SeriesPoint point = seriesPoint(
+                new SeriesPointInput(LocalDate.parse("2013-10-31"), 57.43970823, 41.4795), 40.5345);
+
+        assertEquals(LocalDate.parse("2013-10-31"), point.date());
+        assertEquals(57.43970823, point.cumulativeGasProduction(), 1e-12);
+        assertEquals(41.4795, point.measuredPressure(), 1e-12);
+        assertEquals(40.5345, point.theoreticalPressure(), 1e-12);
+        assertEquals(0.945, point.difference(), 1e-9);
+        assertEquals(2.331, point.deviationPercent(), 1e-3);
+    }
+
+    @Test
+    void seriesPointHasNoDifferenceWhenTheoryIsMissing() {
+        // 原平台不可用时该点理论值为空：差异必须是 null，
+        // 不能退化成"实测 − 0 = 实测"，那会在图上多出一条与实测线重合的假线。
+        SeriesPoint point = seriesPoint(
+                new SeriesPointInput(LocalDate.parse("2013-10-31"), 57.43970823, 41.4795), null);
+
+        assertNull(point.theoreticalPressure());
+        assertNull(point.difference());
+        assertNull(point.deviationPercent());
+        assertEquals(41.4795, point.measuredPressure(), 1e-12, "理论值缺失不影响该点的实测值");
     }
 }
