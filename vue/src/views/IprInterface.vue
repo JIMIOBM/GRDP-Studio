@@ -47,7 +47,7 @@ import PipelineCapacityContent from '@/views/PipelineCapacity/PipelineCapacityCo
 import { ensurePipelineNavigation, findPipelinePageNode, pipelinePageForCommand, resolvePipelinePage } from '@/utils/pipelineNavigation'
 import { createDefaultWellboreNodes, ensureWellboreNavigation, resolveErosionCommandTarget } from '@/utils/wellboreNavigation'
 import { NODETYPE } from '@/constants/nodeType'
-import { resolveWorkspaceContextId } from '@/constants/workspaceContext'
+import { resolveWorkspaceContextId, WORKSPACE_PROJECT_ID, WORKSPACE_GAS_RESERVOIR_ID } from '@/constants/workspaceContext'
 import { analyticMethodApi, dataManagementApi, dynamicBalanceApi, materialBalanceApi, nodeApi, notifyApi, parametersApi, projectApi, typicalCurveApi, wellApi } from '@/api/docker'
 import { waterInvasionApi } from '@/api/waterInvasion'
 import { pvtStorageApi } from '@/api/pvtStorage'
@@ -128,8 +128,10 @@ import {
 
 // 当前工作台所使用的项目和气藏。
 const route = useRoute()
-const PROJECT_ID = resolveWorkspaceContextId(route.query.projectId, import.meta.env.VITE_WORKSPACE_PROJECT_ID, 7)
-const GAS_RESERVOIR_ID = resolveWorkspaceContextId(route.query.gasReservoirId, import.meta.env.VITE_WORKSPACE_GAS_RESERVOIR_ID, 4)
+// Refreshing a deep link can temporarily omit the query. Use the same shared
+// workspace fallback as every other analysis page instead of a page-local ID.
+const PROJECT_ID = resolveWorkspaceContextId(route.query.projectId, WORKSPACE_PROJECT_ID)
+const GAS_RESERVOIR_ID = resolveWorkspaceContextId(route.query.gasReservoirId, WORKSPACE_GAS_RESERVOIR_ID)
 const SOFTWARE_INTEGRATION_WORKSPACE = 'software-integration'
 const SOFTWARE_INTEGRATION_IMPORT_INTENTS = {
   'software-integration.model.import.pipesim-well': 'import-pipesim-well',
