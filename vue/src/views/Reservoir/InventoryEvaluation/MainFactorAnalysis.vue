@@ -11,7 +11,8 @@
  * 运行时不读原平台或团队其他模块的任何表。整条序列共用一组参数，**只有累产气量在变**，
  * 所以工具箱会话只开一次、串行提交每个点。
  *
- * 布局与交互照「微观损耗」：顶部功能区（导入PVT / 导入数据 / 保存）+ 参数网格 + 计算/重置 + 计算结果。
+ * 布局与交互照「微观损耗」：顶部功能区（导入PVT / 导入数据 / 保存）+ 参数网格
+ * + 计算/重置 + 已导入数据 + 计算结果。导入数据直接从本库时序表读取，不依赖计算成功。
  *
  * 参数在界面上用**界面口径**（MPa / ℃ / 10⁸m³ / % / MPa⁻¹），与微观损耗以及原平台
  * 自己的表单一致——用户看到的量级应该是 50 MPa，而不是 50000000 Pa。
@@ -67,12 +68,17 @@ const form = reactive({
 })
 
 const importDialogVisible = ref(false)
-/** 本库已导入的时序数据点数。不足两个画不出折线，也不该去调平台。 */
-const seriesPointCount = ref(0)
+/** 本库已导入的原始时序点；计算失败时仍保留，便于核对日期、累产气和实测压力。 */
+const seriesPoints = ref([])
+const seriesPointCount = computed(() => seriesPoints.value.length)
+const maxImportedGas = computed(() => seriesPoints.value.reduce(
+  (maximum, point) => Math.max(maximum, Number(point.cumulativeGasProduction)), 0
+))
 const loading = ref(false)
 const calculating = ref(false)
 const saving = ref(false)
-const error = ref('')
+const loadError = ref('')
+const calculationError = ref('')
 /** 上次计算的结果（SeriesResult）。理论值、实际值、差异只在点过「计算」之后才有。 */
 const result = ref(null)
 /** 结果是否因为参数被改过而作废（与"从没算过"要分开说，用户的下一步动作不同）。 */
@@ -129,6 +135,9 @@ onBeforeUnmount(() => {
 })
 
 const unwrap = response => response?.data ?? response
+// 请求可能以 Axios 错误或后端 { code, msg } 返回，优先展示业务校验的中文原因。
+const errorText = (error, fallback) => error?.response?.data?.msg || error?.response?.data?.message
+  || error?.msg || error?.message || fallback
 
 const applyInputs = inputs => {
   const display = toDisplayInputs(inputs)
@@ -138,22 +147,24 @@ const applyInputs = inputs => {
 /** 重置只撤销本次计算结果，保留用户已填写或已导入的全部参数。 */
 const resetCalculation = () => {
   result.value = null
-  error.value = ''
+  calculationError.value = ''
 }
 
 const load = async () => {
   const version = ++loadVersion
   loading.value = true
-  error.value = ''
+  loadError.value = ''
+  calculationError.value = ''
   result.value = null
   resultStale.value = false
+  seriesPoints.value = []
   try {
-    // 这一趟**只用来校验库范围并取到已导入的点数**；
+    // 这一趟校验库范围并读取已导入的原始点；
     // 刻意**不预填表单**：参数表与原平台 MBE 表单对齐后，用户从"请输入"开始自己填
     // （与「微观损耗」一致）。理论值、实际值、差异也都要点过「计算」才出现。
     const data = unwrap(await storageMainFactorApi.seriesData(scope.value))
     if (!active || version !== loadVersion) return
-    seriesPointCount.value = Array.isArray(data) ? data.length : 0
+    seriesPoints.value = Array.isArray(data) ? data : []
 
     // 保存过就用保存值覆盖预填：用户上次看到的参数与结果要能原样恢复。
     //
@@ -170,7 +181,7 @@ const load = async () => {
       // 忽略：没有已保存记录不影响本次读取
     }
   } catch (e) {
-    if (active && version === loadVersion) error.value = e?.message || '读取库内时序数据失败'
+    if (active && version === loadVersion) loadError.value = errorText(e, '读取库内时序数据失败')
   } finally {
     if (active && version === loadVersion) loading.value = false
   }
@@ -195,7 +206,7 @@ const calculate = async () => {
     return
   }
   calculating.value = true
-  error.value = ''
+  calculationError.value = ''
   result.value = null
   try {
     const response = unwrap(await storageMainFactorApi.series({
@@ -206,7 +217,7 @@ const calculate = async () => {
     result.value = response
     resultStale.value = false
   } catch (e) {
-    if (active) error.value = e?.message || '计算失败'
+    if (active) calculationError.value = errorText(e, '计算失败')
   } finally {
     if (active) calculating.value = false
   }
@@ -250,6 +261,7 @@ const save = async () => {
 /** 导入的是「时序数据」：三列——日期、累产气量（10⁸m³）、地层压力（MPa）。 */
 const handleSeriesImport = async event => {
   const file = event.target.files?.[0]
+  const version = loadVersion
   // 清空选择：同一个文件再选一次也要能触发 change
   event.target.value = ''
   if (!file) return
@@ -268,9 +280,13 @@ const handleSeriesImport = async event => {
       ElMessage.error(parseError)
       return
     }
-    const imported = unwrap(await storageMainFactorApi.importSeriesData({ ...scope.value, points }))
-    if (!active) return
-    seriesPointCount.value = Number(imported) || points.length
+    await storageMainFactorApi.importSeriesData({ ...scope.value, points })
+    if (!active || version !== loadVersion) return
+    // 后端整体替换成功后，直接展示这份已经校验并按日期排序的数据。
+    // 重新进入页面时由 seriesData 接口从数据库恢复同一列表。
+    seriesPoints.value = points
+    loadError.value = ''
+    calculationError.value = ''
     // 换了数据，上一次的结果就不作数了
     result.value = null
     resultStale.value = false
@@ -315,6 +331,7 @@ const handleGasImport = async ({ file, options }) => {
 watch(form, () => {
   if (result.value) resultStale.value = true
   result.value = null
+  calculationError.value = ''
 }, { deep: true, flush: 'sync' })
 
 // 结果一出现就画图；结果作废时容器被 v-if 移除，实例同时释放。
@@ -346,8 +363,7 @@ watch(() => [scope.value.projectId, scope.value.gasReservoirId, scope.value.stor
     <main class="form-canvas">
       <div class="form-title">请输入计算参数</div>
 
-      <div v-if="error" class="form-error" role="alert">{{ error }}</div>
-      <div v-else-if="loading" class="form-loading" role="status">正在读取库内时序数据…</div>
+      <div v-if="loading" class="form-loading" role="status">正在读取库内时序数据…</div>
 
       <div class="parameter-grid">
         <!-- 气藏类型与天然气物性用下拉框，其余按公式需要的量手填。 -->
@@ -394,6 +410,35 @@ watch(() => [scope.value.projectId, scope.value.gasReservoirId, scope.value.stor
         <button class="calculate" type="button" :disabled="calculating" @click="calculate">{{ calculating ? '计算中…' : '计 算' }}</button>
         <button class="reset" type="button" @click="resetCalculation">重 置</button>
       </div>
+      <div v-if="calculationError" class="calculation-error" role="alert">{{ calculationError }}</div>
+
+      <section class="imported-card" aria-label="已导入时序数据">
+        <div class="imported-heading">
+          <h3>已导入数据</h3>
+          <span v-if="seriesPointCount">{{ seriesPointCount }} 个时间点 · 最大累产气量 {{ maxImportedGas }} ×10⁸m³</span>
+        </div>
+        <p v-if="loading" class="imported-empty">正在读取已导入数据…</p>
+        <p v-else-if="loadError" class="imported-error" role="alert">{{ loadError }}</p>
+        <p v-else-if="!seriesPointCount" class="imported-empty">尚未导入时序数据，请点击右上角“导入数据”</p>
+        <div v-else class="imported-table-wrap">
+          <table class="imported-table">
+            <thead><tr>
+              <th scope="col">序号</th>
+              <th scope="col">日期</th>
+              <th scope="col">累产气量（10⁸m³）</th>
+              <th scope="col">实测地层压力（MPa）</th>
+            </tr></thead>
+            <tbody>
+              <tr v-for="(point, index) in seriesPoints" :key="point.date">
+                <td>{{ index + 1 }}</td>
+                <td>{{ point.date }}</td>
+                <td>{{ point.cumulativeGasProduction }}</td>
+                <td>{{ point.measuredPressure }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <!-- 计算结果：**只用折线图表示**，不放数值读数。 -->
       <section class="result-card">
@@ -426,7 +471,9 @@ button:disabled { cursor: wait; opacity: .65; }
 button.primary { min-width: 74px; border-color: #202020; background: #202020; color: #fff; }
 .form-canvas { padding: 20px 18px 34px; }
 .form-title { margin-bottom: 20px; font-size: 13px; font-weight: 600; }
-.form-error { margin-bottom: 16px; padding: 8px 12px; border: 1px solid #fde2e2; border-radius: 4px; background: #fef0f0; color: #f56c6c; }
+.calculation-error, .imported-error { padding: 8px 12px; border: 1px solid #fde2e2; border-radius: 4px; background: #fef0f0; color: #f56c6c; line-height: 1.6; overflow-wrap: anywhere; }
+.calculation-error { margin-top: 12px; }
+.imported-error { margin: 12px 16px; }
 .form-loading { margin-bottom: 16px; color: #909399; }
 .parameter-grid { display: grid; grid-template-columns: repeat(4, minmax(170px, 1fr)); gap: 20px 24px; }
 .field { display: grid; gap: 8px; min-width: 0; color: #333; }
@@ -436,7 +483,19 @@ button.primary { min-width: 74px; border-color: #202020; background: #202020; co
 .calculation-actions button { height: 32px; }
 .calculate { min-width: 72px; border-color: #d5b900; background: #f4d000; }
 .reset { min-width: 72px; }
-.result-card { min-height: 142px; margin-top: 36px; padding: 18px 18px 26px; border: 1px solid #ececec; border-radius: 4px; background: #f5f5f5; box-sizing: border-box; }
+.imported-card { margin-top: 28px; border: 1px solid #e4e7ed; border-radius: 4px; background: #fff; }
+.imported-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; padding: 13px 16px; border-bottom: 1px solid #ebeef2; }
+.imported-heading h3 { margin: 0; font-size: 13px; }
+.imported-heading span { color: #606266; font-size: 12px; }
+.imported-empty { margin: 0; padding: 24px 16px; color: #909399; text-align: center; }
+.imported-table-wrap { max-height: 300px; overflow: auto; }
+.imported-table { width: 100%; min-width: 620px; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.imported-table th, .imported-table td { padding: 9px 16px; border-bottom: 1px solid #ebeef2; text-align: right; white-space: nowrap; }
+.imported-table th { position: sticky; top: 0; z-index: 1; background: #f8f9fb; color: #606266; font-weight: 600; }
+.imported-table th:nth-child(2), .imported-table td:nth-child(2) { text-align: left; }
+.imported-table tbody tr:last-child td { border-bottom: 0; }
+.imported-table tbody tr:hover { background: #fafafa; }
+.result-card { min-height: 142px; margin-top: 28px; padding: 18px 18px 26px; border: 1px solid #ececec; border-radius: 4px; background: #f5f5f5; box-sizing: border-box; }
 .result-card h3 { margin: 0 0 24px; font-size: 13px; }
 .chart-head { display: flex; align-items: center; gap: 8px; margin: 24px 0 0; color: #333; }
 .chart-head > span { margin-right: 4px; }
