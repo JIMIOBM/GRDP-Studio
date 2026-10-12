@@ -1,8 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  buildCalculatedGradientComparison,
   buildPressureGradientComparison,
   calculateDatumPressure,
+  calculateGradientPressure,
   calculatePressureIntercept,
   isCalculablePressureRecord,
   normalizePressureRecord,
@@ -125,4 +127,18 @@ test('直接压力图保留没有 PGD 和 H 的原始静压记录', () => {
   assert.deepEqual(result.categories, ['X-4', 'X-5'])
   assert.deepEqual(result.series[0].data, [20.1, 19.65])
   assert.equal(result.validRows.length, 2)
+})
+
+test('压力梯度对比图与折算表使用同一公式，待补参数行不绘图', () => {
+  const rows = [
+    { wellName: 'X-1', date: '2024-03-01', p0: '10', gradient: '0.01', measuredCoordinate: '1000', measuredPressure: '999' },
+    { wellName: 'X-1', date: '2024-03-01', p0: '12', gradient: '0.01', measuredCoordinate: '1000', measuredPressure: '888' },
+    { wellName: 'X-2', date: '2024-03-01', p0: '', gradient: '', measuredCoordinate: '', measuredPressure: '19' },
+    { wellName: 'X-2', date: '2024-03-01', p0: '20', gradient: '0.01', measuredCoordinate: '1000', measuredPressure: '30', deleted: true }
+  ]
+  assert.equal(calculateGradientPressure(rows[0]), 20)
+  assert.equal(calculateGradientPressure(rows[2]), null)
+  const model = buildCalculatedGradientComparison({ rows, selectedWells: ['X-1', 'X-2'], dateRange: 'all' })
+  assert.deepEqual(model.series[0].data, [21, null])
+  assert.deepEqual(model.validRows.map(row => row.measuredPressure), [20, 22])
 })

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
 import { dataManagementApi } from '@/api/docker'
@@ -20,9 +20,15 @@ const loadError = ref('')
 const ready = ref(false)
 const databaseLoaded = ref(false)
 const chartElement = ref(null)
+const chartFrame = ref(null)
 const importFileInput = ref(null)
 const saveState = ref('saved')
+const hiddenLegendNames = ref(new Set())
+const legendPosition = ref(null)
+const draggingLegend = ref(false)
 let chart
+let resizeObserver
+let legendOffset = null
 let version = 0
 let saveTimer = 0
 let saveVersion = 0
@@ -55,9 +61,49 @@ const chartModel = computed(() => buildPressureTestComparison({
   rows: rows.value, selectedWells: selectedWells.value, dateRange: dateRange.value, chartAxis: 'well'
 }))
 const chartHasData = computed(() => chartModel.value.series.some(series => series.data.some(Number.isFinite)))
+const chartColors = ['#5470c6', '#b84a4a', '#2f80ed', '#e6a23c', '#67b58b', '#9367b5']
+const legendItems = computed(() => chartModel.value.series
+  .map((series, index) => ({ name: series.key, color: chartColors[index % chartColors.length], hasData: series.data.some(Number.isFinite) }))
+  .filter(item => item.hasData))
+const legendStyle = computed(() => legendPosition.value
+  ? { left: `${legendPosition.value.x}px`, top: `${legendPosition.value.y}px` }
+  : { top: '52px', right: '28px' })
 const shownRows = computed(() => rows.value.filter(row => row.deleted !== true))
 const saveLabel = computed(() => ({ saving: '正在保存到数据库…', failed: '数据库保存失败' }[saveState.value] || '数据库已保存'))
 const format = value => Number.isFinite(value) ? value.toLocaleString('zh-CN', { maximumFractionDigits: 4 }) : '—'
+const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character])
+
+const toggleLegendItem = name => {
+  const hidden = new Set(hiddenLegendNames.value)
+  if (hidden.has(name)) hidden.delete(name)
+  else hidden.add(name)
+  hiddenLegendNames.value = hidden
+}
+const moveLegend = event => {
+  if (!legendOffset || !chartFrame.value) return
+  const bounds = chartFrame.value.getBoundingClientRect()
+  legendPosition.value = {
+    x: Math.max(0, Math.min(bounds.width - legendOffset.width, event.clientX - bounds.left - legendOffset.x)),
+    y: Math.max(0, Math.min(bounds.height - legendOffset.height, event.clientY - bounds.top - legendOffset.y))
+  }
+}
+const stopLegendDrag = () => {
+  legendOffset = null
+  draggingLegend.value = false
+  window.removeEventListener('mousemove', moveLegend)
+  window.removeEventListener('mouseup', stopLegendDrag)
+}
+const startLegendDrag = event => {
+  if (event.button !== 0 || !chartFrame.value) return
+  event.preventDefault()
+  const current = event.currentTarget.getBoundingClientRect()
+  const bounds = chartFrame.value.getBoundingClientRect()
+  legendPosition.value = { x: current.left - bounds.left, y: current.top - bounds.top }
+  legendOffset = { x: event.clientX - current.left, y: event.clientY - current.top, width: current.width, height: current.height }
+  draggingLegend.value = true
+  window.addEventListener('mousemove', moveLegend)
+  window.addEventListener('mouseup', stopLegendDrag)
+}
 
 const toDbRows = () => rows.value.map((row, index) => {
   const numberOrNull = (value, label) => {
@@ -238,16 +284,33 @@ const importFile = async event => {
 
 const chartOption = () => {
   const model = chartModel.value
+  const axisStyle = {
+    nameLocation: 'middle',
+    minorTick: { show: true },
+    minorSplitLine: { show: true, lineStyle: { color: '#f1f5fb' } },
+    splitLine: { show: true, lineStyle: { color: '#dce5f2' } }
+  }
   return {
     animation: false,
-    color: ['#568df5', '#ff9b21', '#f05252', '#31a6a0', '#9a6de8', '#4aaf5d'],
-    title: { text: '地层压力测试法对比', left: 'center', top: 12, textStyle: { fontSize: 17, fontWeight: 600 } },
-    tooltip: { trigger: 'axis', formatter: params => params.filter(item => item.value !== null && item.value !== undefined && Number.isFinite(Number(item.value))).map(item => `${item.axisValue}<br/>${item.marker}${item.seriesName}：${format(Number(item.value))} MPa`).join('<br/>') },
-    legend: { top: 42, type: 'scroll' },
-    grid: { top: 88, left: 76, right: 34, bottom: 68 },
-    xAxis: { type: 'category', name: '井号', nameLocation: 'middle', nameGap: 40, data: model.categories },
-    yAxis: { type: 'value', name: '实测静压 (MPa)', nameLocation: 'middle', nameGap: 54, min: 0, max: Math.max(5, Math.ceil(model.maxPressure / 5) * 5), interval: 5, splitLine: { lineStyle: { color: '#e4e9f2' } } },
-    series: model.series.map(({ key, data }) => ({ name: key, type: 'line', data, connectNulls: false, symbol: 'circle', symbolSize: 8, lineStyle: { width: 2 } }))
+    title: { text: '地层压力测试法对比', left: 'center', top: 8, textStyle: { fontSize: 14, fontWeight: 600, color: '#333' } },
+    tooltip: {
+      trigger: 'item',
+      confine: true,
+      formatter: point => point && point.value !== null && Number.isFinite(Number(point.value))
+        ? `<strong>${escapeHtml(point.name)}</strong><br/>${escapeHtml(point.seriesName)} 实测静压：${format(Number(point.value))} MPa`
+        : ''
+    },
+    legend: { show: false },
+    grid: { top: 44, left: 62, right: 92, bottom: 56 },
+    xAxis: { ...axisStyle, type: 'category', name: '井号', nameGap: 34, data: model.categories },
+    yAxis: { ...axisStyle, type: 'value', name: '实测静压 (MPa)', nameGap: 44, min: 0, max: Math.max(5, Math.ceil(model.maxPressure / 5) * 5), interval: 5 },
+    series: model.series.map(({ key, data }, index) => ({
+      name: key, type: 'line', data, connectNulls: false, smooth: false,
+      symbol: 'circle', symbolSize: 8,
+      lineStyle: { width: 1.5, color: chartColors[index % chartColors.length] },
+      itemStyle: { color: chartColors[index % chartColors.length], opacity: 0.85 },
+      emphasis: { focus: 'series' }
+    })).filter(series => !hiddenLegendNames.value.has(series.name))
   }
 }
 const renderChart = async () => {
@@ -256,7 +319,7 @@ const renderChart = async () => {
   if (!chart) chart = echarts.init(chartElement.value)
   chart.setOption(chartHasData.value ? chartOption() : {
     animation: false,
-    title: { text: '地层压力测试法对比', left: 'center', top: 12, textStyle: { fontSize: 17, fontWeight: 600 } },
+    title: { text: '地层压力测试法对比', left: 'center', top: 8, textStyle: { fontSize: 14, fontWeight: 600 } },
     xAxis: { type: 'category', data: [] }, yAxis: { type: 'value', name: '实测静压 (MPa)' }, series: []
   }, true)
   chart.resize()
@@ -264,6 +327,14 @@ const renderChart = async () => {
 watch(() => [props.reservoir?.projectId, props.reservoir?.gasReservoirId, props.reservoir?.storageId], load, { immediate: true })
 watch(rows, scheduleSave, { deep: true })
 watch([dateRange, activeTab, chartModel], renderChart)
+watch(dateRange, () => { hiddenLegendNames.value = new Set(); legendPosition.value = null })
+watch(draftKey, () => { hiddenLegendNames.value = new Set(); legendPosition.value = null; stopLegendDrag() })
+watch(hiddenLegendNames, renderChart)
+onMounted(() => {
+  if (typeof ResizeObserver === 'undefined') return
+  resizeObserver = new ResizeObserver(() => chart?.resize())
+  if (chartElement.value) resizeObserver.observe(chartElement.value)
+})
 onBeforeUnmount(() => {
   if (saveTimer) {
     clearTimeout(saveTimer)
@@ -271,6 +342,8 @@ onBeforeUnmount(() => {
     saveDatabase().catch(() => {})
   }
   version++
+  stopLegendDrag()
+  resizeObserver?.disconnect()
   chart?.dispose()
   chart = null
 })
@@ -279,8 +352,8 @@ onBeforeUnmount(() => {
 <template>
   <section class="pressure-test-method" aria-label="地层压力测试法">
     <div class="test-toolbar">
-      <button :class="{ active: activeTab === 'chart' }" @click="activeTab = 'chart'">压力对比图</button>
-      <button :class="{ active: activeTab === 'table' }" @click="activeTab = 'table'">实测数据</button>
+      <button type="button" :class="{ active: activeTab === 'chart' }" @click="activeTab = 'chart'">压力对比图</button>
+      <button type="button" :class="{ active: activeTab === 'table' }" @click="activeTab = 'table'">实测数据</button>
       <span v-if="loadError" class="load-error" role="status">{{ loadError }}</span>
     </div>
     <div v-show="activeTab === 'chart'" class="chart-view">
@@ -289,17 +362,27 @@ onBeforeUnmount(() => {
         <el-select v-model="dateRange" size="small" style="width: 140px"><el-option label="最近 3 期" value="recent3" /><el-option label="全部日期" value="all" /></el-select>
         <span>{{ chartModel.validRows.length }} 个有效测点</span>
       </div>
-      <div class="chart-frame"><div v-if="loading" class="chart-empty">正在读取智慧气藏实测静压…</div><div v-else-if="!chartHasData" class="chart-empty">暂无可绘制的实测数据</div><div ref="chartElement" class="pressure-chart" /></div>
+      <div ref="chartFrame" class="chart-frame">
+        <div ref="chartElement" class="pressure-chart" />
+        <div v-if="chartHasData && legendItems.length" class="floating-chart-legend" :class="{ dragging: draggingLegend }" :style="legendStyle" @mousedown="startLegendDrag">
+          <button v-for="item in legendItems" :key="item.name" type="button" class="floating-legend-item" :class="{ hidden: hiddenLegendNames.has(item.name) }" title="点击显示或隐藏该日期" @mousedown.stop @click.stop="toggleLegendItem(item.name)">
+            <span class="legend-dot" :style="{ backgroundColor: hiddenLegendNames.has(item.name) ? 'transparent' : item.color, borderColor: item.color }" />
+            <span>{{ item.name }}</span>
+          </button>
+        </div>
+        <div v-if="loading" class="chart-empty">正在读取智慧气藏实测静压…</div>
+        <div v-else-if="!chartHasData" class="chart-empty">暂无可绘制的实测数据</div>
+      </div>
     </div>
     <div v-show="activeTab === 'table'" class="table-view">
       <div class="table-toolbar">
         <span :class="`save-${saveState}`" role="status">{{ saveLabel }}</span>
         <div class="table-actions">
-          <el-button size="small" @click="downloadTemplate">下载模板</el-button>
-          <el-button size="small" :disabled="!databaseLoaded" @click="importFileInput?.click()">导入表格</el-button>
+          <button type="button" class="toolbar-button" @click="downloadTemplate">下载模板</button>
+          <button type="button" class="toolbar-button" :disabled="!databaseLoaded" @click="importFileInput?.click()">导入表格</button>
           <input ref="importFileInput" class="hidden-file-input" type="file" accept=".xlsx,.xls,.csv" :disabled="!databaseLoaded" @change="importFile" />
-          <el-button size="small" type="primary" plain :disabled="!databaseLoaded" @click="addPoint">新增测点</el-button>
-          <el-button size="small" type="primary" :disabled="!databaseLoaded" :loading="saveState === 'saving'" @click="saveDatabase(true).catch(() => {})">保存</el-button>
+          <button type="button" class="toolbar-button" :disabled="!databaseLoaded" @click="addPoint">新增测点</button>
+          <button type="button" class="toolbar-button primary" :disabled="!databaseLoaded || saveState === 'saving'" @click="saveDatabase(true).catch(() => {})">{{ saveState === 'saving' ? '保存中…' : '保存' }}</button>
         </div>
       </div>
       <el-table :data="shownRows" row-key="id" stripe border height="100%" empty-text="当前库没有实测静压">
@@ -318,16 +401,26 @@ onBeforeUnmount(() => {
 .pressure-test-method { display:flex; flex-direction:column; min-width:0; min-height:0; height:100%; overflow:hidden; background:#fff; color:#303133; }
 .test-toolbar { display:flex; flex:0 0 44px; align-items:stretch; border-bottom:1px solid #dcdfe6; background:#fafafa; }
 .test-toolbar button { min-width:100px; padding:0 16px; border:0; border-bottom:2px solid transparent; background:transparent; color:#606266; cursor:pointer; }
-.test-toolbar button.active { border-bottom-color:#409eff; color:#409eff; font-weight:600; }
+.test-toolbar button:hover { color:#202020; }
+.test-toolbar button.active { border-bottom-color:#f2c811; color:#202020; font-weight:600; }
 .load-error { align-self:center; margin-left:auto; padding:0 16px; color:#d9822b; font-size:12px; }
 .chart-view,.table-view { flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
 .chart-controls,.table-toolbar { display:flex; align-items:center; gap:10px; min-height:50px; padding:6px 16px; color:#606266; font-size:13px; }
 .chart-controls span { margin-left:auto; color:#909399; }
 .chart-frame { position:relative; flex:1; min-height:220px; }
 .pressure-chart { width:100%; height:100%; }
+.floating-chart-legend { position:absolute; z-index:5; display:flex; flex-direction:column; gap:5px; max-width:280px; max-height:45%; overflow:auto; padding:7px 10px; border:1px solid #eee; background:rgba(255,255,255,.9); color:#333; font-size:12px; line-height:1.2; cursor:move; user-select:none; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+.floating-chart-legend.dragging { box-shadow:0 4px 12px rgba(0,0,0,.14); }
+.floating-legend-item { display:flex; align-items:center; gap:5px; border:0; padding:0; background:transparent; color:#333; font:12px Arial,"Microsoft YaHei",sans-serif; line-height:1.2; white-space:nowrap; cursor:pointer; }
+.floating-legend-item.hidden { color:#999; opacity:.55; }
+.legend-dot { width:10px; height:10px; flex-shrink:0; border:1px solid transparent; border-radius:50%; }
 .chart-empty { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#909399; pointer-events:none; }
 .table-toolbar { justify-content:space-between; }
 .table-actions { display:flex; align-items:center; gap:8px; }
+.toolbar-button { height:26px; padding:3px 9px; border:1px solid #d9dfeb; border-radius:2px; background:#fff; color:#465366; font:12px Arial,"Microsoft YaHei",sans-serif; cursor:pointer; white-space:nowrap; }
+.toolbar-button:hover:not(:disabled),.toolbar-button:focus-visible { border-color:#b79b00; outline:none; }
+.toolbar-button.primary { border-color:#e0be00; background:#f4d000; color:#222; }
+.toolbar-button:disabled { border-color:#d9dfeb; background:#fafafa; color:#b4b8c0; cursor:not-allowed; }
 .hidden-file-input { display:none; }
 .save-saved { color:#67c23a; }
 .save-saving { color:#409eff; }

@@ -47,6 +47,16 @@ export function calculatePressureIntercept({
     : pressure - slope * coordinate
 }
 
+/** The pressure shown in the folding table and plotted for a completed row. */
+export function calculateGradientPressure({ p0, gradient, measuredCoordinate }) {
+  const intercept = finiteInput(p0)
+  const slope = finiteInput(gradient)
+  const coordinate = finiteInput(measuredCoordinate)
+  if ([intercept, slope, coordinate].some(value => value === null || value < 0)) return null
+  const pressure = intercept + slope * coordinate
+  return Number.isFinite(pressure) ? pressure : null
+}
+
 const dateFields = ['date', 'testDate', 'pressureDate', 'measuredDate', 'test_date', 'pressure_date', 'measured_date']
 const pressureFields = ['reserviorPressure', 'reservoirPressure', 'formationPressure', 'pressure', 'reservior_pressure', 'reservoir_pressure', 'formation_pressure']
 
@@ -149,6 +159,15 @@ export function buildPressureGradientComparison({
   })
   const maxPressure = Math.max(0, ...series.flatMap(item => item.data.filter(Number.isFinite)))
   return { validRows, allDates, dates, categories, seriesKeys, series, maxPressure }
+}
+
+/** Plot exactly the table's P₀ + PGD × H, excluding rows awaiting parameters. */
+export function buildCalculatedGradientComparison({ rows = [], ...options }) {
+  const calculatedRows = rows.flatMap(row => {
+    const pressure = calculateGradientPressure(row)
+    return pressure === null ? [] : [{ ...row, measuredPressure: pressure }]
+  })
+  return buildPressureGradientComparison({ ...options, rows: calculatedRows, directPressure: true })
 }
 
 export function normalizePressureRecord(row, wellName, id) {

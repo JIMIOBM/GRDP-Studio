@@ -6,7 +6,7 @@ import { Document } from '@element-plus/icons-vue'
 import { dataManagementApi } from '@/api/docker'
 import { storageCatalogApi } from '@/api/storageCatalog'
 import { storagePressureGradientApi } from '@/api/storagePressureGradient'
-import { buildPressureGradientComparison, calculatePressureIntercept, normalizePressureRecord, pressureRecordDate, pressureSourceKeys } from '@/utils/formationPressureGradient'
+import { buildCalculatedGradientComparison, calculateGradientPressure, calculatePressureIntercept, normalizePressureRecord, pressureRecordDate, pressureSourceKeys } from '@/utils/formationPressureGradient'
 import { cleanPressureGradientImportRows, mergePressureGradientImportRows, parsePressureGradientRows, pressureGradientImportColumns } from '@/utils/pressureGradientImport'
 import { assertNoSpreadsheetFormulaCells } from '@/utils/spreadsheetImport'
 
@@ -17,12 +17,13 @@ const selectedWells = ref([])
 const referenceCoordinate = ref('2000')
 const coordinateMode = ref('depth')
 const dateRange = ref('recent3')
-const activeTab = ref('chart')
+const activeTab = ref('table')
 const loading = ref(false)
 const loadError = ref('')
 const ready = ref(false)
 const databaseLoaded = ref(false)
 const chartElement = ref(null)
+const chartFrame = ref(null)
 const workspaceElement = ref(null)
 const importFileInput = ref(null)
 const importDialogVisible = ref(false)
@@ -31,8 +32,12 @@ const selectedImportFile = ref(null)
 const importingSpreadsheet = ref(false)
 const importOptions = ref({ removeEmptyRows: false, removeEmptyColumns: false, removeZeroRows: false })
 const databaseSaveState = ref('saved')
+const hiddenLegendNames = ref(new Set())
+const legendPosition = ref(null)
+const draggingLegend = ref(false)
 let chart = null
 let resizeObserver = null
+let legendOffset = null
 let loadVersion = 0
 let resizeFrame = 0
 let saveTimer = 0
@@ -53,22 +58,14 @@ const storageScope = computed(() => [props.reservoir?.projectId, props.reservoir
 const draftKey = computed(() => `grdp:formation-pressure-gradient:${storageScope.value}`)
 const selectedWellSet = computed(() => new Set(selectedWells.value.map(String)))
 const format = value => Number.isFinite(value) ? value.toLocaleString('zh-CN', { maximumFractionDigits: 4 }) : '—'
+const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character])
 const optionalNumber = value => value === null || value === undefined || String(value).trim() === ''
   ? null : Number.isFinite(Number(value)) ? Number(value) : null
-const rowPressure = row => {
-  const p0 = optionalNumber(row.p0)
-  const gradient = optionalNumber(row.gradient)
-  const height = optionalNumber(row.measuredCoordinate)
-  if ([p0, gradient, height].some(value => value === null)) return null
-  const pressure = p0 + gradient * height
-  return Number.isFinite(pressure) ? pressure : null
-}
+const rowPressure = row => calculateGradientPressure(row)
 const rowIntercept = row => optionalNumber(row.p0)
 const isRowCalculable = row => {
   const pressure = rowPressure(row)
-  return pressure !== null && pressure >= 0 && optionalNumber(row.p0) >= 0
-    && optionalNumber(row.gradient) >= 0 && optionalNumber(row.measuredCoordinate) >= 0
-    && pressureRecordDate({ date: row.date }) === String(row.date)
+  return row.deleted !== true && pressure !== null && pressureRecordDate({ date: row.date }) === String(row.date)
 }
 const deriveP0 = row => {
   const derived = row.p0 !== undefined && row.p0 !== null && String(row.p0).trim() !== ''
@@ -81,25 +78,65 @@ const selectedRows = computed(() => rows.value.filter(row => selectedWellSet.val
 const calculableSelectedRows = computed(() => validRows.value.filter(row => selectedWellSet.value.has(String(row.wellName))))
 const missingSelectedCount = computed(() => Math.max(0, selectedRows.value.length - calculableSelectedRows.value.length))
 const chartWells = computed(() => wells.value.map(well => well.wellName).filter(name => selectedWellSet.value.has(String(name))))
-const chartModel = computed(() => buildPressureGradientComparison({
+const chartModel = computed(() => buildCalculatedGradientComparison({
   rows: rows.value,
   selectedWells: chartWells.value,
   referenceCoordinate: referenceCoordinate.value,
   coordinateMode: coordinateMode.value,
   dateRange: dateRange.value,
-  chartAxis: 'well',
-  directPressure: true
+  chartAxis: 'well'
 }))
-const chartRows = computed(() => chartModel.value.validRows)
+const chartRows = computed(() => chartModel.value.validRows.filter(row => chartModel.value.dates.includes(row.date)))
 const chartHasData = computed(() => chartModel.value.series.some(series => series.data.some(Number.isFinite)))
+const chartColors = ['#5470c6', '#b84a4a', '#2f80ed', '#e6a23c', '#67b58b', '#9367b5']
+const legendItems = computed(() => chartModel.value.series
+  .map((series, index) => ({ name: series.key, color: chartColors[index % chartColors.length], hasData: series.data.some(Number.isFinite) }))
+  .filter(item => item.hasData))
+const legendStyle = computed(() => legendPosition.value
+  ? { left: `${legendPosition.value.x}px`, top: `${legendPosition.value.y}px` }
+  : { top: '52px', right: '28px' })
+const plottedPointCount = computed(() => chartModel.value.series.reduce((count, series) => count + series.data.filter(Number.isFinite).length, 0))
 const displayedRows = computed(() => rows.value.filter(row => row.deleted !== true))
 const displayedValidCount = computed(() => displayedRows.value.filter(isRowCalculable).length)
 const displayedMissingCount = computed(() => displayedRows.value.length - displayedValidCount.value)
-const selectionCountText = computed(() => `已选 ${selectedWells.value.length} / ${wells.value.length} 口井 · ${calculableSelectedRows.value.length} 个有效测点 · ${missingSelectedCount.value} 行待补`)
+const chartDateText = computed(() => dateRange.value === 'all' ? '全部日期' : '最近 3 期')
+const selectionCountText = computed(() => `已选 ${selectedWells.value.length} / ${wells.value.length} 口井 · ${plottedPointCount.value} 个图点 · ${missingSelectedCount.value} 行待补`)
 const databaseSaveLabel = computed(() => ({
   saving: '正在保存到数据库…',
   failed: '数据库保存失败，本机草稿已保留'
 }[databaseSaveState.value] || '数据库已保存'))
+
+const toggleLegendItem = name => {
+  const hidden = new Set(hiddenLegendNames.value)
+  if (hidden.has(name)) hidden.delete(name)
+  else hidden.add(name)
+  hiddenLegendNames.value = hidden
+}
+const moveLegend = event => {
+  if (!legendOffset || !chartFrame.value) return
+  const bounds = chartFrame.value.getBoundingClientRect()
+  legendPosition.value = {
+    x: Math.max(0, Math.min(bounds.width - legendOffset.width, event.clientX - bounds.left - legendOffset.x)),
+    y: Math.max(0, Math.min(bounds.height - legendOffset.height, event.clientY - bounds.top - legendOffset.y))
+  }
+}
+const stopLegendDrag = () => {
+  legendOffset = null
+  draggingLegend.value = false
+  window.removeEventListener('mousemove', moveLegend)
+  window.removeEventListener('mouseup', stopLegendDrag)
+}
+const startLegendDrag = event => {
+  if (event.button !== 0 || !chartFrame.value) return
+  event.preventDefault()
+  const current = event.currentTarget.getBoundingClientRect()
+  const bounds = chartFrame.value.getBoundingClientRect()
+  legendPosition.value = { x: current.left - bounds.left, y: current.top - bounds.top }
+  legendOffset = { x: event.clientX - current.left, y: event.clientY - current.top, width: current.width, height: current.height }
+  draggingLegend.value = true
+  window.addEventListener('mousemove', moveLegend)
+  window.addEventListener('mouseup', stopLegendDrag)
+}
 
 const readDraft = () => {
   try { return JSON.parse(localStorage.getItem(draftKey.value) || 'null') || {} } catch { return {} }
@@ -424,72 +461,76 @@ const importSpreadsheet = async () => {
 }
 
 const buildChartOption = () => {
-  const categoryWells = chartWells.value
   const model = chartModel.value
-  const activeDates = model.dates
   const categories = model.categories
-  const series = model.series.map(({ key, data }) => {
+  const series = model.series.map(({ key, data }, index) => {
     return {
       name: key,
       type: 'line',
       data,
       connectNulls: false,
+      // Wells are categories, not a continuous time axis; keep straight segments to avoid invented extrema.
+      smooth: false,
       symbol: 'circle',
       symbolSize: 8,
-      lineStyle: { width: 2 },
+      lineStyle: { width: 1.5, color: chartColors[index % chartColors.length] },
+      itemStyle: { color: chartColors[index % chartColors.length], opacity: 0.85 },
       emphasis: { focus: 'series' }
     }
-  })
+  }).filter(series => !hiddenLegendNames.value.has(series.name))
+  const axisStyle = {
+    nameLocation: 'middle',
+    minorTick: { show: true },
+    minorSplitLine: { show: true, lineStyle: { color: '#f1f5fb' } },
+    splitLine: { show: true, lineStyle: { color: '#dce5f2' } }
+  }
   return {
     animation: false,
-    color: ['#568df5', '#ff9b21', '#f05252', '#31a6a0', '#9a6de8', '#4aaf5d'],
-    title: { text: '地层压力梯度对比', left: 'center', top: 12, textStyle: { fontSize: 17, fontWeight: 600, color: '#303133' } },
+    title: { text: '地层压力梯度对比', left: 'center', top: 8, textStyle: { fontSize: 14, fontWeight: 600, color: '#333' } },
     tooltip: {
-      trigger: 'axis',
-      axisPointer: { type: 'line' },
-      formatter: params => {
-        const first = params?.[0]
-        if (!first) return ''
-        const date = activeDates[first.seriesIndex]
-        const wellName = categoryWells[first.dataIndex]
+      trigger: 'item',
+      confine: true,
+      formatter: point => {
+        if (!point || !Number.isFinite(Number(point.value))) return ''
+        const date = String(point.seriesName || '')
+        const wellName = String(point.name || '')
         const sourceRows = chartRows.value.filter(row => row.date === date && row.wellName === wellName)
         const pointLines = sourceRows.filter(row => [row.p0, row.gradient, row.measuredCoordinate]
           .every(value => value !== null && value !== undefined && String(value).trim() !== ''))
           .map(row => `P₀ ${format(rowIntercept(row))} MPa，PGD ${format(optionalNumber(row.gradient))} MPa/m，H ${format(optionalNumber(row.measuredCoordinate))} m`)
         const averageNote = sourceRows.length > 1 ? `同井同日 ${sourceRows.length} 个测点取压力均值` : ''
-        return [`<strong>${wellName}</strong>`, `${date} 压力 P：${format(Number(first.value))} MPa`, averageNote, ...pointLines].filter(Boolean).join('<br/>')
+        return [`<strong>${escapeHtml(wellName)}</strong>`, `${escapeHtml(date)} 压力 P：${format(Number(point.value))} MPa`, averageNote, ...pointLines].filter(Boolean).join('<br/>')
       }
     },
-    legend: { top: 42, type: 'scroll' },
-    grid: { top: 88, left: 76, right: 34, bottom: 68, containLabel: false },
+    legend: { show: false },
+    grid: { top: 44, left: 62, right: 92, bottom: 56, containLabel: false },
     xAxis: {
+      ...axisStyle,
       type: 'category',
       name: '井号',
-      nameLocation: 'middle',
-      nameGap: 42,
+      nameGap: 34,
       data: categories,
       axisTick: { alignWithLabel: true },
       axisLabel: { interval: 0 }
     },
     yAxis: {
+      ...axisStyle,
       type: 'value',
       name: '压力 P (MPa)',
-      nameLocation: 'middle',
-      nameGap: 54,
+      nameGap: 44,
       min: 0,
       max: Math.max(5, Math.ceil(model.maxPressure / 5) * 5),
       interval: 5,
-      splitLine: { lineStyle: { color: '#e4e9f2' } }
     },
     series
   }
 }
 const renderChart = () => {
-  if (!chartElement.value) return
+  if (activeTab.value !== 'chart' || !chartElement.value) return
   if (!chart) chart = echarts.init(chartElement.value)
   chart.setOption(chartHasData.value ? buildChartOption() : {
     animation: false,
-    title: { text: '地层压力梯度对比', left: 'center', top: 12, textStyle: { fontSize: 17, fontWeight: 600 } },
+    title: { text: '地层压力梯度对比', left: 'center', top: 8, textStyle: { fontSize: 14, fontWeight: 600 } },
     xAxis: { type: 'category', data: [] },
     yAxis: { type: 'value', name: '压力 (MPa)' },
     series: []
@@ -510,6 +551,10 @@ watch([selectedWells, dateRange], () => {
   saveDraft()
   nextTick(renderChart)
 }, { deep: true })
+watch(dateRange, () => { hiddenLegendNames.value = new Set(); legendPosition.value = null })
+watch(storageScope, () => { hiddenLegendNames.value = new Set(); legendPosition.value = null; stopLegendDrag() })
+watch(chartModel, () => nextTick(renderChart))
+watch(hiddenLegendNames, () => nextTick(renderChart))
 watch(activeTab, async tab => {
   if (tab === 'chart') {
     await nextTick()
@@ -533,6 +578,7 @@ onBeforeUnmount(() => {
     persistToDatabase().catch(() => {})
   }
   loadVersion++
+  stopLegendDrag()
   resizeObserver?.disconnect()
   window.removeEventListener('resize', scheduleResize)
   if (resizeFrame) cancelAnimationFrame(resizeFrame)
@@ -543,6 +589,8 @@ onBeforeUnmount(() => {
 
 <template>
   <section ref="workspaceElement" class="pressure-gradient-workspace" aria-label="压力梯度折算">
+    <div class="module-bar"><span>库存评估 · 地层压力</span></div>
+    <div class="workspace">
     <aside class="pressure-params">
       <div class="params-head"><span>参数设置</span><button type="button" @click="reload">重新读取</button></div>
       <div class="params-body">
@@ -569,9 +617,16 @@ onBeforeUnmount(() => {
     </aside>
 
     <main class="pressure-results">
-      <div class="result-tabs">
-        <button :class="{ active: activeTab === 'chart' }" type="button" @click="activeTab = 'chart'">压力对比图</button>
-        <button :class="{ active: activeTab === 'table' }" type="button" @click="activeTab = 'table'">折算数据</button>
+      <div class="dynamic-result-tabs">
+        <span class="dynamic-result-tab-text">地层压力-{{ reservoir?.label || '当前库' }}-压力梯度折算</span>
+      </div>
+      <div class="result-toolbar">
+        <span class="save-status" :class="`save-${databaseSaveState}`" role="status">{{ databaseSaveLabel }}</span>
+        <div class="table-actions">
+          <button type="button" class="toolbar-button" @click="openImportDialog">导入表格</button>
+          <button type="button" class="toolbar-button" @click="addPoint">新增测点</button>
+          <button type="button" class="toolbar-button primary" :disabled="!databaseLoaded || databaseSaveState === 'saving'" @click="saveExplicitly">{{ databaseSaveState === 'saving' ? '保存中…' : '保存' }}</button>
+        </div>
       </div>
 
       <div v-show="activeTab === 'chart'" class="chart-view">
@@ -583,8 +638,14 @@ onBeforeUnmount(() => {
           </el-select>
           <span class="chart-summary">{{ selectionCountText }}</span>
         </div>
-        <div class="chart-frame">
+        <div ref="chartFrame" class="chart-frame">
           <div ref="chartElement" class="pressure-chart" aria-label="地层压力梯度对比图" />
+          <div v-if="chartHasData && legendItems.length" class="floating-chart-legend" :class="{ dragging: draggingLegend }" :style="legendStyle" @mousedown="startLegendDrag">
+            <button v-for="item in legendItems" :key="item.name" type="button" class="floating-legend-item" :class="{ hidden: hiddenLegendNames.has(item.name) }" title="点击显示或隐藏该日期" @mousedown.stop @click.stop="toggleLegendItem(item.name)">
+              <span class="legend-dot" :style="{ backgroundColor: hiddenLegendNames.has(item.name) ? 'transparent' : item.color, borderColor: item.color }" />
+              <span>{{ item.name }}</span>
+            </button>
+          </div>
           <div v-if="!chartHasData" class="chart-empty">
             <span>{{ loading ? '正在读取压力数据…' : '暂无可绘制测点' }}</span>
             <button v-if="!loading" type="button" @click="activeTab = 'table'">录入测点参数</button>
@@ -594,12 +655,7 @@ onBeforeUnmount(() => {
 
       <div v-show="activeTab === 'table'" class="table-view">
         <div class="table-toolbar">
-          <span class="save-status" :class="`save-${databaseSaveState}`" role="status">{{ databaseSaveLabel }}</span>
-          <div class="table-actions">
-            <el-button size="small" @click="openImportDialog">导入表格</el-button>
-            <el-button size="small" type="primary" plain @click="addPoint">新增测点</el-button>
-            <el-button size="small" type="primary" :disabled="!databaseLoaded" :loading="databaseSaveState === 'saving'" @click="saveExplicitly">保存</el-button>
-          </div>
+          <span>图表只取已选井在{{ chartDateText }}内的有效行；同井同日多个测点取计算压力均值。</span>
         </div>
         <div class="table-holder">
           <el-table :data="displayedRows" row-key="id" stripe border height="100%" empty-text="当前库没有实测静压，请新增测点录入">
@@ -638,7 +694,12 @@ onBeforeUnmount(() => {
           <span>共 {{ displayedRows.length }} 条测点</span>
         </div>
       </div>
+      <nav class="bottom-chart-tabs" aria-label="地层压力结果视图">
+        <button :class="{ active: activeTab === 'table' }" type="button" @click="activeTab = 'table'">折算数据</button>
+        <button :class="{ active: activeTab === 'chart' }" type="button" @click="activeTab = 'chart'">压力对比图</button>
+      </nav>
     </main>
+    </div>
 
     <Teleport to="body">
       <div v-if="importDialogVisible" class="pressure-import-overlay" role="presentation" @mousedown.self="importDialogVisible = false">
@@ -693,37 +754,56 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.pressure-gradient-workspace { display:flex; flex:1; min-width:0; min-height:0; height:100%; overflow:hidden; background:#fff; color:#303133; font:14px Arial,"Microsoft YaHei",sans-serif; }
-.pressure-params { width:300px; min-width:270px; max-width:360px; flex:0 0 300px; display:flex; flex-direction:column; min-height:0; border-right:1px solid #dcdfe6; }
-.params-head { height:42px; flex:0 0 42px; display:flex; align-items:center; justify-content:space-between; padding:0 14px; border-bottom:1px solid #ebeef5; font-weight:600; }
-.params-head button { border:0; background:none; color:#409eff; cursor:pointer; font-size:12px; }
-.params-body { flex:1; min-height:0; overflow:auto; padding:14px 16px; }
+.pressure-gradient-workspace { display:flex; flex:1; flex-direction:column; min-width:0; min-height:0; height:100%; overflow:hidden; background:#fff; color:#303133; font:12px Arial,"Microsoft YaHei",sans-serif; }
+.module-bar { display:flex; flex:0 0 34px; align-items:stretch; background:#fafafa; border-bottom:1px solid #e4e7ed; }
+.module-bar span { padding:0 12px; background:#f4d000; line-height:34px; font-weight:600; }
+.workspace { display:flex; flex:1; min-width:0; min-height:0; overflow:hidden; }
+.pressure-params { width:258px; min-width:220px; max-width:360px; flex:0 0 258px; display:flex; flex-direction:column; min-height:0; border-right:1px solid #dcdfe6; }
+.params-head { height:34px; flex:0 0 34px; display:flex; align-items:center; justify-content:space-between; padding:0 12px; border-bottom:1px solid #ebeef5; font-weight:600; }
+.params-head button { border:0; background:none; color:#8a7000; cursor:pointer; font-size:12px; }
+.params-body { flex:1; min-height:0; overflow:auto; padding:12px; }
 .field { display:flex; flex-direction:column; gap:6px; margin-bottom:14px; color:#606266; font-size:13px; }
 .field :deep(.el-select) { width:100%; }
-.formula-card { margin:4px 0 18px; padding:10px 11px; background:#f4f7fb; color:#336699; line-height:1.7; font-size:13px; }
+.formula-card { margin:4px 0 18px; padding:10px 11px; background:#f8f9fb; color:#606266; line-height:1.7; font-size:12px; }
 .formula-card small { display:block; margin-top:3px; color:#7d8da3; font-size:11px; }
 .section-heading { display:flex; align-items:center; justify-content:space-between; margin:14px 0 8px; padding-bottom:8px; border-bottom:1px solid #ebeef5; color:#303133; font-weight:600; }
 .section-heading span,.well-count { color:#909399; font-size:12px; font-weight:400; }
-.well-list { max-height:300px; overflow:auto; border:1px solid #ebeef5; border-radius:3px; }
-.well-item { display:flex; align-items:center; gap:7px; min-height:42px; padding:0 9px; border-bottom:1px solid #ebeef5; cursor:pointer; }
+.well-list { max-height:52vh; overflow:auto; border:1px solid #ebeef5; border-radius:3px; }
+.well-item { display:flex; align-items:center; gap:7px; min-height:36px; padding:0 9px; border-bottom:1px solid #ebeef5; background:#fff; cursor:pointer; }
 .well-item:last-child { border-bottom:0; }
-.well-name { flex:1; min-width:0; overflow:hidden; color:#409eff; text-overflow:ellipsis; white-space:nowrap; }
+.well-list :deep(.el-checkbox__input.is-checked:not(.is-disabled) .el-checkbox__inner) { background:#f4d000; border-color:#d6b500; }
+.well-list :deep(.el-checkbox__input.is-checked:not(.is-disabled) .el-checkbox__inner::after) { border-color:#222; }
+.well-list :deep(.el-checkbox__input:not(.is-disabled) .el-checkbox__inner:hover) { border-color:#b79b00; }
+.well-name { flex:1; min-width:0; overflow:hidden; color:#303133; text-overflow:ellipsis; white-space:nowrap; }
 .subtle-message { padding:12px 4px; color:#909399; font-size:12px; }
 .load-notice { color:#d9822b; font-size:12px; }
 .pressure-results { flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
-.result-tabs { display:flex; flex:0 0 44px; height:44px; align-items:stretch; border-bottom:1px solid #dcdfe6; background:#fafafa; }
-.result-tabs button { min-width:100px; padding:0 16px; border:0; border-bottom:2px solid transparent; background:transparent; color:#606266; font-size:14px; cursor:pointer; }
-.result-tabs button.active { border-bottom-color:#409eff; color:#409eff; font-weight:600; }
+.dynamic-result-tabs { display:flex; flex:0 0 34px; align-items:stretch; border-bottom:1px solid #e4e7ed; background:#fafafa; overflow:hidden; }
+.dynamic-result-tab-text { display:flex; align-items:center; padding:0 12px; background:#f4d000; font-weight:600; white-space:nowrap; }
+.result-toolbar { display:flex; align-items:center; justify-content:space-between; gap:10px; min-height:40px; padding:5px 12px; border-bottom:1px solid #e5e5e5; }
+.bottom-chart-tabs { display:flex; align-items:flex-end; flex:0 0 30px; border-top:1px solid #e4e7ed; background:#fff; overflow-x:auto; }
+.bottom-chart-tabs button { height:30px; min-width:82px; padding:0 14px; border:0; border-right:1px solid #e4e7ed; background:#fff; color:#333; font-size:13px; cursor:pointer; white-space:nowrap; }
+.bottom-chart-tabs button:hover { background:#fff8d8; }
+.bottom-chart-tabs button.active { font-weight:600; box-shadow:inset 0 3px 0 #f2c811; }
 .chart-view,.table-view { flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
 .chart-toolbar { display:flex; align-items:center; gap:10px; min-height:50px; padding:6px 16px; color:#606266; font-size:13px; }
 .chart-summary { margin-left:auto; color:#8a96a8; font-size:12px; white-space:nowrap; }
 .chart-frame { position:relative; flex:1; min-height:220px; overflow:hidden; }
 .pressure-chart { width:100%; height:100%; }
+.floating-chart-legend { position:absolute; z-index:5; display:flex; flex-direction:column; gap:5px; max-width:280px; max-height:45%; overflow:auto; padding:7px 10px; border:1px solid #eee; background:rgba(255,255,255,.9); color:#333; font-size:12px; line-height:1.2; cursor:move; user-select:none; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+.floating-chart-legend.dragging { box-shadow:0 4px 12px rgba(0,0,0,.14); }
+.floating-legend-item { display:flex; align-items:center; gap:5px; border:0; padding:0; background:transparent; color:#333; font:12px Arial,"Microsoft YaHei",sans-serif; line-height:1.2; white-space:nowrap; cursor:pointer; }
+.floating-legend-item.hidden { color:#999; opacity:.55; }
+.legend-dot { width:10px; height:10px; flex-shrink:0; border:1px solid transparent; border-radius:50%; }
 .chart-empty { position:absolute; inset:90px 0 0; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:12px; color:#909399; pointer-events:none; }
 .chart-empty button { padding:6px 12px; border:1px solid #a0cfff; border-radius:3px; background:#ecf5ff; color:#409eff; cursor:pointer; pointer-events:auto; }
 .table-footer { display:flex; align-items:center; justify-content:space-between; min-height:38px; padding:0 16px; border-top:1px solid #ebeef5; color:#8a96a8; font-size:12px; }
-.table-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:54px; padding:7px 16px; color:#738198; font-size:12px; }
+.table-toolbar { display:flex; align-items:center; gap:12px; min-height:36px; padding:6px 14px; color:#738198; font-size:12px; }
 .table-actions { display:flex; align-items:center; gap:8px; }
+.toolbar-button { height:26px; padding:3px 9px; border:1px solid #d9dfeb; border-radius:2px; background:#fff; color:#465366; font:12px Arial,"Microsoft YaHei",sans-serif; cursor:pointer; white-space:nowrap; }
+.toolbar-button:hover:not(:disabled),.toolbar-button:focus-visible { border-color:#b79b00; outline:none; }
+.toolbar-button.primary { border-color:#e0be00; background:#f4d000; color:#222; }
+.toolbar-button:disabled { border-color:#d9dfeb; background:#fafafa; color:#b4b8c0; cursor:not-allowed; }
 .save-status { color:#67c23a; white-space:nowrap; }
 .save-saving { color:#409eff; }
 .save-failed { color:#e6a23c; }
@@ -759,7 +839,8 @@ onBeforeUnmount(() => {
 .pressure-import-confirm:disabled { border-color:#c8c9cc; background:#c8c9cc; cursor:not-allowed; }
 @media (max-width:680px) { .pressure-import-body { padding-inline:14px; } .pressure-import-options { padding:7px 0; } .pressure-import-dropzone { height:calc(100% - 96px); } .pressure-import-prompt { margin-top:28px; } }
 @media (max-width:900px) {
-  .pressure-params { width:250px; min-width:220px; flex-basis:250px; }
+  .pressure-params { width:220px; flex-basis:220px; }
+  .result-toolbar { flex-wrap:wrap; }
   .chart-summary { white-space:normal; text-align:right; }
 }
 </style>

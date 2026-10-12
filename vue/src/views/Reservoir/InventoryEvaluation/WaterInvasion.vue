@@ -2,7 +2,7 @@
 /** 库水侵：选择已保存单井批次 → 日期并集逐日加权 → 旧算法 → 新库历史。与单井页面独立。 */
 import { computed, ref, watch, nextTick, onBeforeUnmount } from 'vue'
 import * as echarts from 'echarts'
-import { ElMessage, ElTable, ElTableColumn, ElPagination, ElInput } from 'element-plus'
+import { ElMessage, ElTable, ElTableColumn, ElPagination, ElInput, ElCheckbox } from 'element-plus'
 import request from '@/utils/request'
 
 const props = defineProps({ reservoir: { type: Object, default: null } })
@@ -238,12 +238,19 @@ reload()
           <label>所属储气库<input :value="reservoir?.label || '未选择库'" readonly /></label>
           <div class="field-title">参与井及来源批次 <button :disabled="loading || busy || running" @click="reload">刷新</button></div>
           <div v-if="loading" class="muted">正在读取单井历史…</div>
-          <div v-for="well in sources" :key="well.wellId" class="well-source">
-            <label class="check"><input v-model="choices[well.wellId].enabled" type="checkbox" :disabled="busy || !well.records.some(r => Number(r.dynamic_gas_volume) > 0)" />{{ well.wellName }}</label>
-            <select v-model="choices[well.wellId].recordId" :disabled="busy || !choices[well.wellId].enabled" :aria-label="`${well.wellName} 来源批次`">
-              <option v-if="!well.records.length" :value="null">无已保存的单井结果</option>
-              <option v-for="r in well.records" :key="r.id" :value="r.id" :disabled="!(Number(r.dynamic_gas_volume) > 0)">{{ stamp(r.saved_at || r.created_at) }} · 储量 {{ format(r.dynamic_gas_volume) }}</option>
-            </select>
+          <div v-if="sources.length" class="well-list">
+            <div v-for="well in sources" :key="well.wellId" class="well-source">
+              <div class="check">
+                <ElCheckbox v-model="choices[well.wellId].enabled" :disabled="busy || !well.records.some(r => Number(r.dynamic_gas_volume) > 0)">
+                  <span class="well-name">{{ well.wellName }}</span>
+                </ElCheckbox>
+                <span class="well-count">{{ well.records.length }} 个批次</span>
+              </div>
+              <select v-model="choices[well.wellId].recordId" :disabled="busy || !choices[well.wellId].enabled" :aria-label="`${well.wellName} 来源批次`">
+                <option v-if="!well.records.length" :value="null">无已保存的单井结果</option>
+                <option v-for="r in well.records" :key="r.id" :value="r.id" :disabled="!(Number(r.dynamic_gas_volume) > 0)">{{ stamp(r.saved_at || r.created_at) }} · 储量 {{ format(r.dynamic_gas_volume) }}</option>
+              </select>
+            </div>
           </div>
           <div v-if="!loading && !sources.length" class="muted">当前库没有可读取的单井数据。</div>
           <label>生产水气比上限（-1 表示不限）<input v-model="limit" type="number" step="any" :disabled="busy" /></label>
@@ -313,7 +320,17 @@ reload()
 .workspace{display:flex;flex:1;min-height:0;overflow:hidden}.parameters{width:258px;min-width:220px;max-width:380px;resize:horizontal;overflow:hidden;display:flex;flex-direction:column;border-right:1px solid #ddd}
 .panel-head{height:34px;line-height:34px;padding:0 12px;border-bottom:1px solid #eee}.parameter-scroll{overflow:auto;flex:1;padding:12px}
 label{display:block;margin-bottom:12px;line-height:1.7}input:not([type=checkbox]),select{display:block;box-sizing:border-box;width:100%;min-width:0;height:26px;padding:2px 6px;border:1px solid #d9dfeb;border-radius:2px;background:#fff;color:#465366;font:12px Arial,"Microsoft YaHei",sans-serif}input[readonly]{background:#fafbfc}
-.check{display:flex;align-items:center;gap:5px;margin-bottom:4px}.check input{margin:0;accent-color:#505050}.well-source{padding:8px 0;border-bottom:1px solid #eee;margin-bottom:6px}.well-source select{font-size:11px}
+.well-list{max-height:52vh;overflow:auto;border:1px solid #ebeef5;border-radius:3px;margin-bottom:12px}
+.well-source{padding:8px 9px;border-bottom:1px solid #ebeef5;background:#fff}
+.well-source:last-child{border-bottom:0}
+.check{display:flex;align-items:center;gap:7px;min-width:0;margin-bottom:6px}
+.check :deep(.el-checkbox){display:inline-flex;flex:1;min-width:0;margin:0}.check :deep(.el-checkbox__label){min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+.well-list :deep(.el-checkbox__input.is-checked:not(.is-disabled) .el-checkbox__inner){background:#f4d000;border-color:#d6b500}
+.well-list :deep(.el-checkbox__input.is-checked:not(.is-disabled) .el-checkbox__inner::after){border-color:#222}
+.well-list :deep(.el-checkbox__input:not(.is-disabled) .el-checkbox__inner:hover){border-color:#b79b00}
+.well-name{color:#303133}.well-count{flex-shrink:0;color:#909399;font-size:11px}
+.check :deep(.el-checkbox.is-disabled .well-name){color:#b4b8c0}
+.well-source select{font-size:11px}
 .field-title{margin:14px 0 8px;display:flex;justify-content:space-between;align-items:center;font-weight:600}
 button{font:12px Arial,"Microsoft YaHei",sans-serif;background:#fff;color:#465366;border:1px solid #d9dfeb;border-radius:2px;padding:4px 9px;cursor:pointer}button:hover:not(:disabled){border-color:#b79b00}button:disabled{cursor:not-allowed;color:#b4b8c0;background:#fafafa}.primary{background:#f4d000;border-color:#e0be00;color:#222}.buttons{display:flex;gap:8px;margin:14px 0}
 .results{display:flex;flex:1;min-width:0;min-height:0;flex-direction:column;overflow:hidden;position:relative;--el-color-primary:#303133;--el-color-primary-light-3:#5d5e60;--el-color-primary-light-5:#858689;--el-color-primary-light-7:#b4b5b7;--el-color-primary-light-8:#d2d3d4;--el-color-primary-light-9:#eeeeef;--el-color-primary-dark-2:#111}

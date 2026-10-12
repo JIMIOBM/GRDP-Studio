@@ -196,12 +196,13 @@ onBeforeUnmount(() => { destroyed = true; reloadVersion++; clear(); clearDetail(
         </div>
         <div class="section-heading">参与井 <span>{{ selectedWellIds.length }} / {{ memberWells.length }}</span></div>
         <div v-if="memberWells.length" class="well-list">
-          <label v-for="well in memberWells" :key="well.wellId" class="well-item">
+          <div v-for="well in memberWells" :key="well.wellId" class="well-item">
             <el-checkbox :model-value="selectedWellSet.has(String(well.wellId))" :disabled="loading"
-              @change="value => setWellSelected(well.wellId, value)" />
-            <span class="well-name">{{ well.wellName }}</span>
+              @change="value => setWellSelected(well.wellId, value)">
+              <span class="well-name">{{ well.wellName }}</span>
+            </el-checkbox>
             <span class="well-count">{{ sampleCountForWell(well.wellId) || well.measuredCount ? `${sampleCountForWell(well.wellId) || well.measuredCount} 个测点` : '—' }}</span>
-          </label>
+          </div>
         </div>
         <div v-else-if="loading" class="subtle-message">正在读取当前库成员井…</div>
         <div v-else class="subtle-message">当前储气库没有成员井</div>
@@ -310,7 +311,7 @@ onBeforeUnmount(() => { destroyed = true; reloadVersion++; clear(); clearDetail(
 .workspace { display:flex; flex:1; min-width:0; min-height:0; overflow:hidden; }
 .mb-params { width:258px; min-width:220px; max-width:360px; flex:0 0 258px; display:flex; flex-direction:column; min-height:0; border-right:1px solid #dcdfe6; }
 .params-head { height:34px; flex:0 0 34px; display:flex; align-items:center; justify-content:space-between; padding:0 12px; border-bottom:1px solid #ebeef5; font-weight:600; }
-.params-head button { border:0; background:none; color:#409eff; cursor:pointer; font-size:12px; }
+.params-head button { border:0; background:none; color:#8a7000; cursor:pointer; font-size:12px; }
 .params-body { flex:1; min-height:0; overflow:auto; padding:12px; }
 .field { display:flex; flex-direction:column; gap:6px; margin-bottom:14px; color:#606266; font-size:13px; }
 .field :deep(.el-input), .field :deep(.el-select) { width:100%; }
@@ -320,9 +321,15 @@ onBeforeUnmount(() => { destroyed = true; reloadVersion++; clear(); clearDetail(
 .section-heading { display:flex; align-items:center; justify-content:space-between; margin:14px 0 8px; padding-bottom:8px; border-bottom:1px solid #ebeef5; color:#303133; font-weight:600; }
 .section-heading span,.well-count { color:#909399; font-size:12px; font-weight:400; }
 .well-list { max-height:52vh; overflow:auto; border:1px solid #ebeef5; border-radius:3px; }
-.well-item { display:flex; align-items:center; gap:7px; min-height:36px; padding:0 9px; border-bottom:1px solid #ebeef5; cursor:pointer; }
+.well-item { display:flex; align-items:center; gap:7px; min-height:36px; padding:0 9px; border-bottom:1px solid #ebeef5; background:#fff; }
 .well-item:last-child { border-bottom:0; }
-.well-name { flex:1; min-width:0; overflow:hidden; color:#409eff; text-overflow:ellipsis; white-space:nowrap; }
+.well-item :deep(.el-checkbox) { flex:1; min-width:0; margin-right:0; }
+.well-item :deep(.el-checkbox__label) { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }
+.well-list :deep(.el-checkbox__input.is-checked:not(.is-disabled) .el-checkbox__inner) { background:#f4d000; border-color:#d6b500; }
+.well-list :deep(.el-checkbox__input.is-checked:not(.is-disabled) .el-checkbox__inner::after) { border-color:#222; }
+.well-list :deep(.el-checkbox__input:not(.is-disabled) .el-checkbox__inner:hover) { border-color:#b79b00; }
+.well-name { color:#303133; }
+.well-count { flex-shrink:0; }
 .subtle-message { padding:12px 4px; color:#909399; font-size:12px; }
 .load-notice { margin-top:8px; color:#d9822b; font-size:12px; line-height:1.6; }
 .pressure-results { flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
