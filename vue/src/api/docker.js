@@ -374,6 +374,11 @@ export const dataManagementApi = {
       `/projects/${projectId}/gasreservoirs/${gasReservoirId}/summary/head`,
       {
         ...options,
+        params: {
+          page: 1,
+          size: -1,
+          ...options.params
+        },
         headers: {
           'X-Project-Id': String(projectId),
           ...options.headers

@@ -1,5 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import PressureDataLoading from './PressureDataLoading.vue'
 import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
 import { dataManagementApi } from '@/api/docker'
@@ -13,8 +14,9 @@ import { buildPressureTestComparison, mergePressureTestRows } from '@/utils/pres
 const props = defineProps({ reservoir: { type: Object, default: null } })
 const wells = ref([])
 const rows = ref([])
-const dateRange = ref('recent3')
-const activeTab = ref('chart')
+const selectedWells = ref([])
+const dateRange = ref('all')
+const activeTab = ref('table')
 const loading = ref(false)
 const loadError = ref('')
 const ready = ref(false)
@@ -56,11 +58,18 @@ const writeDraft = () => {
 const clearDraft = () => {
   try { localStorage.removeItem(draftKey.value) } catch { /* retain the database save result */ }
 }
-const selectedWells = computed(() => wells.value.map(well => well.wellName))
+const selectedWellSet = computed(() => new Set(selectedWells.value.map(String)))
+const setWellSelected = (wellName, checked) => {
+  const next = new Set(selectedWells.value.map(String))
+  if (checked) next.add(String(wellName))
+  else next.delete(String(wellName))
+  selectedWells.value = [...next]
+}
 const chartModel = computed(() => buildPressureTestComparison({
   rows: rows.value, selectedWells: selectedWells.value, dateRange: dateRange.value, chartAxis: 'well'
 }))
 const chartHasData = computed(() => chartModel.value.series.some(series => series.data.some(Number.isFinite)))
+const plottedPointCount = computed(() => chartModel.value.series.reduce((count, series) => count + series.data.filter(Number.isFinite).length, 0))
 const chartColors = ['#5470c6', '#b84a4a', '#2f80ed', '#e6a23c', '#67b58b', '#9367b5']
 const legendItems = computed(() => chartModel.value.series
   .map((series, index) => ({ name: series.key, color: chartColors[index % chartColors.length], hasData: series.data.some(Number.isFinite) }))
@@ -69,6 +78,12 @@ const legendStyle = computed(() => legendPosition.value
   ? { left: `${legendPosition.value.x}px`, top: `${legendPosition.value.y}px` }
   : { top: '52px', right: '28px' })
 const shownRows = computed(() => rows.value.filter(row => row.deleted !== true))
+const tableEmptyText = computed(() => loading.value ? '\u00a0' : '当前库没有实测静压')
+const wellPointCounts = computed(() => {
+  const counts = new Map()
+  shownRows.value.forEach(row => counts.set(row.wellName, (counts.get(row.wellName) || 0) + 1))
+  return counts
+})
 const saveLabel = computed(() => ({ saving: '正在保存到数据库…', failed: '数据库保存失败' }[saveState.value] || '数据库已保存'))
 const format = value => Number.isFinite(value) ? value.toLocaleString('zh-CN', { maximumFractionDigits: 4 }) : '—'
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character])
@@ -187,7 +202,7 @@ const load = async () => {
   const draft = readDraft()
   if (saveTimer) { clearTimeout(saveTimer); saveTimer = 0 }
   ready.value = false; databaseLoaded.value = false; loading.value = true; loadError.value = ''
-  rows.value = []; wells.value = []
+  rows.value = []; wells.value = []; selectedWells.value = []
   try {
     const { projectId, gasReservoirId, storageId } = props.reservoir || {}
     if (![projectId, gasReservoirId, storageId].every(value => Number(value) > 0)) throw new Error('请先打开一个具体储气库')
@@ -195,6 +210,7 @@ const load = async () => {
     if (current !== version) return
     if (!Array.isArray(wellPayload)) throw new Error('当前储气库井列表返回格式不正确')
     wells.value = wellPayload.map(well => ({ id: Number(well.id), wellName: String(well.wellName || '').trim() })).filter(well => well.wellName)
+    selectedWells.value = wells.value.map(well => well.wellName)
     let savedRows = []
     try {
       const saved = responseData(await storagePressureTestMethodApi.list({ projectId, gasReservoirId, storageId }))
@@ -296,9 +312,12 @@ const chartOption = () => {
     tooltip: {
       trigger: 'item',
       confine: true,
-      formatter: point => point && point.value !== null && Number.isFinite(Number(point.value))
-        ? `<strong>${escapeHtml(point.name)}</strong><br/>${escapeHtml(point.seriesName)} 实测静压：${format(Number(point.value))} MPa`
-        : ''
+      formatter: point => {
+        if (!point || point.value === null || !Number.isFinite(Number(point.value))) return ''
+        const sourceCount = chartModel.value.validRows.filter(row => row.wellName === point.name && row.date === point.seriesName).length
+        const averageNote = sourceCount > 1 ? `<br/>同井同日 ${sourceCount} 条记录取均值` : ''
+        return `<strong>${escapeHtml(point.name)}</strong><br/>${escapeHtml(point.seriesName)} 实测静压：${format(Number(point.value))} MPa${averageNote}`
+      }
     },
     legend: { show: false },
     grid: { top: 44, left: 62, right: 92, bottom: 56 },
@@ -351,63 +370,118 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="pressure-test-method" aria-label="地层压力测试法">
-    <div class="test-toolbar">
-      <button type="button" :class="{ active: activeTab === 'chart' }" @click="activeTab = 'chart'">压力对比图</button>
-      <button type="button" :class="{ active: activeTab === 'table' }" @click="activeTab = 'table'">实测数据</button>
-      <span v-if="loadError" class="load-error" role="status">{{ loadError }}</span>
-    </div>
-    <div v-show="activeTab === 'chart'" class="chart-view">
-      <div class="chart-controls">
-        <label>测压期</label>
-        <el-select v-model="dateRange" size="small" style="width: 140px"><el-option label="最近 3 期" value="recent3" /><el-option label="全部日期" value="all" /></el-select>
-        <span>{{ chartModel.validRows.length }} 个有效测点</span>
-      </div>
-      <div ref="chartFrame" class="chart-frame">
-        <div ref="chartElement" class="pressure-chart" />
-        <div v-if="chartHasData && legendItems.length" class="floating-chart-legend" :class="{ dragging: draggingLegend }" :style="legendStyle" @mousedown="startLegendDrag">
-          <button v-for="item in legendItems" :key="item.name" type="button" class="floating-legend-item" :class="{ hidden: hiddenLegendNames.has(item.name) }" title="点击显示或隐藏该日期" @mousedown.stop @click.stop="toggleLegendItem(item.name)">
-            <span class="legend-dot" :style="{ backgroundColor: hiddenLegendNames.has(item.name) ? 'transparent' : item.color, borderColor: item.color }" />
-            <span>{{ item.name }}</span>
-          </button>
+    <div class="module-bar"><span>库存评估 · 地层压力</span></div>
+    <div class="workspace">
+      <aside class="pressure-params">
+        <div class="params-head">数据范围</div>
+        <div class="params-body">
+          <div class="field">
+            <label>当前储气库</label>
+            <el-input size="small" readonly :model-value="reservoir?.label || '未选择储气库'" />
+          </div>
+          <div class="section-heading">参与井 <span>{{ selectedWells.length }} / {{ wells.length }}</span></div>
+          <div v-if="wells.length" class="well-list">
+            <label v-for="well in wells" :key="well.id ?? well.wellName" class="well-item">
+              <el-checkbox :model-value="selectedWellSet.has(well.wellName)" @change="checked => setWellSelected(well.wellName, checked)" />
+              <span class="well-name">{{ well.wellName }}</span>
+              <span class="well-count">{{ loading ? '—' : `${wellPointCounts.get(well.wellName) || 0} 个测点` }}</span>
+            </label>
+          </div>
+          <div v-else-if="loading" class="subtle-message">正在读取当前库成员井…</div>
+          <div v-else class="subtle-message">当前储气库没有成员井</div>
+          <div class="scope-note">图表只使用已选井的实测静压，不进行压力梯度计算；原始测点始终保留在数据表中。</div>
+          <div v-if="loadError" class="load-notice" role="status">{{ loadError }}</div>
         </div>
-        <div v-if="loading" class="chart-empty">正在读取智慧气藏实测静压…</div>
-        <div v-else-if="!chartHasData" class="chart-empty">暂无可绘制的实测数据</div>
-      </div>
-    </div>
-    <div v-show="activeTab === 'table'" class="table-view">
-      <div class="table-toolbar">
-        <span :class="`save-${saveState}`" role="status">{{ saveLabel }}</span>
-        <div class="table-actions">
-          <button type="button" class="toolbar-button" @click="downloadTemplate">下载模板</button>
-          <button type="button" class="toolbar-button" :disabled="!databaseLoaded" @click="importFileInput?.click()">导入表格</button>
-          <input ref="importFileInput" class="hidden-file-input" type="file" accept=".xlsx,.xls,.csv" :disabled="!databaseLoaded" @change="importFile" />
-          <button type="button" class="toolbar-button" :disabled="!databaseLoaded" @click="addPoint">新增测点</button>
-          <button type="button" class="toolbar-button primary" :disabled="!databaseLoaded || saveState === 'saving'" @click="saveDatabase(true).catch(() => {})">{{ saveState === 'saving' ? '保存中…' : '保存' }}</button>
+      </aside>
+
+      <main class="pressure-results">
+        <div class="dynamic-result-tabs">
+          <span class="dynamic-result-tab-text">地层压力-{{ reservoir?.label || '当前库' }}-测试法分析结果</span>
         </div>
-      </div>
-      <el-table :data="shownRows" row-key="id" stripe border height="100%" empty-text="当前库没有实测静压">
-        <el-table-column label="井号" min-width="140"><template #default="{ row }"><el-select v-model="row.wellName" size="small" :disabled="!databaseLoaded"><el-option v-for="well in wells" :key="well.id" :label="well.wellName" :value="well.wellName" /></el-select></template></el-table-column>
-        <el-table-column label="日期" min-width="150"><template #default="{ row }"><el-input v-model="row.date" type="date" size="small" :disabled="!databaseLoaded" /></template></el-table-column>
-        <el-table-column label="实测静压 (MPa)" min-width="180"><template #default="{ row }"><el-input v-model="row.measuredPressure" size="small" inputmode="decimal" :disabled="!databaseLoaded" /></template></el-table-column>
-        <el-table-column label="来源" width="100"><template #default="{ row }">{{ row.manual ? '补录' : '平台实测' }}</template></el-table-column>
-        <el-table-column label="操作" width="90" fixed="right"><template #default="{ row }"><el-button link type="danger" :disabled="!databaseLoaded" @click="removePoint(row)">删除</el-button></template></el-table-column>
-      </el-table>
-      <div class="table-footer"><span>{{ shownRows.length }} 个测点</span></div>
+        <div class="result-toolbar">
+          <span :class="loading ? 'save-loading' : `save-${saveState}`" role="status">{{ loading ? '正在读取测点数据…' : saveLabel }}</span>
+          <div class="table-actions">
+            <button type="button" class="toolbar-button" @click="downloadTemplate">下载模板</button>
+            <button type="button" class="toolbar-button" :disabled="!databaseLoaded" @click="importFileInput?.click()">导入表格</button>
+            <input ref="importFileInput" class="hidden-file-input" type="file" accept=".xlsx,.xls,.csv" :disabled="!databaseLoaded" @change="importFile" />
+            <button type="button" class="toolbar-button" :disabled="!databaseLoaded" @click="addPoint">新增测点</button>
+            <button type="button" class="toolbar-button primary" :disabled="!databaseLoaded || saveState === 'saving'" @click="saveDatabase(true).catch(() => {})">{{ saveState === 'saving' ? '保存中…' : '保存' }}</button>
+          </div>
+        </div>
+
+        <div v-show="activeTab === 'chart'" class="chart-view">
+          <div class="chart-controls">
+            <label>显示测压期</label>
+            <el-select v-model="dateRange" size="small" style="width: 150px"><el-option label="最近 3 期" value="recent3" /><el-option label="全部日期" value="all" /></el-select>
+            <span>{{ plottedPointCount }} 个图点 · {{ chartModel.validRows.length }} 条有效记录</span>
+          </div>
+          <div ref="chartFrame" class="chart-frame">
+            <div ref="chartElement" class="pressure-chart" aria-label="地层压力测试法对比图" />
+            <div v-if="chartHasData && legendItems.length" class="floating-chart-legend" :class="{ dragging: draggingLegend }" :style="legendStyle" @mousedown="startLegendDrag">
+              <button v-for="item in legendItems" :key="item.name" type="button" class="floating-legend-item" :class="{ hidden: hiddenLegendNames.has(item.name) }" title="点击显示或隐藏该日期" @mousedown.stop @click.stop="toggleLegendItem(item.name)">
+                <span class="legend-dot" :style="{ backgroundColor: hiddenLegendNames.has(item.name) ? 'transparent' : item.color, borderColor: item.color }" />
+                <span>{{ item.name }}</span>
+              </button>
+            </div>
+            <div v-if="!loading && !chartHasData" class="chart-empty">{{ selectedWells.length ? '暂无可绘制的实测数据' : '请至少选择一口井' }}</div>
+            <PressureDataLoading v-if="loading" />
+          </div>
+        </div>
+
+        <div v-show="activeTab === 'table'" class="table-view">
+          <div class="table-toolbar">同井同日多个实测点在图表中取平均值；原始测点保留在下表。</div>
+          <div class="table-holder">
+            <el-table :data="shownRows" row-key="id" stripe border height="100%" :empty-text="tableEmptyText">
+              <el-table-column label="井号" min-width="140"><template #default="{ row }"><el-select v-model="row.wellName" size="small" :disabled="!databaseLoaded"><el-option v-for="well in wells" :key="well.id" :label="well.wellName" :value="well.wellName" /></el-select></template></el-table-column>
+              <el-table-column label="日期" min-width="150"><template #default="{ row }"><el-input v-model="row.date" type="date" size="small" :disabled="!databaseLoaded" /></template></el-table-column>
+              <el-table-column label="实测静压 (MPa)" min-width="180"><template #default="{ row }"><el-input v-model="row.measuredPressure" size="small" inputmode="decimal" :disabled="!databaseLoaded" /></template></el-table-column>
+              <el-table-column label="来源" width="100"><template #default="{ row }">{{ row.manual ? '补录' : '平台实测' }}</template></el-table-column>
+              <el-table-column label="操作" width="90" fixed="right"><template #default="{ row }"><el-button link type="danger" :disabled="!databaseLoaded" @click="removePoint(row)">删除</el-button></template></el-table-column>
+            </el-table>
+            <PressureDataLoading v-if="loading" />
+          </div>
+          <div class="table-footer"><span v-if="!loading">{{ shownRows.length }} 个测点</span></div>
+        </div>
+
+        <nav class="bottom-chart-tabs" aria-label="地层压力测试法结果视图">
+          <button type="button" :class="{ active: activeTab === 'table' }" @click="activeTab = 'table'">实测数据</button>
+          <button type="button" :class="{ active: activeTab === 'chart' }" @click="activeTab = 'chart'">压力对比图</button>
+        </nav>
+      </main>
     </div>
   </section>
 </template>
 
 <style scoped>
-.pressure-test-method { display:flex; flex-direction:column; min-width:0; min-height:0; height:100%; overflow:hidden; background:#fff; color:#303133; }
-.test-toolbar { display:flex; flex:0 0 44px; align-items:stretch; border-bottom:1px solid #dcdfe6; background:#fafafa; }
-.test-toolbar button { min-width:100px; padding:0 16px; border:0; border-bottom:2px solid transparent; background:transparent; color:#606266; cursor:pointer; }
-.test-toolbar button:hover { color:#202020; }
-.test-toolbar button.active { border-bottom-color:#f2c811; color:#202020; font-weight:600; }
-.load-error { align-self:center; margin-left:auto; padding:0 16px; color:#d9822b; font-size:12px; }
+.pressure-test-method { display:flex; flex:1; flex-direction:column; min-width:0; min-height:0; height:100%; overflow:hidden; background:#fff; color:#303133; font:12px Arial,"Microsoft YaHei",sans-serif; }
+.module-bar { display:flex; flex:0 0 34px; align-items:stretch; background:#fafafa; border-bottom:1px solid #e4e7ed; }
+.module-bar span { padding:0 12px; background:#f4d000; line-height:34px; font-weight:600; }
+.workspace { display:flex; flex:1; min-width:0; min-height:0; overflow:hidden; }
+.pressure-params { width:258px; min-width:220px; max-width:360px; flex:0 0 258px; display:flex; flex-direction:column; min-height:0; border-right:1px solid #dcdfe6; }
+.params-head { height:34px; flex:0 0 34px; display:flex; align-items:center; padding:0 12px; border-bottom:1px solid #ebeef5; font-weight:600; }
+.params-body { flex:1; min-height:0; overflow:auto; padding:12px; }
+.field { display:flex; flex-direction:column; gap:6px; margin-bottom:14px; color:#606266; font-size:13px; }
+.field :deep(.el-input) { width:100%; }
+.section-heading { display:flex; align-items:center; justify-content:space-between; margin:14px 0 8px; padding-bottom:8px; border-bottom:1px solid #ebeef5; font-weight:600; }
+.section-heading span,.well-count { color:#909399; font-size:12px; font-weight:400; }
+.well-list { max-height:52vh; overflow:auto; border:1px solid #ebeef5; border-radius:3px; }
+.well-item { display:flex; align-items:center; gap:7px; min-height:36px; padding:0 9px; border-bottom:1px solid #ebeef5; background:#fff; }
+.well-item:last-child { border-bottom:0; }
+.well-list :deep(.el-checkbox__input.is-checked:not(.is-disabled) .el-checkbox__inner) { background:#f4d000; border-color:#d6b500; }
+.well-list :deep(.el-checkbox__input.is-checked:not(.is-disabled) .el-checkbox__inner::after) { border-color:#222; }
+.well-list :deep(.el-checkbox__input:not(.is-disabled) .el-checkbox__inner:hover) { border-color:#b79b00; }
+.well-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.well-count { flex-shrink:0; }
+.scope-note,.subtle-message { padding:10px 4px; color:#909399; font-size:12px; line-height:1.5; }
+.load-notice { color:#d9822b; font-size:12px; line-height:1.5; overflow-wrap:anywhere; }
+.pressure-results { flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
+.dynamic-result-tabs { display:flex; flex:0 0 34px; align-items:stretch; border-bottom:1px solid #e4e7ed; background:#fafafa; overflow:hidden; }
+.dynamic-result-tab-text { display:flex; align-items:center; padding:0 12px; background:#f4d000; font-weight:600; white-space:nowrap; }
+.result-toolbar { display:flex; align-items:center; justify-content:space-between; gap:10px; min-height:40px; padding:5px 12px; border-bottom:1px solid #e5e5e5; }
 .chart-view,.table-view { flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
-.chart-controls,.table-toolbar { display:flex; align-items:center; gap:10px; min-height:50px; padding:6px 16px; color:#606266; font-size:13px; }
-.chart-controls span { margin-left:auto; color:#909399; }
-.chart-frame { position:relative; flex:1; min-height:220px; }
+.chart-controls { display:flex; align-items:center; gap:10px; min-height:50px; padding:6px 16px; color:#606266; font-size:13px; }
+.chart-controls span { margin-left:auto; color:#8a96a8; font-size:12px; }
+.chart-frame { position:relative; flex:1; min-height:220px; overflow:hidden; }
 .pressure-chart { width:100%; height:100%; }
 .floating-chart-legend { position:absolute; z-index:5; display:flex; flex-direction:column; gap:5px; max-width:280px; max-height:45%; overflow:auto; padding:7px 10px; border:1px solid #eee; background:rgba(255,255,255,.9); color:#333; font-size:12px; line-height:1.2; cursor:move; user-select:none; box-shadow:0 1px 2px rgba(0,0,0,.04); }
 .floating-chart-legend.dragging { box-shadow:0 4px 12px rgba(0,0,0,.14); }
@@ -415,7 +489,8 @@ onBeforeUnmount(() => {
 .floating-legend-item.hidden { color:#999; opacity:.55; }
 .legend-dot { width:10px; height:10px; flex-shrink:0; border:1px solid transparent; border-radius:50%; }
 .chart-empty { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#909399; pointer-events:none; }
-.table-toolbar { justify-content:space-between; }
+.table-toolbar { display:flex; align-items:center; min-height:36px; padding:6px 14px; color:#738198; font-size:12px; }
+.table-holder { position:relative; flex:1; min-width:0; min-height:0; overflow:hidden; }
 .table-actions { display:flex; align-items:center; gap:8px; }
 .toolbar-button { height:26px; padding:3px 9px; border:1px solid #d9dfeb; border-radius:2px; background:#fff; color:#465366; font:12px Arial,"Microsoft YaHei",sans-serif; cursor:pointer; white-space:nowrap; }
 .toolbar-button:hover:not(:disabled),.toolbar-button:focus-visible { border-color:#b79b00; outline:none; }
@@ -423,7 +498,17 @@ onBeforeUnmount(() => {
 .toolbar-button:disabled { border-color:#d9dfeb; background:#fafafa; color:#b4b8c0; cursor:not-allowed; }
 .hidden-file-input { display:none; }
 .save-saved { color:#67c23a; }
+.save-loading { color:#909399; }
 .save-saving { color:#409eff; }
 .save-failed { color:#e6a23c; }
-.table-footer { display:flex; align-items:center; justify-content:space-between; min-height:36px; padding:0 16px; color:#909399; font-size:12px; }
+.table-footer { display:flex; align-items:center; justify-content:space-between; min-height:38px; padding:0 16px; border-top:1px solid #ebeef5; color:#8a96a8; font-size:12px; }
+.bottom-chart-tabs { display:flex; align-items:flex-end; flex:0 0 30px; border-top:1px solid #e4e7ed; background:#fff; overflow-x:auto; }
+.bottom-chart-tabs button { height:30px; min-width:82px; padding:0 14px; border:0; border-right:1px solid #e4e7ed; background:#fff; color:#333; font-size:13px; cursor:pointer; white-space:nowrap; }
+.bottom-chart-tabs button:hover { background:#fff8d8; }
+.bottom-chart-tabs button.active { font-weight:600; box-shadow:inset 0 3px 0 #f2c811; }
+@media (max-width:900px) {
+  .pressure-params { width:220px; flex-basis:220px; }
+  .result-toolbar { flex-wrap:wrap; }
+  .chart-controls span { text-align:right; }
+}
 </style>

@@ -4730,17 +4730,10 @@ const handleCommand = async ({ group, name, parent, commandId, wellName: command
   const dataType = dataViewByName[name]
 
   if (dataType) {
-    const activeWellName = targetWellName
-    const supportsProjectScope = ['deliverability', 'staticPressure', 'wellcompletion', 'otherdata', 'productiondata'].includes(dataType)
-
-    if (!supportsProjectScope && !activeWellName) {
-      ElMessage.warning('请先在左侧选择一口井')
-      return
-    }
-
+    // 顶部数据管理始终展示气藏内所有井；左侧井目录仍由 handleSelect 传入井名进行筛选。
     currentView.value = 'well-data-table'
     currentViewNode.value = {
-      wellName: supportsProjectScope ? '' : activeWellName,
+      wellName: '',
       dataType
     }
     return

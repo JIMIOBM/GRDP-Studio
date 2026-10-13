@@ -19,6 +19,7 @@ import static com.grdp.studio.waterinvasion.WaterInvasionResultMapper.*;
 /** 单井水侵专用旧平台适配器；只转发当前用户会话，不使用全局 Cookie 或保存凭据。 */
 @Component
 public class WaterInvasionLegacyGateway {
+    private static final int LOG_PAGE_SIZE = 2000;
     private volatile HttpClient http;
     private final ObjectMapper json;
     private final String base,authBase,cookieName;
@@ -68,12 +69,37 @@ public class WaterInvasionLegacyGateway {
             .header("Content-Type","application/json").POST(HttpRequest.BodyPublishers.ofString(json.writeValueAsString(body))).build();
         return http().sendAsync(request,HttpResponse.BodyHandlers.ofString()).thenAccept(response->{check(response);});
     }
-    public List<Map<String,Object>> logs(long startMillis,String cookie) {
-        var result=getAbsolute(base+"/api/common/notify/logs?start_time="+startMillis+"&keyword="+encode("水侵动态分析")+"&order=asc&page=1&page_size=2000",cookie);
-        if(!(result.get("logs") instanceof List<?>)) throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,"旧平台未返回计算日志，无法确认本次计算完成");
-        var rows=objects(result.get("logs"));
-        if(rows.size()>=2000) throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,"本次计算日志数量超出安全读取范围，未保存未经确认的结果");
-        return rows;
+    public boolean completedSince(long startMillis,Scope scope,String cookie) {
+        Pattern well=Pattern.compile("(?<![\\p{L}\\p{N}_-])"+Pattern.quote(scope.wellName())+"(?![\\p{L}\\p{N}_-])");
+        Pattern terminal=Pattern.compile("\\[\\s*水侵动态分析-水体活跃性\\s*]\\s*[:：]\\s*完成");
+        var wellPins=new HashSet<String>();
+        var terminalPins=new HashSet<String>();
+        List<Map<String,Object>> previous=null;
+        for(int page=1;;page++) {
+            var result=getAbsolute(base+"/api/common/notify/logs?start_time="+startMillis+"&keyword="+encode("水侵动态分析")+"&order=asc&page="+page+"&page_size="+LOG_PAGE_SIZE,cookie);
+            if(!(result.get("logs") instanceof List<?>)) throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,"旧平台未返回计算日志，无法确认本次计算完成");
+            var rows=objects(result.get("logs"));
+            // 满页只表示可能还有后续日志；旧接口若忽略页码，拒绝把不完整日志误判为完整结果。
+            if(previous!=null && rows.equals(previous)) throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,"旧平台计算日志分页未前进，无法确认本次计算完成");
+            for(var log:rows) {
+                var fields=map(log.get("fields"));
+                if(!Objects.toString(log.getOrDefault("module",fields.get("module")),"").equals("projectanalysis.waterinvasionanalysis"))continue;
+                if(timestamp(log.get("timestamp"))<startMillis || !matchesScope(fields,scope))continue;
+                String message=Objects.toString(log.get("message"),"");
+                String pin=Objects.toString(log.getOrDefault("pin",fields.get("pin")),"");
+                boolean namesWell=well.matcher(message).find();
+                boolean isTerminal=terminal.matcher(message).find();
+                if(isTerminal && (namesWell || !pin.isBlank() && wellPins.contains(pin)))return true;
+                if(namesWell && !pin.isBlank()) {
+                    if(terminalPins.contains(pin))return true;
+                    wellPins.add(pin);
+                }
+                if(isTerminal && !pin.isBlank())terminalPins.add(pin);
+            }
+            if(rows.size()<LOG_PAGE_SIZE)return false;
+            if(page==Integer.MAX_VALUE)throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,"旧平台计算日志页码超出可读取范围");
+            previous=rows;
+        }
     }
     /** 有完整参数和两组生产输入的重算接口，{} 仅表示 HTTP 返回，仍须核对完成通知和结果。 */
     public CompletableFuture<Void> calculate(String wellName,Map<String,Object> payload,String cookie) {

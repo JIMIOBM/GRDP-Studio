@@ -20,6 +20,30 @@ test('test method chart uses actual pressures, averages duplicate same-day measu
   assert.equal(model.maxPressure, 21)
 })
 
+test('test method chart defaults to all measurement dates while retaining the recent-three filter', () => {
+  const rows = ['2025-01-01', '2025-02-01', '2025-03-01', '2025-04-01']
+    .map((date, index) => ({ wellName: 'X-1', date, measuredPressure: String(20 + index) }))
+  const all = buildPressureTestComparison({ rows, selectedWells: ['X-1'] })
+  assert.deepEqual(all.dates, rows.map(row => row.date))
+  assert.deepEqual(all.series.map(series => series.data[0]), [20, 21, 22, 23])
+  const recent = buildPressureTestComparison({ rows, selectedWells: ['X-1'], dateRange: 'recent3' })
+  assert.deepEqual(recent.dates, ['2025-02-01', '2025-03-01', '2025-04-01'])
+})
+
+test('test method comparison only plots selected wells without changing source rows', () => {
+  const rows = [
+    { wellName: 'X-1', date: '2025-01-01', measuredPressure: '20' },
+    { wellName: 'X-2', date: '2025-01-01', measuredPressure: '22' }
+  ]
+  const selected = buildPressureTestComparison({ rows, selectedWells: ['X-2'] })
+  assert.deepEqual(selected.categories, ['X-2'])
+  assert.deepEqual(selected.series[0].data, [22])
+  const none = buildPressureTestComparison({ rows, selectedWells: [] })
+  assert.deepEqual(none.validRows, [])
+  assert.deepEqual(none.series, [])
+  assert.equal(rows.length, 2)
+})
+
 test('partial platform response keeps saved wells and overlays edits for matching measurements', () => {
   const savedRows = [
     { id: 'x1-old', sourceKey: 'legacy:X-1', wellName: 'X-1', date: '2010-06-10', measuredPressure: '18', manual: false },

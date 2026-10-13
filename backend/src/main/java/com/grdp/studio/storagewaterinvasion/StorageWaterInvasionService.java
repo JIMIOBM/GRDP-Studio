@@ -57,7 +57,7 @@ public class StorageWaterInvasionService {
         return storage.task(id,scope);
     }
     private boolean collect(long id,Scope scope,Detail detail,WaterInvasionModels.Scope carrier,long started,String cookie) {
-        if(!WaterInvasionLegacyGateway.completed(legacy.logs(started,cookie),carrier,started))return false;
+        if(!legacy.completedSince(started,carrier,cookie))return false;
         var result=legacy.resultIfPresent(carrier,cookie);
         if(!WaterInvasionPayload.matches(detail.input(),result))return false;
         storage.save(id,carrier.wellName(),result);return true;

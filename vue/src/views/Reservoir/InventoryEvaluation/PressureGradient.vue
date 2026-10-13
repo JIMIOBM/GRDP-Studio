@@ -1,5 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import PressureDataLoading from './PressureDataLoading.vue'
 import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
 import { Document } from '@element-plus/icons-vue'
@@ -16,7 +17,7 @@ const rows = ref([])
 const selectedWells = ref([])
 const referenceCoordinate = ref('2000')
 const coordinateMode = ref('depth')
-const dateRange = ref('recent3')
+const dateRange = ref('all')
 const activeTab = ref('table')
 const loading = ref(false)
 const loadError = ref('')
@@ -99,6 +100,7 @@ const plottedPointCount = computed(() => chartModel.value.series.reduce((count, 
 const displayedRows = computed(() => rows.value.filter(row => row.deleted !== true))
 const displayedValidCount = computed(() => displayedRows.value.filter(isRowCalculable).length)
 const displayedMissingCount = computed(() => displayedRows.value.length - displayedValidCount.value)
+const tableEmptyText = computed(() => loading.value ? '\u00a0' : '当前库没有实测静压，请新增测点录入')
 const chartDateText = computed(() => dateRange.value === 'all' ? '全部日期' : '最近 3 期')
 const selectionCountText = computed(() => `已选 ${selectedWells.value.length} / ${wells.value.length} 口井 · ${plottedPointCount.value} 个图点 · ${missingSelectedCount.value} 行待补`)
 const databaseSaveLabel = computed(() => ({
@@ -146,7 +148,7 @@ const saveDraft = pendingDatabaseSave => {
   try {
     const previousDraft = readDraft()
     localStorage.setItem(draftKey.value, JSON.stringify({
-      version: 1,
+      version: 2,
       pendingDatabaseSave: typeof pendingDatabaseSave === 'boolean'
         ? pendingDatabaseSave : previousDraft.pendingDatabaseSave === true,
       referenceCoordinate: referenceCoordinate.value,
@@ -250,7 +252,8 @@ const loadData = async () => {
   let storageReadError = ''
   referenceCoordinate.value = draft.referenceCoordinate ?? '2000'
   coordinateMode.value = draft.coordinateMode === 'elevation' ? 'elevation' : 'depth'
-  dateRange.value = draft.dateRange === 'all' ? 'all' : 'recent3'
+  // Existing drafts used a recent-three-period default. Show all dates after the update.
+  dateRange.value = Number(draft.version) >= 2 && draft.dateRange === 'recent3' ? 'recent3' : 'all'
   coordinateMode.value = 'depth'
   try {
     const { projectId, gasReservoirId, storageId } = props.reservoir || {}
@@ -607,7 +610,7 @@ onBeforeUnmount(() => {
           <label v-for="well in wells" :key="well.id ?? well.wellName" class="well-item">
             <el-checkbox :model-value="selectedWellSet.has(well.wellName)" @change="value => setWellSelected(well.wellName, value)" />
             <span class="well-name">{{ well.wellName }}</span>
-            <span class="well-count">{{ rows.filter(row => row.wellName === well.wellName && !row.deleted).length }} 个测点</span>
+            <span class="well-count">{{ loading ? '—' : `${rows.filter(row => row.wellName === well.wellName && !row.deleted).length} 个测点` }}</span>
           </label>
         </div>
         <div v-else-if="loading" class="subtle-message">正在读取当前库成员井…</div>
@@ -621,7 +624,7 @@ onBeforeUnmount(() => {
         <span class="dynamic-result-tab-text">地层压力-{{ reservoir?.label || '当前库' }}-压力梯度折算</span>
       </div>
       <div class="result-toolbar">
-        <span class="save-status" :class="`save-${databaseSaveState}`" role="status">{{ databaseSaveLabel }}</span>
+        <span class="save-status" :class="loading ? 'save-loading' : `save-${databaseSaveState}`" role="status">{{ loading ? '正在读取测点数据…' : databaseSaveLabel }}</span>
         <div class="table-actions">
           <button type="button" class="toolbar-button" @click="openImportDialog">导入表格</button>
           <button type="button" class="toolbar-button" @click="addPoint">新增测点</button>
@@ -646,10 +649,11 @@ onBeforeUnmount(() => {
               <span>{{ item.name }}</span>
             </button>
           </div>
-          <div v-if="!chartHasData" class="chart-empty">
-            <span>{{ loading ? '正在读取压力数据…' : '暂无可绘制测点' }}</span>
-            <button v-if="!loading" type="button" @click="activeTab = 'table'">录入测点参数</button>
+          <div v-if="!loading && !chartHasData" class="chart-empty">
+            <span>暂无可绘制测点</span>
+            <button type="button" @click="activeTab = 'table'">录入测点参数</button>
           </div>
+          <PressureDataLoading v-if="loading" />
         </div>
       </div>
 
@@ -658,7 +662,7 @@ onBeforeUnmount(() => {
           <span>图表只取已选井在{{ chartDateText }}内的有效行；同井同日多个测点取计算压力均值。</span>
         </div>
         <div class="table-holder">
-          <el-table :data="displayedRows" row-key="id" stripe border height="100%" empty-text="当前库没有实测静压，请新增测点录入">
+          <el-table :data="displayedRows" row-key="id" stripe border height="100%" :empty-text="tableEmptyText">
             <el-table-column label="井号" min-width="116">
               <template #default="scope">
                 <el-select v-model="scope.row.wellName" size="small" @change="onInput">
@@ -688,10 +692,11 @@ onBeforeUnmount(() => {
               <template #default="scope"><el-button link type="danger" @click="deletePoint(scope.row)">删除</el-button></template>
             </el-table-column>
           </el-table>
+          <PressureDataLoading v-if="loading" />
         </div>
         <div class="table-footer">
-          <span :class="{ 'load-notice': displayedMissingCount > 0 }">{{ displayedMissingCount ? `${displayedMissingCount} 行待补参数，暂不参与图表` : `已计算 ${displayedValidCount} 个测点` }}</span>
-          <span>共 {{ displayedRows.length }} 条测点</span>
+          <span v-if="!loading" :class="{ 'load-notice': displayedMissingCount > 0 }">{{ displayedMissingCount ? `${displayedMissingCount} 行待补参数，暂不参与图表` : `已计算 ${displayedValidCount} 个测点` }}</span>
+          <span v-if="!loading">共 {{ displayedRows.length }} 条测点</span>
         </div>
       </div>
       <nav class="bottom-chart-tabs" aria-label="地层压力结果视图">
@@ -805,9 +810,10 @@ onBeforeUnmount(() => {
 .toolbar-button.primary { border-color:#e0be00; background:#f4d000; color:#222; }
 .toolbar-button:disabled { border-color:#d9dfeb; background:#fafafa; color:#b4b8c0; cursor:not-allowed; }
 .save-status { color:#67c23a; white-space:nowrap; }
+.save-loading { color:#909399; }
 .save-saving { color:#409eff; }
 .save-failed { color:#e6a23c; }
-.table-holder { flex:1; min-width:0; min-height:0; padding:0 14px; overflow:hidden; }
+.table-holder { position:relative; flex:1; min-width:0; min-height:0; padding:0 14px; overflow:hidden; }
 .table-footer { flex:0 0 38px; }
 .missing-value { color:#b8bdc5; }
 .table-footer .load-notice { color:#d9822b; }

@@ -15,7 +15,7 @@ export function mergePressureTestRows(sourceRecords = [], savedRows = []) {
 }
 
 /** 按真实实测静压构建测试法对比，不插值、不模拟缺失值。 */
-export function buildPressureTestComparison({ rows = [], selectedWells = [], dateRange = 'recent3', chartAxis = 'well' }) {
+export function buildPressureTestComparison({ rows = [], selectedWells = [], dateRange = 'all', chartAxis = 'well' }) {
   const selected = new Set(selectedWells.map(String))
   const validRows = rows.filter(row => {
     if (!selected.has(String(row.wellName)) || row.deleted === true

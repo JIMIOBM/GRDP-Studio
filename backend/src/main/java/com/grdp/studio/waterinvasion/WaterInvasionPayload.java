@@ -1,5 +1,7 @@
 package com.grdp.studio.waterinvasion;
 
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 import java.util.*;
 import static com.grdp.studio.waterinvasion.WaterInvasionResultMapper.*;
 
@@ -20,7 +22,16 @@ public final class WaterInvasionPayload {
             for(var row:objects(snapshot.get(key))) {
                 if(Boolean.TRUE.equals(row.get("isDeleted")))continue;
                 var clean=new LinkedHashMap<String,Object>();
-                for(String field:key.equals("influxInputItems")?List.of("date","pressure","dailyGasProduction","cumulativeGasProduction","cumulativeWaterProduction"):List.of("date","pressure","cumulativeGasProduction","cumulativeWaterProduction")) clean.put(field,row.get(field));
+                for(String field:key.equals("influxInputItems")?List.of("date","pressure","dailyGasProduction","cumulativeGasProduction","cumulativeWaterProduction","cumulativeOilProduction"):List.of("date","pressure","cumulativeGasProduction","cumulativeWaterProduction","cumulativeOilProduction")) {
+                    if(field.equals("cumulativeOilProduction") && !row.containsKey(field)) continue;
+                    if(field.equals("date")) {
+                        var day=date(row.get(field));
+                        if(day==null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"已保存的单井水侵输入含无效日期，无法重新计算");
+                        // 旧平台的计算输入按日期解析；历史结果快照却带有时区时间戳。
+                        // 与原平台页面及库级计算保持一致，避免整组生产数据被旧接口忽略。
+                        clean.put(field,day.toLocalDate().toString());
+                    } else clean.put(field,row.get(field));
+                }
                 rows.add(clean);
             }
             body.put(key,rows);

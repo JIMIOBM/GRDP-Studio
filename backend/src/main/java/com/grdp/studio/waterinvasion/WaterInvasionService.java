@@ -34,6 +34,7 @@ public class WaterInvasionService {
         var scope=new Scope(request.projectId(),request.gasReservoirId(),request.wellName());
         CompletableFuture<Void> submission=null;
         boolean submitted=false;
+        boolean completionConfirmed=false;
         try {
             if(importing){storage.save(id,scope.wellName(),legacy.result(scope,cookie),true);return;}
             var before=legacy.resultIfPresent(scope,cookie);
@@ -41,17 +42,24 @@ public class WaterInvasionService {
             long started=System.currentTimeMillis();
             var saved=storage.recalculationSnapshot(scope);
             var explicitInput=saved==null?null:WaterInvasionPayload.fromSnapshot(scope,saved,request.waterGasRatioLimit());
+            if(explicitInput!=null && before!=null) {
+                // 原平台页面重算会提交当前分析 ID；历史快照里的 ID 可能已被库计算替换。
+                var outputs=WaterInvasionResultMapper.objects(before.get("outputs"));
+                if(outputs.isEmpty())throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,"旧平台当前分析 ID 缺失，无法安全重算该井");
+                var currentId=WaterInvasionResultMapper.legacyId(outputs.getFirst().get("analysisId"));
+                if(currentId==null)throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,"旧平台当前分析 ID 无效，无法安全重算该井");
+                explicitInput.put("analysisId",currentId);
+            }
             storage.submitted(id);submitted=true;
             submission=explicitInput==null?legacy.start(request,cookie):legacy.calculate(scope.wellName(),explicitInput,cookie);
             long deadline=started+TimeUnit.MINUTES.toMillis(10);
-            boolean completed=false;
             while(System.currentTimeMillis()<deadline) {
                 // HTTP 成功不是计算完成，但明确的请求失败应立即报告，不能无限等待。
                 if(submission.isCompletedExceptionally())submission.join();
-                if(WaterInvasionLegacyGateway.completed(legacy.logs(started,cookie),scope,started)){completed=true;break;}
+                if(legacy.completedSince(started,scope,cookie)){completionConfirmed=true;break;}
                 Thread.sleep(1500);
             }
-            if(!completed)throw new TimeoutException();
+            if(!completionConfirmed)throw new TimeoutException();
             // 最终日志可能先于结果可见；短暂重读，但绝不把原封不动的旧返回标为新计算。
             for(int attempt=0;attempt<12;attempt++) {
                 var response=legacy.resultIfPresent(scope,cookie);
@@ -66,7 +74,10 @@ public class WaterInvasionService {
             boolean timeout=cause instanceof TimeoutException;
             String message=timeout?"未收到可关联本井本次任务的完成日志，未覆盖历史结果":
                 cause instanceof ResponseStatusException e?e.getReason():"计算或保存失败，请检查旧平台及新数据库服务";
-            if(submitted)storage.failSubmitted(id,message,timeout);else storage.fail(id,message,timeout);
+            // 已收到本井终态且 HTTP 调用也结束时，旧任务不会再迟到写入；保留失败记录但释放井锁。
+            if(submitted && (!completionConfirmed || submission==null || !submission.isDone() || submission.isCompletedExceptionally()))
+                storage.failSubmitted(id,message,timeout);
+            else storage.fail(id,message,timeout);
             if(error instanceof InterruptedException)Thread.currentThread().interrupt();
         } finally {if(submission!=null && !submission.isDone())submission.cancel(true);}
     }
@@ -76,7 +87,7 @@ public class WaterInvasionService {
         if(!List.of("FAILED","TIMED_OUT").contains(task.taskStatus()))return task;
         var recovery=storage.recovery(id,scope);
         if(!recovery.blocked() || recovery.startedAt()==null)return task;
-        if(!WaterInvasionLegacyGateway.completed(legacy.logs(recovery.startedAt(),cookie),scope,recovery.startedAt()))
+        if(!legacy.completedSince(recovery.startedAt(),scope,cookie))
             throw new ResponseStatusException(HttpStatus.CONFLICT,"尚未找到该井本次计算完成通知，保护未解除");
         var response=legacy.result(scope,cookie);var snapshot=storage.recalculationSnapshot(scope);
         if(snapshot!=null && !WaterInvasionPayload.matches(WaterInvasionPayload.fromSnapshot(scope,snapshot,recovery.request().waterGasRatioLimit()),response))
