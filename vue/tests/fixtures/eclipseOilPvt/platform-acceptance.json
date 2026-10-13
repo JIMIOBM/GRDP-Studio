@@ -1,0 +1,74 @@
+{
+  "apiVerified": true,
+  "manualUiVerified": false,
+  "baselineRunId": 538,
+  "targetRunId": 539,
+  "portableRunId": 540,
+  "originalVersionId": 175,
+  "portableVersionId": 176,
+  "portableArtifact": {
+    "id": 4262,
+    "name": "eclipse-schedule-applied-package.zip",
+    "type": "output",
+    "contentType": "application/zip",
+    "sizeBytes": 1918,
+    "sha256": "61f249e60ab127ef792922c2d292b95444d77d5c7b6206c199579f56fd5e04a7",
+    "createdAt": "2026-10-12T16:43:16.096",
+    "expiresAt": "2026-11-11T16:43:16.096"
+  },
+  "sourceUnchanged": true,
+  "onlyOilViscosityColumnChanged": true,
+  "fullNativeSummaryVerified": true,
+  "summaryNumericPaths": 630,
+  "maxDifference": 0,
+  "completeSeriesPerRun": 5,
+  "reportsPerSeries": 21,
+  "geologicalInputsUnchanged": true,
+  "geometryUnchanged": true,
+  "activeCells": 10,
+  "totalCells": 13,
+  "keyword": "PVDO",
+  "unit": "cP",
+  "multiplier": 2,
+  "tableRows": 6,
+  "wellIdentityAndControlsUnchanged": true,
+  "rejectedRequests": 18,
+  "rejectedRequestCreatedRun": false,
+  "lastReportResponse": [
+    {
+      "keyword": "YEARS",
+      "objectName": null,
+      "unit": "YEARS",
+      "baseline": 0.2737850844860077,
+      "target": 0.2737850844860077
+    },
+    {
+      "keyword": "WLPR",
+      "objectName": "P1",
+      "unit": "STB/DAY",
+      "baseline": 787.3981323242188,
+      "target": 785.7467651367188
+    },
+    {
+      "keyword": "WBHP",
+      "objectName": "P1",
+      "unit": "PSIA",
+      "baseline": 3000.0,
+      "target": 3000.0
+    },
+    {
+      "keyword": "WOPR",
+      "objectName": "P1",
+      "unit": "STB/DAY",
+      "baseline": 785.87451171875,
+      "target": 782.5386352539062
+    },
+    {
+      "keyword": "WWPR",
+      "objectName": "P1",
+      "unit": "STB/DAY",
+      "baseline": 1.5236138105392456,
+      "target": 3.208101749420166
+    }
+  ]
+}

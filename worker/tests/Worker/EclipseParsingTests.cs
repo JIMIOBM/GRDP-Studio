@@ -180,6 +180,15 @@ public sealed class EclipseParsingTests
     }
 
     [Fact]
+    public void OfficialColonWellNamesKeepTheirExactIdentityWithoutAllowingFilePaths()
+    {
+        var series = EclipseParsers.ParseRsm(Block(Row("TIME", "WOPR"), Row("DAYS", "STB/DAY"), Row("", "P1:01"), Row("0", "2")));
+        Assert.Equal("P1:01", Assert.Single(series).ObjectName);
+        Assert.True(EclipseParsers.IsPublishableSummary(series));
+        Assert.Empty(EclipseParsers.ParseRsm(Block(Row("TIME", "WOPR"), Row("DAYS", "STB/DAY"), Row("", "C:/private"), Row("0", "2"))));
+    }
+
+    [Fact]
     public async Task UnreadableOrUnparseableFreshRsmIsOptional()
     {
         var unreadable = await EclipseRunService.ReadRsmAsync(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".RSM"));
@@ -229,12 +238,23 @@ public sealed class EclipseParsingTests
     [InlineData("CASE.EGRID")]
     [InlineData("CASE.INIT")]
     [InlineData("CASE.UNRST")]
+    [InlineData("CASE.FUNRST")]
     [InlineData("CASE.UNSMRY")]
     [InlineData("CASE.SMSPEC")]
     [InlineData("CASE.S0001")]
     public void ApprovedEclipseBinaryOutputsAreDownloadable(string fileName)
     {
         Assert.True(EclipseRunRules.IsApprovedBinaryOutput(fileName));
+    }
+
+    [Theory]
+    [InlineData("CASE.EGRID")]
+    [InlineData("CASE.INIT")]
+    [InlineData("CASE.UNRST")]
+    [InlineData("CASE.FUNRST")]
+    public void FieldIndexableEclipseOutputsIncludeRestartFiles(string fileName)
+    {
+        Assert.True(EclipseRunRules.IsFieldBinaryOutput(fileName));
     }
 
     [Theory]

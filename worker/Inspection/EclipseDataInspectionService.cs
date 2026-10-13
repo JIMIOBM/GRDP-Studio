@@ -37,9 +37,18 @@ public sealed class EclipseDataInspectionService(StorageResolver storage)
             if (packageBytes > MaxDataBytes) return Invalid("ECLIPSE_DATA_PACKAGE_TOO_LARGE", "The ECLIPSE DATA package exceeds the 64 MiB inspection limit.");
             var inspection = EclipseDataInspector.InspectPackage(package.Files, Path.GetFileName(request.ModelStorageKey));
             var packageFiles = await DescribePackageAsync(package, cancellationToken);
+            var simulation = EclipseSimulationModelReader.Read(package);
+            if (simulation is not null)
+            {
+                // Keep E100 schedule editors outside the E300 metadata contract.
+                inspection = inspection with { SchemaVersion = simulation.ModelType == "THERMAL" ? "eclipse-data-inspection/15" : "eclipse-data-inspection/14", PackageFiles = packageFiles, Simulation = simulation.Metadata,
+                    ScheduleMetadata = null, VfpTables = null, GroupControls = null, InjectionGroupControls = null, GasInjectionGroupControls = null,
+                    GroupRateControls = null, WaterProductionGroupControls = null, AdvancedInjectionGroupControls = null, GroupStructureControls = null, ProductionControlPlan = null };
+                return new(StatusCodes.Status200OK, new ModelValidationResponse("READY", [], $"ECLIPSE 300 {simulation.ModelType.ToLowerInvariant()} DATA inspection completed.", "eclipse_300", Inspection: inspection));
+            }
             inspection = inspection with
             {
-                SchemaVersion = inspection.ScheduleMetadata is null ? "eclipse-data-inspection/3" : "eclipse-data-inspection/4",
+                SchemaVersion = inspection.ProductionControlPlan is not null ? "eclipse-data-inspection/13" : inspection.GroupStructureControls is not null ? "eclipse-data-inspection/12" : inspection.AdvancedInjectionGroupControls is not null ? "eclipse-data-inspection/11" : inspection.WaterProductionGroupControls is not null ? "eclipse-data-inspection/10" : inspection.GroupRateControls is not null ? "eclipse-data-inspection/9" : inspection.GasInjectionGroupControls is not null ? "eclipse-data-inspection/8" : inspection.InjectionGroupControls is not null ? "eclipse-data-inspection/7" : inspection.GroupControls is not null ? "eclipse-data-inspection/6" : inspection.VfpTables is not null ? "eclipse-data-inspection/5" : inspection.ScheduleMetadata is null ? "eclipse-data-inspection/3" : "eclipse-data-inspection/4",
                 PackageFiles = packageFiles
             };
             return new(StatusCodes.Status200OK, new ModelValidationResponse(

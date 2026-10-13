@@ -24,6 +24,7 @@ public final class EclipseCompletionFactorParameters {
         var names = new HashSet<String>();
         value.properties().forEach(field -> names.add(field.getKey()));
         if (!names.equals(FIELDS) || !SCHEMA.equals(value.path("schemaVersion").asText())) return false;
+        if (!Set.of("well", "sourceFile", "i", "j", "k1", "k2").stream().allMatch(name -> value.path(name).isTextual())) return false;
         if (!value.path("baselineRunId").isIntegralNumber() || !value.path("baselineRunId").canConvertToLong()
                 || value.path("baselineRunId").asLong() <= 0) return false;
         String well = value.path("well").asText(null);
@@ -42,7 +43,7 @@ public final class EclipseCompletionFactorParameters {
     }
 
     public static boolean matchesInspection(JsonNode value, JsonNode inspection) {
-        if (!valid(value) || inspection == null || !"eclipse-data-inspection/4".equals(inspection.path("schemaVersion").asText())) return false;
+        if (!valid(value) || inspection == null || !Set.of("eclipse-data-inspection/4", "eclipse-data-inspection/5", "eclipse-data-inspection/6", "eclipse-data-inspection/7", "eclipse-data-inspection/8", "eclipse-data-inspection/9", "eclipse-data-inspection/10", "eclipse-data-inspection/11", "eclipse-data-inspection/12", "eclipse-data-inspection/13").contains(inspection.path("schemaVersion").asText())) return false;
         String well = value.path("well").asText();
         for (JsonNode completion : inspection.path("scheduleMetadata").path("completions")) {
             if (!"COMPDAT".equals(completion.path("keyword").asText()) || !well.equals(completion.path("well").asText())
@@ -71,6 +72,7 @@ public final class EclipseCompletionFactorParameters {
     }
 
     private static boolean positiveFinite(JsonNode value, String name) {
+        if (!value.path(name).isNumber()) return false;
         double number = value.path(name).asDouble(Double.NaN);
         return Double.isFinite(number) && number > 0 && number <= 1_000_000_000d;
     }

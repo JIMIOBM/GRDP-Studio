@@ -72,6 +72,17 @@ public final class EclipseDataInspectionValidator {
         if ("eclipse-data-inspection/1".equals(schemaVersion)) return validateV1(input, mapper);
         if ("eclipse-data-inspection/2".equals(schemaVersion)) return validateV2(input, mapper);
         if ("eclipse-data-inspection/3".equals(schemaVersion)) return validateV3(input, mapper);
+        if ("eclipse-data-inspection/14".equals(schemaVersion)) return validateV14(input, mapper);
+        if ("eclipse-data-inspection/15".equals(schemaVersion)) return validateV15(input, mapper);
+        if ("eclipse-data-inspection/13".equals(schemaVersion)) return validateV13(input, mapper);
+        if ("eclipse-data-inspection/12".equals(schemaVersion)) return validateV12(input, mapper);
+        if ("eclipse-data-inspection/11".equals(schemaVersion)) return validateV11(input, mapper);
+        if ("eclipse-data-inspection/10".equals(schemaVersion)) return validateV10(input, mapper);
+        if ("eclipse-data-inspection/9".equals(schemaVersion)) return validateV9(input, mapper);
+        if ("eclipse-data-inspection/8".equals(schemaVersion)) return validateV8(input, mapper);
+        if ("eclipse-data-inspection/7".equals(schemaVersion)) return validateV7(input, mapper);
+        if ("eclipse-data-inspection/6".equals(schemaVersion)) return validateV6(input, mapper);
+        if ("eclipse-data-inspection/5".equals(schemaVersion)) return validateV5(input, mapper);
         if ("eclipse-data-inspection/4".equals(schemaVersion)) return validateV4(input, mapper);
         fail();
         return null;
@@ -107,6 +118,34 @@ public final class EclipseDataInspectionValidator {
         return result;
     }
 
+    private static JsonNode validateV14(ObjectNode input, ObjectMapper mapper) {
+        var fields = new HashSet<>(ROOT_FIELDS_V3); fields.add("simulation");
+        if (input.size() != fields.size()) fail();
+        input.properties().forEach(f -> { if (!fields.contains(f.getKey())) fail(); });
+        if (!EclipseSimulationMetadataValidator.valid(input.get("simulation")) || !Set.of("FIELD", "METRIC").contains(input.path("unitSystem").asText()) || input.path("dimensions").isNull()) fail();
+        ObjectNode result = (ObjectNode) validateV1Fields(input, mapper, "eclipse-data-inspection/14");
+        result.set("wellNames", wellNames(input.get("wellNames"), mapper));
+        result.set("scheduleTimeline", scheduleTimeline(input.get("scheduleTimeline"), mapper, true));
+        result.set("packageFiles", packageFiles(input.get("packageFiles"), mapper));
+        result.set("simulation", input.get("simulation").deepCopy());
+        return result;
+    }
+
+    private static JsonNode validateV15(ObjectNode input, ObjectMapper mapper) {
+        var fields = new HashSet<>(ROOT_FIELDS_V3); fields.add("simulation");
+        if (input.size() != fields.size()) fail();
+        input.properties().forEach(f -> { if (!fields.contains(f.getKey())) fail(); });
+        if (!EclipseThermalMetadataValidator.valid(input.get("simulation")) || !Set.of("FIELD", "METRIC").contains(input.path("unitSystem").asText()) || input.path("dimensions").isNull()) fail();
+        var phases = input.path("phases");
+        if (!phases.isArray() || phases.size() != 3 || !"OIL".equals(phases.get(0).asText()) || !"WATER".equals(phases.get(1).asText()) || !"GAS".equals(phases.get(2).asText())) fail();
+        ObjectNode result = (ObjectNode) validateV1Fields(input, mapper, "eclipse-data-inspection/15");
+        result.set("wellNames", wellNames(input.get("wellNames"), mapper));
+        result.set("scheduleTimeline", scheduleTimeline(input.get("scheduleTimeline"), mapper, true));
+        result.set("packageFiles", packageFiles(input.get("packageFiles"), mapper));
+        result.set("simulation", input.get("simulation").deepCopy());
+        return result;
+    }
+
     private static JsonNode validateV3(ObjectNode input, ObjectMapper mapper) {
         if (input.size() != ROOT_FIELDS_V3.size()) fail();
         input.properties().forEach(field -> { if (!ROOT_FIELDS_V3.contains(field.getKey())) fail(); });
@@ -118,14 +157,477 @@ public final class EclipseDataInspectionValidator {
     }
 
     private static JsonNode validateV4(ObjectNode input, ObjectMapper mapper) {
-        if (input.size() != ROOT_FIELDS_V4.size()) fail();
-        input.properties().forEach(field -> { if (!ROOT_FIELDS_V4.contains(field.getKey())) fail(); });
+        boolean withNewWellContext = input.has("newWellContext");
+        boolean withPvtwContext = input.has("pvtwContext");
+        boolean withOilPvtContext = input.has("oilPvtContext");
+        boolean withGasPvtContext = input.has("gasPvtContext");
+        boolean withRelpermContext = input.has("relpermContext");
+        if (input.size() != ROOT_FIELDS_V4.size() + (withNewWellContext ? 1 : 0) + (withPvtwContext ? 1 : 0) + (withOilPvtContext ? 1 : 0) + (withGasPvtContext ? 1 : 0) + (withRelpermContext ? 1 : 0)) fail();
+        input.properties().forEach(field -> {
+            if (!ROOT_FIELDS_V4.contains(field.getKey()) && !"newWellContext".equals(field.getKey()) && !"pvtwContext".equals(field.getKey()) && !"oilPvtContext".equals(field.getKey()) && !"gasPvtContext".equals(field.getKey()) && !"relpermContext".equals(field.getKey())) fail();
+        });
         ObjectNode result = (ObjectNode) validateV1Fields(input, mapper, "eclipse-data-inspection/4");
         result.set("wellNames", wellNames(input.get("wellNames"), mapper));
         result.set("scheduleTimeline", scheduleTimeline(input.get("scheduleTimeline"), mapper, true));
         result.set("packageFiles", packageFiles(input.get("packageFiles"), mapper));
         result.set("scheduleMetadata", scheduleMetadata(input.get("scheduleMetadata"), mapper));
+        if (withNewWellContext) result.set("newWellContext", newWellContext(input.get("newWellContext"), result));
+        if (withPvtwContext) result.set("pvtwContext", pvtwContext(input.get("pvtwContext"), result));
+        if (withOilPvtContext) result.set("oilPvtContext", oilPvtContext(input.get("oilPvtContext"), result));
+        if (withGasPvtContext) result.set("gasPvtContext", gasPvtContext(input.get("gasPvtContext"), result));
+        if (withRelpermContext) result.set("relpermContext", relpermContext(input.get("relpermContext"), result));
         return result;
+    }
+
+    private static JsonNode relpermContext(JsonNode c,ObjectNode inspection) {
+        var fields=Set.of("schemaVersion","sourceFile","tables");
+        if(c==null||!c.isObject()||c.size()!=fields.size())fail();
+        c.properties().forEach(p->{if(!fields.contains(p.getKey()))fail();});
+        var phases=new HashSet<String>();for(var phase:inspection.path("phases"))phases.add(phase.asText());
+        if(!c.path("schemaVersion").isString()||!"eclipse-relperm-context/1".equals(c.path("schemaVersion").asText())||!c.path("sourceFile").isString()||!c.path("sourceFile").asText().matches("(?i)^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\\.DATA$")
+            ||!phases.equals(Set.of("OIL","GAS","WATER"))||!UNIT_SYSTEMS.contains(inspection.path("unitSystem").asText())||inspection.path("packageFiles").size()!=1
+            ||!c.path("sourceFile").equals(inspection.path("packageFiles").path(0).path("relativePath"))||!c.path("sourceFile").equals(inspection.path("caseName"))||!EclipseRelpermParameters.validTables(c.path("tables")))fail();
+        int last=0;
+        for(var t:c.path("tables")){
+            if(!validSource(c.path("sourceFile").asText(),t.get("keywordLineNumber"))||t.path("keywordLineNumber").asInt()<=last)fail();
+            last=t.path("rows").path(t.path("rows").size()-1).path("lineNumber").asInt();
+        }
+        for(var event:inspection.path("scheduleTimeline"))if(!event.path("sourceFile").equals(c.path("sourceFile"))||event.path("lineNumber").asInt()<=last)fail();
+        return c.deepCopy();
+    }
+
+    private static JsonNode gasPvtContext(JsonNode c,ObjectNode inspection) {
+        var fields=Set.of("schemaVersion","sourceFile","keywordLineNumber","rows");
+        if(c==null||!c.isObject()||c.size()!=fields.size())fail();
+        c.properties().forEach(p->{if(!fields.contains(p.getKey()))fail();});
+        boolean gas=false;for(var phase:inspection.path("phases"))gas|="GAS".equals(phase.asText());
+        if(!c.path("schemaVersion").isString()||!"eclipse-gas-pvt-context/1".equals(c.path("schemaVersion").asText())
+            ||!c.path("sourceFile").isString()||!validSource(c.path("sourceFile").asText(),c.get("keywordLineNumber"))
+            ||!EclipseGasPvtParameters.validRows(c.path("rows"),c.path("keywordLineNumber").asInt())||!gas
+            ||!UNIT_SYSTEMS.contains(inspection.path("unitSystem").asText())||inspection.path("packageFiles").size()!=1
+            ||!c.path("sourceFile").equals(inspection.path("packageFiles").path(0).path("relativePath"))
+            ||!c.path("sourceFile").equals(inspection.path("caseName"))||!c.path("sourceFile").asText().matches("(?i)^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\\.DATA$"))fail();
+        int last=c.path("rows").path(c.path("rows").size()-1).path("lineNumber").asInt();
+        for(var event:inspection.path("scheduleTimeline"))if(!event.path("sourceFile").equals(c.path("sourceFile"))||event.path("lineNumber").asInt()<=last)fail();
+        return c.deepCopy();
+    }
+
+    private static JsonNode oilPvtContext(JsonNode c,ObjectNode inspection) {
+        var fields=Set.of("schemaVersion","sourceFile","keywordLineNumber","rows");
+        if(c==null||!c.isObject()||c.size()!=fields.size())fail();
+        c.properties().forEach(p->{if(!fields.contains(p.getKey()))fail();});
+        boolean oil=false;for(var phase:inspection.path("phases"))oil|="OIL".equals(phase.asText());
+        if(!c.path("schemaVersion").isString()||!"eclipse-oil-pvt-context/1".equals(c.path("schemaVersion").asText())
+            ||!c.path("sourceFile").isString()||!validSource(c.path("sourceFile").asText(),c.get("keywordLineNumber"))
+            ||!EclipseOilPvtParameters.validRows(c.path("rows"),c.path("keywordLineNumber").asInt())||!oil
+            ||!UNIT_SYSTEMS.contains(inspection.path("unitSystem").asText())||inspection.path("packageFiles").size()!=1
+            ||!c.path("sourceFile").equals(inspection.path("packageFiles").path(0).path("relativePath"))
+            ||!c.path("sourceFile").equals(inspection.path("caseName"))||!c.path("sourceFile").asText().matches("(?i)^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\\.DATA$"))fail();
+        int last=c.path("rows").path(c.path("rows").size()-1).path("lineNumber").asInt();
+        for(var event:inspection.path("scheduleTimeline"))if(!event.path("sourceFile").equals(c.path("sourceFile"))||event.path("lineNumber").asInt()<=last)fail();
+        return c.deepCopy();
+    }
+
+    private static JsonNode pvtwContext(JsonNode c, ObjectNode inspection) {
+        var fields=Set.of("schemaVersion","sourceFile","lineNumber","recordValues");
+        if(c==null||!c.isObject()||c.size()!=fields.size())fail();
+        c.properties().forEach(p->{if(!fields.contains(p.getKey()))fail();});
+        if(!c.path("schemaVersion").isString()||!"eclipse-pvtw-context/1".equals(c.path("schemaVersion").asText())
+            ||!c.path("sourceFile").isString()||!validSource(c.path("sourceFile").asText(),c.get("lineNumber"))
+            ||!EclipsePvtwParameters.validRow(c.path("recordValues"))||inspection.path("phases").size()!=1||!"WATER".equals(inspection.path("phases").path(0).asText())
+            ||inspection.path("packageFiles").size()!=1||!c.path("sourceFile").equals(inspection.path("packageFiles").path(0).path("relativePath"))
+            ||!c.path("sourceFile").equals(inspection.path("caseName"))||c.path("sourceFile").asText().contains("/"))fail();
+        for(var event:inspection.path("scheduleTimeline"))if(!event.path("sourceFile").equals(c.path("sourceFile"))||event.path("lineNumber").asInt()<=c.path("lineNumber").asInt())fail();
+        return c.deepCopy();
+    }
+
+    private static JsonNode newWellContext(JsonNode context, ObjectNode inspection) {
+        var fields = Set.of("schemaVersion", "sourceFile", "insertionLine", "maxWells", "maxConnections", "maxGroups", "maxWellsPerGroup");
+        if (context == null || !context.isObject() || context.size() != fields.size()) fail();
+        context.properties().forEach(field -> { if (!fields.contains(field.getKey())) fail(); });
+        if (!context.path("schemaVersion").isTextual() || !"eclipse-new-well-context/1".equals(context.path("schemaVersion").asText())
+                || !context.path("sourceFile").isTextual() || !validSource(context.path("sourceFile").asText(), context.get("insertionLine"))) fail();
+        String source = context.path("sourceFile").asText();
+        int insertion = context.path("insertionLine").asInt();
+        for (String field : List.of("maxWells", "maxConnections", "maxGroups", "maxWellsPerGroup")) {
+            var capacity = context.path(field);
+            if (!capacity.isIntegralNumber() || !capacity.canConvertToInt() || capacity.asInt() < 1 || capacity.asInt() > 100_000) fail();
+        }
+        if (source.contains("/") || !source.toUpperCase(Locale.ROOT).endsWith(".DATA") || !source.equals(inspection.path("caseName").asText())
+                || inspection.path("dimensions").isNull() || inspection.path("phases").size() != 1 || !"WATER".equals(inspection.path("phases").get(0).asText())
+                || inspection.path("packageFiles").size() != 1 || !source.equals(inspection.path("packageFiles").get(0).path("relativePath").asText())
+                || inspection.path("scheduleTimeline").size() != 1 || !"TSTEP".equals(inspection.path("scheduleTimeline").get(0).path("kind").asText())
+                || !source.equals(inspection.path("scheduleTimeline").get(0).path("sourceFile").asText())
+                || insertion != inspection.path("scheduleTimeline").get(0).path("lineNumber").asInt()) fail();
+        var metadata = inspection.path("scheduleMetadata");
+        if (!metadata.path("groups").isEmpty() || metadata.path("wells").isEmpty()
+                || metadata.path("wells").size() > context.path("maxWells").asInt()) fail();
+        var groupCounts = new java.util.HashMap<String, Integer>();
+        for (var well : metadata.path("wells")) {
+            if (well.path("group").isNull() || well.path("group").asText().isBlank()) fail();
+            String group = well.path("group").asText();
+            groupCounts.merge(group, 1, Integer::sum);
+        }
+        if (groupCounts.size() > context.path("maxGroups").asInt()
+                || groupCounts.values().stream().anyMatch(count -> count > context.path("maxWellsPerGroup").asInt())) fail();
+        for (String collection : List.of("wells", "records", "completions")) for (var record : metadata.path(collection)) {
+            if (!source.equals(record.path("sourceFile").asText()) || record.path("lineNumber").asInt() >= insertion) fail();
+        }
+        return context.deepCopy();
+    }
+
+    private static JsonNode validateV5(ObjectNode input, ObjectMapper mapper) {
+        var fields = new HashSet<>(ROOT_FIELDS_V4); fields.add("vfpTables");
+        if (input.size() != fields.size()) fail();
+        input.properties().forEach(f -> { if (!fields.contains(f.getKey())) fail(); });
+        var v4 = input.deepCopy(); v4.remove("vfpTables"); v4.put("schemaVersion", "eclipse-data-inspection/4");
+        var result = (ObjectNode) validateV4(v4, mapper);
+        var tables = input.path("vfpTables");
+        var tableFields = Set.of("number", "datumDepth", "flowType", "waterFractionType", "gasFractionType", "alqType", "unitSystem", "sourceFile", "lineNumber", "sha256", "flowAxis", "thpAxis", "waterFractionAxis", "gasFractionAxis", "alqAxis");
+        if (!tables.isArray() || tables.isEmpty() || tables.size() > 64) fail();
+        var ids = new HashSet<Integer>();
+        for (var t : tables) {
+            if (!t.isObject() || t.size() != tableFields.size()) fail();
+            t.properties().forEach(f -> { if (!tableFields.contains(f.getKey())) fail(); });
+            if (!t.path("number").isIntegralNumber() || !t.path("number").canConvertToInt() || t.path("number").asInt() < 1 || t.path("number").asInt() > 100000 || !ids.add(t.path("number").asInt())
+                || !t.path("datumDepth").isNumber() || !Double.isFinite(t.path("datumDepth").asDouble()) || t.path("datumDepth").asDouble() < 0
+                || !Set.of("OIL", "LIQ", "GAS").contains(t.path("flowType").asText()) || !Set.of("WOR", "WCT", "WGR").contains(t.path("waterFractionType").asText())
+                || !Set.of("GOR", "GLR", "OGR").contains(t.path("gasFractionType").asText()) || !t.path("alqType").isTextual() || t.path("alqType").asText().length() > 16
+                || !Set.of("FIELD", "METRIC").contains(t.path("unitSystem").asText()) || !t.path("unitSystem").asText().equals(input.path("unitSystem").asText())
+                || !validSource(t.path("sourceFile").asText(), t.path("lineNumber")) || !SHA256.matcher(t.path("sha256").asText()).matches()) fail();
+            boolean bound = false;
+            for (var file : result.path("packageFiles")) if (file.path("relativePath").asText().equals(t.path("sourceFile").asText())) bound = true;
+            if (!bound) fail();
+            for (var key : List.of("flowAxis", "thpAxis", "waterFractionAxis", "gasFractionAxis", "alqAxis")) {
+                var axis = t.path(key); int min = key.equals("flowAxis") ? 2 : 1, max = key.equals("flowAxis") ? 128 : 32;
+                if (!axis.isArray() || axis.size() < min || axis.size() > max) fail();
+                double last = -1;
+                for (var v : axis) { if (!v.isNumber() || !Double.isFinite(v.asDouble()) || v.asDouble() < 0 || v.asDouble() <= last) fail(); last = v.asDouble(); }
+            }
+        }
+        result.put("schemaVersion", "eclipse-data-inspection/5"); result.set("vfpTables", tables);
+        return result;
+    }
+
+    private static JsonNode validateV13(ObjectNode input, ObjectMapper mapper) {
+        var fields = new HashSet<>(ROOT_FIELDS_V4); fields.add("vfpTables"); fields.add("productionControlPlan");
+        if (input.size() != fields.size()) fail();
+        input.properties().forEach(f -> { if (!fields.contains(f.getKey())) fail(); });
+        if (!input.path("vfpTables").isArray() || !input.path("vfpTables").isEmpty()) fail();
+        var old = input.deepCopy(); old.remove("productionControlPlan"); old.remove("vfpTables");
+        old.put("schemaVersion", "eclipse-data-inspection/4");
+        var result = (ObjectNode) validateV4(old, mapper);
+        if (!EclipseControlPlanParameters.validPlan(input)) fail();
+        result.put("schemaVersion", "eclipse-data-inspection/13");
+        result.set("vfpTables", mapper.createArrayNode()); result.set("productionControlPlan", input.path("productionControlPlan"));
+        return result;
+    }
+
+    private static JsonNode validateV12(ObjectNode input, ObjectMapper mapper) {
+        var fields = new HashSet<>(ROOT_FIELDS_V4); fields.add("vfpTables"); fields.add("groupStructureControls");
+        if (input.size() != fields.size()) fail();
+        input.properties().forEach(f -> { if (!fields.contains(f.getKey())) fail(); });
+        if (!input.path("vfpTables").isArray() || !input.path("vfpTables").isEmpty()) fail();
+        var old = input.deepCopy(); old.remove("groupStructureControls"); old.remove("vfpTables");
+        old.put("schemaVersion", "eclipse-data-inspection/4");
+        var result = (ObjectNode) validateV4(old, mapper);
+        if (!EclipseGroupStructureParameters.validControls(input)) fail();
+        result.put("schemaVersion", "eclipse-data-inspection/12");
+        result.set("vfpTables", mapper.createArrayNode()); result.set("groupStructureControls", input.path("groupStructureControls"));
+        return result;
+    }
+
+    private static JsonNode validateV11(ObjectNode input, ObjectMapper mapper) {
+        var fields = new HashSet<>(ROOT_FIELDS_V4); fields.add("vfpTables"); fields.add("advancedInjectionGroupControls");
+        if (input.size() != fields.size()) fail();
+        input.properties().forEach(f -> { if (!fields.contains(f.getKey())) fail(); });
+        var old = input.deepCopy(); old.remove("advancedInjectionGroupControls");
+        if (!old.path("vfpTables").isArray()) fail();
+        ObjectNode result;
+        if (old.path("vfpTables").isEmpty()) {
+            old.remove("vfpTables"); old.put("schemaVersion", "eclipse-data-inspection/4");
+            result = (ObjectNode) validateV4(old, mapper); result.set("vfpTables", mapper.createArrayNode());
+        } else {
+            old.put("schemaVersion", "eclipse-data-inspection/5"); result = (ObjectNode) validateV5(old, mapper);
+        }
+        var controls = input.path("advancedInjectionGroupControls");
+        if (!controls.isArray() || controls.isEmpty() || controls.size() > 1000 || !Set.of("FIELD", "METRIC").contains(input.path("unitSystem").asText())
+            || result.path("packageFiles").size() != 1 || !result.path("scheduleMetadata").path("groups").isEmpty()) fail();
+        var groups = new HashSet<String>();
+        var controlFields = Set.of("group", "sourceFile", "lineNumber", "controlMode", "unit", "originalTargetRate", "members", "injectionPhase", "referenceGroup", "referenceMembers");
+        for (var g : controls) {
+            String mode = g.path("controlMode").asText();
+            String phase = g.path("injectionPhase").asText();
+            String unit = EclipseAdvancedInjectionParameters.unit(input.path("unitSystem").asText(), phase, mode);
+            if (!g.isObject() || g.size() != controlFields.size()) fail();
+            g.properties().forEach(f -> { if (!controlFields.contains(f.getKey())) fail(); });
+            if (!g.path("group").isTextual() || !Pattern.matches("[A-Za-z0-9][A-Za-z0-9:_ .-]{0,63}", g.path("group").asText())
+                || "FIELD".equals(g.path("group").asText()) || !groups.add(g.path("group").asText())
+                || !validSource(g.path("sourceFile").asText(), g.path("lineNumber")) || !g.path("sourceFile").asText().equals(input.path("caseName").asText())
+                || !g.path("sourceFile").asText().equals(result.path("packageFiles").get(0).path("relativePath").asText())
+                || unit == null || !unit.equals(g.path("unit").asText())
+                || !g.path("originalTargetRate").isNumber() || !Double.isFinite(g.path("originalTargetRate").asDouble()) || g.path("originalTargetRate").asDouble() <= 0 || g.path("originalTargetRate").asDouble() > 100_000_000
+                || !g.path("members").isArray() || g.path("members").size() < 2 || g.path("members").size() > 1000) fail();
+            var members = new HashSet<String>();
+            for (var m : g.path("members")) {
+                if (!m.isObject() || m.size() != 3 || !m.has("well") || !m.has("bhpLimit") || !m.has("surfaceRateLimit")
+                    || !m.path("surfaceRateLimit").isNumber() || !Double.isFinite(m.path("surfaceRateLimit").asDouble()) || m.path("surfaceRateLimit").asDouble() <= 0 || m.path("surfaceRateLimit").asDouble() > 100_000_000 || !m.path("well").isTextual() || !members.add(m.path("well").asText())
+                    || !m.path("bhpLimit").isNumber() || !Double.isFinite(m.path("bhpLimit").asDouble()) || m.path("bhpLimit").asDouble() <= 0 || m.path("bhpLimit").asDouble() > 100_000_000) fail();
+                int found = 0;
+                for (var w : result.path("scheduleMetadata").path("wells")) if (m.path("well").asText().equals(w.path("name").asText()) && g.path("group").asText().equals(w.path("group").asText())) found++;
+                if (found != 1) fail();
+            }
+            int direct = 0;
+            for (var w : result.path("scheduleMetadata").path("wells")) if (g.path("group").asText().equals(w.path("group").asText())) direct++;
+            if (direct != members.size()) fail();
+            boolean ratio = Set.of("REIN", "VREP").contains(mode);
+            var refGroup = g.path("referenceGroup"); var refMembers = g.path("referenceMembers");
+            if (!refMembers.isArray() || (ratio ? !refGroup.isTextual() || !validWellName(refGroup.asText()) || "FIELD".equals(refGroup.asText()) || refGroup.equals(g.path("group")) || refMembers.isEmpty() || refMembers.size() > 1000 : !refGroup.isNull() || !refMembers.isEmpty())) fail();
+            var refs = new HashSet<String>();
+            for (var ref : refMembers) {
+                if (!ref.isTextual() || !validWellName(ref.asText()) || !refs.add(ref.asText())) fail();
+                int found = 0;
+                for (var w : result.path("scheduleMetadata").path("wells")) if (ref.equals(w.path("name")) && refGroup.equals(w.path("group"))) found++;
+                if (found != 1 || members.contains(ref.asText())) fail();
+            }
+            int refCount = 0;
+            if (ratio) for (var w : result.path("scheduleMetadata").path("wells")) if (refGroup.equals(w.path("group"))) refCount++;
+            if (refCount != refs.size()) fail();
+            for (var e : result.path("scheduleTimeline")) if (g.path("lineNumber").asInt() >= e.path("lineNumber").asInt()) fail();
+        }
+        result.put("schemaVersion", "eclipse-data-inspection/11"); result.set("advancedInjectionGroupControls", controls); return result;
+    }
+
+    private static JsonNode validateV10(ObjectNode input, ObjectMapper mapper) {
+        var fields = new HashSet<>(ROOT_FIELDS_V4); fields.add("vfpTables"); fields.add("waterProductionGroupControls");
+        if (input.size() != fields.size()) fail();
+        input.properties().forEach(f -> { if (!fields.contains(f.getKey())) fail(); });
+        var old = input.deepCopy(); old.remove("waterProductionGroupControls");
+        if (!old.path("vfpTables").isArray()) fail();
+        ObjectNode result;
+        if (old.path("vfpTables").isEmpty()) {
+            old.remove("vfpTables"); old.put("schemaVersion", "eclipse-data-inspection/4");
+            result = (ObjectNode) validateV4(old, mapper); result.set("vfpTables", mapper.createArrayNode());
+        } else {
+            old.put("schemaVersion", "eclipse-data-inspection/5"); result = (ObjectNode) validateV5(old, mapper);
+        }
+        var controls = input.path("waterProductionGroupControls");
+        if (!controls.isArray() || controls.isEmpty() || controls.size() > 1000 || !Set.of("FIELD", "METRIC").contains(input.path("unitSystem").asText())
+            || result.path("packageFiles").size() != 1 || !result.path("scheduleMetadata").path("groups").isEmpty()) fail();
+        var groups = new HashSet<String>();
+        var controlFields = Set.of("group", "sourceFile", "lineNumber", "controlMode", "unit", "originalTargetRate", "members");
+        for (var g : controls) {
+            String mode = g.path("controlMode").asText();
+            String unit = "FIELD".equals(input.path("unitSystem").asText()) ? "STB/day" : "sm3/day";
+            if (!g.isObject() || g.size() != controlFields.size()) fail();
+            g.properties().forEach(f -> { if (!controlFields.contains(f.getKey())) fail(); });
+            if (!g.path("group").isTextual() || !Pattern.matches("[A-Za-z0-9][A-Za-z0-9:_ .-]{0,63}", g.path("group").asText())
+                || "FIELD".equals(g.path("group").asText()) || !groups.add(g.path("group").asText())
+                || !validSource(g.path("sourceFile").asText(), g.path("lineNumber")) || !g.path("sourceFile").asText().equals(input.path("caseName").asText())
+                || !g.path("sourceFile").asText().equals(result.path("packageFiles").get(0).path("relativePath").asText())
+                || !"WRAT".equals(mode) || !unit.equals(g.path("unit").asText())
+                || !g.path("originalTargetRate").isNumber() || !Double.isFinite(g.path("originalTargetRate").asDouble()) || g.path("originalTargetRate").asDouble() <= 0 || g.path("originalTargetRate").asDouble() > 100_000_000
+                || !g.path("members").isArray() || g.path("members").size() < 2 || g.path("members").size() > 1000) fail();
+            var members = new HashSet<String>();
+            for (var m : g.path("members")) {
+                if (!m.isObject() || m.size() != 3 || !m.has("well") || !m.has("bhpLimit") || !m.has("oilRateLimit")
+                    || !m.path("oilRateLimit").isNumber() || !Double.isFinite(m.path("oilRateLimit").asDouble()) || m.path("oilRateLimit").asDouble() <= 0 || m.path("oilRateLimit").asDouble() > 100_000_000 || !m.path("well").isTextual() || !members.add(m.path("well").asText())
+                    || !m.path("bhpLimit").isNumber() || !Double.isFinite(m.path("bhpLimit").asDouble()) || m.path("bhpLimit").asDouble() <= 0 || m.path("bhpLimit").asDouble() > 100_000_000) fail();
+                int found = 0;
+                for (var w : result.path("scheduleMetadata").path("wells")) if (m.path("well").asText().equals(w.path("name").asText()) && g.path("group").asText().equals(w.path("group").asText())) found++;
+                if (found != 1) fail();
+            }
+            int direct = 0;
+            for (var w : result.path("scheduleMetadata").path("wells")) if (g.path("group").asText().equals(w.path("group").asText())) direct++;
+            if (direct != members.size()) fail();
+            for (var e : result.path("scheduleTimeline")) if (g.path("lineNumber").asInt() >= e.path("lineNumber").asInt()) fail();
+        }
+        result.put("schemaVersion", "eclipse-data-inspection/10"); result.set("waterProductionGroupControls", controls); return result;
+    }
+
+    private static JsonNode validateV9(ObjectNode input, ObjectMapper mapper) {
+        var fields = new HashSet<>(ROOT_FIELDS_V4); fields.add("vfpTables"); fields.add("groupRateControls");
+        if (input.size() != fields.size()) fail();
+        input.properties().forEach(f -> { if (!fields.contains(f.getKey())) fail(); });
+        var old = input.deepCopy(); old.remove("groupRateControls");
+        if (!old.path("vfpTables").isArray()) fail();
+        ObjectNode result;
+        if (old.path("vfpTables").isEmpty()) {
+            old.remove("vfpTables"); old.put("schemaVersion", "eclipse-data-inspection/4");
+            result = (ObjectNode) validateV4(old, mapper); result.set("vfpTables", mapper.createArrayNode());
+        } else {
+            old.put("schemaVersion", "eclipse-data-inspection/5"); result = (ObjectNode) validateV5(old, mapper);
+        }
+        var controls = input.path("groupRateControls");
+        if (!controls.isArray() || controls.isEmpty() || controls.size() > 1000 || !Set.of("FIELD", "METRIC").contains(input.path("unitSystem").asText())
+            || result.path("packageFiles").size() != 1 || !result.path("scheduleMetadata").path("groups").isEmpty()) fail();
+        var groups = new HashSet<String>();
+        var controlFields = Set.of("group", "sourceFile", "lineNumber", "controlMode", "unit", "originalTargetRate", "members");
+        for (var g : controls) {
+            String mode = g.path("controlMode").asText();
+            String unit = "FIELD".equals(input.path("unitSystem").asText()) ? "GRAT".equals(mode) ? "Mscf/day" : "STB/day" : "sm3/day";
+            if (!g.isObject() || g.size() != controlFields.size()) fail();
+            g.properties().forEach(f -> { if (!controlFields.contains(f.getKey())) fail(); });
+            if (!g.path("group").isTextual() || !Pattern.matches("[A-Za-z0-9][A-Za-z0-9:_ .-]{0,63}", g.path("group").asText())
+                || "FIELD".equals(g.path("group").asText()) || !groups.add(g.path("group").asText())
+                || !validSource(g.path("sourceFile").asText(), g.path("lineNumber")) || !g.path("sourceFile").asText().equals(input.path("caseName").asText())
+                || !g.path("sourceFile").asText().equals(result.path("packageFiles").get(0).path("relativePath").asText())
+                || !Set.of("GRAT", "LRAT").contains(mode) || !unit.equals(g.path("unit").asText())
+                || !g.path("originalTargetRate").isNumber() || !Double.isFinite(g.path("originalTargetRate").asDouble()) || g.path("originalTargetRate").asDouble() <= 0 || g.path("originalTargetRate").asDouble() > 100_000_000
+                || !g.path("members").isArray() || g.path("members").size() < 2 || g.path("members").size() > 1000) fail();
+            var members = new HashSet<String>();
+            for (var m : g.path("members")) {
+                if (!m.isObject() || m.size() != 2 || !m.has("well") || !m.has("bhpLimit") || !m.path("well").isTextual() || !members.add(m.path("well").asText())
+                    || !m.path("bhpLimit").isNumber() || !Double.isFinite(m.path("bhpLimit").asDouble()) || m.path("bhpLimit").asDouble() <= 0 || m.path("bhpLimit").asDouble() > 100_000_000) fail();
+                int found = 0;
+                for (var w : result.path("scheduleMetadata").path("wells")) if (m.path("well").asText().equals(w.path("name").asText()) && g.path("group").asText().equals(w.path("group").asText())) found++;
+                if (found != 1) fail();
+            }
+            int direct = 0;
+            for (var w : result.path("scheduleMetadata").path("wells")) if (g.path("group").asText().equals(w.path("group").asText())) direct++;
+            if (direct != members.size()) fail();
+            for (var e : result.path("scheduleTimeline")) if (g.path("lineNumber").asInt() >= e.path("lineNumber").asInt()) fail();
+        }
+        result.put("schemaVersion", "eclipse-data-inspection/9"); result.set("groupRateControls", controls); return result;
+    }
+
+    private static JsonNode validateV6(ObjectNode input, ObjectMapper mapper) {
+        var fields = new HashSet<>(ROOT_FIELDS_V4); fields.add("vfpTables"); fields.add("groupControls");
+        if (input.size() != fields.size()) fail();
+        input.properties().forEach(f -> { if (!fields.contains(f.getKey())) fail(); });
+        var old = input.deepCopy(); old.remove("groupControls");
+        if (!old.path("vfpTables").isArray()) fail();
+        ObjectNode result;
+        if (old.path("vfpTables").isEmpty()) {
+            old.remove("vfpTables"); old.put("schemaVersion", "eclipse-data-inspection/4");
+            result = (ObjectNode) validateV4(old, mapper); result.set("vfpTables", mapper.createArrayNode());
+        } else {
+            old.put("schemaVersion", "eclipse-data-inspection/5"); result = (ObjectNode) validateV5(old, mapper);
+        }
+        var controls = input.path("groupControls");
+        if (!controls.isArray() || controls.isEmpty() || controls.size() > 1000 || !Set.of("FIELD", "METRIC").contains(input.path("unitSystem").asText())
+            || result.path("packageFiles").size() != 1 || !result.path("scheduleMetadata").path("groups").isEmpty()) fail();
+        var groups = new HashSet<String>();
+        var controlFields = Set.of("group", "sourceFile", "lineNumber", "controlMode", "unit", "originalTargetRate", "members");
+        String unit = "FIELD".equals(input.path("unitSystem").asText()) ? "STB/day" : "sm3/day";
+        for (var g : controls) {
+            if (!g.isObject() || g.size() != controlFields.size()) fail();
+            g.properties().forEach(f -> { if (!controlFields.contains(f.getKey())) fail(); });
+            if (!g.path("group").isTextual() || !Pattern.matches("[A-Za-z0-9][A-Za-z0-9:_ .-]{0,63}", g.path("group").asText())
+                || "FIELD".equals(g.path("group").asText()) || !groups.add(g.path("group").asText())
+                || !validSource(g.path("sourceFile").asText(), g.path("lineNumber")) || !g.path("sourceFile").asText().equals(input.path("caseName").asText())
+                || !g.path("sourceFile").asText().equals(result.path("packageFiles").get(0).path("relativePath").asText())
+                || !"ORAT".equals(g.path("controlMode").asText()) || !unit.equals(g.path("unit").asText())
+                || !g.path("originalTargetRate").isNumber() || !Double.isFinite(g.path("originalTargetRate").asDouble()) || g.path("originalTargetRate").asDouble() <= 0 || g.path("originalTargetRate").asDouble() > 100_000_000
+                || !g.path("members").isArray() || g.path("members").size() < 2 || g.path("members").size() > 1000) fail();
+            var members = new HashSet<String>();
+            for (var m : g.path("members")) {
+                if (!m.isObject() || m.size() != 2 || !m.has("well") || !m.has("bhpLimit") || !m.path("well").isTextual() || !members.add(m.path("well").asText())
+                    || !m.path("bhpLimit").isNumber() || !Double.isFinite(m.path("bhpLimit").asDouble()) || m.path("bhpLimit").asDouble() <= 0 || m.path("bhpLimit").asDouble() > 100_000_000) fail();
+                int found = 0;
+                for (var w : result.path("scheduleMetadata").path("wells")) if (m.path("well").asText().equals(w.path("name").asText()) && g.path("group").asText().equals(w.path("group").asText())) found++;
+                if (found != 1) fail();
+            }
+            int direct = 0;
+            for (var w : result.path("scheduleMetadata").path("wells")) if (g.path("group").asText().equals(w.path("group").asText())) direct++;
+            if (direct != members.size()) fail();
+            for (var e : result.path("scheduleTimeline")) if (g.path("lineNumber").asInt() >= e.path("lineNumber").asInt()) fail();
+        }
+        result.put("schemaVersion", "eclipse-data-inspection/6"); result.set("groupControls", controls); return result;
+    }
+
+    private static JsonNode validateV7(ObjectNode input, ObjectMapper mapper) {
+        var fields = new HashSet<>(ROOT_FIELDS_V4); fields.add("vfpTables"); fields.add("injectionGroupControls");
+        if (input.size() != fields.size()) fail();
+        input.properties().forEach(f -> { if (!fields.contains(f.getKey())) fail(); });
+        var old = input.deepCopy(); old.remove("injectionGroupControls");
+        if (!old.path("vfpTables").isArray()) fail();
+        ObjectNode result;
+        if (old.path("vfpTables").isEmpty()) {
+            old.remove("vfpTables"); old.put("schemaVersion", "eclipse-data-inspection/4");
+            result = (ObjectNode) validateV4(old, mapper); result.set("vfpTables", mapper.createArrayNode());
+        } else {
+            old.put("schemaVersion", "eclipse-data-inspection/5"); result = (ObjectNode) validateV5(old, mapper);
+        }
+        var controls = input.path("injectionGroupControls");
+        if (!controls.isArray() || controls.isEmpty() || controls.size() > 1000 || !Set.of("FIELD", "METRIC").contains(input.path("unitSystem").asText())
+            || result.path("packageFiles").size() != 1 || !result.path("scheduleMetadata").path("groups").isEmpty()) fail();
+        var groups = new HashSet<String>();
+        var controlFields = Set.of("group", "sourceFile", "lineNumber", "controlMode", "injectionPhase", "unit", "originalTargetRate", "members");
+
+        for (var g : controls) {
+            String phase = g.path("injectionPhase").asText();
+            String unit = "FIELD".equals(input.path("unitSystem").asText()) ? phase.equals("GAS") ? "Mscf/day" : "STB/day" : "sm3/day";
+            if (!g.isObject() || g.size() != controlFields.size()) fail();
+            g.properties().forEach(f -> { if (!controlFields.contains(f.getKey())) fail(); });
+            if (!g.path("group").isTextual() || !Pattern.matches("[A-Za-z0-9][A-Za-z0-9:_ .-]{0,63}", g.path("group").asText())
+                || "FIELD".equals(g.path("group").asText()) || !groups.add(g.path("group").asText())
+                || !validSource(g.path("sourceFile").asText(), g.path("lineNumber")) || !g.path("sourceFile").asText().equals(input.path("caseName").asText())
+                || !g.path("sourceFile").asText().equals(result.path("packageFiles").get(0).path("relativePath").asText())
+                || !Set.of("WATER").contains(phase) || !"RATE".equals(g.path("controlMode").asText()) || !unit.equals(g.path("unit").asText())
+                || !g.path("originalTargetRate").isNumber() || !Double.isFinite(g.path("originalTargetRate").asDouble()) || g.path("originalTargetRate").asDouble() <= 0 || g.path("originalTargetRate").asDouble() > 100_000_000
+                || !g.path("members").isArray() || g.path("members").size() < 2 || g.path("members").size() > 1000) fail();
+            var members = new HashSet<String>();
+            for (var m : g.path("members")) {
+                if (!m.isObject() || m.size() != 2 || !m.has("well") || !m.has("bhpLimit") || !m.path("well").isTextual() || !members.add(m.path("well").asText())
+                    || !m.path("bhpLimit").isNumber() || !Double.isFinite(m.path("bhpLimit").asDouble()) || m.path("bhpLimit").asDouble() <= 0 || m.path("bhpLimit").asDouble() > 100_000_000) fail();
+                int found = 0;
+                for (var w : result.path("scheduleMetadata").path("wells")) if (m.path("well").asText().equals(w.path("name").asText()) && g.path("group").asText().equals(w.path("group").asText())) found++;
+                if (found != 1) fail();
+            }
+            int direct = 0;
+            for (var w : result.path("scheduleMetadata").path("wells")) if (g.path("group").asText().equals(w.path("group").asText())) direct++;
+            if (direct != members.size()) fail();
+            for (var e : result.path("scheduleTimeline")) if (g.path("lineNumber").asInt() >= e.path("lineNumber").asInt()) fail();
+        }
+        result.put("schemaVersion", "eclipse-data-inspection/7"); result.set("injectionGroupControls", controls); return result;
+    }
+
+    private static JsonNode validateV8(ObjectNode input, ObjectMapper mapper) {
+        var fields = new HashSet<>(ROOT_FIELDS_V4); fields.add("vfpTables"); fields.add("gasInjectionGroupControls");
+        if (input.size() != fields.size()) fail();
+        input.properties().forEach(f -> { if (!fields.contains(f.getKey())) fail(); });
+        var old = input.deepCopy(); old.remove("gasInjectionGroupControls");
+        if (!old.path("vfpTables").isArray()) fail();
+        ObjectNode result;
+        if (old.path("vfpTables").isEmpty()) {
+            old.remove("vfpTables"); old.put("schemaVersion", "eclipse-data-inspection/4");
+            result = (ObjectNode) validateV4(old, mapper); result.set("vfpTables", mapper.createArrayNode());
+        } else {
+            old.put("schemaVersion", "eclipse-data-inspection/5"); result = (ObjectNode) validateV5(old, mapper);
+        }
+        var controls = input.path("gasInjectionGroupControls");
+        if (!controls.isArray() || controls.isEmpty() || controls.size() > 1000 || !Set.of("FIELD", "METRIC").contains(input.path("unitSystem").asText())
+            || result.path("packageFiles").size() != 1 || !result.path("scheduleMetadata").path("groups").isEmpty()) fail();
+        var groups = new HashSet<String>();
+        var controlFields = Set.of("group", "sourceFile", "lineNumber", "controlMode", "injectionPhase", "unit", "originalTargetRate", "members");
+
+        for (var g : controls) {
+            String phase = g.path("injectionPhase").asText();
+            String unit = "FIELD".equals(input.path("unitSystem").asText()) ? phase.equals("GAS") ? "Mscf/day" : "STB/day" : "sm3/day";
+            if (!g.isObject() || g.size() != controlFields.size()) fail();
+            g.properties().forEach(f -> { if (!controlFields.contains(f.getKey())) fail(); });
+            if (!g.path("group").isTextual() || !Pattern.matches("[A-Za-z0-9][A-Za-z0-9:_ .-]{0,63}", g.path("group").asText())
+                || "FIELD".equals(g.path("group").asText()) || !groups.add(g.path("group").asText())
+                || !validSource(g.path("sourceFile").asText(), g.path("lineNumber")) || !g.path("sourceFile").asText().equals(input.path("caseName").asText())
+                || !g.path("sourceFile").asText().equals(result.path("packageFiles").get(0).path("relativePath").asText())
+                || !Set.of("GAS").contains(phase) || !"RATE".equals(g.path("controlMode").asText()) || !unit.equals(g.path("unit").asText())
+                || !g.path("originalTargetRate").isNumber() || !Double.isFinite(g.path("originalTargetRate").asDouble()) || g.path("originalTargetRate").asDouble() <= 0 || g.path("originalTargetRate").asDouble() > 100_000_000
+                || !g.path("members").isArray() || g.path("members").size() < 2 || g.path("members").size() > 1000) fail();
+            var members = new HashSet<String>();
+            for (var m : g.path("members")) {
+                if (!m.isObject() || m.size() != 2 || !m.has("well") || !m.has("bhpLimit") || !m.path("well").isTextual() || !members.add(m.path("well").asText())
+                    || !m.path("bhpLimit").isNumber() || !Double.isFinite(m.path("bhpLimit").asDouble()) || m.path("bhpLimit").asDouble() <= 0 || m.path("bhpLimit").asDouble() > 100_000_000) fail();
+                int found = 0;
+                for (var w : result.path("scheduleMetadata").path("wells")) if (m.path("well").asText().equals(w.path("name").asText()) && g.path("group").asText().equals(w.path("group").asText())) found++;
+                if (found != 1) fail();
+            }
+            int direct = 0;
+            for (var w : result.path("scheduleMetadata").path("wells")) if (g.path("group").asText().equals(w.path("group").asText())) direct++;
+            if (direct != members.size()) fail();
+            for (var e : result.path("scheduleTimeline")) if (g.path("lineNumber").asInt() >= e.path("lineNumber").asInt()) fail();
+        }
+        result.put("schemaVersion", "eclipse-data-inspection/8"); result.set("gasInjectionGroupControls", controls); return result;
     }
 
     private static JsonNode validateV1Fields(ObjectNode input, ObjectMapper mapper, String schemaVersion) {

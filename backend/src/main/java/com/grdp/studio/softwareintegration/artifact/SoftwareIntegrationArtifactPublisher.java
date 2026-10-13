@@ -31,9 +31,15 @@ public class SoftwareIntegrationArtifactPublisher {
     private static final Map<String, String> ECLIPSE_ARTIFACTS = Map.of(
             "normalized-result.json", "application/json",
             "run.log", "text/plain",
-            "manifest.json", "application/json");
+            "manifest.json", "application/json",
+            "eclipse-grid-field-applied-package.zip", "application/zip",
+            "eclipse-schedule-applied-package.zip", "application/zip",
+            "eclipse-restart-catalog.json", "application/json",
+            "eclipse-forecast-applied-package.zip", "application/zip",
+            "eclipse-compositional-input-package.zip", "application/zip",
+            "eclipse-thermal-input-package.zip", "application/zip");
     private static final Pattern ECLIPSE_BINARY_OUTPUT = Pattern.compile(
-            "^eclipse-output-[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\\.(?:EGRID|INIT|UNRST|UNSMRY|SMSPEC|FUNRST|S\\d{4,5})$",
+            "^eclipse-output-[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\\.(?:EGRID|INIT|FEGRID|FINIT|UNRST|UNSMRY|SMSPEC|FUNRST|FUNSMRY|S\\d{4,5})$",
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
     private final SoftwareIntegrationStorageKeyNormalizer normalizer;
     private final SoftwareIntegrationProperties properties;

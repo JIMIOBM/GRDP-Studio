@@ -1,0 +1,11 @@
+{
+  "source": "C:\\ecl\\2024.1\\e300\\data\\SPE3_GASCOND.DATA",
+  "sourceSha256": "30f36c71726bae3e1c3da3820eefa60212f0628a5c4c1a2163f42c51d75d7feb",
+  "sizeBytes": 8773,
+  "mainFile": "SPE3_GASCOND.DATA",
+  "packageSha256": "b8dd83354937998e2bc928f6ec04482ed2e4d3117628ce2f708fe3d28a3d4ae0",
+  "physicsModified": false,
+  "controlsModified": false,
+  "summaryModified": false,
+  "scenario": "SLB ECLIPSE 300 SPE3 nine-component gas-condensate cycling; original native sample."
+}

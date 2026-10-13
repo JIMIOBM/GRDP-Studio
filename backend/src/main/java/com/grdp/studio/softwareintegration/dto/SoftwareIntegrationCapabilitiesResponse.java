@@ -6,8 +6,12 @@ public record SoftwareIntegrationCapabilitiesResponse(
         WorkerCapability worker,
         SimulatorCapability pipesimWell,
         SimulatorCapability pipesimNetwork,
-        SimulatorCapability eclipse100
+        SimulatorCapability eclipse100,
+        SimulatorCapability eclipse300
 ) {
+    public SoftwareIntegrationCapabilitiesResponse(WorkerCapability worker, SimulatorCapability pipesimWell, SimulatorCapability pipesimNetwork, SimulatorCapability eclipse100) {
+        this(worker, pipesimWell, pipesimNetwork, eclipse100, null);
+    }
     public record WorkerCapability(String status, boolean idle, String reasonCode) {}
 
     public record SimulatorCapability(

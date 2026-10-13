@@ -5,11 +5,30 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <DefaultItemExcludes>$(DefaultItemExcludes);bin\**;bin/**;obj\**;obj/**;bin-*\**;bin-*/**;obj-*\**;obj-*/**</DefaultItemExcludes>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.0" />
     <PackageReference Include="xunit.v3" Version="3.2.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
     <ProjectReference Include="..\..\Grdp.SoftwareIntegration.Worker.csproj" />
+    <None Include="Fixtures/RELPERM-SWFN.DATA" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Fixtures/RELPERM-SOF3.DATA" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\..\test-data\ECLIPSE_GROUP_OIL_INJECTION.DATA;..\..\..\test-data\ECLIPSE_GROUP_GAS_RESV.DATA;..\..\..\test-data\ECLIPSE_GROUP_GAS_REIN.DATA;..\..\..\test-data\ECLIPSE_GROUP_GAS_VREP.DATA" Link="Fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\..\test-data\ECLIPSE_GROUP_TREE.DATA;..\..\..\test-data\ECLIPSE_GROUP_GUIDE.DATA;..\..\..\test-data\ECLIPSE_GROUP_EFFICIENCY.DATA" Link="Fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\..\test-data\ECLIPSE_CONTROL_PLAN.DATA" Link="Fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\..\test-data\ECLIPSE_NEW_WELL_WATER.DATA" Link="Fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\..\test-data\ECLIPSE_NEW_COMPLETION_WATER.DATA" Link="Fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\..\test-data\ECLIPSE_PVTW_WATER.DATA" Link="Fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\..\test-data\ECLIPSE_PVDG_GASWATER.DATA" Link="Fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\..\test-data\ECLIPSE_PVDO_OIL.DATA" Link="Fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Fixtures\PVDO.FINIT;Fixtures\PVDO.FEGRID" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Fixtures\ECLIPSE_NEW_WELL_BASELINE.EGRID" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

@@ -7,6 +7,32 @@ namespace Grdp.SoftwareIntegration.Worker.Tests;
 public sealed class PtkRunEnvelopeTests
 {
     [Fact]
+    public void PreservesBoundedOfficialValidationDiagnosticsOnTaskFailure()
+    {
+        using var document = JsonDocument.Parse("""
+            {
+              "status":"error",
+              "error":{
+                "category":"VALIDATION",
+                "code":"PIPESIM_TASK_VALIDATION_FAILED",
+                "message":"PIPESIM task preflight found 1 issue(s).",
+                "retryable":false,
+                "diagnostics":[{"path":"Well_1","property":"OutletPressure","message":"Pressure is outside the task limits."}]
+              }
+            }
+            """);
+
+        var accepted = PtkRunService.TryReadEnvelope(
+            document.RootElement, "nodal", out var status, out var result, out var error, out _);
+
+        Assert.True(accepted);
+        Assert.Equal("error", status);
+        Assert.Null(result);
+        Assert.Equal("PIPESIM_TASK_VALIDATION_FAILED", error?.Code);
+        Assert.Equal("OutletPressure", Assert.Single(error!.Diagnostics!).Property);
+    }
+
+    [Fact]
     public void AcceptsOfficialGasLiftPerformanceResult()
     {
         using var document = JsonDocument.Parse("""
@@ -94,19 +120,9 @@ public sealed class PtkRunEnvelopeTests
     }
 
     [Fact]
-    public void AcceptsOfficialVfpTablesResult()
+    public void AcceptsOfficialVfpTablesResultWithNonSquareAxes()
     {
-        using var document = JsonDocument.Parse("""
-            {
-              "status":"ok", "result":{
-                "schemaVersion":"pipesim-vfp-tables-result/1", "model_kind":"black_oil_liquid", "runTask":"vfp-tables", "resultContract":"VALID_FULL", "producer":"Well", "reservoirSimulator":"ECLIPSE", "tableNumber":2, "includeTemperature":true, "bottomHoleDatumDepth":30,
-                "axes":{"liquidRatesStbPerDay":[200,300],"outletPressuresPsi":[250,350],"waterCutFraction":[0.4],"gorMscfPerStb":[0.265],"artificialLiftInjectionDpPsi":[40,50]},
-                "table":{"valueName":"BHP","unit":"psia","rows":[{"liquidRateIndex":1,"waterCutIndex":1,"gorIndex":1,"artificialLiftIndex":1,"values":[1368.283,1568.016]}]},
-                "temperatureTable":{"valueName":"TEMP","unit":"F","rows":[{"liquidRateIndex":1,"waterCutIndex":1,"gorIndex":1,"artificialLiftIndex":1,"values":[81.85878,85.70919]}]},
-                "vfpTableContent":"VFPPROD 2 30.0", "vfpTableWithTemperatureContent":"VFPPROD 2 30.0"
-              }, "warnings":[]
-            }
-            """);
+        using var document = JsonDocument.Parse(VfpTablesEnvelope());
 
         var accepted = PtkRunService.TryReadEnvelope(document.RootElement, "vfp-tables", out var status, out var result, out var error, out _);
 
@@ -115,6 +131,38 @@ public sealed class PtkRunEnvelopeTests
         Assert.Equal("VALID_FULL", result?.GetProperty("resultContract").GetString());
         Assert.Null(error);
     }
+
+    [Fact]
+    public void RejectsVfpRowsThatDoNotCoverThpWfrGfrAlqGrid()
+    {
+        var malformed = VfpTablesEnvelope().Replace(
+            "{\"thpIndex\":2,\"waterCutIndex\":1,\"gorIndex\":1,\"artificialLiftIndex\":2,\"values\":[1000,1100,1200]}",
+            "{\"thpIndex\":1,\"waterCutIndex\":1,\"gorIndex\":1,\"artificialLiftIndex\":2,\"values\":[1000,1100,1200]}",
+            StringComparison.Ordinal);
+        using var document = JsonDocument.Parse(malformed);
+
+        Assert.False(PtkRunService.TryReadEnvelope(document.RootElement, "vfp-tables", out _, out _, out _, out _));
+    }
+
+    private static string VfpTablesEnvelope() => """
+            {
+              "status":"ok", "result":{
+                "schemaVersion":"pipesim-vfp-tables-result/2", "model_kind":"black_oil_liquid", "runTask":"vfp-tables", "resultContract":"VALID_FULL", "producer":"Well", "reservoirSimulator":"ECLIPSE", "tableNumber":2, "includeTemperature":true, "bottomHoleDatumDepth":30,
+                "axes":{"liquidRatesStbPerDay":[100,200,300],"outletPressuresPsi":[250,350],"waterCutFraction":[0.4],"gorMscfPerStb":[0.265],"artificialLiftInjectionDpPsi":[40,50]},
+                "table":{"valueName":"BHP","unit":"psia","rows":[
+                  {"thpIndex":1,"waterCutIndex":1,"gorIndex":1,"artificialLiftIndex":1,"values":[100,200,300]},
+                  {"thpIndex":1,"waterCutIndex":1,"gorIndex":1,"artificialLiftIndex":2,"values":[400,500,600]},
+                  {"thpIndex":2,"waterCutIndex":1,"gorIndex":1,"artificialLiftIndex":1,"values":[700,800,900]},
+                  {"thpIndex":2,"waterCutIndex":1,"gorIndex":1,"artificialLiftIndex":2,"values":[1000,1100,1200]}]},
+                "temperatureTable":{"valueName":"TEMP","unit":"F","rows":[
+                  {"thpIndex":1,"waterCutIndex":1,"gorIndex":1,"artificialLiftIndex":1,"values":[50,51,52]},
+                  {"thpIndex":1,"waterCutIndex":1,"gorIndex":1,"artificialLiftIndex":2,"values":[53,54,55]},
+                  {"thpIndex":2,"waterCutIndex":1,"gorIndex":1,"artificialLiftIndex":1,"values":[56,57,58]},
+                  {"thpIndex":2,"waterCutIndex":1,"gorIndex":1,"artificialLiftIndex":2,"values":[59,60,61]}]},
+                "vfpTableContent":"VFPPROD 2 30.0", "vfpTableWithTemperatureContent":"VFPPROD 2 30.0"
+              }, "warnings":[]
+            }
+            """;
 
     [Fact]
     public void AcceptsOfficialWellTrajectoryResult()
@@ -138,6 +186,42 @@ public sealed class PtkRunEnvelopeTests
         Assert.Equal("ok", status);
         Assert.Equal("Well_1", result?.GetProperty("producer").GetString());
         Assert.Equal(2, result?.GetProperty("points").GetArrayLength());
+        Assert.Null(error);
+    }
+
+    [Fact]
+    public void AcceptsVerifiedEditedTrajectoryResultWithExactDepthProfileComparison()
+    {
+        using var document = JsonDocument.Parse("""
+            {
+              "status":"ok", "result":{
+                "schemaVersion":"pipesim-well-trajectory-result/2", "model_kind":"black_oil_liquid", "runTask":"trajectory", "resultContract":"VALID_FULL", "producer":"Well_1",
+                "units":{"measuredDepth":"ft","trueVerticalDepth":"ft","inclination":"deg","azimuth":"deg","maxDogLegSeverity":"deg/100ft"},
+                "points":[
+                  {"measuredDepth":0,"trueVerticalDepth":0,"inclination":0,"azimuth":null,"maxDogLegSeverity":null},
+                  {"measuredDepth":500,"trueVerticalDepth":490,"inclination":26,"azimuth":null,"maxDogLegSeverity":null},
+                  {"measuredDepth":1000,"trueVerticalDepth":980,"inclination":30,"azimuth":null,"maxDogLegSeverity":null}
+                ],
+                "application":{"applied":true,"isolatedCopy":true,"sourceModelUnchanged":true,"artifactName":"pipesim-trajectory-applied.pips","stationIndex":1,"originalInclinationDeg":25,"targetInclinationDeg":26,"maxTvdBeforeFt":980,"maxTvdAfterFt":980},
+                "profileComparison":{
+                  "method":"exact-depth-match-no-interpolation","baselinePointCount":4,"targetPointCount":3,"matchedPointCount":2,
+                  "baseline":[{"depth":0,"pressure":100,"temperature":60},{"depth":1,"pressure":90,"temperature":61},{"depth":1,"pressure":91,"temperature":61.5},{"depth":2,"pressure":80,"temperature":62}],
+                  "target":[{"depth":0,"pressure":101,"temperature":60.5},{"depth":1,"pressure":88,"temperature":62},{"depth":2,"pressure":78,"temperature":63}],
+                  "matchedPoints":[
+                    {"depth":0,"baselinePressure":100,"targetPressure":101,"pressureDelta":1,"baselineTemperature":60,"targetTemperature":60.5,"temperatureDelta":0.5},
+                    {"depth":2,"baselinePressure":80,"targetPressure":78,"pressureDelta":-2,"baselineTemperature":62,"targetTemperature":63,"temperatureDelta":1}
+                  ],
+                  "maxAbsPressureDelta":2,"maxAbsTemperatureDelta":1
+                }
+              }, "warnings":[]
+            }
+            """);
+
+        var accepted = PtkRunService.TryReadEnvelope(document.RootElement, "trajectory", out var status, out var result, out var error, out _);
+
+        Assert.True(accepted);
+        Assert.Equal("ok", status);
+        Assert.Equal("pipesim-well-trajectory-result/2", result?.GetProperty("schemaVersion").GetString());
         Assert.Null(error);
     }
 
@@ -178,6 +262,77 @@ public sealed class PtkRunEnvelopeTests
         Assert.True(accepted);
         Assert.Equal("ok", status);
         Assert.Equal("basic_gas", result?.GetProperty("model_kind").GetString());
+        Assert.Null(error);
+    }
+
+    [Fact]
+    public void AcceptsContextBoundEspCurvesResultForLegacyWellAndNamedPump()
+    {
+        using var document = JsonDocument.Parse("""
+            {"status":"ok","result":{"schemaVersion":"pipesim-esp-curves-result/2","model_kind":"legacy_well","runTask":"esp-curves","resultContract":"VALID_FULL","producer":"Well_2","espContext":"Well_2:ESP",
+             "pump":{"pumpName":"ESP-2","inputs":{"frequency":60,"frequencyUnit":"Hz","manufacturer":"REDA","model":"J7000N","minFlowRate":100,"maxFlowRate":1000,"stages":120},
+             "frequencies":[{"frequencyHz":60,"frequencyLabel":"60 Hz","flowRate":[100,500],"flowRateUnit":"bbl/d","head":[1000,800],"headUnit":"ft"}],
+             "operatingEnvelope":{"qMin":{"flowRate":[100],"flowRateUnit":"bbl/d","head":[1000],"headUnit":"ft"},"bep":{"flowRate":[500],"flowRateUnit":"bbl/d","head":[800],"headUnit":"ft"},"qMax":{"flowRate":[1000],"flowRateUnit":"bbl/d","head":[600],"headUnit":"ft"}}},
+             "nodalPump":{"pumpName":"ESP-2","inputs":{"frequency":60,"frequencyUnit":"Hz","manufacturer":"REDA","model":"J7000N","minFlowRate":100,"maxFlowRate":1000,"stages":120},
+             "frequencies":[{"frequencyHz":60,"frequencyLabel":"60 Hz","flowRate":[100,500],"flowRateUnit":"bbl/d","head":[1000,800],"headUnit":"ft"}],
+             "operatingEnvelope":{"qMin":{"flowRate":[100],"flowRateUnit":"bbl/d","head":[1000],"headUnit":"ft"},"bep":{"flowRate":[500],"flowRateUnit":"bbl/d","head":[800],"headUnit":"ft"},"qMax":{"flowRate":[1000],"flowRateUnit":"bbl/d","head":[600],"headUnit":"ft"}}}},"warnings":[]}
+            """);
+
+        var accepted = PtkRunService.TryReadEnvelope(
+            document.RootElement, "esp-curves", out var status, out var result, out var error, out _);
+
+        Assert.True(accepted);
+        Assert.Equal("legacy_well", result?.GetProperty("model_kind").GetString());
+        Assert.Equal("Well_2:ESP", result?.GetProperty("espContext").GetString());
+        Assert.Null(error);
+    }
+
+    [Fact]
+    public void AcceptsOfficialEspParameterResultWithBaselineAndTargetCases()
+    {
+        using var document = JsonDocument.Parse("""
+            {
+              "status":"ok", "result":{
+                "schemaVersion":"pipesim-esp-parameter-result/1", "model_kind":"black_oil_liquid", "runTask":"esp-parameter", "resultContract":"VALID_FULL", "producer":"Well_1", "espContext":"Well_1:ESP",
+                "parameter":"operatingFrequency", "unit":"Hz", "originalValue":60, "targetValue":70, "appliedValue":70, "sourceModelUnchanged":true, "isolatedCopy":true,
+                "baseline":{"frequencyHz":60,"ipr":[{"flow":100,"pressure":1200}],"vlp":[{"flow":100,"pressure":1300}],"profile":[{"depth":0,"pressure":1500,"temperature":80}]},
+                "target":{"frequencyHz":70,"ipr":[{"flow":100,"pressure":1250}],"vlp":[{"flow":100,"pressure":1350}],"profile":[{"depth":0,"pressure":1550,"temperature":82}]},
+                "comparison":{"maxIprPressureDelta":null,"maxVlpPressureDelta":50,"maxProfilePressureDelta":50,"maxProfileTemperatureDelta":2}
+              }, "warnings":[]
+            }
+            """);
+
+        var accepted = PtkRunService.TryReadEnvelope(
+            document.RootElement, "esp-parameter", out var status, out var result, out var error, out _);
+
+        Assert.True(accepted);
+        Assert.Equal("ok", status);
+        Assert.Equal("Well_1:ESP", result?.GetProperty("espContext").GetString());
+        Assert.Equal(70, result?.GetProperty("appliedValue").GetDouble());
+        Assert.Null(error);
+    }
+
+    [Fact]
+    public void AcceptsDimensionlessEspHeadFactorResultV2()
+    {
+        using var document = JsonDocument.Parse("""
+            {
+              "status":"ok", "result":{
+                "schemaVersion":"pipesim-esp-parameter-result/2", "model_kind":"legacy_well", "runTask":"esp-parameter", "resultContract":"VALID_FULL", "producer":"Well_1", "espContext":"Well_1:ESP",
+                "parameter":"headFactor", "unit":"1", "originalValue":2.5, "targetValue":0.9, "appliedValue":0.9, "sourceModelUnchanged":true, "isolatedCopy":true,
+                "baseline":{"parameterValue":2.5,"ipr":[{"flow":100,"pressure":1200}],"vlp":[{"flow":100,"pressure":1300}],"profile":[{"depth":0,"pressure":1500,"temperature":80}]},
+                "target":{"parameterValue":0.9,"ipr":[{"flow":100,"pressure":1201}],"vlp":[{"flow":100,"pressure":1301}],"profile":[{"depth":0,"pressure":1500,"temperature":80}]},
+                "comparison":{"maxIprPressureDelta":1,"maxVlpPressureDelta":1,"maxProfilePressureDelta":null,"maxProfileTemperatureDelta":null}
+              }, "warnings":[]
+            }
+            """);
+
+        var accepted = PtkRunService.TryReadEnvelope(
+            document.RootElement, "esp-parameter", out var status, out var result, out var error, out _);
+
+        Assert.True(accepted);
+        Assert.Equal("ok", status);
+        Assert.Equal(0.9, result?.GetProperty("targetValue").GetDouble());
         Assert.Null(error);
     }
 
@@ -632,6 +787,25 @@ public sealed class PtkRunEnvelopeTests
             """);
 
         Assert.False(PtkRunService.TryReadEnvelope(document.RootElement, "network", out _, out _, out _, out _));
+    }
+
+    [Fact]
+    public void TubingEditAcceptsOnlyReadBackValuesBoundToTheParameterRequest()
+    {
+        using var parameters = JsonDocument.Parse("""
+            {"schemaVersion":"pipesim-well-tubing-diameter-parameters/1","baselineRunId":7401,"wellContext":"Well_1","tubingContext":"Tubing_1","originalInnerDiameter":2.441,"unit":"in","targetInnerDiameter":2.3}
+            """);
+        using var document = JsonDocument.Parse("""
+            {"status":"ok","result":{"schemaVersion":"pipesim-well-result/2","model_kind":"black_oil_liquid","runTask":"profile","resultContract":"VALID_FULL","units":{"flow":{"displayUnit":null,"semantics":"unspecified"},"pressure":{"displayUnit":null,"semantics":"unspecified"},"depth":{"displayUnit":null,"semantics":"unspecified"},"temperature":{"displayUnit":null,"semantics":"unspecified"}},"ipr":[],"vlp":[],"profile":[{"depth":0.0,"pressure":1500.0,"temperature":80.0}],"application":{"applied":true,"isolatedCopy":true,"sourceModelUnchanged":true,"artifactName":"pipesim-well-tubing-applied.pips","wellContext":"Well_1","tubingContext":"Tubing_1","unit":"in","originalInnerDiameter":2.441,"targetInnerDiameter":2.3,"appliedInnerDiameter":2.3}}}
+            """);
+
+        Assert.True(PtkRunService.TryReadEnvelope(document.RootElement, "profile", out var status, out var result, out _, out _, parameters.RootElement));
+        Assert.Equal("ok", status);
+        Assert.Equal("pipesim-well-result/2", result?.GetProperty("schemaVersion").GetString());
+
+        using var changed = JsonDocument.Parse(document.RootElement.GetRawText().Replace("\"appliedInnerDiameter\":2.3", "\"appliedInnerDiameter\":2.31"));
+        Assert.False(PtkRunService.TryReadEnvelope(changed.RootElement, "profile", out _, out _, out _, out _, parameters.RootElement));
+        Assert.False(PtkRunService.TryReadEnvelope(document.RootElement, "nodal", out _, out _, out _, out _, parameters.RootElement));
     }
 
     private const string DefaultProfiles = "[{ \"branch\": \"Branch 1\", \"pointCount\": 1, \"variables\": [{ \"variable\": \"TotalDistance\", \"unit\": \"ft\", \"values\": [1] }, { \"variable\": \"Pressure\", \"unit\": \"psi\", \"values\": [2] }] }]";

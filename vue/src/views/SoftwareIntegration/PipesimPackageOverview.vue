@@ -7,7 +7,7 @@ const props = defineProps({
 
 const files = computed(() => {
   const value = props.inspection
-  if (!value || !['pipesim-well-inspection/2', 'pipesim-well-inspection/3', 'pipesim-network-inspection/2', 'pipesim-network-inspection/3'].includes(value.schemaVersion) ||
+  if (!value || !['pipesim-well-inspection/2', 'pipesim-well-inspection/3', 'pipesim-well-inspection/4', 'pipesim-well-inspection/5', 'pipesim-well-inspection/6', 'pipesim-well-inspection/7', 'pipesim-well-inspection/8', 'pipesim-well-inspection/9', 'pipesim-network-inspection/2', 'pipesim-network-inspection/3'].includes(value.schemaVersion) ||
     !Array.isArray(value.packageFiles) || value.packageFiles.length < 1 || value.packageFiles.length > 4096) return []
   const seen = new Set()
   const normalized = value.packageFiles.map(file => {

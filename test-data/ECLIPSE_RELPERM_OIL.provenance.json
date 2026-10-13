@@ -1,0 +1,7 @@
+{
+  "sampleSha256": "c128f7a4a20ee1680938af85b47aa76f5739789faa721941123acda605b8aad9",
+  "source": "ECLIPSE_PVDO_OIL.DATA / previously verified ECLIPSE_LRAT.DATA",
+  "adaptation": "Filename only; source physical inputs and output requests byte-identical.",
+  "scenario": "SWFN water Krw multiplier or paired SOF3 Krow/Krog multiplier, independent baseline scenarios.",
+  "manualUiVerified": false
+}

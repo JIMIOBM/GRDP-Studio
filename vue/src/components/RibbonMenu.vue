@@ -141,7 +141,7 @@ const defaultTabs = [
             dropdownItems: ['模型组合', '方案构建']
           },
           { type: 'checks', items: ['PVT设置', '井信息匹配', '耦合参数传递'] },
-          { type: 'checks', items: ['模拟控制', '耦合计算', '运行状态监控'] }
+          { type: 'checks', items: ['模拟控制', '耦合计算', '运行状态监控'], commandIds: { '耦合计算': 'software-integration.coupling.iam-pipesim-demo' } }
         ]
       },
       {

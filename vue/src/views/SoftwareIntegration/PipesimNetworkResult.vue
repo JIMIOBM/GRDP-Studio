@@ -12,8 +12,10 @@ const props = defineProps({
   partial: { type: Boolean, default: false },
   runId: { type: [String, Number], default: null },
   history: { type: Array, default: () => [] },
-  run: { type: Object, default: null }
+  run: { type: Object, default: null },
+  submitting: { type: Boolean, default: false }
 })
+const emit = defineEmits(['create-network-connection-run'])
 
 const PROFILE_VARIABLES = [
   { variable: 'Pressure', label: '压力', color: '#2B6CB3' },
@@ -67,6 +69,83 @@ const topologyNodes = computed(() => arrayValue(props.result?.topology?.nodes).f
   typeof node?.id === 'string' && typeof node.componentType === 'string'))
 const topologyEdges = computed(() => arrayValue(props.result?.topology?.edges).filter(edge =>
   typeof edge?.source === 'string' && typeof edge.destination === 'string'))
+const redirectableEdges = computed(() => topologyEdges.value.map((edge, index) => ({ ...edge, key: String(index) })))
+const connectionBaselineReady = computed(() => props.run?.runType === 'network' && props.run?.status === 'SUCCEEDED' &&
+  props.run?.resultContract === 'VALID_FULL' && props.run?.parameters == null && props.result?.resultContract === 'VALID_FULL' &&
+  props.result?.schemaVersion === 'pipesim-network-result/1' && topologyNodes.value.length > 1 && topologyEdges.value.length > 0)
+const selectedConnectionKey = ref('')
+const selectedConnection = computed(() => redirectableEdges.value.find(edge => edge.key === selectedConnectionKey.value) || null)
+const replacementConnectionTargets = computed(() => {
+  if (!selectedConnection.value) return []
+  const source = selectedConnection.value.source
+  const oldDestination = selectedConnection.value.destination
+  return topologyNodes.value.filter(node => node.id !== source && node.id !== oldDestination &&
+    !topologyEdges.value.some(edge => edge.source === source && edge.destination === node.id))
+})
+const originalFlowlineInletWouldBeDisconnected = computed(() => {
+  const selected = selectedConnection.value
+  if (!selected || topologyNodes.value.find(node => node.id === selected.destination)?.componentType !== 'Flowline') return false
+  return !topologyEdges.value.some((edge, index) => String(index) !== selected.key && edge.destination === selected.destination)
+})
+const connectionTargetInletUnavailable = nodeOrId => {
+  const node = typeof nodeOrId === 'string' ? topologyNodes.value.find(item => item.id === nodeOrId) : nodeOrId
+  if (!node) return false
+  if (node.componentType === 'Source') return true
+  return node.componentType !== 'Junction' && topologyEdges.value.some(edge => edge.destination === node.id)
+}
+const replacementDestination = ref('')
+watch(selectedConnectionKey, () => { replacementDestination.value = '' })
+const connectionImpact = computed(() => {
+  const current = selectedConnection.value
+  const target = replacementDestination.value
+  if (!current || !target) return null
+  const roots = topologyNodes.value.filter(node => ['Source', 'Well', 'Injector'].includes(node.componentType)).map(node => node.id)
+  const sinks = topologyNodes.value.filter(node => node.componentType === 'Sink').map(node => node.id)
+  const reachableSinks = edges => {
+    const reachable = new Set(roots)
+    let changed = true
+    while (changed) {
+      changed = false
+      for (const edge of edges) {
+        if (reachable.has(edge.source) && !reachable.has(edge.destination)) {
+          reachable.add(edge.destination)
+          changed = true
+        }
+      }
+    }
+    return sinks.filter(id => reachable.has(id))
+  }
+  const before = reachableSinks(topologyEdges.value)
+  const afterEdges = topologyEdges.value.filter((_, index) => String(index) !== current.key)
+  afterEdges.push({ source: current.source, sourcePort: current.sourcePort || '', destination: target })
+  const after = reachableSinks(afterEdges)
+  return {
+    sourceCount: roots.length,
+    sinkCount: sinks.length,
+    before,
+    after,
+    lost: before.filter(id => !after.includes(id)),
+    determinate: roots.length > 0 && sinks.length > 0
+  }
+})
+const clearConnectionDraft = () => {
+  selectedConnectionKey.value = ''
+  replacementDestination.value = ''
+}
+const createConnectionScenario = () => {
+  if (!connectionBaselineReady.value || !selectedConnection.value ||
+    !replacementConnectionTargets.value.some(node => node.id === replacementDestination.value) ||
+    connectionTargetInletUnavailable(replacementDestination.value) || originalFlowlineInletWouldBeDisconnected.value ||
+    connectionImpact.value?.lost.length) return
+  emit('create-network-connection-run', {
+    schemaVersion: 'pipesim-network-connection-parameters/1',
+    baselineRunId: Number(props.run.id),
+    source: selectedConnection.value.source,
+    sourcePort: selectedConnection.value.sourcePort || '',
+    originalDestination: selectedConnection.value.destination,
+    newDestination: replacementDestination.value
+  })
+}
 const topologyCounts = computed(() => props.result?.topology?.counts || {})
 const countItems = computed(() => [
   { key: 'nodes', label: '节点', value: topologyCounts.value.nodes ?? '不可用' },
@@ -641,6 +720,34 @@ onBeforeUnmount(() => {
       <p class="network-scenario-next-step">下方剖面和系统/节点结果为本次真实返回值；选择“对比历史运行”可与同版本同 Study 的基线逐点核验。</p>
     </section>
 
+    <section v-if="connectionBaselineReady" class="network-connection-scenario" aria-label="PIPESIM 单连接派生方案">
+      <div><strong>单连接重接并重新计算</strong><p>只替换当前完整成功无参数基线中的一条现有连接；对象与端口会由 Worker 按原生拓扑重新核验。</p></div>
+      <el-select v-model="selectedConnectionKey" placeholder="选择要替换的现有连接" aria-label="要替换的现有连接">
+        <el-option v-for="edge in redirectableEdges" :key="edge.key" :value="edge.key"
+          :label="`${edge.source} [${edge.sourcePort || '默认出口'}] → ${edge.destination}`" />
+      </el-select>
+      <el-select v-model="replacementDestination" :disabled="!selectedConnection" placeholder="选择已有目标设备" aria-label="连接新目标设备">
+        <el-option v-for="node in replacementConnectionTargets" :key="node.id" :value="node.id"
+          :disabled="connectionTargetInletUnavailable(node) || originalFlowlineInletWouldBeDisconnected"
+          :label="`${node.id} · ${node.componentType}${connectionTargetInletUnavailable(node) ? '（入口不可用）' : ''}`" />
+      </el-select>
+      <div v-if="selectedConnection && replacementDestination" class="network-connection-impact" data-testid="network-connection-impact" role="status">
+        <strong>拓扑影响预览</strong>
+        <span>替换 {{ selectedConnection.source }} [{{ selectedConnection.sourcePort || '默认出口' }}] → {{ selectedConnection.destination }} 为 {{ selectedConnection.source }} [{{ selectedConnection.sourcePort || '默认出口' }}] → {{ replacementDestination }}</span>
+        <span v-if="connectionImpact?.determinate">基线可达汇点：{{ connectionImpact.before.join('、') || '无' }}；方案后：{{ connectionImpact.after.join('、') || '无' }}</span>
+        <span v-else>当前拓扑缺少可识别的源点或汇点，无法静态计算可达路径；仍会由 Worker 与官方求解器校验。</span>
+        <span v-if="connectionImpact?.lost.length" class="network-connection-impact-error">此方案会使既有汇点失去可达路径（{{ connectionImpact.lost.join('、') }}），不能提交。</span>
+        <span v-else-if="connectionImpact?.determinate" class="network-connection-impact-ok">已识别的汇点路径均保留；求解器仍会进行原生校验。</span>
+      </div>
+      <p v-if="originalFlowlineInletWouldBeDisconnected" class="network-connection-impact-error" role="alert">原连接终点 {{ selectedConnection?.destination }} 是只通过该连接接入的 Flowline；单边重接会使其 ConnectionsBoth 端口悬空，官方 Study 校验必然失败。请改选其他连接。</p>
+      <div class="network-connection-actions">
+        <el-button :disabled="!selectedConnection" @click="clearConnectionDraft">撤销本次选择</el-button>
+        <el-button type="primary" :loading="submitting" :disabled="submitting || !connectionBaselineReady || !selectedConnection || !replacementDestination || Boolean(connectionImpact?.lost.length)"
+        @click="createConnectionScenario">保存派生拓扑并真实重算</el-button>
+      </div>
+      <small>新目标须在当前拓扑中有可用入口（仅 Junction 按多入口处理）；唯一入口连接到 Flowline 的边不能单边移走。重复连接和造成已有可达汇点断连的方案会被拒绝；原始模型不改。</small>
+    </section>
+
     <div class="count-strip" aria-label="管网拓扑统计">
       <div v-for="item in countItems" :key="item.key" class="count-item">
         <span>{{ item.label }}</span>
@@ -819,6 +926,15 @@ onBeforeUnmount(() => {
 .network-scenario-row strong { color: #315b36; }
 .network-scenario-row small { grid-column: 1 / -1; color: #849486; }
 .network-scenario-next-step { margin: 10px 0 0; color: #5f7461; font-size: 12px; }
+.network-connection-scenario { display: grid; grid-template-columns: minmax(220px, 1fr) repeat(2, minmax(180px, 1fr)); align-items: center; gap: 10px; padding: 14px 16px; border: 1px solid #d9e4f0; background: #f8fafc; }
+.network-connection-scenario p, .network-connection-scenario small { margin: 5px 0 0; color: #737a84; font-size: 12px; line-height: 1.55; }
+.network-connection-scenario > .el-select { width: 100%; }
+.network-connection-impact { grid-column: 1 / -1; display: grid; gap: 4px; padding: 9px 11px; border: 1px solid #dce4ed; background: #fff; color: #606266; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.network-connection-impact strong { color: #315b80; }
+.network-connection-impact-ok { color: #477a4b; }
+.network-connection-impact-error { color: #b42318; font-weight: 600; }
+.network-connection-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 8px; }
+.network-connection-scenario > small { grid-column: 1 / -1; }
 .count-strip { display: grid; grid-template-columns: repeat(5, minmax(90px, 1fr)); border: 1px solid #e1e7ef; background: #fff; }
 .count-item { min-width: 0; padding: 13px 16px; border-right: 1px solid #e8edf3; }
 .count-item:last-child { border-right: 0; }
@@ -858,6 +974,8 @@ onBeforeUnmount(() => {
 .missing { color: #a8abb2; }
 @media (max-width: 760px) {
   .network-result-header, .network-scenario-acceptance-heading, .panel-heading { align-items: flex-start; flex-direction: column; }
+  .network-connection-scenario { grid-template-columns: 1fr; }
+  .network-connection-impact, .network-connection-actions, .network-connection-scenario > small { grid-column: 1; }
   .topology-heading-actions { width: 100%; justify-content: space-between; white-space: normal; }
   .count-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .count-item { border-bottom: 1px solid #e8edf3; }

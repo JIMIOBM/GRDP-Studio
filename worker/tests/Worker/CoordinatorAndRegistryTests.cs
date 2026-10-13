@@ -101,6 +101,25 @@ public sealed class CoordinatorAndRegistryTests
     }
 
     [Fact]
+    public void TrajectoryEditUsesBaselineApplyTargetProfilePhasesOnlyForEditParameters()
+    {
+        var registry = Registry();
+        var request = Request(25, "trajectory", "{\"schemaVersion\":\"pipesim-well-trajectory-parameters/3\",\"wellContext\":\"Well_1\",\"stationIndex\":2,\"targetInclinationDeg\":27}");
+        Assert.Equal(ClaimStatus.Created, registry.TryClaim(request, "trajectory-edit").Status);
+
+        registry.Transition(25, "PREPARING", "prepare");
+        registry.Transition(25, "RUNNING_PROFILE", "baseline profile");
+        registry.Transition(25, "APPLYING_TRAJECTORY", "apply isolated edit");
+        registry.Transition(25, "RUNNING_PROFILE", "target profile");
+        registry.Transition(25, "COLLECTING", "collect");
+
+        Assert.Equal(
+            new[] { "CLAIMED", "PREPARING", "RUNNING_PROFILE", "APPLYING_TRAJECTORY", "RUNNING_PROFILE", "COLLECTING" },
+            registry.GetSnapshot(25, 0)!.Events.Select(item => item.State));
+        Assert.Throws<InvalidOperationException>(() => registry.Transition(25, "APPLYING_TRAJECTORY", "unexpected second edit"));
+    }
+
+    [Fact]
     public void EspCurveRunUsesProfileThenNodalPhases()
     {
         var registry = Registry();
@@ -115,6 +134,25 @@ public sealed class CoordinatorAndRegistryTests
         Assert.Equal(
             new[] { "CLAIMED", "PREPARING", "RUNNING_PROFILE", "RUNNING_NODAL", "COLLECTING" },
             registry.GetSnapshot(10, 0)!.Events.Select(item => item.State));
+    }
+
+    [Fact]
+    public void EspParameterRunReportsBothBaselineAndTargetPhases()
+    {
+        var registry = Registry();
+        var request = Request(11, "esp-parameter");
+        Assert.Equal(ClaimStatus.Created, registry.TryClaim(request, "esp-parameter").Status);
+
+        registry.Transition(11, "PREPARING", "prepare");
+        registry.Transition(11, "RUNNING_PROFILE", "baseline profile");
+        registry.Transition(11, "RUNNING_NODAL", "baseline nodal");
+        registry.Transition(11, "RUNNING_PROFILE", "target profile");
+        registry.Transition(11, "RUNNING_NODAL", "target nodal");
+        registry.Transition(11, "COLLECTING", "collect");
+
+        Assert.Equal(
+            new[] { "CLAIMED", "PREPARING", "RUNNING_PROFILE", "RUNNING_NODAL", "RUNNING_PROFILE", "RUNNING_NODAL", "COLLECTING" },
+            registry.GetSnapshot(11, 0)!.Events.Select(item => item.State));
     }
 
     [Fact]
@@ -280,9 +318,9 @@ public sealed class CoordinatorAndRegistryTests
     private static PtkRunRegistry Registry() => new(
         new WorkerIdentity(Options.Create(new WorkerOptions { WorkerId = "test-worker" })));
 
-    private static RunExecuteRequest Request(long id, string runTask = "nodal")
+    private static RunExecuteRequest Request(long id, string runTask = "nodal", string parametersJson = "null")
     {
-        using var document = JsonDocument.Parse("null");
+        using var document = JsonDocument.Parse(parametersJson);
         return new RunExecuteRequest(id, "models/well.pips", new string('a', 64), "Study 1", runTask, document.RootElement.Clone(), 600);
     }
 }

@@ -75,6 +75,31 @@ public sealed class EclipseBinaryFieldIndexTests
     }
 
     [Fact]
+    public void IndexesUnifiedFunrstReportNumbersFromSeqnum()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "grdp-eclipse-field-index-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var path = Path.Combine(root, "CASE.FUNRST");
+            File.WriteAllBytes(path, KeywordSection("SEQNUM", "INTE", Ints(14))
+                .Concat(KeywordSection("INTEHEAD", "INTE", Ints(2, 3, 4)))
+                .Concat(KeywordSection("PRESSURE", "REAL", Floats(100)))
+                .Concat(KeywordSection("SEQNUM", "INTE", Ints(41)))
+                .Concat(KeywordSection("INTEHEAD", "INTE", Ints(2, 3, 4)))
+                .Concat(KeywordSection("PRESSURE", "REAL", Floats(200))).ToArray());
+
+            var index = EclipseBinaryFieldIndexParser.TryParse(path);
+
+            Assert.NotNull(index);
+            Assert.Equal("CASE.FUNRST", index!.FileName);
+            Assert.Equal(new int?[] { 14, 41 }, index.Sections.Where(section => section.Keyword == "INTEHEAD")
+                .Select(section => section.TimeStep).ToArray());
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
     public void SkipsZeroLengthMessageRecordsAndContinuesIndexingUnrst()
     {
         var root = Path.Combine(Path.GetTempPath(), "grdp-eclipse-field-index-tests", Guid.NewGuid().ToString("N"));

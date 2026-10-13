@@ -1,0 +1,23 @@
+{
+  "metadata": {
+    "id": 2,
+    "modelVersionId": 152,
+    "baselineRunId": 436,
+    "name": "失败隔离算法验算",
+    "sourceFile": "water-algorithm.csv",
+    "sourceSha256": "3d5beffc4285eef309e1214cdc7ac9bb260d6f3a823161492e411a6165c73f2d",
+    "observationCount": 1,
+    "createdAt": "2026-10-13T02:14:52.966"
+  },
+  "csv": "well,keyword,unit,timeDays,value\r\nP,WWPR,SM3/DAY,300,1000\r\n",
+  "observations": [
+    {
+      "well": "P",
+      "keyword": "WWPR",
+      "unit": "SM3/DAY",
+      "timeDays": 300.0,
+      "value": 1000.0,
+      "sourceLine": 2
+    }
+  ]
+}

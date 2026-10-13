@@ -1,0 +1,14 @@
+{
+  "officialSource": "C:\\ecl\\2024.1\\eclipse\\data\\GASWATER.DATA",
+  "officialSha256": "915a5217e6f6c4131c183ff7e7cd791acc942c6079522df6d4a5b6426e1d770e",
+  "sampleSha256": "471ad8f8f6d6826afe76f41ed28f0abe84c3fc37c73373340e705aaa899930f1",
+  "originalOfficialModel": false,
+  "changes": [
+    "Replace SUMMARY requests only with explicit gas/water well rate, cumulative, pressure and state vectors.",
+    "Add INIT output request to GRID; no physical input is changed."
+  ],
+  "physicalInputsAndScheduleUnchanged": true,
+  "manualUiVerified": false,
+  "platformImplemented": false,
+  "failedPreparationEvidence": "C:/GRDP-TestOutput/ECLIPSE-P06-PVDG-native-a1: unsupported explicit YEARS SUMMARY request; removed before native certification."
+}

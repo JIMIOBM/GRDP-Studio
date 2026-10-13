@@ -26,17 +26,19 @@ public class SoftwareIntegrationCapabilityService {
             WorkerCapabilities capabilities = workerClient.capabilities();
             boolean idle = Boolean.TRUE.equals(capabilities.idle());
             return response("AVAILABLE", idle, idle ? null : "WORKER_BUSY",
-                    normalize(capabilities.pipesimWell(), "2022.1", List.of("nodal", "profile", "combined", "sensitivity", "gas-lift-performance", "gas-lift-diagnostics", "vfp-tables", "esp-curves", "trajectory"),
+                    normalize(capabilities.pipesimWell(), "2022.1", List.of("nodal", "profile", "combined", "sensitivity", "gas-lift-performance", "gas-lift-diagnostics", "vfp-tables", "esp-curves", "esp-parameter", "trajectory"),
                             "PIPESIM_UNAVAILABLE", "PIPESIM_VERSION_MISMATCH"),
-                    normalize(capabilities.pipesimNetwork(), "2022.1", List.of("network", "system-analysis", "network-optimizer"),
+                    normalize(capabilities.pipesimNetwork(), "2022.1", List.of("network", "system-analysis", "network-optimizer", "network-well-performance-curves"),
                             "PIPESIM_UNAVAILABLE", "PIPESIM_VERSION_MISMATCH"),
                     normalize(capabilities.eclipse100(), "2024.1", List.of("eclipse"),
+                            "ECLIPSE_UNAVAILABLE", "ECLIPSE_VERSION_MISMATCH"),
+                    normalize(capabilities.eclipse300(), "2024.1", List.of("eclipse"),
                             "ECLIPSE_UNAVAILABLE", "ECLIPSE_VERSION_MISMATCH"));
         } catch (WorkerClientException exception) {
             return response("UNAVAILABLE", false, "WORKER_UNREACHABLE",
                     unavailable("WORKER_UNREACHABLE", 600),
                     unavailable("WORKER_UNREACHABLE", 600),
-                    unavailable("WORKER_UNREACHABLE", 1800));
+                    unavailable("WORKER_UNREACHABLE", 1800), unavailable("WORKER_UNREACHABLE", 1800));
         }
     }
 
@@ -46,6 +48,12 @@ public class SoftwareIntegrationCapabilityService {
         } catch (WorkerClientException exception) {
             return false;
         }
+    }
+
+    public boolean eclipse300Available() {
+        try {
+            return "AVAILABLE".equals(normalize(workerClient.capabilities().eclipse300(), "2024.1", List.of("eclipse"), "ECLIPSE_UNAVAILABLE", "ECLIPSE_VERSION_MISMATCH").status());
+        } catch (WorkerClientException exception) { return false; }
     }
 
     private static WorkerEclipseCapability normalize(WorkerEclipseCapability capability) {
@@ -85,10 +93,11 @@ public class SoftwareIntegrationCapabilityService {
     private static SoftwareIntegrationCapabilitiesResponse response(String workerStatus, boolean idle, String workerReason,
                                                                     WorkerSimulatorCapability well,
                                                                     WorkerSimulatorCapability network,
-                                                                    WorkerSimulatorCapability eclipse) {
+                                                                    WorkerSimulatorCapability eclipse,
+                                                                    WorkerSimulatorCapability compositional) {
         return new SoftwareIntegrationCapabilitiesResponse(
                 new SoftwareIntegrationCapabilitiesResponse.WorkerCapability(workerStatus, idle, workerReason),
-                response(well), response(network), response(eclipse));
+                response(well), response(network), response(eclipse), response(compositional));
     }
 
     private static SoftwareIntegrationCapabilitiesResponse.SimulatorCapability response(WorkerSimulatorCapability capability) {

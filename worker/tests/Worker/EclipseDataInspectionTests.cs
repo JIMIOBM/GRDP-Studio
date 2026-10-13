@@ -92,7 +92,7 @@ public sealed class EclipseDataInspectionTests : IDisposable
         Assert.Equal(["Well' One", "WELL_2"], inspection.WellNames);
         Assert.Equal(2, inspection.ScheduleTimeline!.Count);
         Assert.Equal([new EclipseScheduleDate("31", "FEB", "2024"), new EclipseScheduleDate("1", "JAN", "2025")], inspection.ScheduleTimeline[0].Records);
-        Assert.Equal(["1", "0.5", "1E2", "2"], inspection.ScheduleTimeline[1].Steps);
+        Assert.Equal(["1", "0.5", "1E2", "3", "3", "2"], inspection.ScheduleTimeline[1].Steps);
     }
 
     [Fact]

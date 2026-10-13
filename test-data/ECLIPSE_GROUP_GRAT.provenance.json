@@ -1,0 +1,28 @@
+{
+  "source": "C:\\ecl\\2024.1\\eclipse\\data\\BIG3D3P.DATA",
+  "sourceSha256": "940a5e181cc9dc65b4d8ff2ae9ffed21547c94a69057a5a5605aeade27fc8a1a",
+  "sourceUnchanged": true,
+  "sample": "ECLIPSE_GROUP_GRAT.DATA",
+  "sampleSha256": "2848d5098185474cae0bd50a98abf5b8d9e0640eba652a1370faa789a5af03d0",
+  "originalOfficialModel": false,
+  "changes": [
+    "SUMMARY requests GGPR G, WGPR and WBHP for four existing producers.",
+    "Four existing OPEN ORAT producers changed to GRUP; all per-well oil limits 20000 STB/day and BHP lower limits 2500 psia preserved.",
+    "Initial GCONPROD G GRAT 60000 inserted in official target slot. All reservoir/fluid physics, well specifications, completions, injectors and TSTEP preserved."
+  ],
+  "mode": "GRAT",
+  "group": "G",
+  "members": [
+    "PRODUCR1",
+    "PRODUCR2",
+    "PRODUCR3",
+    "PRODUCR4"
+  ],
+  "unit": "Mscf/day",
+  "baselineTarget": 60000,
+  "positiveTarget": 30000,
+  "pressureLimitedTarget": 250000,
+  "nativeBaseline": "C:\\GRDP-TestOutput\\ECLIPSE-P03-GROUP-RATE-probe-a1\\GRAT\\baseline\\CASE.DATA",
+  "nativeByteEquivalent": true,
+  "warnings": "Installed reference endpoint/PVT/default injector BHP and convergence warnings must remain visible."
+}

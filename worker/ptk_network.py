@@ -46,10 +46,9 @@ def inspect_network(model):
                       list(model.find(component="Completion")) and
                       list(model.find(component="Tubing")))
     connections = list(model.connections())
-    # A model without the well structure is a Network candidate when it has
-    # terminal/flowline topology.  This preserves Network validation for
-    # models that contain well nodes but no well-engineering components.
-    is_candidate = not well_model and bool(components["Sink"] or components["Flowline"])
+    # Surface-network capability is independent of well-engineering capability:
+    # official cases can contain both and must be validated per task.
+    is_candidate = bool(components["Sink"] or components["Flowline"])
     missing = []
     if not components["Source"] and not components["Well"]:
         missing.append("Source/Well")

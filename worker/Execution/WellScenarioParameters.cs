@@ -6,32 +6,76 @@ internal static class WellScenarioParameters
 {
     internal static bool Valid(JsonElement value, string task)
     {
-        if (value.ValueKind == JsonValueKind.Null) return task is not "sensitivity" and not "system-analysis" and not "network-optimizer" and not "gas-lift-performance" and not "gas-lift-diagnostics" and not "vfp-tables" and not "trajectory";
-        if (task == "esp-curves") return value.ValueKind == JsonValueKind.Object && value.EnumerateObject().Count() == 1 &&
-            value.TryGetProperty("schemaVersion", out var espSchema) && espSchema.ValueKind == JsonValueKind.String &&
-            espSchema.GetString() == "pipesim-esp-curves-parameters/1";
-        if (task == "trajectory") return value.ValueKind == JsonValueKind.Object && value.EnumerateObject().Count() == 1 &&
-            value.TryGetProperty("schemaVersion", out var trajectorySchema) && trajectorySchema.ValueKind == JsonValueKind.String &&
-            trajectorySchema.GetString() == "pipesim-well-trajectory-parameters/1";
-        if (task == "sensitivity") return SensitivityValid(value);
-        if (task == "gas-lift-performance") return GasLiftPerformanceValid(value);
-        if (task == "gas-lift-diagnostics") return GasLiftDiagnosticsValid(value);
-        if (task == "vfp-tables") return VfpTablesValid(value);
-        if (task == "network") return NetworkScenarioParameters.Valid(value) || NetworkChokeBeanSizeParameters.Valid(value);
-        if (task == "network-optimizer") return NetworkOptimizerValid(value);
-        if (task == "system-analysis") return SystemAnalysisParameters.Valid(value);
-        if (task is ("profile" or "combined") && value.ValueKind == JsonValueKind.Object && value.EnumerateObject().Count() == 2
-            && value.TryGetProperty("schemaVersion", out var profileSchema) && profileSchema.ValueKind == JsonValueKind.String
-            && profileSchema.GetString() == "pipesim-well-profile-parameters/1")
+        if (value.ValueKind == JsonValueKind.Null)
+            return task is "nodal" or "profile" or "combined" or "network" or "esp-curves";
+        // Check the common JSON shape before task-specific validators read strings.
+        if (value.ValueKind != JsonValueKind.Object || !value.TryGetProperty("schemaVersion", out var schema)
+            || schema.ValueKind != JsonValueKind.String) return false;
+
+        return task switch
         {
-            return Number(value, "outletPressurePsi", 0, 100000)
-                && value.GetProperty("outletPressurePsi").GetDouble() > 0;
-        }
-        if (task is not ("nodal" or "profile" or "combined") || value.ValueKind != JsonValueKind.Object || value.EnumerateObject().Count() != 2) return false;
-        return value.TryGetProperty("schemaVersion", out var schema) && schema.ValueKind == JsonValueKind.String
-            && schema.GetString() == "pipesim-well-parameters/1"
-            && value.TryGetProperty("reservoirPressurePsi", out var pressure) && pressure.ValueKind == JsonValueKind.Number
-            && pressure.TryGetDouble(out var number) && double.IsFinite(number) && number > 0 && number <= 100000;
+            "esp-curves" => EspCurvesValid(value, schema.GetString()),
+            "esp-parameter" => EspParameterValid(value),
+            "trajectory" => TrajectoryValid(value, schema.GetString()),
+            "profile" when schema.GetString() == "pipesim-well-tubing-diameter-parameters/1" => TubingDiameterValid(value),
+            "nodal" or "profile" or "combined" => FlowParametersValid(value, task, schema.GetString()),
+            "sensitivity" => SensitivityValid(value),
+            "gas-lift-performance" => GasLiftPerformanceValid(value),
+            "gas-lift-diagnostics" => GasLiftDiagnosticsValid(value),
+            "vfp-tables" => VfpTablesValid(value),
+            "network" => NetworkScenarioParameters.Valid(value) || NetworkChokeBeanSizeParameters.Valid(value)
+                || NetworkFlowlineDiameterParameters.Valid(value) || NetworkConnectionParameters.Valid(value),
+            "network-well-performance-curves" => NetworkWellPerformanceParameters.Valid(value),
+            "network-optimizer" => NetworkOptimizerValid(value),
+            "system-analysis" => SystemAnalysisParameters.Valid(value),
+            _ => false
+        };
+    }
+
+    private static bool EspCurvesValid(JsonElement value, string? schema) => schema switch
+    {
+        "pipesim-esp-curves-parameters/1" => HasExactlyProperties(value, "schemaVersion"),
+        "pipesim-esp-curves-parameters/2" => HasExactlyProperties(value, "schemaVersion", "wellContext", "espContext")
+            && SafeName(value.GetProperty("wellContext")) && SafeName(value.GetProperty("espContext")),
+        _ => false
+    };
+
+    private static bool TrajectoryValid(JsonElement value, string? schema) => schema switch
+    {
+        "pipesim-well-trajectory-parameters/1" => HasExactlyProperties(value, "schemaVersion"),
+        "pipesim-well-trajectory-parameters/2" => HasExactlyProperties(value, "schemaVersion", "wellContext")
+            && SafeName(value.GetProperty("wellContext")),
+        "pipesim-well-trajectory-parameters/3" => HasExactlyProperties(value, "schemaVersion", "wellContext", "stationIndex", "targetInclinationDeg")
+            && SafeName(value.GetProperty("wellContext")) && Integer(value, "stationIndex", 1, 4094)
+            && Number(value, "targetInclinationDeg", 0, 90),
+        _ => false
+    };
+
+    private static bool FlowParametersValid(JsonElement value, string task, string? schema)
+    {
+        var field = schema switch
+        {
+            "pipesim-well-profile-parameters/1" when task is "profile" or "combined" => "outletPressurePsi",
+            "pipesim-well-parameters/1" => "reservoirPressurePsi",
+            _ => null
+        };
+        return field is not null && HasExactlyProperties(value, "schemaVersion", field)
+            && Number(value, field, 0, 100000) && value.GetProperty(field).GetDouble() > 0;
+    }
+
+    private static bool TubingDiameterValid(JsonElement value)
+    {
+        if (!HasExactlyProperties(value, "schemaVersion", "baselineRunId", "wellContext", "tubingContext", "originalInnerDiameter", "unit", "targetInnerDiameter")
+            || value.GetProperty("baselineRunId").ValueKind != JsonValueKind.Number
+            || !value.GetProperty("baselineRunId").TryGetInt64(out var baselineRunId) || baselineRunId <= 0
+            || !SafeName(value.GetProperty("wellContext")) || !SafeName(value.GetProperty("tubingContext"))
+            || value.GetProperty("unit").ValueKind != JsonValueKind.String) return false;
+        var unit = value.GetProperty("unit").GetString();
+        if (string.IsNullOrWhiteSpace(unit) || unit.Length > 32 || unit.Any(char.IsControl)
+            || !Number(value, "originalInnerDiameter", 0, 1000) || !Number(value, "targetInnerDiameter", 0, 1000)) return false;
+        var original = value.GetProperty("originalInnerDiameter").GetDouble();
+        var target = value.GetProperty("targetInnerDiameter").GetDouble();
+        return original > 0 && target > 0 && Math.Abs(original - target) > Math.Max(1e-12, Math.Abs(original) * 1e-12);
     }
 
     private static bool SensitivityValid(JsonElement value)
@@ -129,7 +173,7 @@ internal static class WellScenarioParameters
             || fields.Any(field => !value.TryGetProperty(field, out _))
             || !value.TryGetProperty("schemaVersion", out var schema) || schema.GetString() != "pipesim-vfp-tables-parameters/1"
             || !value.TryGetProperty("producer", out var producer) || !SafeName(producer)
-            || !value.TryGetProperty("reservoirSimulator", out var simulator) || simulator.GetString() != "ECLIPSE"
+            || !value.TryGetProperty("reservoirSimulator", out var simulator) || simulator.ValueKind != JsonValueKind.String || simulator.GetString() != "ECLIPSE"
             || !value.TryGetProperty("tableNumber", out var tableNumber) || tableNumber.ValueKind != JsonValueKind.Number
             || !tableNumber.TryGetInt32(out var number) || number < 1 || number > 100000
             || !value.TryGetProperty("includeTemperature", out var includeTemperature) || includeTemperature.ValueKind is not (JsonValueKind.True or JsonValueKind.False)
@@ -139,6 +183,33 @@ internal static class WellScenarioParameters
             && Increasing(value.GetProperty("waterCutFraction"), 0, 1)
             && Increasing(value.GetProperty("gorMscfPerStb"), 0, 1000000)
             && Increasing(value.GetProperty("artificialLiftInjectionDpPsi"), 0, 1000000);
+    }
+
+    private static bool EspParameterValid(JsonElement value)
+    {
+        if (value.ValueKind != JsonValueKind.Object || !value.TryGetProperty("schemaVersion", out var schema) || schema.ValueKind != JsonValueKind.String
+            || !value.TryGetProperty("espContext", out var context) || !SafeName(context)
+            || !value.TryGetProperty("parameter", out var parameter) || parameter.ValueKind != JsonValueKind.String) return false;
+        return schema.GetString() switch
+        {
+            "pipesim-esp-parameter-parameters/1" =>
+                HasExactlyProperties(value, "schemaVersion", "espContext", "parameter", "targetValueHz")
+                && parameter.GetString() == "operatingFrequency"
+                && Number(value, "targetValueHz", 0, 200)
+                && value.GetProperty("targetValueHz").GetDouble() > 0,
+            "pipesim-esp-parameter-parameters/2" =>
+                HasExactlyProperties(value, "schemaVersion", "espContext", "parameter", "targetValue")
+                && parameter.GetString() == "headFactor"
+                && Number(value, "targetValue", 0, 2)
+                && value.GetProperty("targetValue").GetDouble() > 0,
+            "pipesim-esp-parameter-parameters/3" =>
+                HasExactlyProperties(value, "schemaVersion", "wellContext", "espContext", "parameter", "targetValue")
+                && SafeName(value.GetProperty("wellContext")) && SafeName(value.GetProperty("espContext"))
+                && parameter.GetString() is "headFactor" or "operatingFrequency"
+                && Number(value, "targetValue", 0, parameter.GetString() == "headFactor" ? 2 : 200)
+                && value.GetProperty("targetValue").GetDouble() > 0,
+            _ => false
+        };
     }
 
     private static bool NetworkOptimizerValid(JsonElement value)
@@ -170,10 +241,19 @@ internal static class WellScenarioParameters
     private static bool SafeName(JsonElement value) => value.ValueKind == JsonValueKind.String
         && !string.IsNullOrWhiteSpace(value.GetString()) && value.GetString()!.Length <= 255
         && !value.GetString()!.Contains("..", StringComparison.Ordinal)
-        && value.GetString()!.IndexOfAny(['/', '\\', '\0']) < 0;
+        && value.GetString()!.IndexOfAny(['/', '\\']) < 0
+        && !value.GetString()!.Any(char.IsControl);
+
+    private static bool HasExactlyProperties(JsonElement value, params string[] names) =>
+        value.ValueKind == JsonValueKind.Object && value.EnumerateObject().Count() == names.Length
+        && names.All(name => value.TryGetProperty(name, out _));
 
     private static bool Number(JsonElement value, string name, double lowerInclusive, double upperInclusive) =>
         value.TryGetProperty(name, out var item) && item.ValueKind == JsonValueKind.Number
         && item.TryGetDouble(out var number) && double.IsFinite(number)
         && number >= lowerInclusive && number <= upperInclusive;
+
+    private static bool Integer(JsonElement value, string name, int lowerInclusive, int upperInclusive) =>
+        value.TryGetProperty(name, out var item) && item.ValueKind == JsonValueKind.Number
+        && item.TryGetInt32(out var number) && number >= lowerInclusive && number <= upperInclusive;
 }

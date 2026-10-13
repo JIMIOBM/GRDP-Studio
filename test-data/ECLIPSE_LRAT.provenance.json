@@ -1,0 +1,12 @@
+{
+  "officialSource": "C:\\ecl\\2024.1\\eclipse\\data\\BASE_WATER.DATA",
+  "officialSha256": "329f86cf71d90b7920a6fc26404e228b4e617c78654e5ccf25640ae69e5047df",
+  "sampleSha256": "c128f7a4a20ee1680938af85b47aa76f5739789faa721941123acda605b8aad9",
+  "controlMode": "LRAT",
+  "well": "P1",
+  "changes": [
+    "Replace SUMMARY requests with unique target flow, WBHP and liquid constituents.",
+    "P1 BHP production becomes LRAT 5000 STB/day; retain original 3000 psia BHP limit. Reservoir, fluid, geometry, injection and time steps unchanged."
+  ],
+  "physicsAndScheduleUnchanged": false
+}

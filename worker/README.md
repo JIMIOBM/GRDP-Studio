@@ -8,6 +8,8 @@ The Worker runs under the signed-in Windows user, listens only on loopback, and 
 
 PIPESIM validation and execution share both an in-process reservation and the machine-wide `Global\GRDP-Pipesim-Golden-Capture` mutex. The mutex is acquired and released on one dedicated thread.
 
+The local IAM × PIPESIM demo has a separate fixed-case endpoint set. Its paths are trusted Worker configuration; browser requests cannot supply paths or executable arguments. Override with `GRDP_WORKER_Worker__IamDemoSourceModelPath`, `GRDP_WORKER_Worker__IamDemoEngineInputPath`, `GRDP_WORKER_Worker__IamDemoInstallationPath`, `GRDP_WORKER_Worker__IamDemoPipesimProgramsPath`, or `GRDP_WORKER_Worker__IamDemoProbePath`. Defaults point into the local `StorageRoot` SIS2 evidence folders and `%LOCALAPPDATA%\GRDP\IamRestHost\PipesimAgentProbe.exe`. Build the .NET Framework probe with `tools/iam/build-agent-probe.ps1`. The probe must run against the isolated IAM clone containing the tested Stingray adapter; it must not target the vendor Program Files installation.
+
 The Worker assigns the Python host to a Windows Job Object before releasing its start gate. The Job uses `KILL_ON_JOB_CLOSE` without breakaway, so cancellation, timeout, and Worker shutdown retain ownership of the complete PTK process tree. Terminal publication and global-lock release require confirmed Job cleanup.
 
 ## API
@@ -18,6 +20,13 @@ The Worker assigns the Python host to a Windows Job Object before releasing its 
 - `POST /api/runs/execute`
 - `GET /api/runs/{runId}?afterSequence=N`
 - `POST /api/runs/{runId}/cancel`
+- `GET /api/iam-pipesim-demo/capabilities`
+- `GET /api/iam-pipesim-demo/runs`
+- `POST /api/iam-pipesim-demo/runs`
+- `GET /api/iam-pipesim-demo/runs/{runId}`
+- `POST /api/iam-pipesim-demo/runs/{runId}/cancel`
+
+The demo recalculates the SIS2 PIPESIM network through IAM's `StingrayEngineAgentManager`. `POST /api/iam-pipesim-demo/runs` accepts an optional JSON body such as `{"outletPressurePsia":800}`; the editable `OIL_EXPORT` sink pressure is limited to 500–1000 psia (default 600). Worker changes exactly that boundary in a run-scoped copy of `SIS2.tnt`, records both the template and run input SHA-256, and leaves the configured source files untouched. Each isolated input/evidence/result is stored under `StorageRoot/iam-pipesim-demo/runs/<runId>`. A run succeeds only after Agent initialization, service creation, `Calculate`, engine result success, and cleanup all pass. The UI can compare returned variables with a prior successful run. The Worker retains the latest 20 run summaries in memory for its current generation; result JSON can be downloaded from the UI. This is an Agent Manager-to-Engine integration demo, not an IAM REST activation flow or an ECLIPSE coupled solve.
 
 Validation accepts only a relative storage key and expected source hash:
 

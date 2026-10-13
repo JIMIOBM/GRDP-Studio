@@ -1,0 +1,764 @@
+{
+  "id": 570,
+  "projectId": 139,
+  "modelId": 175,
+  "modelVersionId": 179,
+  "modelName": "ECLIPSE_RELPERM_OIL",
+  "versionNo": 1,
+  "status": "SUCCEEDED",
+  "study": null,
+  "runType": "eclipse",
+  "parameters": null,
+  "createdAt": "2026-10-13T00:41:38.247",
+  "queuedAt": "2026-10-13T00:41:38.247",
+  "claimedAt": "2026-10-13T00:41:38.608",
+  "startedAt": "2026-10-13T00:41:39.086",
+  "deadlineAt": "2026-10-13T01:11:39.086",
+  "finishedAt": "2026-10-13T00:41:45.631",
+  "timeoutSeconds": 1800,
+  "elapsedMillis": 6545,
+  "cancellable": false,
+  "error": null,
+  "cleanup": {
+    "message": "ECLIPSE cleanup completed.",
+    "killUsed": false,
+    "inputDeleted": true,
+    "workDirectoryDeleted": true,
+    "processTreeExitConfirmed": true
+  },
+  "resultContract": "VALID_FULL",
+  "result": {
+    "schemaVersion": "eclipse-summary-result/1",
+    "modelKind": "eclipse_100",
+    "runTask": "eclipse",
+    "resultContract": "VALID_FULL",
+    "caseName": "ECLIPSE_RELPERM_OIL.DATA",
+    "eclEnd": {
+      "comments": 0,
+      "warnings": 0,
+      "problems": 0,
+      "errors": 0,
+      "bugs": 0
+    },
+    "summary": {
+      "series": [
+        {
+          "keyword": "YEARS",
+          "objectName": null,
+          "unit": "YEARS",
+          "points": [
+            {
+              "timeDays": 0,
+              "value": 0
+            },
+            {
+              "timeDays": 5,
+              "value": 0.01368925254791975
+            },
+            {
+              "timeDays": 10,
+              "value": 0.02737850695848465
+            },
+            {
+              "timeDays": 15,
+              "value": 0.041067760437726974
+            },
+            {
+              "timeDays": 20,
+              "value": 0.0547570139169693
+            },
+            {
+              "timeDays": 25,
+              "value": 0.06844627112150192
+            },
+            {
+              "timeDays": 30,
+              "value": 0.08213552087545395
+            },
+            {
+              "timeDays": 35,
+              "value": 0.09582477807998657
+            },
+            {
+              "timeDays": 40,
+              "value": 0.1095140278339386
+            },
+            {
+              "timeDays": 45,
+              "value": 0.12320329248905182
+            },
+            {
+              "timeDays": 50,
+              "value": 0.13689254224300385
+            },
+            {
+              "timeDays": 55,
+              "value": 0.15058179199695587
+            },
+            {
+              "timeDays": 60,
+              "value": 0.1642710417509079
+            },
+            {
+              "timeDays": 65,
+              "value": 0.17796030640602112
+            },
+            {
+              "timeDays": 70,
+              "value": 0.19164955615997314
+            },
+            {
+              "timeDays": 75,
+              "value": 0.20533880591392517
+            },
+            {
+              "timeDays": 80,
+              "value": 0.2190280556678772
+            },
+            {
+              "timeDays": 85,
+              "value": 0.23271732032299042
+            },
+            {
+              "timeDays": 90,
+              "value": 0.24640657007694244
+            },
+            {
+              "timeDays": 95,
+              "value": 0.26009583473205566
+            },
+            {
+              "timeDays": 100,
+              "value": 0.2737850844860077
+            }
+          ]
+        },
+        {
+          "keyword": "WLPR",
+          "objectName": "P1",
+          "unit": "STB/DAY",
+          "points": [
+            {
+              "timeDays": 0,
+              "value": 0
+            },
+            {
+              "timeDays": 5,
+              "value": 5000
+            },
+            {
+              "timeDays": 10,
+              "value": 5000
+            },
+            {
+              "timeDays": 15,
+              "value": 1898.5885009765625
+            },
+            {
+              "timeDays": 20,
+              "value": 1098.836181640625
+            },
+            {
+              "timeDays": 25,
+              "value": 880.671142578125
+            },
+            {
+              "timeDays": 30,
+              "value": 814.303466796875
+            },
+            {
+              "timeDays": 35,
+              "value": 792.5364379882812
+            },
+            {
+              "timeDays": 40,
+              "value": 784.62890625
+            },
+            {
+              "timeDays": 45,
+              "value": 781.7534790039062
+            },
+            {
+              "timeDays": 50,
+              "value": 780.8271484375
+            },
+            {
+              "timeDays": 55,
+              "value": 780.814453125
+            },
+            {
+              "timeDays": 60,
+              "value": 781.1467895507812
+            },
+            {
+              "timeDays": 65,
+              "value": 782.4392700195312
+            },
+            {
+              "timeDays": 70,
+              "value": 783.1277465820312
+            },
+            {
+              "timeDays": 75,
+              "value": 783.6720581054688
+            },
+            {
+              "timeDays": 80,
+              "value": 785.0238647460938
+            },
+            {
+              "timeDays": 85,
+              "value": 786.0211791992188
+            },
+            {
+              "timeDays": 90,
+              "value": 786.6099243164062
+            },
+            {
+              "timeDays": 95,
+              "value": 787.0411987304688
+            },
+            {
+              "timeDays": 100,
+              "value": 787.3981323242188
+            }
+          ]
+        },
+        {
+          "keyword": "WBHP",
+          "objectName": "P1",
+          "unit": "PSIA",
+          "points": [
+            {
+              "timeDays": 0,
+              "value": 4500
+            },
+            {
+              "timeDays": 5,
+              "value": 3648.781005859375
+            },
+            {
+              "timeDays": 10,
+              "value": 3005.312744140625
+            },
+            {
+              "timeDays": 15,
+              "value": 3000
+            },
+            {
+              "timeDays": 20,
+              "value": 3000
+            },
+            {
+              "timeDays": 25,
+              "value": 3000
+            },
+            {
+              "timeDays": 30,
+              "value": 3000
+            },
+            {
+              "timeDays": 35,
+              "value": 3000
+            },
+            {
+              "timeDays": 40,
+              "value": 3000
+            },
+            {
+              "timeDays": 45,
+              "value": 3000
+            },
+            {
+              "timeDays": 50,
+              "value": 3000
+            },
+            {
+              "timeDays": 55,
+              "value": 3000
+            },
+            {
+              "timeDays": 60,
+              "value": 3000
+            },
+            {
+              "timeDays": 65,
+              "value": 3000
+            },
+            {
+              "timeDays": 70,
+              "value": 3000
+            },
+            {
+              "timeDays": 75,
+              "value": 3000
+            },
+            {
+              "timeDays": 80,
+              "value": 3000
+            },
+            {
+              "timeDays": 85,
+              "value": 3000
+            },
+            {
+              "timeDays": 90,
+              "value": 3000
+            },
+            {
+              "timeDays": 95,
+              "value": 3000
+            },
+            {
+              "timeDays": 100,
+              "value": 3000
+            }
+          ]
+        },
+        {
+          "keyword": "WOPR",
+          "objectName": "P1",
+          "unit": "STB/DAY",
+          "points": [
+            {
+              "timeDays": 0,
+              "value": 0
+            },
+            {
+              "timeDays": 5,
+              "value": 4996.2900390625
+            },
+            {
+              "timeDays": 10,
+              "value": 4992.5654296875
+            },
+            {
+              "timeDays": 15,
+              "value": 1895.4591064453125
+            },
+            {
+              "timeDays": 20,
+              "value": 1096.976318359375
+            },
+            {
+              "timeDays": 25,
+              "value": 879.166259765625
+            },
+            {
+              "timeDays": 30,
+              "value": 812.9044189453125
+            },
+            {
+              "timeDays": 35,
+              "value": 791.1685791015625
+            },
+            {
+              "timeDays": 40,
+              "value": 783.2683715820312
+            },
+            {
+              "timeDays": 45,
+              "value": 780.3909912109375
+            },
+            {
+              "timeDays": 50,
+              "value": 779.4585571289062
+            },
+            {
+              "timeDays": 55,
+              "value": 779.4371948242188
+            },
+            {
+              "timeDays": 60,
+              "value": 779.75927734375
+            },
+            {
+              "timeDays": 65,
+              "value": 781.0386962890625
+            },
+            {
+              "timeDays": 70,
+              "value": 781.7139892578125
+            },
+            {
+              "timeDays": 75,
+              "value": 782.2442016601562
+            },
+            {
+              "timeDays": 80,
+              "value": 783.5790405273438
+            },
+            {
+              "timeDays": 85,
+              "value": 784.5585327148438
+            },
+            {
+              "timeDays": 90,
+              "value": 785.1285400390625
+            },
+            {
+              "timeDays": 95,
+              "value": 785.5396118164062
+            },
+            {
+              "timeDays": 100,
+              "value": 785.87451171875
+            }
+          ]
+        },
+        {
+          "keyword": "WWPR",
+          "objectName": "P1",
+          "unit": "STB/DAY",
+          "points": [
+            {
+              "timeDays": 0,
+              "value": 0
+            },
+            {
+              "timeDays": 5,
+              "value": 3.7098710536956787
+            },
+            {
+              "timeDays": 10,
+              "value": 7.434547424316406
+            },
+            {
+              "timeDays": 15,
+              "value": 3.1293516159057617
+            },
+            {
+              "timeDays": 20,
+              "value": 1.8599016666412354
+            },
+            {
+              "timeDays": 25,
+              "value": 1.504908800125122
+            },
+            {
+              "timeDays": 30,
+              "value": 1.399050235748291
+            },
+            {
+              "timeDays": 35,
+              "value": 1.367823839187622
+            },
+            {
+              "timeDays": 40,
+              "value": 1.3605222702026367
+            },
+            {
+              "timeDays": 45,
+              "value": 1.3624907732009888
+            },
+            {
+              "timeDays": 50,
+              "value": 1.3686370849609375
+            },
+            {
+              "timeDays": 55,
+              "value": 1.3772896528244019
+            },
+            {
+              "timeDays": 60,
+              "value": 1.3875457048416138
+            },
+            {
+              "timeDays": 65,
+              "value": 1.400577187538147
+            },
+            {
+              "timeDays": 70,
+              "value": 1.4137269258499146
+            },
+            {
+              "timeDays": 75,
+              "value": 1.427865982055664
+            },
+            {
+              "timeDays": 80,
+              "value": 1.4448339939117432
+            },
+            {
+              "timeDays": 85,
+              "value": 1.4626704454421997
+            },
+            {
+              "timeDays": 90,
+              "value": 1.4813958406448364
+            },
+            {
+              "timeDays": 95,
+              "value": 1.5016058683395386
+            },
+            {
+              "timeDays": 100,
+              "value": 1.5236138105392456
+            }
+          ]
+        }
+      ]
+    },
+    "grid": null,
+    "fieldIndex": null,
+    "outputFiles": [
+      {
+        "name": "ECLIPSE_RELPERM_OIL.ECLEND",
+        "sizeBytes": 335,
+        "sha256": "cba5ea609cf3bd38cd2b5b38020437a110566fe8cc0944db6b9d49d241adf781"
+      },
+      {
+        "name": "ECLIPSE_RELPERM_OIL.FEGRID",
+        "sizeBytes": 7999,
+        "sha256": "abc3fe1c94a3154c4a4bb0c5c5066a9ea0122c15e999a9d1dfc6b156d789d411"
+      },
+      {
+        "name": "ECLIPSE_RELPERM_OIL.FINIT",
+        "sizeBytes": 34080,
+        "sha256": "17db6262f45b624f5d820e7637fac795181038365da7ce4c4609ff0adbbcc0db"
+      },
+      {
+        "name": "ECLIPSE_RELPERM_OIL.FSMSPEC",
+        "sizeBytes": 1848,
+        "sha256": "68ba1de4f283509881945fd42b0d62a72bfd16de9940ecd0850c3d376d042b28"
+      },
+      {
+        "name": "ECLIPSE_RELPERM_OIL.FUNRST",
+        "sizeBytes": 1466304,
+        "sha256": "f9678e9f8821e72aafd53ebffd5996af217c5c44e484f3bae723bdd775df1160"
+      },
+      {
+        "name": "ECLIPSE_RELPERM_OIL.FUNSMRY",
+        "sizeBytes": 4784,
+        "sha256": "0cfdfd6395a1149a3250b4926865a7d9702d376926907c25dcd9c2231c1e2a58"
+      },
+      {
+        "name": "ECLIPSE_RELPERM_OIL.MSG",
+        "sizeBytes": 6801,
+        "sha256": "b4bea2a0d6ac27b905c118cba5094cfc8211e82af0f646002495fff0c132bcf3"
+      },
+      {
+        "name": "ECLIPSE_RELPERM_OIL.PRT",
+        "sizeBytes": 289889,
+        "sha256": "4f2aa2936309dc5cb0f524f3942df89f017ebb35b32980b3a02e07b370b38c00"
+      }
+    ],
+    "messages": []
+  },
+  "events": [
+    {
+      "id": 30297,
+      "sequence": 1,
+      "workerSequence": null,
+      "type": "STATE",
+      "status": "CREATED",
+      "message": "运行已创建",
+      "error": null,
+      "occurredAt": "2026-10-13T00:41:38.247"
+    },
+    {
+      "id": 30298,
+      "sequence": 2,
+      "workerSequence": null,
+      "type": "STATE",
+      "status": "QUEUED",
+      "message": "运行已进入持久队列",
+      "error": null,
+      "occurredAt": "2026-10-13T00:41:38.247"
+    },
+    {
+      "id": 30299,
+      "sequence": 3,
+      "workerSequence": null,
+      "type": "STATE",
+      "status": "CLAIMED",
+      "message": "运行已由调度器认领",
+      "error": null,
+      "occurredAt": "2026-10-13T00:41:38.608"
+    },
+    {
+      "id": 30300,
+      "sequence": 4,
+      "workerSequence": null,
+      "type": "WORKER_ACCEPTED",
+      "status": "CLAIMED",
+      "message": "Worker 已接受运行",
+      "error": null,
+      "occurredAt": "2026-10-13T00:41:39.086"
+    },
+    {
+      "id": 30301,
+      "sequence": 5,
+      "workerSequence": 1,
+      "type": "STATE",
+      "status": "CLAIMED",
+      "message": "Run claimed by Worker generation.",
+      "error": null,
+      "occurredAt": "2026-10-13T00:41:39.076"
+    },
+    {
+      "id": 30302,
+      "sequence": 6,
+      "workerSequence": 2,
+      "type": "STATE",
+      "status": "PREPARING",
+      "message": "Preparing isolated ECLIPSE deck.",
+      "error": null,
+      "occurredAt": "2026-10-13T00:41:39.085"
+    },
+    {
+      "id": 30303,
+      "sequence": 7,
+      "workerSequence": 3,
+      "type": "STATE",
+      "status": "RUNNING_ECLIPSE",
+      "message": "Running ECLIPSE 100.",
+      "error": null,
+      "occurredAt": "2026-10-13T00:41:39.113"
+    },
+    {
+      "id": 30304,
+      "sequence": 8,
+      "workerSequence": null,
+      "type": "STATE",
+      "status": "PREPARING",
+      "message": "Worker 正在准备模型",
+      "error": null,
+      "occurredAt": "2026-10-13T00:41:39.174"
+    },
+    {
+      "id": 30305,
+      "sequence": 9,
+      "workerSequence": null,
+      "type": "STATE",
+      "status": "RUNNING_ECLIPSE",
+      "message": "Worker 正在执行 ECLIPSE 计算",
+      "error": null,
+      "occurredAt": "2026-10-13T00:41:39.201"
+    },
+    {
+      "id": 30306,
+      "sequence": 10,
+      "workerSequence": 4,
+      "type": "STATE",
+      "status": "COLLECTING",
+      "message": "Collecting fresh ECLIPSE output.",
+      "error": null,
+      "occurredAt": "2026-10-13T00:41:45.184"
+    },
+    {
+      "id": 30307,
+      "sequence": 11,
+      "workerSequence": 5,
+      "type": "STATE",
+      "status": "COLLECTING",
+      "message": "Restart source is outside the verified E100 formatted global-grid scope; no selectable restart catalog was published.",
+      "error": null,
+      "occurredAt": "2026-10-13T00:41:45.248"
+    },
+    {
+      "id": 30308,
+      "sequence": 12,
+      "workerSequence": 6,
+      "type": "STATE",
+      "status": "SUCCEEDED",
+      "message": "ECLIPSE 100 completed successfully.",
+      "error": null,
+      "occurredAt": "2026-10-13T00:41:45.273"
+    },
+    {
+      "id": 30309,
+      "sequence": 13,
+      "workerSequence": null,
+      "type": "STATE",
+      "status": "COLLECTING",
+      "message": "Worker 正在收集结果",
+      "error": null,
+      "occurredAt": "2026-10-13T00:41:45.376"
+    },
+    {
+      "id": 30310,
+      "sequence": 14,
+      "workerSequence": null,
+      "type": "STATE",
+      "status": "SUCCEEDED",
+      "message": "运行完成",
+      "error": null,
+      "occurredAt": "2026-10-13T00:41:45.631"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": 4529,
+      "name": "eclipse-output-ECLIPSE_RELPERM_OIL.FUNRST",
+      "type": "output",
+      "contentType": "application/octet-stream",
+      "sizeBytes": 1466304,
+      "sha256": "f9678e9f8821e72aafd53ebffd5996af217c5c44e484f3bae723bdd775df1160",
+      "createdAt": "2026-10-13T00:41:45.472",
+      "expiresAt": "2026-11-12T00:41:45.472"
+    },
+    {
+      "id": 4530,
+      "name": "eclipse-output-ECLIPSE_RELPERM_OIL.FEGRID",
+      "type": "output",
+      "contentType": "application/octet-stream",
+      "sizeBytes": 7999,
+      "sha256": "abc3fe1c94a3154c4a4bb0c5c5066a9ea0122c15e999a9d1dfc6b156d789d411",
+      "createdAt": "2026-10-13T00:41:45.504",
+      "expiresAt": "2026-11-12T00:41:45.504"
+    },
+    {
+      "id": 4531,
+      "name": "eclipse-output-ECLIPSE_RELPERM_OIL.FINIT",
+      "type": "output",
+      "contentType": "application/octet-stream",
+      "sizeBytes": 34080,
+      "sha256": "17db6262f45b624f5d820e7637fac795181038365da7ce4c4609ff0adbbcc0db",
+      "createdAt": "2026-10-13T00:41:45.54",
+      "expiresAt": "2026-11-12T00:41:45.54"
+    },
+    {
+      "id": 4532,
+      "name": "eclipse-output-ECLIPSE_RELPERM_OIL.FUNSMRY",
+      "type": "output",
+      "contentType": "application/octet-stream",
+      "sizeBytes": 4784,
+      "sha256": "0cfdfd6395a1149a3250b4926865a7d9702d376926907c25dcd9c2231c1e2a58",
+      "createdAt": "2026-10-13T00:41:45.571",
+      "expiresAt": "2026-11-12T00:41:45.571"
+    },
+    {
+      "id": 4533,
+      "name": "normalized-result.json",
+      "type": "normalized-result",
+      "contentType": "application/json",
+      "sizeBytes": 12226,
+      "sha256": "341b65a1d4779fe2e9da4808765d193c0323d0580578539edcd6e2c9e28a3999",
+      "createdAt": "2026-10-13T00:41:45.592",
+      "expiresAt": "2026-11-12T00:41:45.592"
+    },
+    {
+      "id": 4534,
+      "name": "run.log",
+      "type": "log",
+      "contentType": "text/plain",
+      "sizeBytes": 20,
+      "sha256": "49a9a2378ce2aa9174c8c9da7faa3f814612d01699e43a52b84d2fe7b63e06aa",
+      "createdAt": "2026-10-13T00:41:45.606",
+      "expiresAt": "2026-11-12T00:41:45.606"
+    },
+    {
+      "id": 4535,
+      "name": "manifest.json",
+      "type": "manifest",
+      "contentType": "application/json",
+      "sizeBytes": 1597,
+      "sha256": "cc01999cad5c56a76466ae1f1282ffaa277ebfac4023a04dfd613a35317512c3",
+      "createdAt": "2026-10-13T00:41:45.621",
+      "expiresAt": "2026-11-12T00:41:45.621"
+    }
+  ],
+  "resultExpiresAt": "2026-11-12T00:41:45.631",
+  "resultExpired": false
+}

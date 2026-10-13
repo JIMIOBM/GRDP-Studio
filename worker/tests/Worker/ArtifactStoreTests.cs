@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Security.Cryptography;
 using System.Text;
+using System.IO.Compression;
 using Grdp.SoftwareIntegration.Worker.Execution;
 using Grdp.SoftwareIntegration.Worker.Storage;
 using Microsoft.Extensions.Options;
@@ -30,6 +31,89 @@ public sealed class ArtifactStoreTests : IDisposable
         Assert.DoesNotContain("operator", json);
         Assert.DoesNotContain("private-id", json);
         Assert.Contains("[redacted]", json);
+    }
+
+    [Fact]
+    public async Task WritesOfficialVfpTableTextAsSeparateDownloadableArtifact()
+    {
+        var output = Path.Combine(root, "jobs", "2", "output");
+        Directory.CreateDirectory(output);
+        var store = new ArtifactStore(new StorageResolver(Options.Create(new WorkerOptions { StorageRoot = root })));
+
+        var artifact = await store.WritePipesimVfpTableAsync(output,
+            "VFPPROD\n 2 30 /\n", includeTemperature: false, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal("text/plain; charset=utf-8", artifact.ContentType);
+        Assert.Equal("VFPPROD\n 2 30 /\n", await File.ReadAllTextAsync(Path.Combine(output, "pipesim-vfp-table.vfpprod"), TestContext.Current.CancellationToken));
+        await store.WritePipesimVfpTableAsync(output,
+            "VFPPROD\n 2 30 /\n", includeTemperature: true, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.True(File.Exists(Path.Combine(output, "pipesim-vfp-table-temperature.vfpprod")));
+        await Assert.ThrowsAsync<InvalidDataException>(() => store.WritePipesimVfpTableAsync(
+            output, "not a VFP keyword", includeTemperature: true, cancellationToken: TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task PackagesOnlyResolvedEclipseInputFilesForFieldScenarioReimport()
+    {
+        var output = Path.Combine(root, "jobs", "9", "output");
+        var work = Path.Combine(root, "jobs", "9", "work");
+        Directory.CreateDirectory(output);
+        Directory.CreateDirectory(work);
+        var deck = Path.Combine(work, "CASE.DATA");
+        var include = Path.Combine(work, "GRID.INC");
+        await File.WriteAllTextAsync(deck, "GRID\nMULTIPLY\n PERMX 0.5 1 1 1 1 1 1 /\n/\nPROPS\n", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(include, "PERMX input\n", TestContext.Current.CancellationToken);
+        var package = new EclipseDeckPackage(deck, work, [deck, include]);
+        var store = new ArtifactStore(new StorageResolver(Options.Create(new WorkerOptions { StorageRoot = root })));
+
+        var artifact = await store.WriteEclipseAppliedPackageAsync(output, package, TestContext.Current.CancellationToken);
+
+        Assert.Equal("jobs/9/output/eclipse-grid-field-applied-package.zip", artifact.StorageKey);
+        Assert.Equal("application/zip", artifact.ContentType);
+        using var archive = ZipFile.OpenRead(Path.Combine(output, "eclipse-grid-field-applied-package.zip"));
+        Assert.Equal(new[] { "CASE.DATA", "GRID.INC" }, archive.Entries.Select(entry => entry.FullName).OrderBy(name => name, StringComparer.Ordinal).ToArray());
+        using var reader = new StreamReader(archive.GetEntry("CASE.DATA")!.Open());
+        Assert.Contains("MULTIPLY", await reader.ReadToEndAsync(TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task PublishesOnlyEngineFilesListedByTheIsolatedVfpManifest()
+    {
+        var output = Path.Combine(root, "jobs", "5", "output");
+        var source = Path.Combine(output, "vfp-engine");
+        Directory.CreateDirectory(source);
+        var bytes = Encoding.UTF8.GetBytes("VFPPROD\n 2 30 /\n");
+        await File.WriteAllBytesAsync(Path.Combine(source, "CSW_131_VFP.DATA"), bytes, TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(source, "engine-files.json"),
+            "{\"schemaVersion\":\"pipesim-vfp-engine-files/1\",\"files\":[\"CSW_131_VFP.DATA\"]}",
+            TestContext.Current.CancellationToken);
+        var store = new ArtifactStore(new StorageResolver(Options.Create(new WorkerOptions { StorageRoot = root })));
+
+        var artifact = Assert.Single(await store.CopyPipesimVfpEngineFilesAsync(
+            output, source, TestContext.Current.CancellationToken));
+
+        var published = Path.Combine(output, "pipesim-vfp-engine-CSW_131_VFP.DATA");
+        Assert.Equal("jobs/5/output/pipesim-vfp-engine-CSW_131_VFP.DATA", artifact.StorageKey);
+        Assert.Equal(bytes.LongLength, artifact.Size);
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(bytes)), artifact.Sha256);
+        Assert.Equal(bytes, await File.ReadAllBytesAsync(published, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task RejectsVfpEngineManifestPathTraversalBeforePublishingAnyArtifact()
+    {
+        var output = Path.Combine(root, "jobs", "6", "output");
+        var source = Path.Combine(output, "vfp-engine");
+        Directory.CreateDirectory(source);
+        await File.WriteAllTextAsync(Path.Combine(output, "outside.DATA"), "must not be published", TestContext.Current.CancellationToken);
+        await File.WriteAllTextAsync(Path.Combine(source, "engine-files.json"),
+            "{\"schemaVersion\":\"pipesim-vfp-engine-files/1\",\"files\":[\"../outside.DATA\"]}",
+            TestContext.Current.CancellationToken);
+        var store = new ArtifactStore(new StorageResolver(Options.Create(new WorkerOptions { StorageRoot = root })));
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => store.CopyPipesimVfpEngineFilesAsync(
+            output, source, TestContext.Current.CancellationToken));
+        Assert.DoesNotContain(Directory.EnumerateFiles(output), path => Path.GetFileName(path).StartsWith("pipesim-vfp-engine-", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -274,6 +358,69 @@ public sealed class ArtifactStoreTests : IDisposable
         Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(bytes)), descriptor.Sha256);
         Assert.Equal("application/octet-stream", descriptor.ContentType);
         Assert.Equal(bytes, await File.ReadAllBytesAsync(published, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task CopiesPersistedNetworkFlowlineVariantAsControlledArtifact()
+    {
+        var output = Path.Combine(root, "jobs", "7", "output");
+        var work = Path.Combine(root, "jobs", "7", "work");
+        Directory.CreateDirectory(output);
+        Directory.CreateDirectory(work);
+        var source = Path.Combine(work, "variant.pips");
+        var bytes = Encoding.UTF8.GetBytes("synthetic persisted PIPESIM variant");
+        await File.WriteAllBytesAsync(source, bytes, TestContext.Current.CancellationToken);
+        var store = new ArtifactStore(new StorageResolver(Options.Create(new WorkerOptions { StorageRoot = root })));
+
+        var descriptor = await store.CopyPipesimAppliedModelAsync(
+            output, source, TestContext.Current.CancellationToken, "pipesim-network-flowline-applied.pips");
+
+        var published = Path.Combine(output, "pipesim-network-flowline-applied.pips");
+        Assert.Equal("jobs/7/output/pipesim-network-flowline-applied.pips", descriptor.StorageKey);
+        Assert.Equal(bytes.LongLength, descriptor.Size);
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(bytes)), descriptor.Sha256);
+        Assert.Equal(bytes, await File.ReadAllBytesAsync(published, TestContext.Current.CancellationToken));
+        Assert.Equal(bytes, await File.ReadAllBytesAsync(source, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task CopiesPersistedNetworkConnectionVariantAsControlledArtifact()
+    {
+        var output = Path.Combine(root, "jobs", "9", "output");
+        var work = Path.Combine(root, "jobs", "9", "work");
+        Directory.CreateDirectory(output);
+        Directory.CreateDirectory(work);
+        var source = Path.Combine(work, "variant.pips");
+        var bytes = Encoding.UTF8.GetBytes("synthetic persisted topology variant");
+        await File.WriteAllBytesAsync(source, bytes, TestContext.Current.CancellationToken);
+        var store = new ArtifactStore(new StorageResolver(Options.Create(new WorkerOptions { StorageRoot = root })));
+
+        var descriptor = await store.CopyPipesimAppliedModelAsync(
+            output, source, TestContext.Current.CancellationToken, "pipesim-network-connection-applied.pips");
+
+        var published = Path.Combine(output, "pipesim-network-connection-applied.pips");
+        Assert.Equal("jobs/9/output/pipesim-network-connection-applied.pips", descriptor.StorageKey);
+        Assert.Equal(bytes.LongLength, descriptor.Size);
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(bytes)), descriptor.Sha256);
+        Assert.Equal(bytes, await File.ReadAllBytesAsync(published, TestContext.Current.CancellationToken));
+        Assert.Equal(bytes, await File.ReadAllBytesAsync(source, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task RejectsUnapprovedAppliedPipesimArtifactNameBeforeCopying()
+    {
+        var output = Path.Combine(root, "jobs", "8", "output");
+        var work = Path.Combine(root, "jobs", "8", "work");
+        Directory.CreateDirectory(output);
+        Directory.CreateDirectory(work);
+        var source = Path.Combine(work, "variant.pips");
+        await File.WriteAllTextAsync(source, "synthetic PIPESIM model", TestContext.Current.CancellationToken);
+        var store = new ArtifactStore(new StorageResolver(Options.Create(new WorkerOptions { StorageRoot = root })));
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => store.CopyPipesimAppliedModelAsync(
+            output, source, TestContext.Current.CancellationToken, "arbitrary.pips"));
+
+        Assert.Empty(Directory.EnumerateFiles(output));
     }
 
     [Theory]

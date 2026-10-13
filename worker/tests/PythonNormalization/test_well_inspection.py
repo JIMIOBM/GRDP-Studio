@@ -14,7 +14,7 @@ class WellInspectionTests(unittest.TestCase):
     def test_validation_ready_survives_optional_read_failure_and_closes_model(self):
         model = self.model()
         model._catalog.lookup_entries_by_class_ids.return_value = [types.SimpleNamespace(name='Study 1')]
-        model.find.side_effect = lambda component: [component]
+        model.find.side_effect = lambda component, **context: [] if component == 'ESP' else [component]
         model.fluids.fluid_type = 'COMPOSITIONAL'
         model.get_value.return_value = 'vertical'
         model.describe.side_effect = RuntimeError('optional descriptor unavailable')
@@ -70,7 +70,7 @@ class WellInspectionTests(unittest.TestCase):
             'Completion': ['Well_1:Completion 1', 'Well_1:Completion 2'],
             'Tubing': ['Well_1:Tubing 1', 'Well_1:Tubing 2'],
         }
-        model.find.side_effect = lambda component: components[component]
+        model.find.side_effect = lambda component, **context: [] if component == 'ESP' else components[component]
         model.fluids.fluid_type = 'BLACKOIL'
         model.get_value.side_effect = ['Vertical', 'Produced Fluid', 4000]
         definitions = types.ModuleType('sixgill.definitions')
@@ -101,11 +101,12 @@ class WellInspectionTests(unittest.TestCase):
     def test_unsupported_fluid_is_rejected_during_validation(self):
         model = self.model()
         model._catalog.lookup_entries_by_class_ids.return_value = [types.SimpleNamespace(name='Study 1')]
-        model.find.side_effect = lambda component: {
+        model.find.side_effect = lambda component, **context: {
             'Well': ['Well_1'],
             'BlackOilFluid': [],
             'Completion': ['Well_1:Completion'],
             'Tubing': ['Well_1:Tubing'],
+            'ESP': [],
         }[component]
         model.fluids.fluid_type = 'PVT'
         definitions = types.ModuleType('sixgill.definitions')
@@ -129,6 +130,65 @@ class WellInspectionTests(unittest.TestCase):
         envelope = json.loads(output.getvalue())
         self.assertEqual('INVALID', envelope['status'])
         self.assertIn('流体类型', envelope['message'])
+        model.close.assert_called_once()
+
+    def test_well_model_advertises_only_natively_validated_network_studies(self):
+        model = self.model()
+        model._catalog.lookup_entries_by_class_ids.return_value = [types.SimpleNamespace(name='Study 1')]
+        components = {
+            'Well': ['Well_1'], 'BlackOilFluid': ['Fluid'],
+            'Completion': ['Well_1:Completion'], 'Tubing': ['Well_1:Tubing'],
+            'ESP': [], 'Choke': [],
+        }
+        model.find.side_effect = lambda component, **kwargs: components[component]
+        model.fluids.fluid_type = 'COMPOSITIONAL'
+        model.get_value.return_value = 'vertical'
+        model.tasks.networksimulation.validate.return_value = []
+        model.tasks.networksimulation.get_conditions.return_value = {
+            'Source_1': {'BoundaryNodeType': 'Source', 'IsActive': True, 'IsSurfaceCondition': True,
+                         'FlowRateType': 'GasFlowRate', 'Pressure': 120, 'Temperature': 80,
+                         'GasFlowRate': 5, 'LiquidFlowRate': None, 'MassFlowRate': None}
+        }
+        definitions = types.ModuleType('sixgill.definitions')
+        definitions.Constants = types.SimpleNamespace(FluidType=types.SimpleNamespace(COMPOSITIONAL='COMPOSITIONAL', BLACKOIL='BLACKOIL'))
+        definitions.Parameters = types.SimpleNamespace(
+            Completion=types.SimpleNamespace(GEOMETRYPROFILETYPE='Geometry', RESERVOIRPRESSURE='Pressure'))
+        pipesim = types.ModuleType('sixgill.pipesim')
+        pipesim.Model = Mock()
+        pipesim.Model.open.return_value = model
+        resources = types.ModuleType('sixgill.core.resources')
+        resources.ModelClasses = types.SimpleNamespace(STUDY='Study')
+        network = types.ModuleType('ptk_network')
+        network.inspect_network = lambda ignored: {
+            'candidate': True, 'well_model': True, 'valid': True,
+            'missing': [], 'components': {'Well': ['Well_1'], 'Source': ['Source_1'], 'Sink': ['Sink_1'], 'Flowline': ['Flowline_1']},
+            'connections': ['edge'],
+        }
+        network.format_validation_issues = str
+        modules = {'sixgill.pipesim': pipesim, 'sixgill.definitions': definitions,
+                   'sixgill.core.resources': resources, 'ptk_network': network}
+        with tempfile.NamedTemporaryFile(suffix='.pips') as source:
+            output = io.StringIO()
+            with patch.dict(sys.modules, modules), patch.object(sys, 'argv', ['ptk_validate.py', source.name]), \
+                    patch.object(sys, 'stdout', output), patch.dict('os.environ', {'GRDP_PTK_START_GATED': '0'}):
+                runpy.run_path(str(Path(__file__).resolve().parents[2] / 'ptk_validate.py'))
+        envelope = json.loads(output.getvalue())
+        self.assertEqual('READY', envelope['status'])
+        self.assertEqual('basic_gas', envelope['modelKind'])
+        self.assertEqual(['Study 1'], envelope['studies'])
+        self.assertEqual({'schemaVersion': 'pipesim-network-capability/1', 'studies': ['Study 1'],
+                          'networkInspection': {'schemaVersion': 'pipesim-network-inspection/5',
+                                                'studies': [{'study': 'Study 1', 'boundaries': [
+                                                    {'node': 'Source_1', 'boundaryNodeType': 'Source', 'isActive': True,
+                                                     'isSurfaceCondition': True, 'flowRateType': 'GasFlowRate',
+                                                     'pressure': 120, 'temperature': 80, 'gasFlowRate': 5,
+                                                     'liquidFlowRate': None, 'massFlowRate': None}]}], 'chokes': [],
+                                                'wellContexts': ['Well_1'], 'flowlineContexts': [], 'flowlines': []}},
+                         envelope['networkCapability'])
+        model.tasks.networksimulation.validate.assert_called_once_with(study='Study 1', validate_model=False)
+        model.tasks.networksimulation.run.assert_not_called()
+        model.save.assert_not_called()
+        model.set_value.assert_not_called()
         model.close.assert_called_once()
 
     def test_unavailable_values_and_units_remain_optional(self):

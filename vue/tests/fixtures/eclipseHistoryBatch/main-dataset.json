@@ -1,0 +1,63 @@
+{
+  "metadata": {
+    "id": 1,
+    "modelVersionId": 179,
+    "baselineRunId": 570,
+    "name": "算法验算样例（非现场实测）",
+    "sourceFile": "ECLIPSE_HISTORY_ALGORITHM_SAMPLE.csv",
+    "sourceSha256": "5f1370c1dc3457e6bcfdf73cbcc22e8f1cf2bff4fb5eb9056bf623800f01d3d1",
+    "observationCount": 6,
+    "createdAt": "2026-10-13T02:03:59.128"
+  },
+  "csv": "﻿well,keyword,unit,timeDays,value\r\nP1,WOPR,STB/DAY,5,4994.2900390625\r\nP1,WOPR,STB/DAY,100,788.87451171875\r\nP1,WOPR,STB/DAY,102.5,800\r\nP1,WBHP,PSIA,5,3658.781005859375\r\nP1,WBHP,PSIA,100,2980\r\nP1,WWPR,STB/DAY,100,0\r\n",
+  "observations": [
+    {
+      "well": "P1",
+      "keyword": "WOPR",
+      "unit": "STB/DAY",
+      "timeDays": 5.0,
+      "value": 4994.2900390625,
+      "sourceLine": 2
+    },
+    {
+      "well": "P1",
+      "keyword": "WOPR",
+      "unit": "STB/DAY",
+      "timeDays": 100.0,
+      "value": 788.87451171875,
+      "sourceLine": 3
+    },
+    {
+      "well": "P1",
+      "keyword": "WOPR",
+      "unit": "STB/DAY",
+      "timeDays": 102.5,
+      "value": 800.0,
+      "sourceLine": 4
+    },
+    {
+      "well": "P1",
+      "keyword": "WBHP",
+      "unit": "PSIA",
+      "timeDays": 5.0,
+      "value": 3658.781005859375,
+      "sourceLine": 5
+    },
+    {
+      "well": "P1",
+      "keyword": "WBHP",
+      "unit": "PSIA",
+      "timeDays": 100.0,
+      "value": 2980.0,
+      "sourceLine": 6
+    },
+    {
+      "well": "P1",
+      "keyword": "WWPR",
+      "unit": "STB/DAY",
+      "timeDays": 100.0,
+      "value": 0.0,
+      "sourceLine": 7
+    }
+  ]
+}

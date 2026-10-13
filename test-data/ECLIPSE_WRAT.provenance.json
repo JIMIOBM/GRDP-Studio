@@ -1,0 +1,11 @@
+{
+  "officialSource": "C:\\ecl\\2024.1\\eclipse\\data\\TRACERDISPERS.DATA",
+  "officialSha256": "0aacf9fd967d483dabdbc5825c116b343b32dbde46486fafd9565967d5748010",
+  "sampleSha256": "a14f8c7a49713f97732bf46c7b4c2c7e8c4588b209b0fc1c122b57d4ffae986c",
+  "controlMode": "WRAT",
+  "well": "P",
+  "changes": [
+    "Replace SUMMARY requests with unique target flow, WBHP and liquid constituents."
+  ],
+  "physicsAndScheduleUnchanged": true
+}

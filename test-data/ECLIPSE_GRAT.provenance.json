@@ -1,0 +1,12 @@
+{
+  "officialSource": "C:\\ecl\\2024.1\\eclipse\\data\\GASCOND.DATA",
+  "officialSha256": "431d15fc4cf3cbee8528364d2fc3c8c7853b689b7013c594bbdfc28a82f18b7c",
+  "sampleSha256": "5d3eba969a0204e5ec40fa894ec5e4df9918ded746f02c03d3cc9167b2343b03",
+  "controlMode": "GRAT",
+  "well": "PRODUCER",
+  "changes": [
+    "Replace SUMMARY requests with unique target flow, WBHP and liquid constituents.",
+    "Annotate the legacy TSTEP METRIC timestamp as a comment; time steps unchanged."
+  ],
+  "physicsAndScheduleUnchanged": true
+}

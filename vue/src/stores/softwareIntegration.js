@@ -12,7 +12,8 @@ export const SOFTWARE_INTEGRATION_TERMINAL_STATUSES = Object.freeze([
 ])
 
 const terminalStatuses = new Set(SOFTWARE_INTEGRATION_TERMINAL_STATUSES)
-const wellRunTypes = new Set(['nodal', 'profile', 'combined', 'sensitivity', 'gas-lift-performance', 'gas-lift-diagnostics', 'vfp-tables', 'esp-curves', 'trajectory'])
+const wellRunTypes = new Set(['nodal', 'profile', 'combined', 'sensitivity', 'gas-lift-performance', 'gas-lift-diagnostics', 'vfp-tables', 'esp-curves', 'esp-parameter', 'trajectory'])
+const networkRunTypes = new Set(['network', 'system-analysis', 'network-optimizer', 'network-well-performance-curves'])
 const wellModelKinds = new Set(['black_oil_liquid', 'basic_gas', 'legacy_well'])
 export const isTerminalRunStatus = status => terminalStatuses.has(status)
 const isValidationPending = status => status === 'UPLOADED' || status === 'VALIDATING'
@@ -22,7 +23,7 @@ const capabilityReasonCodes = new Set([
   'WORKER_UNREACHABLE', 'WORKER_BUSY', 'PIPESIM_UNAVAILABLE', 'PIPESIM_VERSION_MISMATCH',
   'ECLIPSE_UNAVAILABLE', 'ECLIPSE_VERSION_MISMATCH'
 ])
-const capabilityTasks = new Set(['nodal', 'profile', 'combined', 'sensitivity', 'gas-lift-performance', 'gas-lift-diagnostics', 'vfp-tables', 'esp-curves', 'trajectory', 'network', 'system-analysis', 'network-optimizer', 'eclipse'])
+const capabilityTasks = new Set(['nodal', 'profile', 'combined', 'sensitivity', 'gas-lift-performance', 'gas-lift-diagnostics', 'vfp-tables', 'esp-curves', 'esp-parameter', 'trajectory', 'network', 'system-analysis', 'network-optimizer', 'network-well-performance-curves', 'eclipse'])
 const unavailableCapability = reasonCode => ({
   version: null,
   status: 'UNAVAILABLE',
@@ -46,7 +47,8 @@ const unavailableCapabilities = () => ({
   worker: { status: 'UNAVAILABLE', idle: false, reasonCode: 'WORKER_UNREACHABLE' },
   pipesimWell: unavailableCapability('WORKER_UNREACHABLE'),
   pipesimNetwork: unavailableCapability('WORKER_UNREACHABLE'),
-  eclipse100: unavailableCapability('WORKER_UNREACHABLE')
+  eclipse100: unavailableCapability('WORKER_UNREACHABLE'),
+  eclipse300: unavailableCapability('WORKER_UNREACHABLE')
 })
 
 export const useSoftwareIntegrationStore = defineStore('software-integration', () => {
@@ -61,6 +63,8 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
   const runHistory = ref([])
   const selectedRun = ref(null)
   const activeRun = ref(null)
+  // 已受理任务的 Worker 占用不随页面导航或详情读取失败而消失。
+  const acceptedRun = ref(null)
   const loadingProjects = ref(false)
   const loadingHistory = ref(false)
   const submittingRun = ref(false)
@@ -84,6 +88,7 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
   let elapsedBase = 0
   let elapsedSyncedAt = Date.now()
   let capabilityGeneration = 0
+  let selectedRunId = null
 
   const activeProjectDetail = computed(() => projectDetails.value[activeProjectId.value] || null)
   const activeProject = computed(() => activeProjectDetail.value?.project ||
@@ -95,21 +100,34 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
   const activeModelKind = computed(() => activeVersion.value?.modelKind || '')
   const isNetworkModel = computed(() => activeModelKind.value === 'network')
   const isWellModel = computed(() => wellModelKinds.has(activeModelKind.value))
-  const isEclipseModel = computed(() => activeModelKind.value === 'eclipse_100' || /\.data$/i.test(activeVersion.value?.originalName || ''))
+  const hasNetworkCapability = computed(() => {
+    const inspection = activeVersion.value?.inspection
+    const capability = inspection?.networkCapability
+    return isWellModel.value && ['pipesim-well-inspection/7', 'pipesim-well-inspection/8', 'pipesim-well-inspection/9'].includes(inspection?.schemaVersion) &&
+      capability?.schemaVersion === 'pipesim-network-capability/1' &&
+      Array.isArray(capability.studies) && capability.studies.length > 0 &&
+      capability.networkInspection?.schemaVersion === 'pipesim-network-inspection/3'
+  })
+  const isNetworkCapable = computed(() => hasNetworkCapability.value &&
+    activeVersion.value?.inspection?.networkCapability?.studies?.includes(selectedStudy.value))
+  const isEclipseModel = computed(() => ['eclipse_100', 'eclipse_300'].includes(activeModelKind.value) || /\.data$/i.test(activeVersion.value?.originalName || ''))
   const persistedStudies = computed(() => activeVersion.value?.status === 'READY' && Array.isArray(activeVersion.value.studies)
     ? activeVersion.value.studies
     : [])
   const hasActiveRun = computed(() => Boolean(activeRun.value && !isTerminalRunStatus(activeRun.value.status)))
-  const workerBusy = computed(() => capabilities.value?.worker?.status === 'AVAILABLE' && !capabilities.value.worker.idle)
+  const workerBusy = computed(() => hasActiveRun.value || Boolean(acceptedRun.value) ||
+    (capabilities.value?.worker?.status === 'AVAILABLE' && !capabilities.value.worker.idle))
   const activeSimulatorCapability = computed(() => {
+    if (networkRunTypes.has(runType.value) && (isNetworkModel.value || isNetworkCapable.value)) return capabilities.value?.pipesimNetwork || null
     if (isNetworkModel.value) return capabilities.value?.pipesimNetwork || null
-    if (isEclipseModel.value) return capabilities.value?.eclipse100 || null
+    if (isEclipseModel.value) return activeModelKind.value === 'eclipse_300' ? capabilities.value?.eclipse300 || null : capabilities.value?.eclipse100 || null
     if (isWellModel.value) return capabilities.value?.pipesimWell || null
     return null
   })
   const activeSimulatorAvailable = computed(() => activeSimulatorCapability.value?.status === 'AVAILABLE')
   const activeRunTaskSupported = computed(() => {
     const task = isNetworkModel.value || isWellModel.value || isEclipseModel.value ? runType.value : ''
+    if (networkRunTypes.has(task) && isWellModel.value && !isNetworkModel.value && !isNetworkCapable.value) return false
     return Array.isArray(activeSimulatorCapability.value?.runTasks) && activeSimulatorCapability.value.runTasks.includes(task)
   })
   const canCreateRunByCapability = computed(() => Boolean(capabilities.value) && !capabilitiesUnavailable.value &&
@@ -157,6 +175,7 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
 
   const beginNavigation = () => {
     navigationGeneration += 1
+    selectedRunId = null
     invalidateRunRequests()
     runPollingUnavailable.value = false
     return navigationGeneration
@@ -173,9 +192,10 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
 
   const syncRunTypeForModel = () => {
     if (!activeModel.value) return
-    if (isNetworkModel.value && !['network', 'system-analysis', 'network-optimizer'].includes(runType.value)) runType.value = 'network'
+    if (isNetworkModel.value && !networkRunTypes.has(runType.value)) runType.value = 'network'
     else if (isEclipseModel.value) runType.value = 'eclipse'
-    else if (isWellModel.value && !wellRunTypes.has(runType.value)) runType.value = 'nodal'
+    else if (isWellModel.value && !wellRunTypes.has(runType.value) &&
+      !(isNetworkCapable.value && networkRunTypes.has(runType.value))) runType.value = 'nodal'
     else if (!isNetworkModel.value && !isWellModel.value && !isEclipseModel.value) runType.value = ''
   }
 
@@ -248,7 +268,8 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
         },
         pipesimWell: normalizeSimulatorCapability(value?.pipesimWell, 'PIPESIM_UNAVAILABLE'),
         pipesimNetwork: normalizeSimulatorCapability(value?.pipesimNetwork, 'PIPESIM_UNAVAILABLE'),
-        eclipse100: normalizeSimulatorCapability(value?.eclipse100, 'ECLIPSE_UNAVAILABLE')
+        eclipse100: normalizeSimulatorCapability(value?.eclipse100, 'ECLIPSE_UNAVAILABLE'),
+        eclipse300: normalizeSimulatorCapability(value?.eclipse300, 'ECLIPSE_UNAVAILABLE')
       }
       return capabilities.value
     } catch (error) {
@@ -378,15 +399,19 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
         if (generation !== runPollGeneration || !matchesRunContext(expectedNavigation, expectedVersionId) ||
           detail?.id !== runId || detail?.modelVersionId !== expectedVersionId) return
         activeRun.value = detail
-        if (selectedRun.value?.id === runId || !selectedRun.value) selectedRun.value = detail
+        if (selectedRunId === runId || (!selectedRunId && (selectedRun.value?.id === runId || !selectedRun.value))) selectedRun.value = detail
         updateHistoryFromDetail(detail)
         syncElapsed(detail)
         if (isTerminalRunStatus(detail.status)) {
+          if (acceptedRun.value?.id === runId) acceptedRun.value = null
           activeRun.value = null
           stopRunPolling()
           if (matchesRunContext(expectedNavigation, expectedVersionId)) {
-            await loadRunHistory(detail.modelVersionId, false, expectedNavigation)
-            loadCapabilities().catch(() => {})
+            try {
+              await loadRunHistory(detail.modelVersionId, false, expectedNavigation)
+            } finally {
+              if (matchesRunContext(expectedNavigation, expectedVersionId)) loadCapabilities().catch(() => {})
+            }
           }
           return
         }
@@ -408,17 +433,31 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
 
   const selectRun = async runId => {
     const requestGeneration = ++runDetailGeneration
+    selectedRunId = runId
+    // 在详情请求失败时，也允许重新选择已受理任务恢复轮询。
+    if (activeRun.value?.id === runId) {
+      startRunPolling(runId)
+      syncElapsed(activeRun.value)
+    }
     const expectedNavigation = navigationGeneration
     const expectedVersionId = activeVersionId.value
+    const expectedPollGeneration = runPollGeneration
+    const wasActiveRun = activeRun.value?.id === runId
     const detail = unwrap(await softwareIntegrationApi.getRun(runId))
     if (requestGeneration !== runDetailGeneration || !matchesRunContext(expectedNavigation, expectedVersionId) ||
       detail?.id !== runId || detail?.modelVersionId !== expectedVersionId) return null
+    if ((wasActiveRun || !isTerminalRunStatus(detail.status)) && expectedPollGeneration !== runPollGeneration) return null
     selectedRun.value = detail
     if (isTerminalRunStatus(detail.status)) {
-      activeRun.value = null
-      runPollingUnavailable.value = false
-      stopRunPolling()
-      syncElapsed(detail)
+      const wasAcceptedRun = acceptedRun.value?.id === runId
+      if (wasAcceptedRun) acceptedRun.value = null
+      if (activeRun.value?.id === runId) {
+        activeRun.value = null
+        runPollingUnavailable.value = false
+        stopRunPolling()
+        loadCapabilities().catch(() => {})
+      } else if (wasAcceptedRun) loadCapabilities().catch(() => {})
+      if (!hasActiveRun.value) syncElapsed(detail)
     } else {
       activeRun.value = detail
       startRunPolling(detail.id)
@@ -446,22 +485,28 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
       const running = history.find(run => !isTerminalRunStatus(run.status))
       const selectedStillExists = history.some(run => run.id === selectedRun.value?.id)
       const target = running || (selectLatest && !selectedStillExists ? history[0] : null)
-      if (expectedRunDetailGeneration !== runDetailGeneration) return history
       if (target) {
+        if (running && !hasActiveRun.value) {
+          activeRun.value = running
+          startRunPolling(running.id)
+          syncElapsed(running)
+        }
+        const expectedPollGeneration = runPollGeneration
         const detail = unwrap(await softwareIntegrationApi.getRun(target.id))
-        if (requestGeneration !== historyGeneration || expectedRunDetailGeneration !== runDetailGeneration ||
+        if (requestGeneration !== historyGeneration || expectedPollGeneration !== runPollGeneration ||
           !matchesRunContext(expectedNavigation, versionId) || detail?.id !== target.id ||
           detail?.modelVersionId !== versionId) return history
-        if (running) {
-          activeRun.value = detail
-          startRunPolling(detail.id)
-          syncElapsed(detail)
+        if (running) trackRun(detail)
+        else if (isTerminalRunStatus(detail.status) && acceptedRun.value?.id === detail.id) {
+          acceptedRun.value = null
+          loadCapabilities().catch(() => {})
         }
-        if (selectLatest || !selectedRun.value) selectedRun.value = detail
+        if (expectedRunDetailGeneration === runDetailGeneration && !selectedRunId &&
+          ((selectLatest && !selectedStillExists) || !selectedRun.value)) selectedRun.value = detail
       } else if (!running) {
-        activeRun.value = null
-        stopElapsedTicker()
-        if (!selectedStillExists) selectedRun.value = null
+        // 列表可能滞后于刚受理的 POST；活动生命周期由详情终态结束。
+        if (!hasActiveRun.value) stopElapsedTicker()
+        if (expectedRunDetailGeneration === runDetailGeneration && !selectedRunId && !selectedStillExists) selectedRun.value = null
       }
       return history
     } finally {
@@ -503,6 +548,7 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
   }
 
   const createRun = async (parameters = null) => {
+    if (submittingRun.value || workerBusy.value) throw new Error('已有运行正在提交或执行')
     if (!canCreateRunByCapability.value) throw new Error('当前模拟器执行能力不可用')
     const version = activeVersion.value
     if (!version || version.status !== 'READY' || (!isEclipseModel.value && !persistedStudies.value.includes(selectedStudy.value))) {
@@ -512,89 +558,98 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
     syncRunTypeForModel()
     const requestedRunType = isNetworkModel.value ? runType.value : (isEclipseModel.value ? 'eclipse' : runType.value)
     const expectedNavigation = navigationGeneration
-    const expectedProjectId = activeProjectId.value
-    const expectedModelId = activeModelId.value
     const expectedVersionId = version.id
     const detailRequestGeneration = ++runDetailGeneration
     historyGeneration += 1
     loadingHistory.value = false
-    submittingRun.value = true
-    try {
-      const summary = unwrap(await softwareIntegrationApi.createRun(version.id, isEclipseModel.value ? null : selectedStudy.value, requestedRunType, parameters))
-      if (detailRequestGeneration !== runDetailGeneration || expectedNavigation !== navigationGeneration ||
-        activeProjectId.value !== expectedProjectId || activeModelId.value !== expectedModelId ||
-        activeVersionId.value !== expectedVersionId || summary?.modelVersionId !== expectedVersionId) return null
-      runHistory.value = [summary, ...runHistory.value.filter(run => run.id !== summary.id)]
-      const detail = unwrap(await softwareIntegrationApi.getRun(summary.id))
-      if (detailRequestGeneration !== runDetailGeneration || !matchesRunContext(expectedNavigation, expectedVersionId) ||
-        activeProjectId.value !== expectedProjectId || activeModelId.value !== expectedModelId ||
-        detail?.id !== summary.id || detail?.modelVersionId !== expectedVersionId) return null
+    const study = isEclipseModel.value ? null : selectedStudy.value
+    return submitRun(() => softwareIntegrationApi.createRun(version.id, study, requestedRunType, parameters),
+      expectedNavigation, expectedVersionId, detailRequestGeneration)
+  }
+
+  const trackRun = (detail, refreshHistory = false) => {
+    updateHistoryFromDetail(detail)
+    if (selectedRunId === detail.id || (!selectedRunId && selectedRun.value?.id === detail.id)) selectedRun.value = detail
+    if (isTerminalRunStatus(detail.status)) {
+      if (acceptedRun.value?.id === detail.id) acceptedRun.value = null
+      activeRun.value = null
+      stopRunPolling()
+      syncElapsed(detail)
+      loadCapabilities().catch(() => {})
+      if (refreshHistory) loadRunHistory(detail.modelVersionId, false, navigationGeneration).catch(() => {})
+    } else {
       activeRun.value = detail
-      selectedRun.value = detail
-      if (capabilities.value?.worker?.status === 'AVAILABLE') capabilities.value.worker.idle = false
       startRunPolling(detail.id)
       syncElapsed(detail)
-      return detail
+    }
+  }
+
+  const submitRun = async (post, expectedNavigation, expectedVersionId, detailRequestGeneration) => {
+    submittingRun.value = true
+    try {
+      const summary = unwrap(await post())
+      acceptedRun.value = isTerminalRunStatus(summary.status) ? null : summary
+      if (capabilities.value?.worker?.status === 'AVAILABLE') capabilities.value.worker.idle = false
+      if (!matchesRunContext(expectedNavigation, expectedVersionId) || summary?.modelVersionId !== expectedVersionId) return null
+      if (detailRequestGeneration === runDetailGeneration) {
+        selectedRunId = summary.id
+        selectedRun.value = summary
+      }
+      trackRun(summary, true)
+      const expectedPollGeneration = runPollGeneration
+      try {
+        const detail = unwrap(await softwareIntegrationApi.getRun(summary.id))
+        if (!matchesRunContext(expectedNavigation, expectedVersionId) || expectedPollGeneration !== runPollGeneration ||
+          detail?.id !== summary.id || detail?.modelVersionId !== expectedVersionId) return null
+        trackRun(detail, true)
+        return detail
+      } catch {
+        // POST 已成功，详情失败只交给轮询恢复，不能作为提交失败重发。
+        return matchesRunContext(expectedNavigation, expectedVersionId) ? summary : null
+      }
     } finally {
       submittingRun.value = false
     }
   }
 
   const cancelRun = async () => {
-    if (!activeRun.value?.cancellable) return null
+    if (cancellingRun.value || !activeRun.value?.cancellable) return null
     const runId = activeRun.value.id
     const expectedNavigation = navigationGeneration
     const expectedVersionId = activeVersionId.value
-    const detailRequestGeneration = ++runDetailGeneration
+    stopRunPolling()
     cancellingRun.value = true
     try {
       const summary = unwrap(await softwareIntegrationApi.cancelRun(runId))
-      if (detailRequestGeneration !== runDetailGeneration || !matchesRunContext(expectedNavigation, expectedVersionId) ||
+      if (!matchesRunContext(expectedNavigation, expectedVersionId) || activeRun.value?.id !== runId ||
         summary?.id !== runId || summary?.modelVersionId !== expectedVersionId) return null
-      updateHistoryFromDetail(summary)
+      trackRun(summary, true)
+      const detailPollGeneration = runPollGeneration
       const detail = unwrap(await softwareIntegrationApi.getRun(summary.id))
-      if (detailRequestGeneration !== runDetailGeneration || !matchesRunContext(expectedNavigation, expectedVersionId) ||
+      if (detailPollGeneration !== runPollGeneration || !matchesRunContext(expectedNavigation, expectedVersionId) ||
         detail?.id !== runId || detail?.modelVersionId !== expectedVersionId) return null
-      activeRun.value = isTerminalRunStatus(detail.status) ? null : detail
-      if (selectedRun.value?.id === detail.id) selectedRun.value = detail
-      if (isTerminalRunStatus(detail.status)) {
-        stopRunPolling()
-        syncElapsed(detail)
-        loadCapabilities().catch(() => {})
-      } else {
-        startRunPolling(detail.id)
-        syncElapsed(detail)
-      }
+      trackRun(detail, true)
       return detail
     } finally {
+      if (matchesRunContext(expectedNavigation, expectedVersionId) && activeRun.value?.id === runId && !runPollTimer) {
+        startRunPolling(runId)
+        syncElapsed(activeRun.value)
+      }
       cancellingRun.value = false
     }
   }
 
   const retryRun = async () => {
+    if (submittingRun.value || workerBusy.value) throw new Error('已有运行正在提交或执行')
     const original = selectedRun.value
     if (!original || !['FAILED', 'TIMED_OUT', 'WORKER_LOST'].includes(original.status)) return null
     const expectedNavigation = navigationGeneration
     const expectedVersionId = activeVersionId.value
     const detailRequestGeneration = ++runDetailGeneration
-    submittingRun.value = true
-    try {
-      const summary = unwrap(await softwareIntegrationApi.retryRun(original.id))
-      if (detailRequestGeneration !== runDetailGeneration || !matchesRunContext(expectedNavigation, expectedVersionId) ||
-        summary?.modelVersionId !== expectedVersionId) return null
-      runHistory.value = [summary, ...runHistory.value.filter(run => run.id !== summary.id)]
-      const detail = unwrap(await softwareIntegrationApi.getRun(summary.id))
-      if (detailRequestGeneration !== runDetailGeneration || !matchesRunContext(expectedNavigation, expectedVersionId) ||
-        detail?.id !== summary.id || detail?.modelVersionId !== expectedVersionId) return null
-      activeRun.value = detail
-      selectedRun.value = detail
-      if (capabilities.value?.worker?.status === 'AVAILABLE') capabilities.value.worker.idle = false
-      startRunPolling(detail.id)
-      syncElapsed(detail)
-      return detail
-    } finally {
-      submittingRun.value = false
-    }
+    historyGeneration += 1
+    loadingHistory.value = false
+    return submitRun(() => softwareIntegrationApi.retryRun(original.id),
+      expectedNavigation, expectedVersionId, detailRequestGeneration)
   }
 
   const refreshActiveProject = async () => {
@@ -641,6 +696,8 @@ export const useSoftwareIntegrationStore = defineStore('software-integration', (
     activeModelKind,
     isNetworkModel,
     isWellModel,
+    hasNetworkCapability,
+    isNetworkCapable,
     isEclipseModel,
     versions,
     readyVersions,

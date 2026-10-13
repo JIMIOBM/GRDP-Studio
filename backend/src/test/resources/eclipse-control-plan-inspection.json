@@ -1,0 +1,822 @@
+{
+  "schemaVersion": "eclipse-data-inspection/13",
+  "caseName": "ECLIPSE_CONTROL_PLAN.DATA",
+  "sections": [
+    "RUNSPEC",
+    "GRID",
+    "PROPS",
+    "SOLUTION",
+    "SUMMARY",
+    "SCHEDULE"
+  ],
+  "unitSystem": "FIELD",
+  "phases": [
+    "OIL",
+    "WATER",
+    "GAS"
+  ],
+  "dimensions": {
+    "nx": 20,
+    "ny": 20,
+    "nz": 10
+  },
+  "wellNames": [
+    "PRODUCR1",
+    "PRODUCR2",
+    "PRODUCR3",
+    "PRODUCR4",
+    "INJECTR1",
+    "INJECTR2",
+    "INJECTR3",
+    "INJECTR4",
+    "INJECTR5",
+    "INJECTR6"
+  ],
+  "scheduleTimeline": [
+    {
+      "kind": "DATES",
+      "records": [
+        {
+          "day": "19",
+          "month": "OCT",
+          "year": "1983",
+          "time": null
+        }
+      ],
+      "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+      "lineNumber": 578
+    },
+    {
+      "kind": "DATES",
+      "records": [
+        {
+          "day": "18",
+          "month": "OCT",
+          "year": "1984",
+          "time": null
+        }
+      ],
+      "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+      "lineNumber": 585
+    },
+    {
+      "kind": "DATES",
+      "records": [
+        {
+          "day": "18",
+          "month": "OCT",
+          "year": "1985",
+          "time": null
+        }
+      ],
+      "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+      "lineNumber": 592
+    },
+    {
+      "kind": "DATES",
+      "records": [
+        {
+          "day": "18",
+          "month": "OCT",
+          "year": "1986",
+          "time": null
+        }
+      ],
+      "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+      "lineNumber": 599
+    },
+    {
+      "kind": "DATES",
+      "records": [
+        {
+          "day": "18",
+          "month": "OCT",
+          "year": "1987",
+          "time": null
+        }
+      ],
+      "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+      "lineNumber": 602
+    },
+    {
+      "kind": "DATES",
+      "records": [
+        {
+          "day": "17",
+          "month": "OCT",
+          "year": "1988",
+          "time": null
+        }
+      ],
+      "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+      "lineNumber": 605
+    },
+    {
+      "kind": "DATES",
+      "records": [
+        {
+          "day": "17",
+          "month": "OCT",
+          "year": "1989",
+          "time": null
+        }
+      ],
+      "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+      "lineNumber": 608
+    },
+    {
+      "kind": "DATES",
+      "records": [
+        {
+          "day": "17",
+          "month": "OCT",
+          "year": "1990",
+          "time": null
+        }
+      ],
+      "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+      "lineNumber": 611
+    },
+    {
+      "kind": "DATES",
+      "records": [
+        {
+          "day": "17",
+          "month": "OCT",
+          "year": "1991",
+          "time": null
+        }
+      ],
+      "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+      "lineNumber": 614
+    },
+    {
+      "kind": "DATES",
+      "records": [
+        {
+          "day": "16",
+          "month": "OCT",
+          "year": "1992",
+          "time": null
+        }
+      ],
+      "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+      "lineNumber": 617
+    }
+  ],
+  "packageFiles": [
+    {
+      "relativePath": "ECLIPSE_CONTROL_PLAN.DATA",
+      "sizeBytes": 20487,
+      "sha256": "ac29699a8d6d6ab4d814ee956a6b99f4b277ba4aafe24aa4a4228b24ec556564"
+    }
+  ],
+  "scheduleMetadata": {
+    "wells": [
+      {
+        "name": "PRODUCR1",
+        "group": "G",
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 522
+      },
+      {
+        "name": "PRODUCR2",
+        "group": "G",
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 523
+      },
+      {
+        "name": "PRODUCR3",
+        "group": "G",
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 524
+      },
+      {
+        "name": "PRODUCR4",
+        "group": "G",
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 525
+      },
+      {
+        "name": "INJECTR1",
+        "group": "I",
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 526
+      },
+      {
+        "name": "INJECTR2",
+        "group": "I",
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 527
+      },
+      {
+        "name": "INJECTR3",
+        "group": "I",
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 528
+      },
+      {
+        "name": "INJECTR4",
+        "group": "I",
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 529
+      },
+      {
+        "name": "INJECTR5",
+        "group": "I",
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 530
+      },
+      {
+        "name": "INJECTR6",
+        "group": "I",
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 531
+      }
+    ],
+    "groups": [],
+    "records": [
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "PRODUCR1",
+          "5",
+          "5",
+          "4",
+          "6",
+          "OPEN",
+          "0",
+          "-1",
+          "0.5"
+        ],
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 539
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "PRODUCR2",
+          "5",
+          "10",
+          "4",
+          "6",
+          "OPEN",
+          "0",
+          "-1",
+          "0.5"
+        ],
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 540
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "PRODUCR3",
+          "5",
+          "15",
+          "4",
+          "6",
+          "OPEN",
+          "0",
+          "-1",
+          "0.5"
+        ],
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 541
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "PRODUCR4",
+          "10",
+          "15",
+          "4",
+          "6",
+          "OPEN",
+          "0",
+          "-1",
+          "0.5"
+        ],
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 542
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "INJECTR1",
+          "20",
+          "1",
+          "1",
+          "1",
+          "OPEN",
+          "1",
+          "-1",
+          "0.5"
+        ],
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 543
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "INJECTR2",
+          "20",
+          "6",
+          "1",
+          "1",
+          "OPEN",
+          "1",
+          "-1",
+          "0.5"
+        ],
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 544
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "INJECTR3",
+          "20",
+          "16",
+          "1",
+          "1",
+          "OPEN",
+          "1",
+          "-1",
+          "0.5"
+        ],
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 545
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "INJECTR4",
+          "16",
+          "20",
+          "1",
+          "1",
+          "OPEN",
+          "1",
+          "-1",
+          "0.5"
+        ],
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 546
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "INJECTR5",
+          "20",
+          "20",
+          "8",
+          "9",
+          "OPEN",
+          "1",
+          "-1",
+          "0.5"
+        ],
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 547
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "INJECTR6",
+          "16",
+          "1",
+          "8",
+          "9",
+          "OPEN",
+          "1",
+          "-1",
+          "0.5"
+        ],
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 548
+      },
+      {
+        "keyword": "WCONPROD",
+        "values": [
+          "PRODUCR1",
+          "OPEN",
+          "ORAT",
+          "500",
+          "4*",
+          "2500"
+        ],
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 556
+      },
+      {
+        "keyword": "WCONPROD",
+        "values": [
+          "PRODUCR2",
+          "OPEN",
+          "ORAT",
+          "500",
+          "4*",
+          "2500"
+        ],
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 557
+      },
+      {
+        "keyword": "WCONPROD",
+        "values": [
+          "PRODUCR3",
+          "OPEN",
+          "ORAT",
+          "500",
+          "4*",
+          "2500"
+        ],
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 558
+      },
+      {
+        "keyword": "WCONPROD",
+        "values": [
+          "PRODUCR4",
+          "OPEN",
+          "ORAT",
+          "500",
+          "4*",
+          "2500"
+        ],
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 559
+      },
+      {
+        "keyword": "WCONINJE",
+        "values": [
+          "INJECTR1",
+          "GAS",
+          "OPEN",
+          "RATE",
+          "50000"
+        ],
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 568
+      },
+      {
+        "keyword": "WCONINJE",
+        "values": [
+          "INJECTR2",
+          "GAS",
+          "OPEN",
+          "RATE",
+          "50000"
+        ],
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 569
+      },
+      {
+        "keyword": "WCONINJE",
+        "values": [
+          "INJECTR3",
+          "GAS",
+          "OPEN",
+          "RATE",
+          "50000"
+        ],
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 570
+      },
+      {
+        "keyword": "WCONINJE",
+        "values": [
+          "INJECTR4",
+          "GAS",
+          "OPEN",
+          "RATE",
+          "50000"
+        ],
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 571
+      },
+      {
+        "keyword": "WCONINJE",
+        "values": [
+          "INJECTR5",
+          "WAT",
+          "OPEN",
+          "RATE",
+          "22500"
+        ],
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 572
+      },
+      {
+        "keyword": "WCONINJE",
+        "values": [
+          "INJECTR6",
+          "WAT",
+          "OPEN",
+          "RATE",
+          "22500"
+        ],
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 573
+      },
+      {
+        "keyword": "WCONPROD",
+        "values": [
+          "PRODUCR1",
+          "OPEN",
+          "ORAT",
+          "500",
+          "4*",
+          "2500"
+        ],
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 582
+      },
+      {
+        "keyword": "WCONPROD",
+        "values": [
+          "PRODUCR2",
+          "OPEN",
+          "ORAT",
+          "500",
+          "4*",
+          "2500"
+        ],
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 583
+      },
+      {
+        "keyword": "WCONPROD",
+        "values": [
+          "PRODUCR1",
+          "OPEN",
+          "ORAT",
+          "500",
+          "4*",
+          "2500"
+        ],
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 589
+      },
+      {
+        "keyword": "WCONPROD",
+        "values": [
+          "PRODUCR2",
+          "OPEN",
+          "ORAT",
+          "500",
+          "4*",
+          "2500"
+        ],
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 590
+      },
+      {
+        "keyword": "WCONPROD",
+        "values": [
+          "PRODUCR1",
+          "OPEN",
+          "ORAT",
+          "500",
+          "4*",
+          "2500"
+        ],
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 596
+      },
+      {
+        "keyword": "WCONPROD",
+        "values": [
+          "PRODUCR2",
+          "OPEN",
+          "ORAT",
+          "500",
+          "4*",
+          "2500"
+        ],
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 597
+      }
+    ],
+    "completions": [
+      {
+        "keyword": "COMPDAT",
+        "well": "PRODUCR1",
+        "i": "5",
+        "j": "5",
+        "k1": "4",
+        "k2": "6",
+        "status": "OPEN",
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 539
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "PRODUCR2",
+        "i": "5",
+        "j": "10",
+        "k1": "4",
+        "k2": "6",
+        "status": "OPEN",
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 540
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "PRODUCR3",
+        "i": "5",
+        "j": "15",
+        "k1": "4",
+        "k2": "6",
+        "status": "OPEN",
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 541
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "PRODUCR4",
+        "i": "10",
+        "j": "15",
+        "k1": "4",
+        "k2": "6",
+        "status": "OPEN",
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 542
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "INJECTR1",
+        "i": "20",
+        "j": "1",
+        "k1": "1",
+        "k2": "1",
+        "status": "OPEN",
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 543
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "INJECTR2",
+        "i": "20",
+        "j": "6",
+        "k1": "1",
+        "k2": "1",
+        "status": "OPEN",
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 544
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "INJECTR3",
+        "i": "20",
+        "j": "16",
+        "k1": "1",
+        "k2": "1",
+        "status": "OPEN",
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 545
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "INJECTR4",
+        "i": "16",
+        "j": "20",
+        "k1": "1",
+        "k2": "1",
+        "status": "OPEN",
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 546
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "INJECTR5",
+        "i": "20",
+        "j": "20",
+        "k1": "8",
+        "k2": "9",
+        "status": "OPEN",
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 547
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "INJECTR6",
+        "i": "16",
+        "j": "1",
+        "k1": "8",
+        "k2": "9",
+        "status": "OPEN",
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 548
+      }
+    ]
+  },
+  "vfpTables": [],
+  "productionControlPlan": {
+    "startDate": "1982-10-19",
+    "endTimeDays": 3650,
+    "records": [
+      {
+        "well": "PRODUCR1",
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 556,
+        "date": "1982-10-19",
+        "timeDays": 0,
+        "unit": "STB/day",
+        "originalOilRate": 500,
+        "bhpLimit": 2500
+      },
+      {
+        "well": "PRODUCR2",
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 557,
+        "date": "1982-10-19",
+        "timeDays": 0,
+        "unit": "STB/day",
+        "originalOilRate": 500,
+        "bhpLimit": 2500
+      },
+      {
+        "well": "PRODUCR3",
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 558,
+        "date": "1982-10-19",
+        "timeDays": 0,
+        "unit": "STB/day",
+        "originalOilRate": 500,
+        "bhpLimit": 2500
+      },
+      {
+        "well": "PRODUCR4",
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 559,
+        "date": "1982-10-19",
+        "timeDays": 0,
+        "unit": "STB/day",
+        "originalOilRate": 500,
+        "bhpLimit": 2500
+      },
+      {
+        "well": "PRODUCR1",
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 582,
+        "date": "1983-10-19",
+        "timeDays": 365,
+        "unit": "STB/day",
+        "originalOilRate": 500,
+        "bhpLimit": 2500
+      },
+      {
+        "well": "PRODUCR2",
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 583,
+        "date": "1983-10-19",
+        "timeDays": 365,
+        "unit": "STB/day",
+        "originalOilRate": 500,
+        "bhpLimit": 2500
+      },
+      {
+        "well": "PRODUCR1",
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 589,
+        "date": "1984-10-18",
+        "timeDays": 730,
+        "unit": "STB/day",
+        "originalOilRate": 500,
+        "bhpLimit": 2500
+      },
+      {
+        "well": "PRODUCR2",
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 590,
+        "date": "1984-10-18",
+        "timeDays": 730,
+        "unit": "STB/day",
+        "originalOilRate": 500,
+        "bhpLimit": 2500
+      },
+      {
+        "well": "PRODUCR1",
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 596,
+        "date": "1985-10-18",
+        "timeDays": 1095,
+        "unit": "STB/day",
+        "originalOilRate": 500,
+        "bhpLimit": 2500
+      },
+      {
+        "well": "PRODUCR2",
+        "sourceFile": "ECLIPSE_CONTROL_PLAN.DATA",
+        "lineNumber": 597,
+        "date": "1985-10-18",
+        "timeDays": 1095,
+        "unit": "STB/day",
+        "originalOilRate": 500,
+        "bhpLimit": 2500
+      }
+    ]
+  }
+}

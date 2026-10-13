@@ -1,0 +1,41 @@
+{
+  "apiVerified": true,
+  "manualUiVerified": false,
+  "baselineRunId": 498,
+  "targetRunId": 499,
+  "portableRunId": 500,
+  "originalVersionId": 164,
+  "portableVersionId": 165,
+  "portableArtifact": {
+    "id": 3928,
+    "name": "eclipse-schedule-applied-package.zip",
+    "type": "output",
+    "contentType": "application/zip",
+    "sizeBytes": 1464,
+    "sha256": "d7b622e0292a5234a0fa2442114093a2d92a7621021671d555a89fdd9d7df926",
+    "createdAt": "2026-10-12T14:41:45.359",
+    "expiresAt": "2026-11-11T14:41:45.359"
+  },
+  "sourceUnchanged": true,
+  "onlyAddedConnectionBlock": true,
+  "fullNativeSummaryVerified": true,
+  "summaryNumericPaths": 1872,
+  "maxDifference": 0,
+  "completeSeriesPerRun": 13,
+  "reportsPerSeries": 24,
+  "allStaticInputsUnchanged": true,
+  "geometryUnchanged": true,
+  "well": "P",
+  "newConnection": {
+    "i": 2,
+    "j": 1,
+    "k": 1
+  },
+  "wellIdentityAndControlsUnchanged": true,
+  "rejectedRequests": 17,
+  "rejectedRequestCreatedRun": false,
+  "lastBaselineBhp": 3885.1171875,
+  "lastTargetBhp": 3906.57421875,
+  "lastWaterRate": 1000.0,
+  "lastWaterTotal": 300000.0
+}

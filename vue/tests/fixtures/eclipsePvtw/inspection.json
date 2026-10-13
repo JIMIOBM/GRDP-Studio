@@ -1,0 +1,185 @@
+{
+  "schemaVersion": "eclipse-data-inspection/4",
+  "caseName": "ECLIPSE_PVTW_WATER.DATA",
+  "sections": [
+    "RUNSPEC",
+    "GRID",
+    "PROPS",
+    "REGIONS",
+    "SOLUTION",
+    "SUMMARY",
+    "SCHEDULE"
+  ],
+  "unitSystem": "METRIC",
+  "phases": [
+    "WATER"
+  ],
+  "dimensions": {
+    "nx": 15,
+    "ny": 15,
+    "nz": 1
+  },
+  "wellNames": [
+    "I",
+    "P"
+  ],
+  "scheduleTimeline": [
+    {
+      "kind": "TSTEP",
+      "steps": [
+        "10.00",
+        "10.00",
+        "10.00",
+        "10.00",
+        "10.00",
+        "10.00",
+        "10.00",
+        "10.00",
+        "10.00",
+        "10.00",
+        "10.00",
+        "10.00",
+        "10.00",
+        "10.00",
+        "10.00",
+        "25.0",
+        "25.0",
+        "25.0",
+        "25.0",
+        "25.0",
+        "25.0"
+      ],
+      "sourceFile": "ECLIPSE_PVTW_WATER.DATA",
+      "lineNumber": 179
+    }
+  ],
+  "packageFiles": [
+    {
+      "relativePath": "ECLIPSE_PVTW_WATER.DATA",
+      "sizeBytes": 3596,
+      "sha256": "dbae4c8a9f20f0a9c521f77d63fae3bbbdd3ec22cb8ab962897db5cb05a028c2"
+    }
+  ],
+  "scheduleMetadata": {
+    "wells": [
+      {
+        "name": "I",
+        "group": "G",
+        "sourceFile": "ECLIPSE_PVTW_WATER.DATA",
+        "lineNumber": 153
+      },
+      {
+        "name": "P",
+        "group": "G",
+        "sourceFile": "ECLIPSE_PVTW_WATER.DATA",
+        "lineNumber": 154
+      }
+    ],
+    "groups": [],
+    "records": [
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "I       ",
+          "15",
+          "15",
+          "1",
+          "1",
+          "OPEN",
+          "0",
+          ".0",
+          "1.0"
+        ],
+        "sourceFile": "ECLIPSE_PVTW_WATER.DATA",
+        "lineNumber": 158
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "P       ",
+          "1",
+          "1",
+          "1",
+          "1",
+          "OPEN",
+          "0",
+          ".0",
+          "1.0",
+          "1000",
+          "0"
+        ],
+        "sourceFile": "ECLIPSE_PVTW_WATER.DATA",
+        "lineNumber": 159
+      },
+      {
+        "keyword": "WCONPROD",
+        "values": [
+          "P",
+          "OPEN",
+          "WRAT",
+          "1*",
+          "1000.0"
+        ],
+        "sourceFile": "ECLIPSE_PVTW_WATER.DATA",
+        "lineNumber": 163
+      },
+      {
+        "keyword": "WCONINJE",
+        "values": [
+          "I ",
+          "WAT",
+          "OPEN",
+          "RATE",
+          "1000.0"
+        ],
+        "sourceFile": "ECLIPSE_PVTW_WATER.DATA",
+        "lineNumber": 167
+      }
+    ],
+    "completions": [
+      {
+        "keyword": "COMPDAT",
+        "well": "I       ",
+        "i": "15",
+        "j": "15",
+        "k1": "1",
+        "k2": "1",
+        "status": "OPEN",
+        "sourceFile": "ECLIPSE_PVTW_WATER.DATA",
+        "lineNumber": 158
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "P       ",
+        "i": "1",
+        "j": "1",
+        "k1": "1",
+        "k2": "1",
+        "status": "OPEN",
+        "sourceFile": "ECLIPSE_PVTW_WATER.DATA",
+        "lineNumber": 159
+      }
+    ]
+  },
+  "newWellContext": {
+    "schemaVersion": "eclipse-new-well-context/1",
+    "sourceFile": "ECLIPSE_PVTW_WATER.DATA",
+    "insertionLine": 179,
+    "maxWells": 3,
+    "maxConnections": 10,
+    "maxGroups": 1,
+    "maxWellsPerGroup": 10
+  },
+  "pvtwContext": {
+    "schemaVersion": "eclipse-pvtw-context/1",
+    "sourceFile": "ECLIPSE_PVTW_WATER.DATA",
+    "lineNumber": 77,
+    "recordValues": [
+      ".0",
+      "1.0",
+      "3.03E-06",
+      ".5",
+      "0.0"
+    ]
+  }
+}

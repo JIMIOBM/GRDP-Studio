@@ -16,3 +16,14 @@ The manifest hash covers UTF-8 JSON of sorted file records with sorted keys, com
 The tool rejects source links/junctions, portable-path traversal, case-insensitive collisions, excessive sizes/counts and detectable file changes during reads. `.iam` is opaque: no BinaryFormatter deserialization, guessed mappings or automatic `.bpn` conversion. It does not verify INCLUDE closure, embedded native references, versions, licenses, MPI services or credentials.
 
 See [CC02-A acceptance](../../docs/software-integration/acceptance/CC02-A.md) for the official-document constraints and the next native/API gate. Other locally present probe files are separate experiments, not dependencies of this tool or automatically part of its GitHub delivery.
+
+## Official document discovery (CC02-B)
+
+`coupling_inspect.py` uses the official local IAM REST reader after a manifest-verified isolated copy. It records live Swagger, HTTP responses, actual model types, variables, units, time, diagnostics and available mappings; it deletes only its confirmed workspace. It never deserializes `.iam`, converts `.bpn`, writes controls or explicitly steps the simulator. Opening a native IAM document can itself activate models: use an isolated host holding the simulator resource locks, not a user's open IAM session. Both application Workers must be idle. The tool rejects a host that already contains workspaces.
+
+```powershell
+python tools/iam/coupling_inspect.py --package "<PACKAGE_DIR>" --entry "Reservoir to Network.iam" --url "http://localhost:<PORT>" --timeout 30 --output "<NEW_EVIDENCE_DIR>"
+python -m unittest discover -s tools/iam -p test_coupling_inspect.py -v
+```
+
+Exit 3 means complete metadata collected, **not** coupled readiness; 2 means input/protocol/discovery/cleanup blocked. A timeout never retries the create request. Confirmed owned workspace IDs are cleaned up; uncertain ownership is reported for the operator. Partial reads remain evidence, not an inferred mapping. `canCalculate` and `coupledSolveVerified` always remain false. Matching unit strings cannot prove absolute/gauge pressure, stock-tank/reservoir rates, PVT or wellbore ownership.

@@ -1,0 +1,13 @@
+{
+  "source": "C:\\Users\\Violet\\Desktop\\Bei\\GRDP-Studio\\test-data\\ECLIPSE_WRAT.DATA",
+  "sourceSha256": "a14f8c7a49713f97732bf46c7b4c2c7e8c4588b209b0fc1c122b57d4ffae986c",
+  "sampleSha256": "97b5fdebe5df1c4e5c85b9b67d6d8bb747ee48aff0bf1e3668cfdc0e8fa43222",
+  "officialSource": "C:/ecl/2024.1/eclipse/data/TRACERDISPERS.DATA",
+  "physicsAndScheduleUnchanged": true,
+  "changes": [
+    "Replace NOGGF with INIT to retain full EGRID and static input",
+    "Add UNIFOUT",
+    "Request WWPT instead of nonexistent water-only WOPR"
+  ],
+  "scenario": "METRIC quarter-five-spot water drive; 15x15x1, uniform PERMX/PERMY 100 mD; P/I opposite corners; 300-day unchanged control."
+}

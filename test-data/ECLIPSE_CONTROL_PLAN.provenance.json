@@ -1,0 +1,55 @@
+{
+  "seed": "C:\\Users\\Violet\\Desktop\\Bei\\GRDP-Studio\\test-data\\ECLIPSE_GROUP_PRODUCTION.DATA",
+  "seedSha256": "057e9672f369c0ae5c444b4ff200fb81d862b35bae1cb61ce9933c05e59da463",
+  "seedUnchanged": true,
+  "sampleSha256": "ac29699a8d6d6ab4d814ee956a6b99f4b277ba4aafe24aa4a4228b24ec556564",
+  "originalOfficialModel": false,
+  "changes": [
+    "Seed derivations retained; see ECLIPSE_GROUP_PRODUCTION.provenance.json.",
+    "Four existing producers changed from GRUP to independent ORAT500; direct GCONPROD removed.",
+    "10*365 report days expressed as corresponding midnight DATES; total3650 days retained, including leap-year calendar shifts.",
+    "PRODUCR1/2 explicitly restate ORAT500 after first three report dates.",
+    "No change to reservoir physics, geometry, completions, injector controls or BHP2500."
+  ],
+  "startDate": "1982-10-19",
+  "endTimeDays": 3650,
+  "positiveEdits": [
+    {
+      "date": "1983-10-19",
+      "timeDays": 365,
+      "wells": [
+        "PRODUCR1",
+        "PRODUCR2"
+      ],
+      "originalOilRate": 500,
+      "targetOilRate": 250
+    },
+    {
+      "date": "1984-10-18",
+      "timeDays": 730,
+      "wells": [
+        "PRODUCR1",
+        "PRODUCR2"
+      ],
+      "originalOilRate": 500,
+      "targetOilRate": 350
+    },
+    {
+      "date": "1985-10-18",
+      "timeDays": 1095,
+      "wells": [
+        "PRODUCR1",
+        "PRODUCR2"
+      ],
+      "originalOilRate": 500,
+      "targetOilRate": 450
+    }
+  ],
+  "limitedTargetOilRate": 100000,
+  "bhpLowerLimit": 2500,
+  "unit": "STB/day",
+  "nativeDirectory": "C:\\GRDP-TestOutput\\ECLIPSE-P03-CONTROL-PLAN-probe-a1",
+  "nativeByteEquivalent": true,
+  "manualUiVerified": false,
+  "limitations": "Native-qualified E100 FIELD reference; platform control-plan delivery still in progress. Other modes, injection, INCLUDE, mixed or fractional time and dynamic work controls require separate qualification."
+}

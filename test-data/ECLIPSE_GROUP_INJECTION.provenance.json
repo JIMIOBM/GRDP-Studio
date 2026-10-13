@@ -1,0 +1,19 @@
+{
+  "source": "C:\\ecl\\2024.1\\eclipse\\data\\BIG3D3P.DATA",
+  "sha256": "940a5e181cc9dc65b4d8ff2ae9ffed21547c94a69057a5a5605aeade27fc8a1a",
+  "sourceUnchanged": true,
+  "sample": "ECLIPSE_GROUP_INJECTION.DATA",
+  "sampleSha256": "bd42d940b61c6ae188154636a8f55d5c1cbd4d4694c176aa89481aa959e5a126",
+  "originalOfficialModel": false,
+  "changes": [
+    "SUMMARY requests GWIR WI, WWIR and WBHP for existing INJECTR5/6.",
+    "WELLDIMS group capacity 2->3 and existing water injectors assigned to dedicated direct WI group.",
+    "Water injectors RATE->GRUP; original surface limit 22500 preserved; explicit BHP upper limit 6000 psia replaces default 100000.",
+    "Insert GCONINJE WI WATER RATE 2 STB/day. All other reservoir/fluid physics, wells, completions and time plan preserved."
+  ],
+  "baselineTarget": 2,
+  "positiveTarget": 1,
+  "pressureLimitedTarget": 10,
+  "bhpUpperLimit": 6000,
+  "limitations": "Native initial capacity is only about 2.345 STB/day at this pressure. These are demonstration targets, not field operating recommendations. Original PVT/endpoints/convergence warnings remain."
+}

@@ -30,13 +30,37 @@ public static class EclipseDataInspector
             var v1 = new Parser(caseName, allowIncludes: false).Read(reader);
             using var scheduleStream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, FileOptions.SequentialScan);
             using var scheduleReader = new StreamReader(scheduleStream, new UTF8Encoding(false, true), detectEncodingFromByteOrderMarks: false, bufferSize: 64 * 1024);
-            var schedule = new ScheduleParser().Read([(caseName, scheduleReader.ReadToEnd())]);
+            var content = scheduleReader.ReadToEnd();
+            var schedule = new ScheduleParser().Read([(caseName, content)]);
+            var tables = EclipseVfpTableReader.Read(content, caseName);
+            var productionControlPlan = EclipseControlPlanReader.Read(content, caseName)?.Plan;
+            var groupStructureControls = EclipseGroupStructureReader.Read(content, caseName).Select(t => t.Control).ToArray();
+            var advancedInjectionControls = EclipseAdvancedInjectionReader.Read(content, caseName).Select(t => t.Control).ToArray();
+            var waterProductionControls = EclipseGroupWaterProductionReader.Read(content, caseName).Select(t => t.Control).ToArray();
+            var groupRateControls = EclipseGroupRateReader.Read(content, caseName).Select(t => t.Control).ToArray();
+            var groupControls = EclipseGroupProductionReader.Read(content, caseName).Select(t => t.Control).ToArray();
+            var injectionControls = EclipseGroupInjectionReader.Read(content, caseName).Select(t => t.Control).ToArray();
+            var gasInjectionControls = EclipseGroupGasInjectionReader.Read(content, caseName).Select(t => t.Control).ToArray();
             return v1 with
             {
-                SchemaVersion = schedule.Metadata is null ? "eclipse-data-inspection/2" : "eclipse-data-inspection/4",
+                SchemaVersion = productionControlPlan is not null && schedule.Metadata is not null ? "eclipse-data-inspection/13" : groupStructureControls.Length > 0 && schedule.Metadata is not null ? "eclipse-data-inspection/12" : advancedInjectionControls.Length > 0 && schedule.Metadata is not null ? "eclipse-data-inspection/11" : waterProductionControls.Length > 0 && schedule.Metadata is not null ? "eclipse-data-inspection/10" : groupRateControls.Length > 0 && schedule.Metadata is not null ? "eclipse-data-inspection/9" : gasInjectionControls.Length > 0 && schedule.Metadata is not null ? "eclipse-data-inspection/8" : injectionControls.Length > 0 && schedule.Metadata is not null ? "eclipse-data-inspection/7" : groupControls.Length > 0 && schedule.Metadata is not null ? "eclipse-data-inspection/6" : tables.Count > 0 && schedule.Metadata is not null ? "eclipse-data-inspection/5" : schedule.Metadata is null ? "eclipse-data-inspection/2" : "eclipse-data-inspection/4",
                 WellNames = schedule.WellNames,
                 ScheduleTimeline = schedule.Events,
-                ScheduleMetadata = schedule.Metadata
+                ScheduleMetadata = schedule.Metadata,
+                VfpTables = productionControlPlan is not null || groupStructureControls.Length > 0 || advancedInjectionControls.Length > 0 || waterProductionControls.Length > 0 || groupRateControls.Length > 0 || gasInjectionControls.Length > 0 || injectionControls.Length > 0 || groupControls.Length > 0 ? tables : tables.Count > 0 && schedule.Metadata is not null ? tables : null,
+                GroupControls = groupControls.Length > 0 && schedule.Metadata is not null ? groupControls : null,
+                InjectionGroupControls = gasInjectionControls.Length == 0 && injectionControls.Length > 0 && schedule.Metadata is not null ? injectionControls : null,
+                GasInjectionGroupControls = gasInjectionControls.Length > 0 && schedule.Metadata is not null ? gasInjectionControls : null,
+                GroupRateControls = groupRateControls.Length > 0 && schedule.Metadata is not null ? groupRateControls : null,
+                WaterProductionGroupControls = waterProductionControls.Length > 0 && schedule.Metadata is not null ? waterProductionControls : null,
+                AdvancedInjectionGroupControls = advancedInjectionControls.Length > 0 && schedule.Metadata is not null ? advancedInjectionControls : null,
+                GroupStructureControls = groupStructureControls.Length > 0 && schedule.Metadata is not null ? groupStructureControls : null,
+                ProductionControlPlan = schedule.Metadata is not null ? productionControlPlan : null,
+                NewWellContext = EclipseNewWellContextReader.Read(content, caseName),
+                PvtwContext = schedule.Metadata is not null && tables.Count == 0 && productionControlPlan is null && groupStructureControls.Length == 0 && advancedInjectionControls.Length == 0 && waterProductionControls.Length == 0 && groupRateControls.Length == 0 && gasInjectionControls.Length == 0 && injectionControls.Length == 0 && groupControls.Length == 0 ? EclipsePvtwReader.Read(content, caseName) : null,
+                OilPvtContext = schedule.Metadata is not null && tables.Count == 0 && productionControlPlan is null && groupStructureControls.Length == 0 && advancedInjectionControls.Length == 0 && waterProductionControls.Length == 0 && groupRateControls.Length == 0 && gasInjectionControls.Length == 0 && injectionControls.Length == 0 && groupControls.Length == 0 ? EclipseOilPvtReader.Read(content, caseName) : null,
+                GasPvtContext = schedule.Metadata is not null && tables.Count == 0 && productionControlPlan is null && groupStructureControls.Length == 0 && advancedInjectionControls.Length == 0 && waterProductionControls.Length == 0 && groupRateControls.Length == 0 && gasInjectionControls.Length == 0 && injectionControls.Length == 0 && groupControls.Length == 0 ? EclipseGasPvtReader.Read(content, caseName) : null,
+                RelpermContext = schedule.Metadata is not null && tables.Count == 0 && productionControlPlan is null && groupStructureControls.Length == 0 && advancedInjectionControls.Length == 0 && waterProductionControls.Length == 0 && groupRateControls.Length == 0 && gasInjectionControls.Length == 0 && injectionControls.Length == 0 && groupControls.Length == 0 ? EclipseRelpermReader.Read(content, caseName) : null
             };
         }
         catch (DecoderFallbackException)
@@ -55,12 +79,35 @@ public static class EclipseDataInspector
         using var reader = new StringReader(combined.ToString());
         var v1 = new Parser(caseName, allowIncludes: true).Read(reader);
         var schedule = new ScheduleParser().Read(sources);
+        var tables = sources.Length == 1 ? EclipseVfpTableReader.Read(sources[0].Content, sources[0].SourceFile) : [];
+        var injectionControls = sources.Length == 1 ? EclipseGroupInjectionReader.Read(sources[0].Content, sources[0].SourceFile).Select(t => t.Control).ToArray() : [];
+        var gasInjectionControls = sources.Length == 1 ? EclipseGroupGasInjectionReader.Read(sources[0].Content, sources[0].SourceFile).Select(t => t.Control).ToArray() : [];
+        var productionControlPlan = sources.Length == 1 ? EclipseControlPlanReader.Read(sources[0].Content, sources[0].SourceFile)?.Plan : null;
+        var groupStructureControls = sources.Length == 1 ? EclipseGroupStructureReader.Read(sources[0].Content, sources[0].SourceFile).Select(t => t.Control).ToArray() : [];
+        var advancedInjectionControls = sources.Length == 1 ? EclipseAdvancedInjectionReader.Read(sources[0].Content, sources[0].SourceFile).Select(t => t.Control).ToArray() : [];
+        var waterProductionControls = sources.Length == 1 ? EclipseGroupWaterProductionReader.Read(sources[0].Content, sources[0].SourceFile).Select(t => t.Control).ToArray() : [];
+        var groupRateControls = sources.Length == 1 ? EclipseGroupRateReader.Read(sources[0].Content, sources[0].SourceFile).Select(t => t.Control).ToArray() : [];
+        var groupControls = sources.Length == 1 ? EclipseGroupProductionReader.Read(sources[0].Content, sources[0].SourceFile).Select(t => t.Control).ToArray() : [];
         return v1 with
         {
-            SchemaVersion = schedule.Metadata is null ? "eclipse-data-inspection/2" : "eclipse-data-inspection/4",
+            SchemaVersion = productionControlPlan is not null && schedule.Metadata is not null ? "eclipse-data-inspection/13" : groupStructureControls.Length > 0 && schedule.Metadata is not null ? "eclipse-data-inspection/12" : advancedInjectionControls.Length > 0 && schedule.Metadata is not null ? "eclipse-data-inspection/11" : waterProductionControls.Length > 0 && schedule.Metadata is not null ? "eclipse-data-inspection/10" : groupRateControls.Length > 0 && schedule.Metadata is not null ? "eclipse-data-inspection/9" : gasInjectionControls.Length > 0 && schedule.Metadata is not null ? "eclipse-data-inspection/8" : injectionControls.Length > 0 && schedule.Metadata is not null ? "eclipse-data-inspection/7" : groupControls.Length > 0 && schedule.Metadata is not null ? "eclipse-data-inspection/6" : tables.Count > 0 && schedule.Metadata is not null ? "eclipse-data-inspection/5" : schedule.Metadata is null ? "eclipse-data-inspection/2" : "eclipse-data-inspection/4",
             WellNames = schedule.WellNames,
             ScheduleTimeline = schedule.Events,
-            ScheduleMetadata = schedule.Metadata
+            ScheduleMetadata = schedule.Metadata,
+                VfpTables = productionControlPlan is not null || groupStructureControls.Length > 0 || advancedInjectionControls.Length > 0 || waterProductionControls.Length > 0 || groupRateControls.Length > 0 || gasInjectionControls.Length > 0 || injectionControls.Length > 0 || groupControls.Length > 0 ? tables : tables.Count > 0 && schedule.Metadata is not null ? tables : null,
+                GroupControls = groupControls.Length > 0 && schedule.Metadata is not null ? groupControls : null,
+                InjectionGroupControls = gasInjectionControls.Length == 0 && injectionControls.Length > 0 && schedule.Metadata is not null ? injectionControls : null,
+                GasInjectionGroupControls = gasInjectionControls.Length > 0 && schedule.Metadata is not null ? gasInjectionControls : null,
+                GroupRateControls = groupRateControls.Length > 0 && schedule.Metadata is not null ? groupRateControls : null,
+                WaterProductionGroupControls = waterProductionControls.Length > 0 && schedule.Metadata is not null ? waterProductionControls : null,
+                AdvancedInjectionGroupControls = advancedInjectionControls.Length > 0 && schedule.Metadata is not null ? advancedInjectionControls : null,
+                GroupStructureControls = groupStructureControls.Length > 0 && schedule.Metadata is not null ? groupStructureControls : null,
+                ProductionControlPlan = schedule.Metadata is not null ? productionControlPlan : null,
+                NewWellContext = sources.Length == 1 ? EclipseNewWellContextReader.Read(sources[0].Content, sources[0].SourceFile) : null,
+                PvtwContext = sources.Length == 1 && schedule.Metadata is not null && tables.Count == 0 && productionControlPlan is null && groupStructureControls.Length == 0 && advancedInjectionControls.Length == 0 && waterProductionControls.Length == 0 && groupRateControls.Length == 0 && gasInjectionControls.Length == 0 && injectionControls.Length == 0 && groupControls.Length == 0 ? EclipsePvtwReader.Read(sources[0].Content, sources[0].SourceFile) : null,
+                OilPvtContext = sources.Length == 1 && schedule.Metadata is not null && tables.Count == 0 && productionControlPlan is null && groupStructureControls.Length == 0 && advancedInjectionControls.Length == 0 && waterProductionControls.Length == 0 && groupRateControls.Length == 0 && gasInjectionControls.Length == 0 && injectionControls.Length == 0 && groupControls.Length == 0 ? EclipseOilPvtReader.Read(sources[0].Content, sources[0].SourceFile) : null,
+                GasPvtContext = sources.Length == 1 && schedule.Metadata is not null && tables.Count == 0 && productionControlPlan is null && groupStructureControls.Length == 0 && advancedInjectionControls.Length == 0 && waterProductionControls.Length == 0 && groupRateControls.Length == 0 && gasInjectionControls.Length == 0 && injectionControls.Length == 0 && groupControls.Length == 0 ? EclipseGasPvtReader.Read(sources[0].Content, sources[0].SourceFile) : null,
+                RelpermContext = sources.Length == 1 && schedule.Metadata is not null && tables.Count == 0 && productionControlPlan is null && groupStructureControls.Length == 0 && advancedInjectionControls.Length == 0 && waterProductionControls.Length == 0 && groupRateControls.Length == 0 && gasInjectionControls.Length == 0 && injectionControls.Length == 0 && groupControls.Length == 0 ? EclipseRelpermReader.Read(sources[0].Content, sources[0].SourceFile) : null
         };
     }
 
@@ -351,6 +398,7 @@ public static class EclipseDataInspector
         private int lineUnquotedTokens;
         private int lineNonSlashTokens;
         private int lineSlashTokens;
+        private bool decoratedScheduleLine;
         private bool lineHasSlash;
         private bool quoted;
         private bool quotePending;
@@ -378,7 +426,7 @@ public static class EclipseDataInspector
                 using var reader = new StringReader(source.Content);
                 int value;
                 while ((value = reader.Read()) >= 0) Process((char)value);
-                if (quotePending) CloseQuotedToken(closed: false);
+                if (quotePending) CloseQuotedToken(closed: true);
                 FinishLine(endOfFile: true);
             }
             // An open candidate is deliberately discarded: no slash means no completed block.
@@ -397,7 +445,7 @@ public static class EclipseDataInspector
             if (value == '\0') Fail("ECLIPSE_DATA_NUL_BYTE", "The ECLIPSE .DATA file contains a NUL byte.");
             if (value is '\r' or '\n')
             {
-                if (quotePending) CloseQuotedToken(closed: false);
+                if (quotePending) CloseQuotedToken(closed: true);
                 if (value == '\n' && previousWasCarriageReturn) { previousWasCarriageReturn = false; return; }
                 FinishLine(endOfFile: false);
                 previousWasCarriageReturn = value == '\r';
@@ -460,7 +508,7 @@ public static class EclipseDataInspector
         {
             FinishToken();
             if (candidate is not null && lineSlashTokens == 1 && lineNonSlashTokens == 0) FinishCandidate();
-            if (candidate is null && !lineHasSlash && lineUnquotedTokens == 1 && IsCandidateKeyword(lineToken))
+            if (candidate is null && !lineHasSlash && (lineUnquotedTokens == 1 || decoratedScheduleLine) && IsCandidateKeyword(lineToken))
             {
                 if (lineToken!.Equals("SCHEDULE", StringComparison.OrdinalIgnoreCase))
                 {
@@ -481,6 +529,7 @@ public static class EclipseDataInspector
             lineUnquotedTokens = 0;
             lineNonSlashTokens = 0;
             lineSlashTokens = 0;
+            decoratedScheduleLine = false;
             lineHasSlash = false;
             if (!endOfFile) lineNumber++;
         }
@@ -506,8 +555,15 @@ public static class EclipseDataInspector
             var value = token.ToString();
             var lex = new LexToken(value, currentQuoted, currentClosedQuote || !currentQuoted, tokenTooLong);
             lineNonSlashTokens++;
+            // TSTEP is a single record; legacy files often put its terminating slash
+            // after the last number, then immediately start the next keyword.
+            if (candidate?.Keyword == "TSTEP" && record.Count == 0 && candidate.Steps.Count > 0
+                && lineNonSlashTokens == 1 && !lex.Quoted && Regex.IsMatch(value, "^[A-Z][A-Z0-9-]{0,15}$"))
+                FinishCandidate();
             if (candidate is null)
             {
+                if (lineNonSlashTokens == 1) decoratedScheduleLine = !lex.Quoted && value.Equals("SCHEDULE", StringComparison.OrdinalIgnoreCase);
+                else if (lex.Quoted || value.Any(character => character != '=')) decoratedScheduleLine = false;
                 if (!lex.Quoted)
                 {
                     lineUnquotedTokens++;
@@ -696,7 +752,15 @@ public static class EclipseDataInspector
                 {
                     foreach (var step in tokens)
                     {
-                        if (!step.Quoted && !step.TooLong && IsFiniteDecimal(step.Value)) Steps.Add(step.Value);
+                        if (step.Quoted || step.TooLong) continue;
+                        var repeat = Regex.Match(step.Value, "^(\\d+)\\*(.+)$", RegexOptions.CultureInvariant);
+                        if (repeat.Success)
+                        {
+                            if (!int.TryParse(repeat.Groups[1].Value, out var count) || count < 1 || count > MaxSteps || Steps.Count + count > MaxSteps) Limit();
+                            if (IsFiniteDecimal(repeat.Groups[2].Value))
+                                for (var index = 0; index < count; index++) Steps.Add(repeat.Groups[2].Value);
+                        }
+                        else if (IsFiniteDecimal(step.Value)) Steps.Add(step.Value);
                         if (Steps.Count > MaxSteps) Limit();
                     }
                 }

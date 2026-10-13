@@ -1,0 +1,24 @@
+{
+  "source": "C:\\ecl\\2024.1\\eclipse\\data\\BIG3D3P.DATA",
+  "sourceSha256": "940a5e181cc9dc65b4d8ff2ae9ffed21547c94a69057a5a5605aeade27fc8a1a",
+  "sourceUnchanged": true,
+  "sample": "ECLIPSE_GROUP_PRODUCTION.DATA",
+  "sampleSha256": "057e9672f369c0ae5c444b4ff200fb81d862b35bae1cb61ce9933c05e59da463",
+  "originalOfficialModel": false,
+  "changes": [
+    "SUMMARY requests GOPR G, FOPR, WOPR and WBHP for the four existing producers.",
+    "Four existing OPEN ORAT producer modes changed to GRUP; individual oil limits 20000 STB/day and BHP limits 2500 psia preserved.",
+    "Initial GCONPROD G ORAT 60000 STB/day inserted. Well specifications, completions, reservoir/fluid physics, injectors and TSTEP preserved."
+  ],
+  "group": "G",
+  "members": [
+    "PRODUCR1",
+    "PRODUCR2",
+    "PRODUCR3",
+    "PRODUCR4"
+  ],
+  "baselineTarget": 60000,
+  "positiveTarget": 30000,
+  "pressureLimitedTarget": 80000,
+  "warnings": "Installed reference has endpoint/PVT/default injection BHP and convergence warnings; keep all diagnostics."
+}

@@ -1,0 +1,23 @@
+{
+  "metadata": {
+    "id": 4,
+    "modelVersionId": 179,
+    "baselineRunId": 570,
+    "name": "极端百分比算法验算",
+    "sourceFile": "extreme-algorithm.csv",
+    "sourceSha256": "b73f2b5d59b2eebbcca4a8b9ebf6965bb470e53f3d111d534359179ae5abfe16",
+    "observationCount": 1,
+    "createdAt": "2026-10-13T02:14:54.474"
+  },
+  "csv": "well,keyword,unit,timeDays,value\nP1,WOPR,STB/DAY,5,1e-308",
+  "observations": [
+    {
+      "well": "P1",
+      "keyword": "WOPR",
+      "unit": "STB/DAY",
+      "timeDays": 5.0,
+      "value": 1e-308,
+      "sourceLine": 2
+    }
+  ]
+}

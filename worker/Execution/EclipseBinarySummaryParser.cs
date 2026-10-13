@@ -5,12 +5,12 @@ namespace Grdp.SoftwareIntegration.Worker.Execution;
 
 /// <summary>
 /// Reads the ECLIPSE SMSPEC/UNSMRY Summary pair without exposing raw binary data.
-/// ECLIPSE writes Fortran records whose payload starts with an eight-byte keyword;
-/// the byte order is detected from the first record. RSM remains the text fallback.
+/// Each official block has a keyword/count/type descriptor and separate data records.
+/// The bounded field index validates those records. RSM remains the text fallback.
 /// </summary>
 public static class EclipseBinarySummaryParser
 {
-    private sealed record Section(string Keyword, byte[] Data, bool BigEndian);
+    private sealed record Section(string Keyword, string DataType, int Count, byte[] Data, bool BigEndian);
 
     public static IReadOnlyList<EclipseSummarySeries> Parse(string smspecPath, string unsmryPath)
         => Parse(smspecPath, [unsmryPath]);
@@ -24,7 +24,12 @@ public static class EclipseBinarySummaryParser
         if (keywords.Count == 0) return [];
         var wells = Strings(specification, "WGNAMES");
         var units = Strings(specification, "UNITS");
-        var timeIndex = keywords.FindIndex(keyword => keyword is "TIME" or "DAYS" or "YEARS");
+        if (wells.Count != keywords.Count || units.Count != keywords.Count)
+            throw new InvalidDataException("Summary identity and unit columns must match KEYWORDS.");
+        var timeIndices = Enumerable.Range(0, keywords.Count).Where(index => keywords[index] is "TIME" or "DAYS").ToArray();
+        if (timeIndices.Length != 1 || units[timeIndices[0]] != "DAYS")
+            throw new InvalidDataException("A unique real TIME/DAYS axis in DAYS is required; years and record indices are not simulation days.");
+        var timeIndex = timeIndices[0];
         var series = new Dictionary<string, MutableSeries>(StringComparer.Ordinal);
         for (var index = 0; index < keywords.Count; index++)
         {
@@ -34,16 +39,14 @@ public static class EclipseBinarySummaryParser
             series.TryAdd(key, new MutableSeries(keywords[index], objectName, units.ElementAtOrDefault(index)));
         }
 
-        var step = 0d;
         foreach (var path in paths)
         {
             foreach (var section in ReadSections(path))
             {
                 if (!section.Keyword.Equals("PARAMS", StringComparison.OrdinalIgnoreCase)) continue;
                 var values = Numbers(section, keywords.Count);
-                if (values.Count < keywords.Count) continue;
-                var time = timeIndex >= 0 && timeIndex < values.Count ? values[timeIndex] : step;
-                if (!double.IsFinite(time) || time < 0) { step++; continue; }
+                var time = values[timeIndex];
+                if (!double.IsFinite(time) || time < 0) continue;
                 for (var index = 0; index < keywords.Count && index < values.Count; index++)
                 {
                     if (index == timeIndex || !double.IsFinite(values[index])) continue;
@@ -53,7 +56,6 @@ public static class EclipseBinarySummaryParser
                     if (item.Points.Count == 0 || time >= item.Points[^1].TimeDays)
                         item.Points.Add(new EclipseSummaryPoint(time, values[index]));
                 }
-                step++;
             }
         }
 
@@ -62,53 +64,42 @@ public static class EclipseBinarySummaryParser
 
     private static IReadOnlyList<Section> ReadSections(string path)
     {
-        var bytes = File.ReadAllBytes(path);
-        if (bytes.Length < 8) throw new InvalidDataException("Truncated ECLIPSE binary file.");
-        var bigEndian = IsValidRecordLength(ReadInt32(bytes, 0, true), bytes.Length)
-                        && !IsValidRecordLength(ReadInt32(bytes, 0, false), bytes.Length);
-        var littleEndian = IsValidRecordLength(ReadInt32(bytes, 0, false), bytes.Length);
-        if (!bigEndian && !littleEndian) throw new InvalidDataException("Invalid ECLIPSE binary record byte order.");
-
+        var index = EclipseBinaryFieldIndexParser.TryParse(path)
+            ?? throw new InvalidDataException("Invalid ECLIPSE descriptor/data record structure.");
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        if (stream.Length != index.FileSize) throw new InvalidDataException("The Summary file changed during indexing.");
         var sections = new List<Section>();
-        var offset = 0;
-        while (offset < bytes.Length)
+        long collectedBytes = 0;
+        foreach (var field in index.Sections)
         {
-            var length = ReadRecordLength(bytes, ref offset, bigEndian);
-            var payload = bytes[offset..(offset + length)];
-            offset += length;
-            var footer = ReadInt32(bytes, offset, bigEndian);
-            offset += 4;
-            if (footer != length) throw new InvalidDataException("Invalid ECLIPSE binary record footer.");
-            var keyword = Encoding.ASCII.GetString(payload, 0, 8).TrimEnd('\0', ' ');
-            sections.Add(new Section(keyword, payload[8..], bigEndian));
+            if (field.Keyword is not ("KEYWORDS" or "WGNAMES" or "UNITS" or "PARAMS")) continue;
+            collectedBytes += field.DataBytes;
+            if (field.Count > 65536 || field.DataBytes > 512 * 1024 || collectedBytes > 64 * 1024 * 1024)
+                throw new InvalidDataException("The Summary exceeds bounded value/byte limits.");
+            var data = new byte[checked((int)field.DataBytes)];
+            var offset = 0;
+            foreach (var segment in field.Segments)
+            {
+                stream.Position = segment.Offset;
+                stream.ReadExactly(data.AsSpan(offset, segment.Length));
+                offset += segment.Length;
+            }
+            sections.Add(new Section(field.Keyword, field.DataType, field.Count, data, index.ByteOrder == "BIG"));
         }
         return sections;
     }
 
-    private static int ReadRecordLength(byte[] bytes, ref int offset, bool bigEndian)
-    {
-        if (offset + 4 > bytes.Length) throw new InvalidDataException("Truncated ECLIPSE binary record.");
-        var length = ReadInt32(bytes, offset, bigEndian);
-        offset += 4;
-        if (length < 8 || length > 512 * 1024 * 1024 || offset + length + 4 > bytes.Length)
-            throw new InvalidDataException("Invalid ECLIPSE binary record length.");
-        return length;
-    }
-
-    private static bool IsValidRecordLength(int length, int totalLength) =>
-        length >= 8 && length <= 512 * 1024 * 1024 && length + 8 <= totalLength;
-
     private static List<string> Strings(IEnumerable<Section> sections, string name) =>
-        sections.Where(section => section.Keyword.Equals(name, StringComparison.OrdinalIgnoreCase))
+        sections.Where(section => section.Keyword.Equals(name, StringComparison.OrdinalIgnoreCase) && section.DataType == "CHAR")
             .SelectMany(section => Enumerable.Range(0, section.Data.Length / 8)
-                .Select(index => Encoding.ASCII.GetString(section.Data, index * 8, 8).TrimEnd('\0', ' ')))
+                .Select(index => Encoding.ASCII.GetString(section.Data, index * 8, 8).Trim('\0', ' ')))
             .ToList();
 
     private static List<double> Numbers(Section section, int expectedCount)
     {
-        if (expectedCount <= 0 || section.Data.Length % expectedCount != 0) return [];
-        var size = section.Data.Length / expectedCount;
-        if (size is not (4 or 8)) return [];
+        if (expectedCount <= 0 || section.Count != expectedCount || section.DataType is not ("REAL" or "DOUB"))
+            throw new InvalidDataException("PARAMS count/type must match the Summary specification.");
+        var size = section.DataType == "DOUB" ? 8 : 4;
         var values = new List<double>(expectedCount);
         for (var index = 0; index < expectedCount; index++)
         {
@@ -137,7 +128,7 @@ public static class EclipseBinarySummaryParser
     {
         public string Keyword { get; } = keyword;
         public string? ObjectName { get; } = objectName;
-        public string? Unit { get; } = unit;
+        public string? Unit { get; } = string.IsNullOrWhiteSpace(unit) ? null : unit;
         public List<EclipseSummaryPoint> Points { get; } = [];
     }
 }

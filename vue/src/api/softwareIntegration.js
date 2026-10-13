@@ -34,6 +34,14 @@ export const softwareIntegrationApi = {
     `/software-integration/model-versions/${versionId}/runs`,
     { study, runType, parameters }
   ),
+  createEclipseBatch: (versionId, data) => request.post(`/software-integration/model-versions/${versionId}/eclipse-batches`, data),
+  listEclipseBatches: versionId => request.get(`/software-integration/model-versions/${versionId}/eclipse-batches`),
+  getEclipseBatch: id => request.get(`/software-integration/eclipse-batches/${id}`),
+  cancelEclipseBatch: id => request.post(`/software-integration/eclipse-batches/${id}/cancel`),
+  createEclipseHistory: (versionId, data) => request.post(`/software-integration/model-versions/${versionId}/eclipse-history-datasets`, data),
+  listEclipseHistory: versionId => request.get(`/software-integration/model-versions/${versionId}/eclipse-history-datasets`),
+  getEclipseHistory: id => request.get(`/software-integration/eclipse-history-datasets/${id}`),
+  compareEclipseHistory: (id, runId) => request.get(`/software-integration/eclipse-history-datasets/${id}/comparison`, { params: { runId } }),
   getRun: (runId) => request.get(`/software-integration/runs/${runId}`),
   downloadArtifact: (runId, artifactId) => request.get(
     `/software-integration/runs/${runId}/artifacts/${artifactId}/download`,
@@ -49,6 +57,11 @@ export const softwareIntegrationApi = {
   ),
   cancelRun: (runId) => request.post(`/software-integration/runs/${runId}/cancel`),
   retryRun: (runId) => request.post(`/software-integration/runs/${runId}/retry`),
+  getIamPipesimDemoCapabilities: () => request.get('/software-integration/iam-pipesim-demo/capabilities'),
+  listIamPipesimDemoRuns: () => request.get('/software-integration/iam-pipesim-demo/runs'),
+  startIamPipesimDemo: (parameters) => request.post('/software-integration/iam-pipesim-demo/runs', parameters),
+  getIamPipesimDemoRun: (runId) => request.get(`/software-integration/iam-pipesim-demo/runs/${runId}`),
+  cancelIamPipesimDemo: (runId) => request.post(`/software-integration/iam-pipesim-demo/runs/${runId}/cancel`),
   uploadModel: (projectId, file, mainFile = null) => {
     const data = new FormData()
     data.append('file', file)

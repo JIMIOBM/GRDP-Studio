@@ -1,0 +1,164 @@
+{
+  "schemaVersion": "eclipse-data-inspection/4",
+  "caseName": "ECLIPSE_COMPLETION_GEOMETRY.DATA",
+  "sections": [
+    "RUNSPEC",
+    "GRID",
+    "PROPS",
+    "REGIONS",
+    "SOLUTION",
+    "SUMMARY",
+    "SCHEDULE"
+  ],
+  "unitSystem": "METRIC",
+  "phases": [
+    "WATER"
+  ],
+  "dimensions": {
+    "nx": 15,
+    "ny": 15,
+    "nz": 1
+  },
+  "wellNames": [
+    "I",
+    "P"
+  ],
+  "scheduleTimeline": [
+    {
+      "kind": "TSTEP",
+      "steps": [
+        "10.00",
+        "10.00",
+        "10.00",
+        "10.00",
+        "10.00",
+        "10.00",
+        "10.00",
+        "10.00",
+        "10.00",
+        "10.00",
+        "10.00",
+        "10.00",
+        "10.00",
+        "10.00",
+        "10.00",
+        "25.0",
+        "25.0",
+        "25.0",
+        "25.0",
+        "25.0",
+        "25.0"
+      ],
+      "sourceFile": "ECLIPSE_COMPLETION_GEOMETRY.DATA",
+      "lineNumber": 177
+    }
+  ],
+  "packageFiles": [
+    {
+      "relativePath": "ECLIPSE_COMPLETION_GEOMETRY.DATA",
+      "sizeBytes": 3582,
+      "sha256": "b29df227965f5266b60bfc8701ea3c021114905371b87d7eb28c4b73ca822be9"
+    }
+  ],
+  "scheduleMetadata": {
+    "wells": [
+      {
+        "name": "I",
+        "group": "G",
+        "sourceFile": "ECLIPSE_COMPLETION_GEOMETRY.DATA",
+        "lineNumber": 151
+      },
+      {
+        "name": "P",
+        "group": "G",
+        "sourceFile": "ECLIPSE_COMPLETION_GEOMETRY.DATA",
+        "lineNumber": 152
+      }
+    ],
+    "groups": [],
+    "records": [
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "I       ",
+          "15",
+          "15",
+          "1",
+          "1",
+          "OPEN",
+          "0",
+          ".0",
+          "1.0"
+        ],
+        "sourceFile": "ECLIPSE_COMPLETION_GEOMETRY.DATA",
+        "lineNumber": 156
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "P       ",
+          "1",
+          "1",
+          "1",
+          "1",
+          "OPEN",
+          "0",
+          ".0",
+          "1.0",
+          "1000",
+          "0"
+        ],
+        "sourceFile": "ECLIPSE_COMPLETION_GEOMETRY.DATA",
+        "lineNumber": 157
+      },
+      {
+        "keyword": "WCONPROD",
+        "values": [
+          "P",
+          "OPEN",
+          "WRAT",
+          "1*",
+          "1000.0"
+        ],
+        "sourceFile": "ECLIPSE_COMPLETION_GEOMETRY.DATA",
+        "lineNumber": 161
+      },
+      {
+        "keyword": "WCONINJE",
+        "values": [
+          "I ",
+          "WAT",
+          "OPEN",
+          "RATE",
+          "1000.0"
+        ],
+        "sourceFile": "ECLIPSE_COMPLETION_GEOMETRY.DATA",
+        "lineNumber": 165
+      }
+    ],
+    "completions": [
+      {
+        "keyword": "COMPDAT",
+        "well": "I       ",
+        "i": "15",
+        "j": "15",
+        "k1": "1",
+        "k2": "1",
+        "status": "OPEN",
+        "sourceFile": "ECLIPSE_COMPLETION_GEOMETRY.DATA",
+        "lineNumber": 156
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "P       ",
+        "i": "1",
+        "j": "1",
+        "k1": "1",
+        "k2": "1",
+        "status": "OPEN",
+        "sourceFile": "ECLIPSE_COMPLETION_GEOMETRY.DATA",
+        "lineNumber": 157
+      }
+    ]
+  }
+}

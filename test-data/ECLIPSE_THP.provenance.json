@@ -1,0 +1,9 @@
+{
+  "officialSource": "C:\\ecl\\2024.1\\eclipse\\data\\HORZWFRI.DATA",
+  "officialSha256": "812fcefb4fb9e28c5aa94d4d08ad53bd66a592e03fd43f171989c91309af6da7",
+  "sampleSha256": "bdf36e3c477ee2c45aa0536083eccfc7c9dc9fdf11f2e1acd08cac36f33e22ba",
+  "changes": [
+    "Replace SUMMARY requests only; preserve reservoir, fluid, horizontal completions, friction, VFP table 1, THP 500 psia, BHP limit 400 psia and original time steps."
+  ],
+  "physicsAndScheduleUnchanged": true
+}

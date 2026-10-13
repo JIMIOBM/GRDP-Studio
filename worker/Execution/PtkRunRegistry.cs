@@ -119,19 +119,34 @@ public sealed class PtkRunRegistry
         "PREPARING" => entry.Request.RunTask switch
         {
             "profile" => next == "RUNNING_PROFILE",
-            "esp-curves" => next == "RUNNING_PROFILE",
-            "trajectory" => next == "READING_TRAJECTORY",
-            "network" or "system-analysis" or "network-optimizer" => next == "RUNNING_NETWORK",
+            "esp-curves" or "esp-parameter" => next == "RUNNING_PROFILE",
+            "trajectory" => next == "READING_TRAJECTORY" ||
+                next == "RUNNING_PROFILE" && IsTrajectoryEdit(entry.Request.Parameters),
+            "network" or "system-analysis" or "network-optimizer" or "network-well-performance-curves" => next == "RUNNING_NETWORK",
             "eclipse" => next == "RUNNING_ECLIPSE",
             _ => next == "RUNNING_NODAL"
         },
-        "RUNNING_NODAL" => entry.Request.RunTask == "combined" ? next == "RUNNING_PROFILE" : next == "COLLECTING",
-        "RUNNING_PROFILE" => entry.Request.RunTask == "esp-curves" ? next == "RUNNING_NODAL" : next == "COLLECTING",
+        "RUNNING_NODAL" => entry.Request.RunTask switch
+        {
+            "combined" => next == "RUNNING_PROFILE",
+            "esp-parameter" => next is "RUNNING_PROFILE" or "COLLECTING",
+            _ => next == "COLLECTING"
+        },
+        "RUNNING_PROFILE" => entry.Request.RunTask is "esp-curves" or "esp-parameter" ? next == "RUNNING_NODAL" :
+            entry.Request.RunTask == "trajectory" && IsTrajectoryEdit(entry.Request.Parameters)
+                ? next is "APPLYING_TRAJECTORY" or "COLLECTING" : next == "COLLECTING",
+        "APPLYING_TRAJECTORY" => entry.Request.RunTask == "trajectory" && IsTrajectoryEdit(entry.Request.Parameters) && next == "RUNNING_PROFILE",
         "READING_TRAJECTORY" => next == "COLLECTING",
         "RUNNING_NETWORK" => next == "COLLECTING",
         "RUNNING_ECLIPSE" => next == "COLLECTING",
         _ => false
     };
+
+    private static bool IsTrajectoryEdit(JsonElement parameters) =>
+        parameters.ValueKind == JsonValueKind.Object &&
+        parameters.TryGetProperty("schemaVersion", out var schema) &&
+        schema.ValueKind == JsonValueKind.String &&
+        schema.GetString() == "pipesim-well-trajectory-parameters/3";
 
     public RunCompletionResult Complete(
         long runId,

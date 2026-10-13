@@ -2,7 +2,9 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.IO.Compression;
 using Grdp.SoftwareIntegration.Worker.Contracts;
+using Grdp.SoftwareIntegration.Worker.Execution;
 
 namespace Grdp.SoftwareIntegration.Worker.Storage;
 
@@ -21,6 +23,7 @@ public sealed class ArtifactStore
     private static readonly Regex CookieCredential = new(@"(?<prefix>\b(?:set-cookie|cookie)\s*[:=]\s*)[^\r\n]*", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly Regex SensitiveKeyValueCredential = new(@"(?<prefix>\b(?:password|passwd|pwd|secret|private[-_ ]?key)\s*[:=]\s*)[^\s,;\""']+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly Regex EclipseBinaryOutputName = new(@"^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\.(?:EGRID|INIT|UNRST|UNSMRY|SMSPEC|FUNRST|S\d{4,5})$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex VfpEngineFileName = new(@"^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}$", RegexOptions.CultureInvariant);
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -47,6 +50,92 @@ public sealed class ArtifactStore
         var controlled = messages.Select(SanitizeLogMessage);
         var bytes = Encoding.UTF8.GetBytes(string.Join(Environment.NewLine, controlled) + Environment.NewLine);
         return await WriteBytesAsync(outputDirectory, "run.log", bytes, "text/plain", cancellationToken);
+    }
+
+    public async Task<ArtifactDescriptor> WritePipesimPwiAsync(string outputDirectory, string content, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(content) || content.Contains('\0') || Encoding.UTF8.GetByteCount(content) > 2_000_000)
+            throw new InvalidDataException("The PIPESIM PWI content is empty or exceeds the approved size limit.");
+        return await WriteBytesAsync(outputDirectory, "pipesim-network-well-performance.pwi",
+            Encoding.UTF8.GetBytes(content), "text/plain; charset=utf-8", cancellationToken);
+    }
+
+    public async Task<ArtifactDescriptor> WritePipesimVfpTableAsync(
+        string outputDirectory,
+        string content,
+        bool includeTemperature,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(content) || content.Contains('\0') || Encoding.UTF8.GetByteCount(content) > 2_000_000 ||
+            !content.Contains("VFPPROD", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("The PIPESIM VFP table text is empty, invalid, or exceeds the approved size limit.");
+        var name = includeTemperature ? "pipesim-vfp-table-temperature.vfpprod" : "pipesim-vfp-table.vfpprod";
+        return await WriteBytesAsync(outputDirectory, name, Encoding.UTF8.GetBytes(content),
+            "text/plain; charset=utf-8", cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<ArtifactDescriptor>> CopyPipesimVfpEngineFilesAsync(
+        string outputDirectory,
+        string sourceDirectory,
+        CancellationToken cancellationToken = default)
+    {
+        var sourceRoot = Path.GetFullPath(sourceDirectory);
+        if (!Directory.Exists(sourceRoot) || (File.GetAttributes(sourceRoot) & FileAttributes.ReparsePoint) != 0)
+            throw new InvalidDataException("The isolated PIPESIM VFP engine output directory is unavailable.");
+        var manifestPath = Path.Combine(sourceRoot, "engine-files.json");
+        if (!File.Exists(manifestPath) || (File.GetAttributes(manifestPath) & FileAttributes.ReparsePoint) != 0 ||
+            new FileInfo(manifestPath).Length > 64 * 1024)
+            throw new InvalidDataException("The PIPESIM VFP engine file manifest is unavailable or too large.");
+
+        await using var manifestStream = File.OpenRead(manifestPath);
+        using var manifest = await JsonDocument.ParseAsync(manifestStream, cancellationToken: cancellationToken);
+        var root = manifest.RootElement;
+        if (root.ValueKind != JsonValueKind.Object || root.EnumerateObject().Count() != 2 ||
+            !root.TryGetProperty("schemaVersion", out var schema) || schema.GetString() != "pipesim-vfp-engine-files/1" ||
+            !root.TryGetProperty("files", out var files) || files.ValueKind != JsonValueKind.Array || files.GetArrayLength() is < 1 or > 64)
+            throw new InvalidDataException("The PIPESIM VFP engine file manifest is invalid.");
+
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var descriptors = new List<ArtifactDescriptor>();
+        long totalBytes = 0;
+        foreach (var item in files.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.String) throw new InvalidDataException("The PIPESIM VFP engine file manifest contains an invalid name.");
+            var name = item.GetString();
+            if (string.IsNullOrWhiteSpace(name) || !VfpEngineFileName.IsMatch(name) || name is "." or ".." || !names.Add(name))
+                throw new InvalidDataException("The PIPESIM VFP engine file manifest contains an unsafe or duplicate name.");
+            var sourcePath = Path.GetFullPath(Path.Combine(sourceRoot, name));
+            if (!string.Equals(Path.GetDirectoryName(sourcePath), sourceRoot, StringComparison.OrdinalIgnoreCase) ||
+                !File.Exists(sourcePath) || (File.GetAttributes(sourcePath) & FileAttributes.ReparsePoint) != 0)
+                throw new InvalidDataException("A PIPESIM VFP engine file is outside the isolated output folder.");
+            var size = new FileInfo(sourcePath).Length;
+            totalBytes = checked(totalBytes + size);
+            if (size is <= 0 or > 100_000_000 || totalBytes > 256_000_000)
+                throw new InvalidDataException("PIPESIM VFP engine files exceed the artifact size limits.");
+
+            var artifactName = "pipesim-vfp-engine-" + name;
+            var destination = Path.Combine(outputDirectory, artifactName);
+            var temporary = destination + ".tmp-" + Guid.NewGuid().ToString("N");
+            try
+            {
+                await using (var input = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read,
+                    1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan))
+                await using (var output = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None,
+                    1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan))
+                {
+                    await input.CopyToAsync(output, cancellationToken);
+                }
+                File.Move(temporary, destination, overwrite: false);
+            }
+            finally
+            {
+                if (File.Exists(temporary)) File.Delete(temporary);
+            }
+            var actualSize = new FileInfo(destination).Length;
+            descriptors.Add(new ArtifactDescriptor(storage.ToStorageKey(destination), actualSize,
+                await ComputeFileSha256Async(destination, cancellationToken), "application/octet-stream"));
+        }
+        return descriptors;
     }
 
     public async Task<ArtifactDescriptor> WriteManifestAsync(
@@ -87,6 +176,31 @@ public sealed class ArtifactStore
         var sourceName = Path.GetFileName(sourcePath);
         if (string.IsNullOrWhiteSpace(sourceName) || !EclipseBinaryOutputName.IsMatch(sourceName))
             throw new InvalidDataException("The ECLIPSE output is not an approved binary result family.");
+        return await CopyEclipseOutputAsync(outputDirectory, sourcePath, cancellationToken);
+    }
+
+    public async Task<ArtifactDescriptor> CopyEclipseFormattedSummaryOutputAsync(
+        string outputDirectory, string sourcePath, CancellationToken cancellationToken = default)
+    {
+        if (!EclipseRunRules.IsFormattedSummaryOutput(sourcePath))
+            throw new InvalidDataException("Only numeric formatted Summary data may be downloaded.");
+        // Keep the source read-locked through validation and copying, not just during one pass.
+        await using var guard = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        EclipseFormattedSummaryParser.ValidateDataFile(sourcePath);
+        return await CopyEclipseOutputAsync(outputDirectory, sourcePath, cancellationToken);
+    }
+
+    public async Task<ArtifactDescriptor> CopyEclipseFormattedGridOutputAsync(string outputDirectory,string sourcePath,CancellationToken cancellationToken=default)
+    {
+        await using var guard=new FileStream(sourcePath,FileMode.Open,FileAccess.Read,FileShare.Read);
+        EclipseFormattedGridOutput.Validate(sourcePath);
+        return await CopyEclipseOutputAsync(outputDirectory,sourcePath,cancellationToken);
+    }
+
+    private async Task<ArtifactDescriptor> CopyEclipseOutputAsync(
+        string outputDirectory, string sourcePath, CancellationToken cancellationToken)
+    {
+        var sourceName = Path.GetFileName(sourcePath);
         var targetName = "eclipse-output-" + sourceName;
         var targetPath = Path.Combine(outputDirectory, targetName);
         var temporaryPath = targetPath + ".tmp-" + Guid.NewGuid().ToString("N");
@@ -111,15 +225,92 @@ public sealed class ArtifactStore
             await ComputeFileSha256Async(targetPath, cancellationToken), "application/octet-stream");
     }
 
+    public Task<ArtifactDescriptor> WriteEclipseAppliedPackageAsync(
+        string outputDirectory, EclipseDeckPackage package, CancellationToken cancellationToken = default)
+        => WriteEclipseInputPackageAsync(outputDirectory, package, "eclipse-grid-field-applied-package.zip", cancellationToken);
+
+    public Task<ArtifactDescriptor> WriteEclipseSchedulePackageAsync(
+        string outputDirectory, EclipseDeckPackage package, CancellationToken cancellationToken = default)
+        => WriteEclipseInputPackageAsync(outputDirectory, package, "eclipse-schedule-applied-package.zip", cancellationToken);
+
+    public Task<ArtifactDescriptor> WriteEclipseCompositionalPackageAsync(string outputDirectory, EclipseDeckPackage package, CancellationToken cancellationToken = default)
+        => WriteEclipseInputPackageAsync(outputDirectory, package, "eclipse-compositional-input-package.zip", cancellationToken);
+
+    public Task<ArtifactDescriptor> WriteEclipseThermalPackageAsync(string outputDirectory, EclipseDeckPackage package, CancellationToken cancellationToken = default)
+        => WriteEclipseInputPackageAsync(outputDirectory, package, "eclipse-thermal-input-package.zip", cancellationToken);
+
+    public async Task<ArtifactDescriptor> WriteEclipseForecastPackageAsync(
+        string outputDirectory, EclipseDeckPackage package, string restartPath, CancellationToken cancellationToken = default)
+    {
+        var catalog = EclipseFormattedRestartReader.Read(restartPath);
+        if (catalog.Reports.Count != 1 || catalog.ArtifactSizeBytes > 64L * 1024 * 1024)
+            throw new InvalidDataException("Portable forecast requires exactly one complete bounded restart report.");
+        var source = EclipseForecastSourceReader.Read(package, true);
+        if (source.StartDate != catalog.StartDate || source.RestartCase != catalog.CaseName || source.RestartReport != catalog.Reports[0].ReportNumber
+            || source.FutureDates.Any(date => string.CompareOrdinal(date, catalog.Reports[0].Date) <= 0))
+            throw new InvalidDataException("Portable restart must match the actual forecast declaration and future dates.");
+        var binding = new EclipsePortableRestartBinding("eclipse-portable-restart/1", source.PhysicsSha256, catalog);
+        await WriteJsonAsync(package.Root, EclipsePortableRestartBinding.Filename, binding, cancellationToken);
+        var bindingPath = Path.Combine(package.Root, EclipsePortableRestartBinding.Filename);
+        var portable = package with { Files = package.Files.Concat(new[] { restartPath, bindingPath }).ToArray() };
+        _ = EclipsePortableRestartBinding.Validate(package);
+        return await WriteEclipseInputPackageAsync(outputDirectory, portable, "eclipse-forecast-applied-package.zip", cancellationToken);
+    }
+
+    private async Task<ArtifactDescriptor> WriteEclipseInputPackageAsync(
+        string outputDirectory, EclipseDeckPackage package, string artifactName, CancellationToken cancellationToken)
+    {
+        const long maximumBytes = 256_000_000;
+        var root = Path.GetFullPath(package.Root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var targetPath = Path.Combine(outputDirectory, artifactName);
+        var temporaryPath = targetPath + ".tmp-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            long totalBytes = 0;
+            var entries = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            await using (var file = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None,
+                1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan))
+            using (var archive = new ZipArchive(file, ZipArchiveMode.Create, leaveOpen: true))
+            {
+                foreach (var sourcePath in package.Files)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var fullPath = Path.GetFullPath(sourcePath);
+                    var relative = Path.GetRelativePath(root, fullPath).Replace('\\', '/');
+                    if (relative.StartsWith("../", StringComparison.Ordinal) || relative == ".." || Path.IsPathRooted(relative)
+                        || relative.Split('/').Any(part => part is "" or "." or "..")
+                        || !entries.Add(relative) || !File.Exists(fullPath)
+                        || (File.GetAttributes(fullPath) & FileAttributes.ReparsePoint) != 0)
+                        throw new InvalidDataException("The ECLIPSE package contains an unsafe file path.");
+                    totalBytes = checked(totalBytes + new FileInfo(fullPath).Length);
+                    if (totalBytes > maximumBytes) throw new InvalidDataException("The derived ECLIPSE input package exceeds the 256 MB limit.");
+                    archive.CreateEntryFromFile(fullPath, relative, CompressionLevel.Optimal);
+                }
+            }
+            if (new FileInfo(temporaryPath).Length > maximumBytes)
+                throw new InvalidDataException("The derived ECLIPSE ZIP exceeds the 256 MB limit.");
+            File.Move(temporaryPath, targetPath, overwrite: false);
+            var info = new FileInfo(targetPath);
+            return new ArtifactDescriptor(storage.ToStorageKey(targetPath), info.Length,
+                await ComputeFileSha256Async(targetPath, cancellationToken), "application/zip");
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+        }
+    }
+
     public async Task<ArtifactDescriptor> CopyPipesimAppliedModelAsync(
         string outputDirectory,
         string sourcePath,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string artifactName = "pipesim-network-optimizer-applied.pips")
     {
         if (!File.Exists(sourcePath) || !string.Equals(Path.GetExtension(sourcePath), ".pips", StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("The applied PIPESIM model copy is unavailable.");
-        const string name = "pipesim-network-optimizer-applied.pips";
-        var targetPath = Path.Combine(outputDirectory, name);
+        if (artifactName is not ("pipesim-network-optimizer-applied.pips" or "pipesim-trajectory-applied.pips" or "pipesim-well-tubing-applied.pips" or "pipesim-network-flowline-applied.pips" or "pipesim-network-connection-applied.pips"))
+            throw new InvalidDataException("The applied PIPESIM artifact name is not approved.");
+        var targetPath = Path.Combine(outputDirectory, artifactName);
         var temporaryPath = targetPath + ".tmp-" + Guid.NewGuid().ToString("N");
         try
         {

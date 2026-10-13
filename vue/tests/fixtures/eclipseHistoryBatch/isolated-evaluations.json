@@ -1,0 +1,92 @@
+{
+  "436": {
+    "dataset": {
+      "id": 2,
+      "modelVersionId": 152,
+      "baselineRunId": 436,
+      "name": "失败隔离算法验算",
+      "sourceFile": "water-algorithm.csv",
+      "sourceSha256": "3d5beffc4285eef309e1214cdc7ac9bb260d6f3a823161492e411a6165c73f2d",
+      "observationCount": 1,
+      "createdAt": "2026-10-13T02:14:52.966"
+    },
+    "runId": 436,
+    "comparison": {
+      "points": [
+        {
+          "well": "P",
+          "keyword": "WWPR",
+          "unit": "SM3/DAY",
+          "timeDays": 300.0,
+          "observed": 1000.0,
+          "simulated": 1000.0,
+          "difference": 0.0,
+          "sourceLine": 2,
+          "reason": ""
+        }
+      ],
+      "metrics": [
+        {
+          "well": "P",
+          "keyword": "WWPR",
+          "unit": "SM3/DAY",
+          "observedCount": 1,
+          "matchedCount": 1,
+          "missingCount": 0,
+          "coverage": 1.0,
+          "mae": 0.0,
+          "rmse": 0.0,
+          "bias": 0.0,
+          "mape": 0.0,
+          "mapeCount": 1,
+          "mapeOverflowCount": 0
+        }
+      ]
+    }
+  },
+  "597": {
+    "dataset": {
+      "id": 2,
+      "modelVersionId": 152,
+      "baselineRunId": 436,
+      "name": "失败隔离算法验算",
+      "sourceFile": "water-algorithm.csv",
+      "sourceSha256": "3d5beffc4285eef309e1214cdc7ac9bb260d6f3a823161492e411a6165c73f2d",
+      "observationCount": 1,
+      "createdAt": "2026-10-13T02:14:52.966"
+    },
+    "runId": 597,
+    "comparison": {
+      "points": [
+        {
+          "well": "P",
+          "keyword": "WWPR",
+          "unit": "SM3/DAY",
+          "timeDays": 300.0,
+          "observed": 1000.0,
+          "simulated": 1000.0,
+          "difference": 0.0,
+          "sourceLine": 2,
+          "reason": ""
+        }
+      ],
+      "metrics": [
+        {
+          "well": "P",
+          "keyword": "WWPR",
+          "unit": "SM3/DAY",
+          "observedCount": 1,
+          "matchedCount": 1,
+          "missingCount": 0,
+          "coverage": 1.0,
+          "mae": 0.0,
+          "rmse": 0.0,
+          "bias": 0.0,
+          "mape": 0.0,
+          "mapeCount": 1,
+          "mapeOverflowCount": 0
+        }
+      ]
+    }
+  }
+}

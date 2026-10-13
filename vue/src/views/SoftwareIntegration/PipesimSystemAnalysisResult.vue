@@ -57,10 +57,10 @@ const renderChart = async () => {
     tooltip: { trigger: 'axis' },
     legend: { top: 4, right: 8, textStyle: { fontSize: 12 } },
     grid: { left: 52, right: 52, top: 34, bottom: 42 },
-    xAxis: { type: 'value', name: 'TotalDistance', nameLocation: 'middle', nameGap: 28 },
+    xAxis: { type: 'value', name: axisName('距离', profileVariables.value.find(item => item.variable === 'TotalDistance')?.unit), nameLocation: 'middle', nameGap: 28 },
     yAxis: [
-      { type: 'value', name: '压力', nameTextStyle: { color: '#2B6CB3' } },
-      { type: 'value', name: '温度', nameTextStyle: { color: '#B32D2D' } }
+      { type: 'value', name: axisName('压力', profileVariables.value.find(item => item.variable === 'Pressure')?.unit), nameTextStyle: { color: '#2B6CB3' } },
+      { type: 'value', name: axisName('温度', profileVariables.value.find(item => item.variable === 'Temperature')?.unit), nameTextStyle: { color: '#B32D2D' } }
     ],
     series
   }, true)
@@ -89,12 +89,12 @@ onBeforeUnmount(() => {
       <div class="result-head">
         <div>
           <strong>PIPESIM System Analysis</strong>
-          <span>Study：{{ result.study }} · BranchTerminator：{{ result.branchTerminator }} · 出口压力：{{ result.outletPressurePsi }} psia</span>
+          <span>井：{{ result.producer }} · Study：{{ result.study }} · 分支：{{ result.branchTerminator }} · 出口压力：{{ result.outletPressurePsi }} psia</span>
         </div>
         <el-tag type="success">VALID_FULL · {{ result.cases.length }} 个工况</el-tag>
       </div>
       <div class="case-controls">
-        <span>LiquidFlowRate 工况</span>
+        <span>液量工况 (STB/d)</span>
         <el-radio-group v-model="selectedCaseIndex" size="small">
           <el-radio-button v-for="(item, index) in result.cases" :key="item.caseName + '-' + item.scanValue" :value="index">
             {{ item.scanValue }}

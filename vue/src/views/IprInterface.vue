@@ -16,6 +16,7 @@ import { Delete } from '@element-plus/icons-vue'
 import RibbonMenu from '@/components/RibbonMenu.vue'
 import WorkspaceSidebar from '@/components/WorkspaceSidebar.vue'
 import SoftwareIntegrationWorkspace from '@/views/SoftwareIntegration/SoftwareIntegrationWorkspace.vue'
+import IamPipesimDemo from '@/views/SoftwareIntegration/IamPipesimDemo.vue'
 import ReservoirWorkspaceContent from '@/views/Reservoir/ReservoirWorkspaceContent.vue'
 import WaterInvasionContent from '@/views/WellControlInventory/WaterInvasionContent.vue'
 import MaterialBalanceContent from '@/views/WellControlInventory/MaterialBalanceContent.vue'
@@ -245,6 +246,9 @@ const softwareIntegrationActiveNodeId = ref('')
 const isSoftwareIntegration = computed(
   () => route.query.workspace === SOFTWARE_INTEGRATION_WORKSPACE
 )
+const isIamPipesimDemo = computed(
+  () => isSoftwareIntegration.value && route.query.demo === 'iam-pipesim'
+)
 const activeRibbonTabName = ref(isSoftwareIntegration.value ? '软件集成' : '解析融合')
 const displayedActiveNodeId = computed(
   () => isSoftwareIntegration.value ? softwareIntegrationActiveNodeId.value : activeNodeId.value
@@ -351,6 +355,19 @@ const handoffSoftwareIntegrationImport = async pendingImport => {
   }
 }
 
+const openIamPipesimDemo = async () => {
+  await router.push({
+    name: 'IprInterface',
+    query: { ...route.query, workspace: SOFTWARE_INTEGRATION_WORKSPACE, demo: 'iam-pipesim' }
+  })
+}
+
+const closeIamPipesimDemo = async () => {
+  const query = { ...route.query, workspace: SOFTWARE_INTEGRATION_WORKSPACE }
+  delete query.demo
+  await router.push({ name: 'IprInterface', query })
+}
+
 const handleSoftwareIntegrationImportFile = async event => {
   const file = event.target.files?.[0]
   event.target.value = ''
@@ -362,13 +379,15 @@ const handleSoftwareIntegrationImportFile = async event => {
   pendingSoftwareIntegrationImport = pendingImport
 
   try {
+    const query = {
+      ...route.query,
+      workspace: SOFTWARE_INTEGRATION_WORKSPACE,
+      intent
+    }
+    delete query.demo
     await router.push({
       name: 'IprInterface',
-      query: {
-        ...route.query,
-        workspace: SOFTWARE_INTEGRATION_WORKSPACE,
-        intent
-      }
+      query
     })
     await handoffSoftwareIntegrationImport(pendingImport)
   } catch {
@@ -402,13 +421,15 @@ const handleRibbonTabChange = async tabName => {
 
   if (tabName === '软件集成') {
     query.workspace = SOFTWARE_INTEGRATION_WORKSPACE
+    delete query.demo
   } else {
     delete query.workspace
     delete query.intent
+    delete query.demo
   }
 
   const currentWorkspace = route.query.workspace
-  if (query.workspace === currentWorkspace || (!query.workspace && !currentWorkspace)) return
+  if (query.workspace === currentWorkspace && query.demo === route.query.demo && query.intent === route.query.intent) return
   await router.push({ name: 'IprInterface', query })
 }
 const treeContextMenu = ref({
@@ -4639,6 +4660,11 @@ function openPipelinePage(section) {
 const handleCommand = async ({ group, name, parent, commandId, wellName: commandWellName }) => { // 接收顶部菜单栏的点击事件
   if (dispatchSoftwareIntegrationCommand(commandId)) return
 
+  if (commandId === 'software-integration.coupling.iam-pipesim-demo') {
+    await openIamPipesimDemo()
+    return
+  }
+
   if (isSoftwareIntegration.value) {
     if (commandId === 'software-integration.project.create') {
       softwareIntegrationWorkspace.value?.openCreateDialog()
@@ -5092,7 +5118,8 @@ onBeforeUnmount(() => {
 
 
     <div class="ipr-main">
-      <SoftwareIntegrationWorkspace v-if="isSoftwareIntegration" ref="softwareIntegrationWorkspace" />
+      <IamPipesimDemo v-if="isIamPipesimDemo" @back="closeIamPipesimDemo" />
+      <SoftwareIntegrationWorkspace v-else-if="isSoftwareIntegration" ref="softwareIntegrationWorkspace" />
       <template v-else>
       <!-- 公共左侧目录：与单井产能工作台共用 WorkspaceSidebar.vue。 -->
       <WorkspaceSidebar

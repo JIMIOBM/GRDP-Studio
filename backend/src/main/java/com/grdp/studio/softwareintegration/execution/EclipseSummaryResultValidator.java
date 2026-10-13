@@ -1,6 +1,8 @@
 package com.grdp.studio.softwareintegration.execution;
 
 import com.grdp.studio.softwareintegration.support.SoftwareIntegrationEclipseSanitizer;
+import com.grdp.studio.softwareintegration.support.EclipseSimulationMetadataValidator;
+import com.grdp.studio.softwareintegration.support.EclipseThermalMetadataValidator;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -38,9 +40,30 @@ public class EclipseSummaryResultValidator {
     }
 
     public ValidatedResult validate(String expectedCaseName, JsonNode result) {
-        requireObject(result, REQUIRED_ROOT_FIELDS, ALLOWED_ROOT_FIELDS, "result");
-        requireText(result, "schemaVersion", "eclipse-summary-result/1");
-        requireText(result, "modelKind", "eclipse_100");
+        return validate(expectedCaseName, result, null);
+    }
+
+    public ValidatedResult validateCompositional(String expectedCaseName, JsonNode result, JsonNode inspection) {
+        require(inspection != null && "eclipse-data-inspection/14".equals(inspection.path("schemaVersion").asText())
+                && EclipseSimulationMetadataValidator.valid(inspection.get("simulation")), "A verified compositional model inspection is required");
+        return validate(expectedCaseName, result, inspection);
+    }
+
+    public ValidatedResult validateThermal(String expectedCaseName, JsonNode result, JsonNode inspection) {
+        require(inspection != null && "eclipse-data-inspection/15".equals(inspection.path("schemaVersion").asText())
+                && EclipseThermalMetadataValidator.valid(inspection.get("simulation")), "A verified thermal model inspection is required");
+        return validate(expectedCaseName, result, inspection);
+    }
+
+    private ValidatedResult validate(String expectedCaseName, JsonNode result, JsonNode inspection) {
+        boolean compositional = inspection != null;
+        boolean thermal = compositional && "eclipse-data-inspection/15".equals(inspection.path("schemaVersion").asText());
+        var required = new HashSet<>(REQUIRED_ROOT_FIELDS); var allowed = new HashSet<>(ALLOWED_ROOT_FIELDS);
+        if (compositional) { required.add("simulation"); allowed.add("simulation"); }
+        requireObject(result, required, allowed, "result");
+        requireText(result, "schemaVersion", thermal ? "eclipse-summary-result/3" : compositional ? "eclipse-summary-result/2" : "eclipse-summary-result/1");
+        requireText(result, "modelKind", compositional ? "eclipse_300" : "eclipse_100");
+        if (compositional) require(inspection.get("simulation").equals(result.get("simulation")), "Result components and solver must match the verified model");
         requireText(result, "runTask", "eclipse");
         String resultContract = requireContract(result.get("resultContract"));
         requireText(result, "caseName", expectedCaseName);
@@ -48,7 +71,8 @@ public class EclipseSummaryResultValidator {
                 && expectedCaseName.equals(fileName(expectedCaseName))
                 && SoftwareIntegrationEclipseSanitizer.isSafeIdentifier(expectedCaseName), "Invalid ECLIPSE caseName");
         validateEclEnd(result.get("eclEnd"), resultContract);
-        validateSummary(result.get("summary"));
+        if (compositional) validateCompositionalSummary(result.get("summary"), inspection);
+        else validateSummary(result.get("summary"));
         validateGrid(result.get("grid"));
         validateFieldIndex(result.get("fieldIndex"));
         validateMessages(result.get("messages"));
@@ -101,6 +125,63 @@ public class EclipseSummaryResultValidator {
         }
     }
 
+    private void validateCompositionalSummary(JsonNode summary, JsonNode inspection) {
+        requireObject(summary, Set.of("startDate", "timeVectorIndex", "series"), Set.of("startDate", "timeVectorIndex", "series"), "compositional summary");
+        require(summary.path("startDate").isTextual() && summary.path("startDate").asText().matches("[0-9]{4}-[0-9]{2}-[0-9]{2}"), "Invalid native start date");
+        try { require(java.time.LocalDate.parse(summary.path("startDate").asText()).getYear() > 0, "Invalid native start date"); }
+        catch (java.time.DateTimeException exception) { throw new ResultValidationException("Invalid native start date"); }
+        var series = requireArray(summary.get("series"), "compositional series");
+        require(!series.isEmpty() && series.size() <= 65535, "Complete bounded compositional series are required");
+        int axis = nonNegativeInt(summary.get("timeVectorIndex"), "time vector index");
+        require(axis <= series.size(), "Time vector index is outside the specification");
+        var fields = new HashSet<>(SERIES_FIELDS); fields.add("vectorIndex"); fields.add("number");
+        var indexes = new HashSet<Integer>();
+        JsonNode clock = null;
+        long totalValues = 0;
+        int previousIndex = -1;
+        int count = inspection.path("simulation").path("componentCount").asInt();
+        long cells = (long)inspection.path("dimensions").path("nx").asInt() * inspection.path("dimensions").path("ny").asInt() * inspection.path("dimensions").path("nz").asInt();
+        for (var item : series) {
+            requireObject(item, fields, fields, "compositional vector");
+            int index = nonNegativeInt(item.get("vectorIndex"), "vector index");
+            require(index <= series.size() && index != axis && index > previousIndex && indexes.add(index), "Original vector indexes must be complete and ordered");
+            previousIndex = index;
+            require(item.path("number").isIntegralNumber() && item.path("number").canConvertToInt(), "NUMS must retain its original integer identity");
+            requireSafeText(item.get("keyword"), false, "keyword");
+            require(item.path("keyword").asText().matches("[A-Z0-9_]{1,8}") && !Set.of("TIME", "DAYS").contains(item.path("keyword").asText()), "Invalid numeric vector mnemonic");
+            requireSafeText(item.get("objectName"), true, "object name");
+            requireSafeText(item.get("unit"), true, "unit");
+            String keyword = item.path("keyword").asText();
+            if ("eclipse-data-inspection/15".equals(inspection.path("schemaVersion").asText()) && Set.of("BTEMP", "WTEMP").contains(keyword)) {
+                require(("FIELD".equals(inspection.path("unitSystem").asText()) ? "DEG F" : "DEG C").equals(item.path("unit").asText()), "Temperature must preserve the verified native temperature unit");
+                if ("BTEMP".equals(keyword)) require(item.path("number").asInt() > 0, "Block temperature requires a real cell identity");
+                if ("WTEMP".equals(keyword) && !":+:+:+:+".equals(item.path("objectName").asText())) {
+                    boolean found = false;
+                    for (var well : inspection.path("wellNames")) if (well.asText().equals(item.path("objectName").asText())) found = true;
+                    require(found, "Well temperature must refer to a verified model well");
+                }
+            }
+            var component = Pattern.compile("[BFGW][XYZ]MF_([0-9]+)").matcher(keyword);
+            if (component.matches()) require(Integer.parseInt(component.group(1)) >= 1 && Integer.parseInt(component.group(1)) <= count, "Component suffix is outside the verified component list");
+            if (keyword.startsWith("B") && item.path("number").asInt() > 0) require(item.path("number").asInt() <= cells, "Block identity is outside the verified model grid");
+            var points = requireArray(item.get("points"), "vector points");
+            require(!points.isEmpty(), "Actual native points are required");
+            totalValues += points.size(); require(totalValues <= 4_000_000, "Compositional result exceeds the complete-value bound");
+            if (clock == null) clock = points;
+            require(points.size() == clock.size(), "Every vector must preserve the same complete actual clock");
+            double previous = -1;
+            for (int i = 0; i < points.size(); i++) {
+                var point = points.get(i);
+                requireObject(point, POINT_FIELDS, POINT_FIELDS, "point");
+                double time = finiteNumber(point.get("timeDays"), "timeDays");
+                finiteNumber(point.get("value"), "value");
+                require(time >= 0 && time > previous && time == clock.get(i).path("timeDays").asDouble(), "Native times must be strictly ordered and identical for every vector");
+                previous = time;
+            }
+        }
+        require(indexes.size() == series.size(), "Missing compositional vector identity");
+    }
+
     private void validateMessages(JsonNode messages) {
         if (messages == null) return;
         JsonNode array = requireArray(messages, "messages");
@@ -140,7 +221,7 @@ public class EclipseSummaryResultValidator {
         for (JsonNode file : files) {
             requireObject(file, FIELD_FILE_FIELDS, FIELD_FILE_FIELDS, "fieldIndex file");
             String name = requiredSafeText(file.get("name"), "fieldIndex file name");
-            require(name.matches("(?i)[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\\.(?:EGRID|INIT|UNRST)"),
+            require(name.matches("(?i)[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\\.(?:EGRID|INIT|UNRST|FUNRST)"),
                     "fieldIndex file name is invalid");
             long sizeBytes = nonNegativeLong(file.get("sizeBytes"), "fieldIndex file sizeBytes");
             require(file.get("byteOrder") != null && file.get("byteOrder").isTextual()

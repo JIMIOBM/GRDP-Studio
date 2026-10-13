@@ -1,0 +1,28 @@
+{
+  "source": "C:\\ecl\\2024.1\\eclipse\\data\\BIG3D3P.DATA",
+  "sourceSha256": "940a5e181cc9dc65b4d8ff2ae9ffed21547c94a69057a5a5605aeade27fc8a1a",
+  "sourceUnchanged": true,
+  "sample": "ECLIPSE_GROUP_LRAT.DATA",
+  "sampleSha256": "2cf05f754630760306842f43f2f835403ff69f2dd6d20a190b8e4af885f52d71",
+  "originalOfficialModel": false,
+  "changes": [
+    "SUMMARY requests GLPR G, WLPR and WBHP for four existing producers.",
+    "Four existing OPEN ORAT producers changed to GRUP; all per-well oil limits 20000 STB/day and BHP lower limits 2500 psia preserved.",
+    "Initial GCONPROD G LRAT 2000 inserted in official target slot. All reservoir/fluid physics, well specifications, completions, injectors and TSTEP preserved."
+  ],
+  "mode": "LRAT",
+  "group": "G",
+  "members": [
+    "PRODUCR1",
+    "PRODUCR2",
+    "PRODUCR3",
+    "PRODUCR4"
+  ],
+  "unit": "STB/day",
+  "baselineTarget": 2000,
+  "positiveTarget": 1000,
+  "pressureLimitedTarget": 80000,
+  "nativeBaseline": "C:\\GRDP-TestOutput\\ECLIPSE-P03-GROUP-RATE-probe-a2\\LRAT\\baseline\\CASE.DATA",
+  "nativeByteEquivalent": true,
+  "warnings": "Installed reference endpoint/PVT/default injector BHP and convergence warnings must remain visible."
+}

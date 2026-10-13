@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Grdp.SoftwareIntegration.Worker.Contracts;
+using Grdp.SoftwareIntegration.Worker.Inspection;
 using Grdp.SoftwareIntegration.Worker.Storage;
 using Microsoft.Extensions.Options;
 
@@ -26,7 +27,12 @@ public sealed partial class EclipseRunService : IDisposable
             string source;
             try { source = storage.ResolveExistingData(request.ModelStorageKey); if (await storage.ComputeSha256Async(source, cancellationToken) != request.ExpectedModelSha256) return new(422, WorkerApiError.Storage("MODEL_SHA256_MISMATCH", "The source model SHA-256 does not match expectedModelSha256.")); storage.EnsureRunDirectoryAvailable(request.RunId); }
             catch (StorageException exception) { return new(exception.HttpStatus, WorkerApiError.Storage(exception.Code, exception.Message)); }
-            var capability = await launcher.GetCapabilityAsync(cancellationToken);
+            EclipseSimulationModel? requestedSimulation;
+            try { requestedSimulation = EclipseSimulationModelReader.Read(packages.Resolve(source, storage.ResolveModelPackageRoot(source))); }
+            catch (EclipseDeckPackageException exception) { return new(422, WorkerApiError.Request(exception.Code, exception.Message)); }
+            if (requestedSimulation is not null && request.Parameters.ValueKind != JsonValueKind.Null)
+                return new(400, WorkerApiError.Request("ECLIPSE_COMPOSITIONAL_SCENARIO_UNSUPPORTED", "E100 editing and restart parameters cannot be applied to a compositional model."));
+            var capability = await launcher.GetCapabilityAsync(requestedSimulation?.Solver ?? 100, cancellationToken);
             if (!capability.Available) return new(503, new WorkerError("ENVIRONMENT", "ECLIPSE_UNAVAILABLE", "ECLIPSE launcher is unavailable.", true));
             var lease = coordinator.TryAcquire("run"); if (!lease.Acquired) return new(409, lease.Error!);
             var claim = registry.TryClaim(request, fingerprint);
@@ -50,35 +56,226 @@ public sealed partial class EclipseRunService : IDisposable
             await EclipsePackageIntegrity.VerifyAsync(inputPackage, request.ExpectedPackageFiles, CancellationToken.None);
             var workModel = storage.CopyInputPackageToWork(dirs);
             var workPackage = packages.Resolve(workModel, dirs.Work);
+            var simulation = EclipseSimulationModelReader.Read(workPackage);
+            var solver = simulation?.Solver ?? 100;
+            EclipseForecastSource? verifiedFuture = null;
             await EclipsePackageIntegrity.VerifyAsync(workPackage, request.ExpectedPackageFiles, CancellationToken.None);
-            if (EclipseCompletionFactorParameters.TryParse(request.Parameters, out var completionFactorParameters))
+            if (request.Parameters.ValueKind == JsonValueKind.Null && EclipsePortableRestartBinding.Validate(workPackage) is not null)
+                verifiedFuture = EclipseForecastSourceReader.Read(workPackage, true);
+            if (EclipseRelpermParameters.TryParse(request.Parameters, out var relperm))
+            {
+                registry.Report(request.RunId,"PREPARING",await EclipseRelpermEditor.ApplyAsync(workPackage,relperm!,CancellationToken.None));
+                descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output,workPackage,CancellationToken.None));
+            }
+            else if (EclipseGasPvtParameters.TryParse(request.Parameters, out var gasPvt))
+            {
+                registry.Report(request.RunId,"PREPARING",await EclipseGasPvtEditor.ApplyAsync(workPackage,gasPvt!,CancellationToken.None));
+                descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output,workPackage,CancellationToken.None));
+            }
+            else if (EclipseOilPvtParameters.TryParse(request.Parameters, out var oilPvt))
+            {
+                registry.Report(request.RunId,"PREPARING",await EclipseOilPvtEditor.ApplyAsync(workPackage,oilPvt!,CancellationToken.None));
+                descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output,workPackage,CancellationToken.None));
+            }
+            else if (EclipsePvtwParameters.TryParse(request.Parameters, out var pvtw))
+            {
+                registry.Report(request.RunId, "PREPARING", await EclipsePvtwEditor.ApplyAsync(workPackage, pvtw!, CancellationToken.None));
+                descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output, workPackage, CancellationToken.None));
+            }
+            else if (EclipseNewCompletionParameters.TryParse(request.Parameters, out var newCompletion))
+            {
+                var baselineDirectory = Path.Combine(dirs.Work, ".grdp-baseline");
+                try
+                {
+                    var grid = await storage.CopyPublishedEclipseGridArtifactToWorkAsync(newCompletion!.BaselineRunId,
+                        newCompletion.GridFile, newCompletion.GridArtifactSha256, dirs.Work, CancellationToken.None);
+                    registry.Report(request.RunId, "PREPARING", await EclipseNewCompletionEditor.ApplyAsync(workPackage, newCompletion, grid, CancellationToken.None));
+                    descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output, workPackage, CancellationToken.None));
+                }
+                finally { StorageResolver.TryDeleteDirectory(baselineDirectory); }
+            }
+            else if (EclipseNewWellParameters.TryParse(request.Parameters, out var newWell))
+            {
+                var baselineDirectory = Path.Combine(dirs.Work, ".grdp-baseline");
+                try
+                {
+                    var grid = await storage.CopyPublishedEclipseGridArtifactToWorkAsync(newWell!.BaselineRunId,
+                        newWell.GridFile, newWell.GridArtifactSha256, dirs.Work, CancellationToken.None);
+                    registry.Report(request.RunId, "PREPARING", await EclipseNewWellEditor.ApplyAsync(workPackage, newWell, grid, CancellationToken.None));
+                    descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output, workPackage, CancellationToken.None));
+                }
+                finally { StorageResolver.TryDeleteDirectory(baselineDirectory); }
+            }
+            else if (EclipseCompletionGeometryParameters.TryParse(request.Parameters, out var completionGeometry))
+            {
+                registry.Report(request.RunId, "PREPARING", await EclipseCompletionGeometryEditor.ApplyAsync(workPackage, completionGeometry!, CancellationToken.None));
+                descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output, workPackage, CancellationToken.None));
+            }
+            else if (EclipseGridRegionParameters.TryParse(request.Parameters, out var region))
+            {
+                var baselineDirectory = Path.Combine(dirs.Work, ".grdp-baseline");
+                try
+                {
+                    var init = await storage.CopyPublishedEclipseInitArtifactToWorkAsync(region!.BaselineRunId,
+                        region.FieldFile, region.FieldArtifactSha256, dirs.Work, CancellationToken.None);
+                    var grid = await storage.CopyPublishedEclipseGridArtifactToWorkAsync(region.BaselineRunId,
+                        region.GridFile, region.GridArtifactSha256, dirs.Work, CancellationToken.None);
+                    registry.Report(request.RunId, "PREPARING", await EclipseGridRegionEditor.ApplyAsync(workPackage, region, init, grid, CancellationToken.None));
+                    descriptors.Add(await artifacts.WriteEclipseAppliedPackageAsync(dirs.Output, workPackage, CancellationToken.None));
+                }
+                finally { StorageResolver.TryDeleteDirectory(baselineDirectory); }
+            }
+            else if (EclipseGridFieldParameters.TryParse(request.Parameters, out var gridFieldParameters))
+            {
+                var baselineField = await storage.CopyPublishedEclipseInitArtifactToWorkAsync(
+                    gridFieldParameters!.BaselineRunId, gridFieldParameters.FieldFile, gridFieldParameters.FieldArtifactSha256,
+                    dirs.Work, CancellationToken.None);
+                try
+                {
+                    var editMessage = await EclipseGridFieldEditor.ApplyAsync(workPackage, gridFieldParameters, baselineField, CancellationToken.None);
+                    registry.Report(request.RunId, "PREPARING", editMessage);
+                    descriptors.Add(await artifacts.WriteEclipseAppliedPackageAsync(dirs.Output, workPackage, CancellationToken.None));
+                }
+                finally
+                {
+                    var baselineDirectory = Path.GetDirectoryName(baselineField);
+                    if (baselineDirectory is not null) StorageResolver.TryDeleteDirectory(baselineDirectory);
+                }
+            }
+            else if (EclipseCompletionFactorParameters.TryParse(request.Parameters, out var completionFactorParameters))
             {
                 var editMessage = await EclipseScheduleEditor.ApplyCompletionFactorAsync(workPackage, completionFactorParameters!, CancellationToken.None);
                 registry.Report(request.RunId, "PREPARING", editMessage);
+                descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output, workPackage, CancellationToken.None));
             }
             else if (EclipseCompletionParameters.TryParse(request.Parameters, out var completionParameters))
             {
                 var editMessage = await EclipseScheduleEditor.ApplyCompletionAsync(workPackage, completionParameters!, CancellationToken.None);
                 registry.Report(request.RunId, "PREPARING", editMessage);
             }
+            else if (EclipseGroupGasInjectionParameters.TryParse(request.Parameters, out var groupGasInjection))
+            {
+                var editMessage = await EclipseGroupGasInjectionEditor.ApplyAsync(workPackage, groupGasInjection!, cancellation);
+                registry.Report(request.RunId, "PREPARING", editMessage);
+                descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output, workPackage, cancellation));
+            }
+            else if (EclipseGroupInjectionParameters.TryParse(request.Parameters, out var groupInjection))
+            {
+                var editMessage = await EclipseGroupInjectionEditor.ApplyAsync(workPackage, groupInjection!, cancellation);
+                registry.Report(request.RunId, "PREPARING", editMessage);
+                descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output, workPackage, cancellation));
+            }
+            else if (EclipseControlPlanParameters.TryParse(request.Parameters, out var controlPlan))
+            {
+                var editMessage = await EclipseControlPlanEditor.ApplyAsync(workPackage, controlPlan!, cancellation);
+                registry.Report(request.RunId, "PREPARING", editMessage);
+                descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output, workPackage, cancellation));
+            }
+            else if (EclipseGroupStructureParameters.TryParse(request.Parameters, out var groupStructure))
+            {
+                var editMessage = await EclipseGroupStructureEditor.ApplyAsync(workPackage, groupStructure!, cancellation);
+                registry.Report(request.RunId, "PREPARING", editMessage);
+                descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output, workPackage, cancellation));
+            }
+            else if (EclipseAdvancedInjectionParameters.TryParse(request.Parameters, out var advancedInjection))
+            {
+                var editMessage = await EclipseAdvancedInjectionEditor.ApplyAsync(workPackage, advancedInjection!, cancellation);
+                registry.Report(request.RunId, "PREPARING", editMessage);
+                descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output, workPackage, cancellation));
+            }
+            else if (EclipseGroupWaterProductionParameters.TryParse(request.Parameters, out var groupWaterProduction))
+            {
+                var editMessage = await EclipseGroupWaterProductionEditor.ApplyAsync(workPackage, groupWaterProduction!, cancellation);
+                registry.Report(request.RunId, "PREPARING", editMessage);
+                descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output, workPackage, cancellation));
+            }
+            else if (EclipseGroupRateParameters.TryParse(request.Parameters, out var groupRate))
+            {
+                var editMessage = await EclipseGroupRateEditor.ApplyAsync(workPackage, groupRate!, cancellation);
+                registry.Report(request.RunId, "PREPARING", editMessage);
+                descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output, workPackage, cancellation));
+            }
+            else if (EclipseGroupProductionParameters.TryParse(request.Parameters, out var groupProduction))
+            {
+                var editMessage = await EclipseGroupProductionEditor.ApplyAsync(workPackage, groupProduction!, cancellation);
+                registry.Report(request.RunId, "PREPARING", editMessage);
+                descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output, workPackage, cancellation));
+            }
+            else if (EclipseTstepParameters.TryParse(request.Parameters, out var tstep))
+            {
+                var editMessage = await EclipseTstepEditor.ApplyAsync(workPackage, tstep!, cancellation);
+                registry.Report(request.RunId, "PREPARING", editMessage);
+                descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output, workPackage, cancellation));
+            }
+            else if (EclipseNewDatesParameters.TryParse(request.Parameters, out var newDates))
+            {
+                var editMessage = await EclipseNewDatesEditor.ApplyAsync(workPackage, newDates!, cancellation);
+                registry.Report(request.RunId, "PREPARING", editMessage);
+                descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output, workPackage, cancellation));
+            }
+            else if (EclipseThpControlParameters.TryParse(request.Parameters, out var thpControl))
+            {
+                var editMessage = await EclipseThpControlEditor.ApplyAsync(workPackage, thpControl!, cancellation);
+                registry.Report(request.RunId, "PREPARING", editMessage);
+                descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output, workPackage, cancellation));
+            }
+            else if (EclipseProductionControlParameters.TryParse(request.Parameters, out var productionControl))
+            {
+                var editMessage = await EclipseProductionControlEditor.ApplyAsync(workPackage, productionControl!, cancellation);
+                registry.Report(request.RunId, "PREPARING", editMessage);
+                descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output, workPackage, cancellation));
+            }
+            else if (EclipsePressureControlParameters.TryParse(request.Parameters, out var pressureControl))
+            {
+                var editMessage = await EclipsePressureControlEditor.ApplyAsync(workPackage, pressureControl!, cancellation);
+                registry.Report(request.RunId, "PREPARING", editMessage);
+                descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output, workPackage, cancellation));
+            }
+            else if (EclipseProductionTargetParameters.TryParse(request.Parameters, out var productionTarget))
+            {
+                var editMessage = await EclipseProductionTargetEditor.ApplyAsync(workPackage, productionTarget!, cancellation);
+                registry.Report(request.RunId, "PREPARING", editMessage);
+                descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output, workPackage, cancellation));
+            }
             else if (EclipseScheduleParameters.TryParse(request.Parameters, out var scheduleParameters))
             {
                 var editMessage = await EclipseScheduleEditor.ApplyAsync(workPackage, scheduleParameters!, CancellationToken.None);
                 registry.Report(request.RunId, "PREPARING", editMessage);
+                if (scheduleParameters!.SchemaVersion is EclipseScheduleParameters.MultiWellSchema or EclipseScheduleParameters.MultiDateSchema
+                    or EclipseScheduleParameters.ControlSchema or EclipseScheduleParameters.InjectionSchema)
+                    descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output, workPackage, CancellationToken.None));
+            }
+            else if (EclipseRestartForecastParameters.TryParse(request.Parameters, out var restartForecast))
+            {
+                var binding = restartForecast!.Reference;
+                var forecastPath = ResolvePackageFile(dirs.Work, binding.ForecastDataFile);
+                var forecastPackage = packages.Resolve(forecastPath, dirs.Work);
+                var restartPath = await storage.CopyPublishedRestartArtifactToWorkAsync(binding.HistoryRunId,
+                    binding.RestartArtifactName, binding.RestartArtifactSha256, dirs.Work, CancellationToken.None);
+                var catalog = EclipseFormattedRestartReader.Read(restartPath);
+                restartForecast.Validate(workPackage, forecastPackage, catalog);
+                verifiedFuture = EclipseForecastSourceReader.Read(forecastPackage, true);
+                var bytes = EclipseFormattedRestartReader.Select(restartPath, catalog, binding.RestartReport);
+                await File.WriteAllBytesAsync(restartPath, bytes, cancellation);
+                descriptors.Add(await artifacts.WriteEclipseForecastPackageAsync(dirs.Output, forecastPackage, restartPath, cancellation));
+                workPackage = forecastPackage;
+                workModel = forecastPath;
+                registry.Report(request.RunId, "PREPARING", $"Prepared verified forecast at {restartForecast.RestartDate}, report {binding.RestartReport}, day {restartForecast.RestartTimeDays}; exported complete portable state.");
             }
             else if (EclipseHistoryForecastParameters.TryParse(request.Parameters, out var forecastParameters))
             {
+                var forecastPath = ResolvePackageFile(dirs.Work, forecastParameters!.ForecastDataFile);
+                workPackage = packages.Resolve(forecastPath, dirs.Work);
+                EclipseHistoryForecastParameters.ValidateRestartBinding(workPackage, forecastParameters);
                 await storage.CopyPublishedRestartArtifactToWorkAsync(forecastParameters!.HistoryRunId,
                     forecastParameters.RestartArtifactName, forecastParameters.RestartArtifactSha256, dirs.Work, CancellationToken.None);
-                var forecastPath = ResolvePackageFile(dirs.Work, forecastParameters.ForecastDataFile);
                 workModel = forecastPath;
-                workPackage = packages.Resolve(workModel, dirs.Work);
                 registry.Report(request.RunId, "PREPARING", $"Prepared forecast DATA {forecastParameters.ForecastDataFile} from restart report {forecastParameters.RestartReport}.");
             }
             var deck = Path.GetRelativePath(dirs.Work, workModel);
             var before = Snapshot(dirs.Work);
-            registry.Transition(request.RunId, "RUNNING_ECLIPSE", "Running ECLIPSE 100.");
-            var launch = await launcher.RunAsync(deck, dirs.Work, TimeSpan.FromSeconds(request.TimeoutSeconds), cancellation);
+            registry.Transition(request.RunId, "RUNNING_ECLIPSE", $"Running ECLIPSE {solver}.");
+            var launch = await launcher.RunAsync(solver, deck, dirs.Work, TimeSpan.FromSeconds(request.TimeoutSeconds), cancellation);
             treeConfirmed = launch.ProcessTreeExitConfirmed; killUsed |= launch.KillUsed;
             var cleanup = await launcher.CleanupAsync(deck, dirs.Work, launch.StopReason == AdapterStopReason.Cancelled, CancellationToken.None);
             treeConfirmed &= cleanup.ProcessTreeExitConfirmed; killUsed |= cleanup.KillUsed;
@@ -105,8 +302,36 @@ public sealed partial class EclipseRunService : IDisposable
             var stepSummaries = fresh.Where(EclipseRunRules.IsStepSummaryOutput).OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToArray();
             var rsm = fresh.FirstOrDefault(path => path.EndsWith(".RSM", StringComparison.OrdinalIgnoreCase));
             var egrid = fresh.FirstOrDefault(path => path.EndsWith(".EGRID", StringComparison.OrdinalIgnoreCase));
-            var summarySeries = await ReadSummaryAsync(smspec, unsmry, rsm, stepSummaries);
-            object? summary = CreateSummary(summarySeries);
+            var caseName = Path.GetFileNameWithoutExtension(workModel);
+            var formattedSmspec = fresh.SingleOrDefault(path => Path.GetFileName(path).Equals(caseName + ".FSMSPEC", StringComparison.OrdinalIgnoreCase));
+            var formattedUnsmry = fresh.SingleOrDefault(path => Path.GetFileName(path).Equals(caseName + ".FUNSMRY", StringComparison.OrdinalIgnoreCase));
+            EclipseCompositionalSummary? compositionalSummary = null;
+            if (simulation is not null)
+            {
+                if (smspec is null) throw new EclipseDeckPackageException("ECLIPSE_COMPOSITIONAL_SUMMARY_MISSING", "A complete native binary Summary specification is required for this compositional card.");
+                try
+                {
+                    var inputMetadata = EclipseDataInspector.InspectPackage(workPackage.Files, Path.GetFileName(workModel));
+                    var dimensions = inputMetadata.Dimensions ?? throw new InvalidDataException("Verified model dimensions are required.");
+                    compositionalSummary = EclipseCompositionalSummaryParser.ParseForModel(smspec, unsmry is null ? stepSummaries : [unsmry],
+                        simulation.SummaryProgramIdentifier, inputMetadata.UnitSystem!, dimensions.Nx, dimensions.Ny, dimensions.Nz);
+                }
+                catch (InvalidDataException exception) { throw new EclipseDeckPackageException("ECLIPSE_COMPOSITIONAL_SUMMARY_INVALID", exception.Message); }
+            }
+            var summaryRead = simulation is null ? await ReadSummaryWithSourceAsync(smspec, unsmry, rsm, stepSummaries, formattedSmspec, formattedUnsmry) : new SummaryRead(null, false);
+            var summarySeries = summaryRead.Series;
+            if (verifiedFuture is not null)
+            {
+                if (!summaryRead.IsFormatted || formattedSmspec is null || summarySeries is null || !EclipseParsers.IsPublishableSummary(summarySeries)
+                    || EclipseFormattedSummaryParser.ReadStartDate(formattedSmspec) != verifiedFuture.StartDate)
+                    throw new EclipseDeckPackageException("ECLIPSE_FORECAST_TIME_ORIGIN_INVALID", "Forecast Summary must preserve the verified history START date.");
+                var origin = DateOnly.ParseExact(verifiedFuture.StartDate, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+                var times = verifiedFuture.FutureDates.Select(d => (double)(DateOnly.ParseExact(d, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture).DayNumber - origin.DayNumber)).ToArray();
+                if (summarySeries.Any(s => !s.Points.Select(p => p.TimeDays).SequenceEqual(times)))
+                    throw new EclipseDeckPackageException("ECLIPSE_FORECAST_REPORT_TIMES_INVALID", "Forecast actual output times must match every declared future report date; no rebasing or interpolation is permitted.");
+            }
+            object? summary = simulation is null ? CreateSummary(summarySeries) : new { startDate = compositionalSummary!.StartDate, timeVectorIndex = compositionalSummary.TimeVectorIndex,
+                series = compositionalSummary.Series.Select(s => new { vectorIndex = s.VectorIndex, keyword = s.Keyword, objectName = s.ObjectName, number = s.Number, unit = s.Unit, points = s.Points }) };
             var outputFiles = await artifacts.DescribeEclipseOutputsAsync(fresh, CancellationToken.None);
             var fieldIndex = fresh.Where(EclipseRunRules.IsFieldBinaryOutput)
                 .Select(EclipseBinaryFieldIndexParser.TryParse)
@@ -115,13 +340,46 @@ public sealed partial class EclipseRunService : IDisposable
                 .ToArray();
             foreach (var binaryOutput in fresh.Where(EclipseRunRules.IsApprovedBinaryOutput))
                 descriptors.Add(await artifacts.CopyEclipseBinaryOutputAsync(dirs.Output, binaryOutput, CancellationToken.None));
-            result = JsonSerializer.SerializeToElement(CreateResultEnvelope(deck, counts, summary, outputFiles,
+            foreach (var formattedGrid in fresh.Where(EclipseRunRules.IsFormattedGridOutput))
+                descriptors.Add(await artifacts.CopyEclipseFormattedGridOutputAsync(dirs.Output, formattedGrid, CancellationToken.None));
+            var restartOutput = fresh.SingleOrDefault(path => Path.GetFileName(path).Equals(caseName + ".FUNRST", StringComparison.OrdinalIgnoreCase));
+            if (simulation is null && !partial && request.Parameters.ValueKind == JsonValueKind.Null && restartOutput is not null)
+            {
+                try
+                {
+                    var catalog = EclipseFormattedRestartReader.Read(restartOutput);
+                    var described = EclipseForecastSourceReader.Describe(workPackage, catalog);
+                    if (!summaryRead.IsFormatted || formattedSmspec is null || EclipseFormattedSummaryParser.ReadStartDate(formattedSmspec) != catalog.StartDate
+                        || summarySeries is null || summarySeries.Any(s => !s.Points.Select(p => p.TimeDays).SequenceEqual(catalog.Reports.Select(r => r.TimeDays))))
+                        throw new InvalidDataException("History Summary and restart report clocks are not identical.");
+                    descriptors.Add(await artifacts.WriteJsonAsync(dirs.Output, "eclipse-restart-catalog.json", described, cancellation));
+                }
+                catch (Exception exception) when (exception is InvalidDataException or EclipseDeckPackageException or DecoderFallbackException)
+                {
+                    registry.Report(request.RunId, "COLLECTING", "Restart source is outside the verified E100 formatted global-grid scope; no selectable restart catalog was published.");
+                }
+            }
+            if (summaryRead.IsFormatted && formattedUnsmry is not null)
+                descriptors.Add(await artifacts.CopyEclipseFormattedSummaryOutputAsync(dirs.Output, formattedUnsmry, CancellationToken.None));
+            var envelope = JsonSerializer.SerializeToElement(CreateResultEnvelope(deck, counts, summary, outputFiles,
                 egrid is null ? null : EclipseGridMetadataParser.TryParse(egrid), fieldIndex, diagnosticMessages));
+            if (simulation is not null)
+            {
+                var compositionalEnvelope = System.Text.Json.Nodes.JsonNode.Parse(envelope.GetRawText())!.AsObject();
+                compositionalEnvelope["schemaVersion"] = simulation.ModelType == "THERMAL" ? "eclipse-summary-result/3" : "eclipse-summary-result/2";
+                compositionalEnvelope["modelKind"] = "eclipse_300";
+                compositionalEnvelope["simulation"] = System.Text.Json.Nodes.JsonNode.Parse(simulation.Metadata.GetRawText());
+                result = JsonSerializer.SerializeToElement(compositionalEnvelope);
+                descriptors.Add(simulation.ModelType == "THERMAL"
+                    ? await artifacts.WriteEclipseThermalPackageAsync(dirs.Output, workPackage, cancellation)
+                    : await artifacts.WriteEclipseCompositionalPackageAsync(dirs.Output, workPackage, cancellation));
+            }
+            else result = envelope;
             descriptors.Add(await artifacts.WriteJsonElementAsync(dirs.Output, "normalized-result.json", result.Value));
             state = partial ? "PARTIAL_SUCCEEDED" : "SUCCEEDED";
             message = partial
-                ? $"ECLIPSE 100 completed with {counts.Problems} solver problem(s); results were published with diagnostics."
-                : "ECLIPSE 100 completed successfully.";
+                ? $"ECLIPSE {solver} completed with {counts.Problems} solver problem(s); results were published with diagnostics."
+                : $"ECLIPSE {solver} completed successfully.";
         }
         catch (EclipseDeckPackageException exception) { error = new("MODEL", exception.Code, exception.Message, false); }
         catch (StorageException exception) { error = new("STORAGE", exception.Code, exception.Message, false); }
@@ -154,10 +412,34 @@ public sealed partial class EclipseRunService : IDisposable
         if (request.RunTask != "eclipse") return WorkerApiError.Request("INVALID_RUN_TASK", "runTask must be eclipse.");
         if (request.Study is not null) return WorkerApiError.Request("INVALID_STUDY", "study must be null for ECLIPSE.");
         if (request.Parameters.ValueKind != JsonValueKind.Null &&
+            !EclipseRelpermParameters.TryParse(request.Parameters, out _) &&
+            !EclipseGasPvtParameters.TryParse(request.Parameters, out _) &&
+            !EclipseOilPvtParameters.TryParse(request.Parameters, out _) &&
+            !EclipsePvtwParameters.TryParse(request.Parameters, out _) &&
+            !EclipseNewCompletionParameters.TryParse(request.Parameters, out _) &&
+            !EclipseNewWellParameters.TryParse(request.Parameters, out _) &&
+            !EclipseCompletionGeometryParameters.TryParse(request.Parameters, out _) &&
+            !EclipseGridRegionParameters.TryParse(request.Parameters, out _) &&
+            !EclipseGridFieldParameters.TryParse(request.Parameters, out _) &&
             !EclipseCompletionFactorParameters.TryParse(request.Parameters, out _) &&
             !EclipseCompletionParameters.TryParse(request.Parameters, out _) &&
+            !EclipseProductionTargetParameters.TryParse(request.Parameters, out _) &&
+            !EclipseGroupGasInjectionParameters.TryParse(request.Parameters, out _) &&
+            !EclipseGroupInjectionParameters.TryParse(request.Parameters, out _) &&
+            !EclipseControlPlanParameters.TryParse(request.Parameters, out _) &&
+            !EclipseGroupStructureParameters.TryParse(request.Parameters, out _) &&
+            !EclipseAdvancedInjectionParameters.TryParse(request.Parameters, out _) &&
+            !EclipseGroupWaterProductionParameters.TryParse(request.Parameters, out _) &&
+            !EclipseGroupRateParameters.TryParse(request.Parameters, out _) &&
+            !EclipseGroupProductionParameters.TryParse(request.Parameters, out _) &&
+            !EclipseTstepParameters.TryParse(request.Parameters, out _) &&
+            !EclipseNewDatesParameters.TryParse(request.Parameters, out _) &&
+            !EclipseThpControlParameters.TryParse(request.Parameters, out _) &&
+            !EclipseProductionControlParameters.TryParse(request.Parameters, out _) &&
+            !EclipsePressureControlParameters.TryParse(request.Parameters, out _) &&
             !EclipseScheduleParameters.TryParse(request.Parameters, out _) &&
-            !EclipseHistoryForecastParameters.TryParse(request.Parameters, out _))
+            !EclipseHistoryForecastParameters.TryParse(request.Parameters, out _) &&
+            !EclipseRestartForecastParameters.TryParse(request.Parameters, out _))
             return WorkerApiError.Request("INVALID_ECLIPSE_PARAMETERS", "ECLIPSE parameters must be null or a valid controlled Schedule, COMPDAT, or connection-factor scenario.");
         if (request.TimeoutSeconds is <= 0 || request.TimeoutSeconds > options.EclipseMaxRunTimeoutSeconds) return WorkerApiError.Request("INVALID_TIMEOUT", "timeoutSeconds exceeds the ECLIPSE limit.");
         if (request.ExpectedPackageFiles is not null && !EclipsePackageIntegrity.IsValidManifest(request.ExpectedPackageFiles))
@@ -183,7 +465,13 @@ public sealed partial class EclipseRunService : IDisposable
         try { return (parser ?? EclipseParsers.ParseRsm)(await File.ReadAllTextAsync(path)); }
         catch { return null; }
     }
-    internal static async Task<IReadOnlyList<EclipseSummarySeries>?> ReadSummaryAsync(string? smspec, string? unsmry, string? rsm, IEnumerable<string>? stepSummaries = null)
+    internal static async Task<IReadOnlyList<EclipseSummarySeries>?> ReadSummaryAsync(string? smspec, string? unsmry, string? rsm,
+        IEnumerable<string>? stepSummaries = null, string? formattedSmspec = null, string? formattedUnsmry = null)
+        => (await ReadSummaryWithSourceAsync(smspec, unsmry, rsm, stepSummaries, formattedSmspec, formattedUnsmry)).Series;
+
+    private sealed record SummaryRead(IReadOnlyList<EclipseSummarySeries>? Series, bool IsFormatted);
+    private static async Task<SummaryRead> ReadSummaryWithSourceAsync(string? smspec, string? unsmry, string? rsm,
+        IEnumerable<string>? stepSummaries, string? formattedSmspec, string? formattedUnsmry)
     {
         var binaryCandidates = new List<IReadOnlyList<string>>();
         if (!string.IsNullOrWhiteSpace(unsmry)) binaryCandidates.Add([unsmry]);
@@ -200,12 +488,22 @@ public sealed partial class EclipseRunService : IDisposable
                 try
                 {
                     var binary = await Task.Run(() => EclipseBinarySummaryParser.Parse(smspec, summaryPaths));
-                    if (EclipseParsers.IsPublishableSummary(binary)) return binary;
+                    if (EclipseParsers.IsPublishableSummary(binary)) return new(binary, false);
                 }
                 catch { /* Try another fresh Summary representation before the text RSM fallback. */ }
             }
         }
-        return await ReadRsmAsync(rsm);
+        if (formattedSmspec is not null && formattedUnsmry is not null)
+        {
+            try
+            {
+                var formatted = await Task.Run(() => EclipseFormattedSummaryParser.Parse(formattedSmspec, formattedUnsmry));
+                if (EclipseParsers.IsPublishableSummary(formatted)) return new(formatted, true);
+            }
+            catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException or DecoderFallbackException)
+            { /* A malformed representation cannot become a curve; the independent RSM fallback remains available. */ }
+        }
+        return new(await ReadRsmAsync(rsm), false);
     }
     internal static object? CreateSummary(IReadOnlyList<EclipseSummarySeries>? series) =>
         EclipseParsers.IsPublishableSummary(series) ? new { series } : null;
@@ -261,6 +559,6 @@ public sealed partial class EclipseRunService : IDisposable
             !treeConfirmed ? "ECLIPSE process-tree exit is unconfirmed."
             : cleanupFailed ? "ECLIPSE cleanup failed or could not be confirmed."
             : "ECLIPSE cleanup completed.");
-    [GeneratedRegex("^.+\\.(ECLEND|MSG|PRT|RSM|SMSPEC|UNSMRY|EGRID|INIT|UNRST|FUNRST|S\\d{4,5})$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)] private static partial Regex Output();
+    [GeneratedRegex("^.+\\.(ECLEND|MSG|PRT|RSM|SMSPEC|UNSMRY|FSMSPEC|FUNSMRY|EGRID|INIT|FEGRID|FINIT|UNRST|FUNRST|S\\d{4,5})$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)] private static partial Regex Output();
     public void Dispose() => submissions.Dispose();
 }

@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "eclipse-sample-provenance/1",
+  "source": "test-data\\ECLIPSE_NEW_WELL_WATER.DATA",
+  "sourceSha256": "dbae4c8a9f20f0a9c521f77d63fae3bbbdd3ec22cb8ab962897db5cb05a028c2",
+  "sampleSha256": "dbae4c8a9f20f0a9c521f77d63fae3bbbdd3ec22cb8ab962897db5cb05a028c2",
+  "changes": [
+    "Filename only; all source bytes identical to verified water sample"
+  ],
+  "physicalEquivalenceVerified": true,
+  "manualUiVerified": false,
+  "nativeVerified": true,
+  "nativeEvidence": "C:\\GRDP-TestOutput\\ECLIPSE-P06-NEW-COMPLETION-native-a1\\native-acceptance.json",
+  "nativeEvidenceSha256": "acca0452ae5cccfe1d4070e9e3e3eddd533ad6bbd749f512ae658a8947dd4d7a"
+}

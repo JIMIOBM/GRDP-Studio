@@ -4,6 +4,8 @@ import com.grdp.studio.common.ApiResponse;
 import com.grdp.studio.common.BusinessException;
 import com.grdp.studio.softwareintegration.controller.SoftwareIntegrationController;
 import com.grdp.studio.softwareintegration.controller.SoftwareIntegrationRunController;
+import com.grdp.studio.softwareintegration.controller.EclipseBatchController;
+import com.grdp.studio.softwareintegration.controller.EclipseHistoryController;
 import jakarta.validation.ConstraintViolationException;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
@@ -15,7 +17,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 @Order(Ordered.HIGHEST_PRECEDENCE)
-@RestControllerAdvice(assignableTypes = {SoftwareIntegrationRunController.class, SoftwareIntegrationController.class})
+@RestControllerAdvice(assignableTypes = {SoftwareIntegrationRunController.class, SoftwareIntegrationController.class, EclipseBatchController.class, EclipseHistoryController.class})
 public class SoftwareIntegrationRunExceptionHandler {
     @ExceptionHandler(RunException.class)
     public ResponseEntity<ApiResponse<Void>> handleRunException(RunException exception) {

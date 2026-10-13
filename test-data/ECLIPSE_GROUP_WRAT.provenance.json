@@ -1,0 +1,32 @@
+{
+  "source": "C:\\ecl\\2024.1\\eclipse\\data\\UDT_LC.DATA",
+  "sourceSha256": "4a17eba57420d8e953eaba16ae49bee5cfc8e0f65de5f99d86cb6cb708144652",
+  "sourceUnchanged": true,
+  "sampleSha256": "9e0971a32fa531e86f324755db48009a319b3c7124ced6859f54b3a72332a8ff",
+  "originalOfficialModel": false,
+  "mode": "WRAT",
+  "group": "G2",
+  "members": [
+    "P20",
+    "P24"
+  ],
+  "unit": "STB/day",
+  "baselineTarget": 2000,
+  "positiveTarget": 1000,
+  "limitedTarget": 20000,
+  "bhpLowerLimit": 1000,
+  "oilRateUpperLimits": {
+    "P20": 8000,
+    "P24": 4000
+  },
+  "changes": [
+    "SUMMARY requests GWPR G2 and WWPR/WBHP/WOPR for existing P20/P24.",
+    "Remove diagnostic-only UDT/UDQ WUPRICE table; no physical or control dependency.",
+    "P20/P24 ORAT -> GRUP; insert G2 WRAT 2000; preserve original oil upper limits and BHP lower limits.",
+    "TUNING record 3: LITMAX 25 -> 50 and MXWSIT 8 -> 40. All convergence tolerances unchanged. Initial failed probe retained.",
+    "All grid, fluid, initial conditions, existing wells/completions, other controls and 20*10 report days unchanged."
+  ],
+  "nativeBaseline": "C:\\GRDP-TestOutput\\ECLIPSE-P03-GROUP-WRAT-probe-a3\\WRAT\\baseline\\CASE.DATA",
+  "nativeByteEquivalent": true,
+  "manualUiVerified": false
+}

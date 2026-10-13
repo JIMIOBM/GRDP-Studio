@@ -150,11 +150,11 @@ class EclipseSummaryResultValidatorTests {
         ObjectNode valid = (ObjectNode) result("0", "0", "null");
         valid.set("fieldIndex", objectMapper.readTree("""
                 {"schemaVersion":"eclipse-binary-field-index/1","files":[
-                  {"name":"CASE.INIT","sizeBytes":100,"byteOrder":"BIG","fields":[
+                  {"name":"CASE.FUNRST","sizeBytes":100,"byteOrder":"BIG","fields":[
                     {"keyword":"PRESSURE","dataType":"REAL","count":3,"elementSize":4,"dataBytes":12,"timeStep":7,
                      "segments":[{"offset":40,"length":12}]}]}]}
                 """));
-        assertThat(validator.validate("CASE.DATA", valid).result().path("fieldIndex").path("files")).hasSize(1);
+        assertThat(validator.validate("CASE.DATA", valid).result().path("fieldIndex").path("files").get(0).path("name").asText()).isEqualTo("CASE.FUNRST");
 
         ObjectNode invalid = (ObjectNode) result("0", "0", "null");
         invalid.set("fieldIndex", objectMapper.readTree("""

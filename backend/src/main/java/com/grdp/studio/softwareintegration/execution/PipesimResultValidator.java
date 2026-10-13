@@ -14,6 +14,7 @@ public class PipesimResultValidator {
     private final PipesimGasLiftDiagnosticsResultValidator gasLiftDiagnosticsValidator;
     private final PipesimVfpTablesResultValidator vfpTablesValidator;
     private final PipesimEspCurvesResultValidator espCurvesValidator;
+    private final PipesimEspParameterResultValidator espParameterValidator;
     private final PipesimWellTrajectoryResultValidator trajectoryValidator;
     private final PipesimNetworkOptimizerResultValidator networkOptimizerValidator;
 
@@ -26,6 +27,7 @@ public class PipesimResultValidator {
                                   PipesimGasLiftDiagnosticsResultValidator gasLiftDiagnosticsValidator,
                                   PipesimVfpTablesResultValidator vfpTablesValidator,
                                   PipesimEspCurvesResultValidator espCurvesValidator,
+                                  PipesimEspParameterResultValidator espParameterValidator,
                                   PipesimWellTrajectoryResultValidator trajectoryValidator,
                                   PipesimNetworkOptimizerResultValidator networkOptimizerValidator) {
         this.wellValidator = wellValidator;
@@ -36,6 +38,7 @@ public class PipesimResultValidator {
         this.gasLiftDiagnosticsValidator = gasLiftDiagnosticsValidator;
         this.vfpTablesValidator = vfpTablesValidator;
         this.espCurvesValidator = espCurvesValidator;
+        this.espParameterValidator = espParameterValidator;
         this.trajectoryValidator = trajectoryValidator;
         this.networkOptimizerValidator = networkOptimizerValidator;
     }
@@ -46,20 +49,35 @@ public class PipesimResultValidator {
                 new PipesimSystemAnalysisResultValidator(), new PipesimGasLiftPerformanceResultValidator(),
                 new PipesimGasLiftDiagnosticsResultValidator(), new PipesimVfpTablesResultValidator(),
                 new PipesimEspCurvesResultValidator(),
+                new PipesimEspParameterResultValidator(),
                 new PipesimWellTrajectoryResultValidator(),
                 new PipesimNetworkOptimizerResultValidator());
     }
 
     public ValidatedResult validate(String expectedRunTask, String expectedStudy, JsonNode result) {
+        return validate(expectedRunTask, expectedStudy, result, null, false);
+    }
+
+    public ValidatedResult validate(String expectedRunTask, String expectedStudy, JsonNode result, JsonNode parameters) {
+        return validate(expectedRunTask, expectedStudy, result, parameters, true);
+    }
+
+    private ValidatedResult validate(String expectedRunTask, String expectedStudy, JsonNode result,
+                                     JsonNode parameters, boolean bindRequest) {
         try {
             if ("network".equals(expectedRunTask)) {
                 PipesimNetworkResultValidator.ValidatedResult validated =
                         networkValidator.validate(expectedRunTask, expectedStudy, result);
                 return new ValidatedResult(validated.terminalStatus(), validated.contract(), validated.result());
             }
+            if ("network-well-performance-curves".equals(expectedRunTask)) {
+                PipesimWellResultValidator.ValidatedResult validated =
+                        new PipesimNetworkWellPerformanceResultValidator().validate(expectedStudy, result);
+                return new ValidatedResult(validated.terminalStatus(), validated.contract(), validated.result());
+            }
             if ("system-analysis".equals(expectedRunTask)) {
                 PipesimWellResultValidator.ValidatedResult validated =
-                        systemAnalysisValidator.validate(expectedStudy, result);
+                        systemAnalysisValidator.validate(expectedStudy, result, parameters);
                 return new ValidatedResult(validated.terminalStatus(), validated.contract(), validated.result());
             }
             if ("gas-lift-performance".equals(expectedRunTask)) {
@@ -78,6 +96,11 @@ public class PipesimResultValidator {
                 PipesimWellResultValidator.ValidatedResult validated = espCurvesValidator.validate(result);
                 return new ValidatedResult(validated.terminalStatus(), validated.contract(), validated.result());
             }
+            if ("esp-parameter".equals(expectedRunTask)) {
+                PipesimWellResultValidator.ValidatedResult validated = bindRequest
+                        ? espParameterValidator.validate(result, parameters) : espParameterValidator.validate(result);
+                return new ValidatedResult(validated.terminalStatus(), validated.contract(), validated.result());
+            }
             if ("trajectory".equals(expectedRunTask)) {
                 PipesimWellResultValidator.ValidatedResult validated = trajectoryValidator.validate(result);
                 return new ValidatedResult(validated.terminalStatus(), validated.contract(), validated.result());
@@ -88,7 +111,7 @@ public class PipesimResultValidator {
             }
             PipesimWellResultValidator.ValidatedResult validated = "sensitivity".equals(expectedRunTask)
                     ? sensitivityValidator.validate(expectedRunTask, result)
-                    : wellValidator.validate(expectedRunTask, result);
+                    : wellValidator.validate(expectedRunTask, result, parameters);
             return new ValidatedResult(validated.terminalStatus(), validated.contract(), validated.result());
         } catch (PipesimWellResultValidator.ResultValidationException
                   | PipesimNetworkResultValidator.ResultValidationException exception) {

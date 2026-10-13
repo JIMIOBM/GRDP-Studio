@@ -97,6 +97,102 @@ public sealed partial class PtkValidationService
                 : [];
             var modelKind = envelope.TryGetProperty("modelKind", out var modelKindElement) ? modelKindElement.GetString() : null;
             var well = envelope.TryGetProperty("well", out var wellElement) ? wellElement.GetString() : null;
+            IReadOnlyList<string>? espContexts = null;
+            if (envelope.TryGetProperty("espContexts", out var espContextsElement))
+            {
+                if (espContextsElement.ValueKind != JsonValueKind.Array || espContextsElement.GetArrayLength() > 128)
+                    return new(StatusCodes.Status502BadGateway, new WorkerError("PROTOCOL", "INVALID_PIPESIM_ESP_CONTEXTS", "The validation adapter returned invalid ESP context metadata.", false));
+                var contexts = new List<string>();
+                foreach (var item in espContextsElement.EnumerateArray())
+                {
+                    if (item.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(item.GetString()) || item.GetString()!.Length > 255 ||
+                        item.GetString()!.Contains("..", StringComparison.Ordinal) || item.GetString()!.IndexOfAny(['/', '\\']) >= 0 ||
+                        item.GetString()!.Any(char.IsControl))
+                    {
+                        return new(StatusCodes.Status502BadGateway, new WorkerError("PROTOCOL", "INVALID_PIPESIM_ESP_CONTEXTS", "The validation adapter returned invalid ESP context metadata.", false));
+                    }
+                    contexts.Add(item.GetString()!);
+                }
+                if (contexts.Count != contexts.Distinct(StringComparer.Ordinal).Count())
+                    return new(StatusCodes.Status502BadGateway, new WorkerError("PROTOCOL", "INVALID_PIPESIM_ESP_CONTEXTS", "The validation adapter returned duplicate ESP contexts.", false));
+                espContexts = contexts;
+            }
+            IReadOnlyList<WellEspContextInspection>? wellContexts = null;
+            var hasTubingComponents = false;
+            if (envelope.TryGetProperty("wellContexts", out var wellsElement))
+            {
+                if (wellsElement.ValueKind != JsonValueKind.Array || wellsElement.GetArrayLength() is 0 or > 128 || espContexts is null)
+                    return new(StatusCodes.Status502BadGateway, new WorkerError("PROTOCOL", "INVALID_PIPESIM_WELL_CONTEXTS", "The validation adapter returned invalid well context metadata.", false));
+                var contexts = new List<WellEspContextInspection>();
+                var seenWells = new HashSet<string>(StringComparer.Ordinal);
+                var allEspContexts = new HashSet<string>(StringComparer.Ordinal);
+                bool? tubingDetailsExpected = null;
+                foreach (var item in wellsElement.EnumerateArray())
+                {
+                    if (item.ValueKind != JsonValueKind.Object || item.EnumerateObject().Count() is not (4 or 5) ||
+                        !item.TryGetProperty("context", out var contextElement) || contextElement.ValueKind != JsonValueKind.String ||
+                        !item.TryGetProperty("espContexts", out var contextEspsElement) || contextEspsElement.ValueKind != JsonValueKind.Array ||
+                        contextEspsElement.GetArrayLength() > 128 ||
+                        !item.TryGetProperty("completionContexts", out var completionsElement) || completionsElement.ValueKind != JsonValueKind.Array || completionsElement.GetArrayLength() > 128 ||
+                        !item.TryGetProperty("tubingContexts", out var tubingsElement) || tubingsElement.ValueKind != JsonValueKind.Array || tubingsElement.GetArrayLength() > 128)
+                        return new(StatusCodes.Status502BadGateway, new WorkerError("PROTOCOL", "INVALID_PIPESIM_WELL_CONTEXTS", "The validation adapter returned invalid well context metadata.", false));
+                    var context = contextElement.GetString()!;
+                    if (!IsSafePipesimContext(context) || !seenWells.Add(context))
+                        return new(StatusCodes.Status502BadGateway, new WorkerError("PROTOCOL", "INVALID_PIPESIM_WELL_CONTEXTS", "The validation adapter returned an unsafe or duplicate well context.", false));
+                    var hasTubingDetails = item.TryGetProperty("tubingComponents", out var tubingComponentsElement);
+                    if (tubingDetailsExpected.HasValue && tubingDetailsExpected.Value != hasTubingDetails)
+                        return new(StatusCodes.Status502BadGateway, new WorkerError("PROTOCOL", "INVALID_PIPESIM_TUBING_COMPONENTS", "The validation adapter returned inconsistent Tubing parameter metadata across wells.", false));
+                    tubingDetailsExpected = hasTubingDetails;
+                    var scopedEspContexts = new List<string>();
+                    var seenScopedEspContexts = new HashSet<string>(StringComparer.Ordinal);
+                    var completionContexts = ReadScopedContexts(completionsElement);
+                    var tubingContexts = ReadScopedContexts(tubingsElement);
+                    if (completionContexts is null || tubingContexts is null)
+                        return new(StatusCodes.Status502BadGateway, new WorkerError("PROTOCOL", "INVALID_PIPESIM_WELL_CONTEXTS", "The validation adapter returned invalid per-well completion or tubing metadata.", false));
+                    IReadOnlyList<WellTubingComponentInspection>? tubingComponents = null;
+                    if (hasTubingDetails)
+                    {
+                        hasTubingComponents = true;
+                        if (item.EnumerateObject().Count() != 5 || tubingComponentsElement.ValueKind != JsonValueKind.Array || tubingComponentsElement.GetArrayLength() > 128)
+                            return new(StatusCodes.Status502BadGateway, new WorkerError("PROTOCOL", "INVALID_PIPESIM_TUBING_COMPONENTS", "The validation adapter returned invalid Tubing parameter metadata.", false));
+                        var parsedTubingComponents = new List<WellTubingComponentInspection>();
+                        var seenTubingComponents = new HashSet<string>(StringComparer.Ordinal);
+                        foreach (var tubingComponent in tubingComponentsElement.EnumerateArray())
+                        {
+                            if (tubingComponent.ValueKind != JsonValueKind.Object || tubingComponent.EnumerateObject().Count() != 3 ||
+                                !tubingComponent.TryGetProperty("context", out var tubingContext) || tubingContext.ValueKind != JsonValueKind.String ||
+                                !tubingComponent.TryGetProperty("innerDiameter", out var diameterElement) || diameterElement.ValueKind != JsonValueKind.Number ||
+                                !diameterElement.TryGetDouble(out var diameter) || !double.IsFinite(diameter) || diameter <= 0 || diameter > 1000 ||
+                                !tubingComponent.TryGetProperty("unit", out var unitElement) || unitElement.ValueKind != JsonValueKind.String ||
+                                !IsSafePipesimContext(tubingContext.GetString()) || !IsSafePipesimUnit(unitElement.GetString()) || !seenTubingComponents.Add(tubingContext.GetString()!) ||
+                                !tubingContexts.Contains(tubingContext.GetString()!, StringComparer.Ordinal))
+                                return new(StatusCodes.Status502BadGateway, new WorkerError("PROTOCOL", "INVALID_PIPESIM_TUBING_COMPONENTS", "The validation adapter returned unsafe or inconsistent Tubing parameter metadata.", false));
+                            parsedTubingComponents.Add(new(tubingContext.GetString()!, diameter, unitElement.GetString()!));
+                        }
+                        tubingComponents = parsedTubingComponents;
+                    }
+                    foreach (var contextEspElement in contextEspsElement.EnumerateArray())
+                    {
+                        if (contextEspElement.ValueKind != JsonValueKind.String || !IsSafePipesimContext(contextEspElement.GetString()) ||
+                            !seenScopedEspContexts.Add(contextEspElement.GetString()!))
+                            return new(StatusCodes.Status502BadGateway, new WorkerError("PROTOCOL", "INVALID_PIPESIM_WELL_CONTEXTS", "The validation adapter returned invalid ESP-to-well context metadata.", false));
+                        scopedEspContexts.Add(contextEspElement.GetString()!);
+                        allEspContexts.Add(contextEspElement.GetString()!);
+                    }
+                    contexts.Add(new(context, scopedEspContexts, completionContexts, tubingContexts, tubingComponents));
+                }
+                if (!allEspContexts.SetEquals(espContexts))
+                    return new(StatusCodes.Status502BadGateway, new WorkerError("PROTOCOL", "INVALID_PIPESIM_WELL_CONTEXTS", "The well-scoped ESP list does not match the discovered ESP contexts.", false));
+                wellContexts = contexts;
+            }
+            IReadOnlyList<GasLiftCapabilityInspection>? gasLiftCapabilities = null;
+            if (envelope.TryGetProperty("gasLiftCapabilities", out var gasLiftElement))
+            {
+                gasLiftCapabilities = wellContexts is null || !hasTubingComponents ? null
+                    : GasLiftCapabilityReader.Read(gasLiftElement, wellContexts, studies);
+                if (gasLiftCapabilities is null)
+                    return new(StatusCodes.Status502BadGateway, new WorkerError("PROTOCOL", "INVALID_GAS_LIFT_CAPABILITIES", "The adapter returned inconsistent gas lift discovery metadata.", false));
+            }
             WorkerError? structuredError = null;
             if (envelope.TryGetProperty("error", out var errorElement) && errorElement.ValueKind == JsonValueKind.Object)
             {
@@ -109,13 +205,19 @@ public sealed partial class PtkValidationService
             object? inspection = modelKind == "network"
                 ? NetworkInspectionReader.Read(envelope, status, modelKind)
                 : WellInspectionReader.Read(envelope, status, modelKind);
+            var networkCapability = modelKind == "network" ? null
+                : NetworkInspectionReader.ReadCapability(envelope, status, modelKind, studies, packageFiles);
             inspection = inspection switch
             {
                 WellDataInspection wellInspection => wellInspection with
                 {
-                    SchemaVersion = "pipesim-well-inspection/3",
+                    SchemaVersion = gasLiftCapabilities is not null ? "pipesim-well-inspection/9" : hasTubingComponents ? "pipesim-well-inspection/8" : networkCapability is not null ? "pipesim-well-inspection/7" : wellContexts is not null ? "pipesim-well-inspection/6" : espContexts is null ? "pipesim-well-inspection/3" : "pipesim-well-inspection/4",
                     PackageFiles = packageFiles,
-                    Well = well
+                    Well = well,
+                    EspContexts = espContexts,
+                    WellContexts = wellContexts,
+                    NetworkCapability = networkCapability,
+                    GasLiftCapabilities = gasLiftCapabilities
                 },
                 NetworkDataInspection network => network with
                 {
@@ -125,7 +227,7 @@ public sealed partial class PtkValidationService
                 _ => inspection
             };
             var response = new ModelValidationResponse(status ?? "INVALID", studies, message ?? "Model validation failed.", modelKind, well, structuredError,
-                inspection);
+                inspection, espContexts);
             return status switch
             {
                 "READY" => new(StatusCodes.Status200OK, response),
@@ -146,6 +248,25 @@ public sealed partial class PtkValidationService
         }
     }
 
+    private static IReadOnlyList<string>? ReadScopedContexts(JsonElement contexts)
+    {
+        var values = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var item in contexts.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.String || !IsSafePipesimContext(item.GetString()) || !seen.Add(item.GetString()!)) return null;
+            values.Add(item.GetString()!);
+        }
+        return values;
+    }
+
     [GeneratedRegex("^[0-9a-f]{64}$", RegexOptions.CultureInvariant)]
     private static partial Regex LowerSha256();
+
+    private static bool IsSafePipesimContext(string? value) =>
+        !string.IsNullOrWhiteSpace(value) && value.Length <= 255 && !value.Contains("..", StringComparison.Ordinal) &&
+        value.IndexOfAny(['/', '\\']) < 0 && !value.Any(char.IsControl);
+
+    private static bool IsSafePipesimUnit(string? value) =>
+        !string.IsNullOrWhiteSpace(value) && value.Length <= 32 && !value.Any(char.IsControl);
 }

@@ -138,7 +138,7 @@ Copy-Item backend/.env.example backend/.env
 | Worker | 5150 | 本机模拟器适配与进程监督 |
 | Vue/Vite | 5173 | 浏览器开发页面 |
 
-真实计算机器至少要检查 `worker/appsettings.json` 中 `Worker.StorageRoot` 和 `Worker.PipesimHome`。Worker 默认从 PIPESIM 安装目录寻找 `PythonToolkitModules.zip`，从 `%LOCALAPPDATA%\Programs\Python\Python39\python.exe` 寻找 Python；如果本机路径不同，可在 `Worker` 节点补充 `PipesimPtkPath`、`PythonPath` 和 `EclrunPath`。这些路径应使用本机配置，不能写入共享提交。
+真实计算机器需要配置 Worker 数据目录 `Worker.StorageRoot`。模拟器路径优先通过“软件集成 → 环境设置”检测、验证和保存，不需要修改仓库中的 `appsettings.json`。也可通过本机环境变量 `GRDP_WORKER_Worker__PipesimHome`、`GRDP_WORKER_Worker__PipesimPtkPath`、`GRDP_WORKER_Worker__PythonPath`、`GRDP_WORKER_Worker__EclrunPath` 设置初始路径；向导已保存的本机配置会覆盖这些初始值。个人安装路径不要写入共享提交。
 
 ### 4. 安装前端依赖
 
@@ -262,16 +262,29 @@ mvn -f backend/pom.xml test
 
 ## 常见问题
 
+### 在另一台电脑上配置软件集成
+
+进入“软件集成”后，首次使用会打开“环境发现与配置”。也可以随时点击工作台上方的“环境设置”。
+
+1. 在运行 Worker 的电脑上安装所需模拟器，启动项目的完整模式。
+2. 点击“重新检测”，从检测结果中选择安装目录、Python 和 Toolkit；未找到时输入该电脑上的完整路径。
+3. 分别点击“验证并保存 PIPESIM”或“验证并保存 ECLIPSE”。可以只配置其中一种；PIPESIM 单井与管网共用配置。
+4. 保存成功后立即生效。配置保存在 Worker 数据目录的 `configuration/simulator-environment.json`，不会提交到仓库，重启后会自动读取。
+
+当前支持 PIPESIM 2022.1 和 ECLIPSE 2024.1。自动搜索覆盖常见安装目录与 PATH，不保证找到所有自定义安装。检测通过不代表许可证有效或模型一定能计算，仍须用实际模型验证。计算或验证运行期间禁止修改环境。
+
+浏览器访问其他电脑上的部署时，检测的是计算服务主机，不是浏览器所在电脑。更改可执行文件路径只允许计算主机上的本地操作；远程用户应联系该主机管理员。未安装某种模拟器时，仍可浏览已有项目和结果。
+
 <details>
 <summary>没有安装 PIPESIM 或 ECLIPSE，能启动项目吗？</summary>
 
-可以。先运行页面模式，网页和后端可以启动；执行对应模型时，能力状态会提示缺少模拟器、Toolkit、许可证或模型文件。
+可以。先运行页面模式，网页和后端可以启动。“环境设置”显示安装和 Toolkit 状态；许可证、模型兼容性等问题在验证和实际计算阶段反馈。
 </details>
 
 <details>
 <summary>为什么浏览器不能直接访问 Worker？</summary>
 
-这是架构约束。浏览器只访问 Spring Boot，Spring Boot 负责鉴权、校验、持久化和任务编排，再由本机 Worker 访问模拟器，避免把本地路径和可执行命令暴露给浏览器。
+这是架构约束。浏览器只访问 Spring Boot，Spring Boot 负责鉴权、校验、持久化和任务编排，再由本机 Worker 访问模拟器。环境设置仅允许本地主机操作员修改安装路径，浏览器不能提交任意执行命令。
 </details>
 
 <details>

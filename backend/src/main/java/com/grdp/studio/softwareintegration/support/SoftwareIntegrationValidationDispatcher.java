@@ -180,7 +180,7 @@ public class SoftwareIntegrationValidationDispatcher {
             if (response.statusCode() == 200 && "READY".equals(payload.path("status").asText())) {
                 String modelKind = payload.path("modelKind").asText();
                 String simulatorType = simulatorType(modelKind);
-                if (simulatorType == null || eclipse != "eclipse_100".equals(modelKind)) {
+                if (simulatorType == null || eclipse != ("eclipse_100".equals(modelKind) || "eclipse_300".equals(modelKind))) {
                     update(version, "INVALID", "MODEL_KIND_EXTENSION_MISMATCH: Worker 返回的 modelKind 与模型扩展名不匹配", null);
                     return;
                 }
@@ -205,6 +205,8 @@ public class SoftwareIntegrationValidationDispatcher {
                 if (eclipse) {
                     try {
                         inspection = EclipseDataInspectionValidator.validateAndSerialize(payload.get("inspection"), objectMapper);
+                        if ("eclipse_300".equals(modelKind) != Set.of("eclipse-data-inspection/14", "eclipse-data-inspection/15").contains(payload.path("inspection").path("schemaVersion").asText()))
+                            throw new IllegalArgumentException("Eclipse model kind does not match inspection schema");
                     } catch (IllegalArgumentException exception) {
                         update(version, "INVALID", "INSPECTION_RESPONSE_INVALID: Worker inspection metadata is invalid", null);
                         return;
@@ -281,6 +283,7 @@ public class SoftwareIntegrationValidationDispatcher {
             case "network" -> "PIPESIM_NETWORK";
             case "black_oil_liquid", "basic_gas", "legacy_well" -> "PIPESIM_WELL";
             case "eclipse_100" -> "ECLIPSE_100";
+            case "eclipse_300" -> "ECLIPSE_300";
             default -> null;
         };
     }

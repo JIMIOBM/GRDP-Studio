@@ -1,14 +1,32 @@
 <script setup>
 import { computed, ref } from 'vue'
+import { validCompositionalMetadata } from './eclipseCompositional'
+import { validThermalMetadata } from './eclipseThermal'
 import { storeToRefs } from 'pinia'
 import { ElMessage } from 'element-plus'
 import { useSoftwareIntegrationStore } from '@/stores/softwareIntegration'
+import { groupProductionRecords } from './eclipseGroupProduction'
+import { groupRateRecords } from './eclipseGroupRate'
+import { groupWaterProductionRecords } from './eclipseGroupWaterProduction'
+import { controlPlanPeriods } from './eclipseControlPlan'
+import { groupStructureRecords, groupStructureLabel } from './eclipseGroupStructure'
+import { advancedInjectionRecords } from './eclipseAdvancedInjection'
+import { groupInjectionRecords } from './eclipseGroupInjection'
+import { groupGasInjectionRecords } from './eclipseGroupGasInjection'
 
 const props = defineProps({ embedded: { type: Boolean, default: false } })
 const store = useSoftwareIntegrationStore()
 const { activeModel, activeVersion, activeVersionId, versions } = storeToRefs(store)
 const inspection = computed(() => activeVersion.value?.inspection || null)
-const inspectionSchemas = new Set(['eclipse-data-inspection/1', 'eclipse-data-inspection/2', 'eclipse-data-inspection/3', 'eclipse-data-inspection/4'])
+const productionControlPlan = computed(() => controlPlanPeriods(inspection.value))
+const groupStructureControls = computed(() => groupStructureRecords(inspection.value))
+const advancedInjectionGroups = computed(() => advancedInjectionRecords(inspection.value))
+const waterProductionGroups = computed(() => groupWaterProductionRecords(inspection.value))
+const rateGroups = computed(() => groupRateRecords(inspection.value))
+const productionGroups = computed(() => groupProductionRecords(inspection.value))
+const injectionGroups = computed(() => groupInjectionRecords(inspection.value))
+const gasInjectionGroups = computed(() => groupGasInjectionRecords(inspection.value))
+const inspectionSchemas = new Set(['eclipse-data-inspection/1', 'eclipse-data-inspection/2', 'eclipse-data-inspection/3', 'eclipse-data-inspection/4', 'eclipse-data-inspection/5', 'eclipse-data-inspection/6', 'eclipse-data-inspection/7', 'eclipse-data-inspection/8', 'eclipse-data-inspection/9', 'eclipse-data-inspection/10', 'eclipse-data-inspection/11', 'eclipse-data-inspection/12', 'eclipse-data-inspection/13', 'eclipse-data-inspection/14', 'eclipse-data-inspection/15'])
 const sectionOrder = ['RUNSPEC', 'GRID', 'EDIT', 'PROPS', 'REGIONS', 'SOLUTION', 'SUMMARY', 'SCHEDULE']
 const phaseOrder = ['OIL', 'WATER', 'GAS']
 const unitSystems = new Set(['METRIC', 'FIELD', 'LAB', 'PVT-M'])
@@ -60,9 +78,26 @@ const inspectionDetails = computed(() => {
     ? ['schemaVersion', 'caseName', 'sections', 'unitSystem', 'phases', 'dimensions']
     : value.schemaVersion === 'eclipse-data-inspection/2'
     ? ['schemaVersion', 'caseName', 'sections', 'unitSystem', 'phases', 'dimensions', 'wellNames', 'scheduleTimeline']
-    : value.schemaVersion === 'eclipse-data-inspection/3'
+    : ['eclipse-data-inspection/3', 'eclipse-data-inspection/14', 'eclipse-data-inspection/15'].includes(value.schemaVersion)
     ? ['schemaVersion', 'caseName', 'sections', 'unitSystem', 'phases', 'dimensions', 'wellNames', 'scheduleTimeline', 'packageFiles']
     : ['schemaVersion', 'caseName', 'sections', 'unitSystem', 'phases', 'dimensions', 'wellNames', 'scheduleTimeline', 'packageFiles', 'scheduleMetadata']
+  if (value.schemaVersion === 'eclipse-data-inspection/5') expectedFields.push('vfpTables')
+  if (value.schemaVersion === 'eclipse-data-inspection/14') {
+    expectedFields.push('simulation')
+    if (!validCompositionalMetadata(value.simulation)) return null
+  }
+  if (value.schemaVersion === 'eclipse-data-inspection/15') {
+    expectedFields.push('simulation')
+    if (!validThermalMetadata(value.simulation) || !Array.isArray(value.phases) || value.phases.join(',') !== 'OIL,WATER,GAS') return null
+  }
+  if (value.schemaVersion === 'eclipse-data-inspection/13') expectedFields.push('vfpTables', 'productionControlPlan')
+  if (value.schemaVersion === 'eclipse-data-inspection/12') expectedFields.push('vfpTables', 'groupStructureControls')
+  if (value.schemaVersion === 'eclipse-data-inspection/11') expectedFields.push('vfpTables', 'advancedInjectionGroupControls')
+  if (value.schemaVersion === 'eclipse-data-inspection/10') expectedFields.push('vfpTables', 'waterProductionGroupControls')
+  if (value.schemaVersion === 'eclipse-data-inspection/9') expectedFields.push('vfpTables', 'groupRateControls')
+  if (value.schemaVersion === 'eclipse-data-inspection/6') expectedFields.push('vfpTables', 'groupControls')
+  if (value.schemaVersion === 'eclipse-data-inspection/7') expectedFields.push('vfpTables', 'injectionGroupControls')
+  if (value.schemaVersion === 'eclipse-data-inspection/8') expectedFields.push('vfpTables', 'gasInjectionGroupControls')
   if (Object.keys(value).length !== expectedFields.length || !expectedFields.every(key => Object.hasOwn(value, key)) ||
     !isSafeFileName(value.caseName) || !orderedValues(value.sections, sectionOrder) || !orderedValues(value.phases, phaseOrder) ||
     !(value.unitSystem === null || unitSystems.has(value.unitSystem)) || !(value.dimensions === null || safeDimensions(value.dimensions))) return null
@@ -72,13 +107,13 @@ const inspectionDetails = computed(() => {
     unitSystem: value.unitSystem,
     phases: value.phases,
     dimensions: value.dimensions,
-    packageFiles: ['eclipse-data-inspection/3', 'eclipse-data-inspection/4'].includes(value.schemaVersion) ? value.packageFiles : null
+    packageFiles: ['eclipse-data-inspection/3', 'eclipse-data-inspection/4', 'eclipse-data-inspection/5', 'eclipse-data-inspection/6', 'eclipse-data-inspection/7', 'eclipse-data-inspection/8', 'eclipse-data-inspection/9', 'eclipse-data-inspection/10', 'eclipse-data-inspection/11', 'eclipse-data-inspection/12', 'eclipse-data-inspection/13', 'eclipse-data-inspection/14', 'eclipse-data-inspection/15'].includes(value.schemaVersion) ? value.packageFiles : null
   }
 })
 
 const inspectionV2 = computed(() => {
   const value = inspection.value
-  if (!inspectionDetails.value || !['eclipse-data-inspection/2', 'eclipse-data-inspection/3', 'eclipse-data-inspection/4'].includes(value?.schemaVersion) ||
+  if (!inspectionDetails.value || !['eclipse-data-inspection/2', 'eclipse-data-inspection/3', 'eclipse-data-inspection/4', 'eclipse-data-inspection/5', 'eclipse-data-inspection/6', 'eclipse-data-inspection/7', 'eclipse-data-inspection/8', 'eclipse-data-inspection/9', 'eclipse-data-inspection/10', 'eclipse-data-inspection/11', 'eclipse-data-inspection/12', 'eclipse-data-inspection/13', 'eclipse-data-inspection/14', 'eclipse-data-inspection/15'].includes(value?.schemaVersion) ||
     !Array.isArray(value.wellNames) || value.wellNames.length > maxWellNames ||
     !Array.isArray(value.scheduleTimeline) || value.scheduleTimeline.length > maxScheduleEvents) return null
 
@@ -86,7 +121,7 @@ const inspectionV2 = computed(() => {
   if (wellNames.some(name => !name)) return null
   let dateCount = 0
   let tstepCount = 0
-  const withSource = value.schemaVersion === 'eclipse-data-inspection/4'
+  const withSource = ['eclipse-data-inspection/4', 'eclipse-data-inspection/5', 'eclipse-data-inspection/6', 'eclipse-data-inspection/7', 'eclipse-data-inspection/8', 'eclipse-data-inspection/9', 'eclipse-data-inspection/10', 'eclipse-data-inspection/11', 'eclipse-data-inspection/12', 'eclipse-data-inspection/13', 'eclipse-data-inspection/14', 'eclipse-data-inspection/15'].includes(value.schemaVersion)
   const schedule = value.scheduleTimeline.flatMap((event, eventIndex) => {
       if (!event || typeof event !== 'object') return []
       if (event.kind === 'DATES' && Array.isArray(event.records)) {
@@ -122,7 +157,7 @@ const inspectionV2 = computed(() => {
 })
 const inspectionV3 = computed(() => {
   const value = inspection.value
-  if (!inspectionV2.value || !['eclipse-data-inspection/3', 'eclipse-data-inspection/4'].includes(value?.schemaVersion) ||
+  if (!inspectionV2.value || !['eclipse-data-inspection/3', 'eclipse-data-inspection/4', 'eclipse-data-inspection/5', 'eclipse-data-inspection/6', 'eclipse-data-inspection/7', 'eclipse-data-inspection/8', 'eclipse-data-inspection/9', 'eclipse-data-inspection/10', 'eclipse-data-inspection/11', 'eclipse-data-inspection/12', 'eclipse-data-inspection/13', 'eclipse-data-inspection/14', 'eclipse-data-inspection/15'].includes(value?.schemaVersion) ||
     !Array.isArray(value.packageFiles) || value.packageFiles.length < 1 || value.packageFiles.length > 4096) return null
   const paths = new Set()
   const files = value.packageFiles.flatMap(file => {
@@ -137,7 +172,7 @@ const inspectionV3 = computed(() => {
 })
 const inspectionV4 = computed(() => {
   const value = inspection.value
-  if (!inspectionV2.value || value?.schemaVersion !== 'eclipse-data-inspection/4' ||
+  if (!inspectionV2.value || !['eclipse-data-inspection/4', 'eclipse-data-inspection/5', 'eclipse-data-inspection/6', 'eclipse-data-inspection/7', 'eclipse-data-inspection/8', 'eclipse-data-inspection/9', 'eclipse-data-inspection/10', 'eclipse-data-inspection/11', 'eclipse-data-inspection/12', 'eclipse-data-inspection/13', 'eclipse-data-inspection/14', 'eclipse-data-inspection/15'].includes(value?.schemaVersion) ||
     !value.scheduleMetadata || typeof value.scheduleMetadata !== 'object' || Object.keys(value.scheduleMetadata).length !== 4) return null
   const metadata = value.scheduleMetadata
   if (!Array.isArray(metadata.wells) || metadata.wells.length > maxScheduleMetadataWells ||
@@ -210,7 +245,7 @@ const clearScheduleFilters = () => {
   scheduleDateFilter.value = ''
 }
 const validInspection = computed(() => inspectionDetails.value && (inspectionDetails.value.schemaVersion === 'eclipse-data-inspection/1' || inspectionV2.value))
-const eclipseExecutionAvailable = computed(() => activeVersion.value?.status === 'READY' && activeVersion.value?.modelKind === 'eclipse_100' && Boolean(validInspection.value))
+const eclipseExecutionAvailable = computed(() => activeVersion.value?.status === 'READY' && ['eclipse_100', 'eclipse_300'].includes(activeVersion.value?.modelKind) && Boolean(validInspection.value))
 const inspectionUnavailableMessage = computed(() => {
   if (activeVersion.value?.status !== 'READY') return '模型仍在验证或未通过验证；ECLIPSE 检查和执行入口暂不可用。'
   return '此 READY ECLIPSE 版本缺少有效的持久化检查信息；执行入口不可用。'
@@ -233,7 +268,7 @@ const changeVersion = async versionId => {
           <h1>{{ activeModel.name }}</h1>
           <el-tag :type="activeVersion?.status === 'READY' ? 'success' : 'warning'">{{ activeVersion?.status || '无版本' }}</el-tag>
         </div>
-        <p>ECLIPSE 100 .DATA 模型</p>
+        <p>{{ activeVersion?.modelKind === 'eclipse_300' ? (inspection?.schemaVersion === 'eclipse-data-inspection/15' ? 'ECLIPSE 300 热采' : 'ECLIPSE 300 组分') : 'ECLIPSE 100' }} .DATA 模型</p>
       </div>
     </header>
 
@@ -263,6 +298,19 @@ const changeVersion = async versionId => {
           <div><dt>架构版本</dt><dd>{{ inspectionDetails.schemaVersion }}</dd></div>
           <div><dt>单位制</dt><dd>{{ inspectionDetails.unitSystem ?? '未知' }}</dd></div>
           <div><dt>检查状态</dt><dd>有效</dd></div>
+          <template v-if="inspection.schemaVersion === 'eclipse-data-inspection/14'">
+            <div><dt>求解器</dt><dd>ECLIPSE {{ inspection.simulation.solver }}</dd></div>
+            <div><dt>组分数</dt><dd>{{ inspection.simulation.componentCount }}</dd></div>
+            <div><dt>状态方程</dt><dd>Peng-Robinson</dd></div>
+            <div class="wide"><dt>组分顺序</dt><dd>{{ inspection.simulation.componentNames.map((n, i) => `${i + 1}: ${n}`).join(' · ') }}</dd></div>
+            <div class="wide"><dt>组分相态</dt><dd>油气相由 COMPS 与状态方程定义；下列相态标签为 DATA 中显式声明的相。</dd></div>
+          </template>
+          <template v-if="inspection.schemaVersion === 'eclipse-data-inspection/15'">
+            <div><dt>求解器</dt><dd>ECLIPSE 300 热采</dd></div>
+            <div><dt>油组分数</dt><dd>{{ inspection.simulation.componentCount }}</dd></div>
+            <div><dt>热物性模式</dt><dd>LIVEOIL</dd></div>
+            <div class="wide"><dt>油组分顺序</dt><dd>{{ inspection.simulation.componentNames.join(' · ') }}；水与蒸汽单独参与热计算。</dd></div>
+          </template>
           <div class="wide"><dt>段</dt><dd><template v-if="inspectionDetails.sections.length"><el-tag v-for="section in inspectionDetails.sections" :key="section" class="value-tag">{{ section }}</el-tag></template><span>未识别到支持的段</span></dd></div>
           <div class="wide"><dt>相态</dt><dd><template v-if="inspectionDetails.phases.length"><el-tag v-for="phase in inspectionDetails.phases" :key="phase" class="value-tag">{{ phase }}</el-tag></template><span>未识别到支持的相态</span></dd></div>
           <template v-if="inspectionDetails.dimensions">
@@ -341,6 +389,72 @@ const changeVersion = async versionId => {
 
     <section v-if="inspectionV4" class="overview-section" aria-labelledby="eclipse-schedule-metadata-title">
       <h2 id="eclipse-schedule-metadata-title">井组关系与调度关键记录</h2>
+      <section v-if="injectionGroups.length" aria-label="已有注水组目标">
+        <h3>已有注水组目标</h3>
+        <el-table :data="injectionGroups" border size="small">
+          <el-table-column prop="group" label="注水组" /><el-table-column prop="controlMode" label="控制方式" />
+          <el-table-column prop="injectionPhase" label="注入相" />
+          <el-table-column prop="originalTargetRate" label="原总注水目标" /><el-table-column prop="unit" label="单位" />
+          <el-table-column label="成员与压力上限"><template #default="{ row }">{{ row.members.map(m => `${m.well} ≤ ${m.bhpLimit}`).join('、') }}</template></el-table-column>
+          <el-table-column label="来源"><template #default="{ row }">{{ row.sourceFile }}:{{ row.lineNumber }}</template></el-table-column>
+        </el-table>
+      </section>
+      <section v-if="gasInjectionGroups.length" aria-label="已有注气组目标">
+        <h3>已有注气组目标</h3>
+        <el-table :data="gasInjectionGroups" border size="small">
+          <el-table-column prop="group" label="注气组" /><el-table-column prop="controlMode" label="控制方式" />
+          <el-table-column prop="injectionPhase" label="注入相" />
+          <el-table-column prop="originalTargetRate" label="原总注气目标" /><el-table-column prop="unit" label="单位" />
+          <el-table-column label="成员与压力上限"><template #default="{ row }">{{ row.members.map(m => `${m.well} ≤ ${m.bhpLimit}`).join('、') }}</template></el-table-column>
+          <el-table-column label="来源"><template #default="{ row }">{{ row.sourceFile }}:{{ row.lineNumber }}</template></el-table-column>
+        </el-table>
+      </section>
+      <section v-if="productionControlPlan.length" aria-label="已有分阶段产油目标">
+        <h4>已有分阶段产油目标</h4>
+        <p>含初始与后续控制链。生效后持续至该井下一条控制，期间没有新记录则继承原目标；修改前可核对后续覆盖。</p>
+        <el-table :data="productionControlPlan" max-height="300" border size="small"><el-table-column prop="well" label="井" /><el-table-column prop="date" label="生效日期" /><el-table-column prop="timeDays" label="生效天数" /><el-table-column prop="originalOilRate" label="原产油目标" /><el-table-column prop="unit" label="单位" /><el-table-column prop="bhpLimit" label="BHP 下限" /><el-table-column label="下一覆盖"><template #default="{ row }">{{ row.nextDate || `计划结束第 ${row.nextTimeDays} 天` }}</template></el-table-column><el-table-column prop="lineNumber" label="源行" /></el-table>
+      </section>
+      <section v-if="groupStructureControls.length" aria-label="已有生产组树与分配控制">
+        <h4>已有生产组树与分配控制</h4>
+        <p v-for="leaf in groupStructureControls[0].leaves" :key="leaf.group">{{ groupStructureControls[0].parentGroup }} → {{ leaf.group }} → {{ leaf.members.map(m => m.well).join('、') }}；开工比例 {{ leaf.efficiency }}；井导向权重 {{ leaf.members.map(m => `${m.well}: ${m.guideRate || '潜力分配'}`).join('、') }}。</p>
+        <el-table :data="groupStructureControls" border size="small"><el-table-column label="操作"><template #default="{ row }">{{ groupStructureLabel(row) }}</template></el-table-column><el-table-column prop="originalValue" label="原值" /><el-table-column prop="unit" label="单位" /><el-table-column prop="sourceFile" label="源文件" /><el-table-column prop="lineNumber" label="行号" /></el-table>
+      </section>
+      <section v-if="advancedInjectionGroups.length" aria-label="已有注入目标与回注比例">
+        <h3>已有注入目标与回注比例</h3>
+        <el-table :data="advancedInjectionGroups" border size="small">
+          <el-table-column prop="group" label="注入组" /><el-table-column prop="controlMode" label="控制方式" /><el-table-column prop="injectionPhase" label="注入相" /><el-table-column prop="referenceGroup" label="来源生产组" />
+          <el-table-column label="原组目标"><template #default="{ row }">{{ row.originalTargetRate }} {{ row.unit === 'fraction' ? '倍' : row.unit }}</template></el-table-column>
+          <el-table-column label="参与分配的井"><template #default="{ row }">{{ row.members.map(m => m.well).join('、') }}</template></el-table-column>
+          <el-table-column label="来源"><template #default="{ row }">{{ row.sourceFile }}:{{ row.lineNumber }}</template></el-table-column>
+        </el-table>
+      </section>
+      <section v-if="waterProductionGroups.length" aria-label="已有生产组产水目标">
+        <h3>已有生产组产水目标</h3>
+        <el-table :data="waterProductionGroups" border size="small">
+          <el-table-column prop="group" label="生产组" /><el-table-column prop="controlMode" label="控制方式" />
+          <el-table-column label="原组目标"><template #default="{ row }">{{ row.originalTargetRate }} {{ row.unit }}</template></el-table-column>
+          <el-table-column label="参与分配的井"><template #default="{ row }">{{ row.members.map(m => m.well).join('、') }}</template></el-table-column>
+          <el-table-column label="来源"><template #default="{ row }">{{ row.sourceFile }}:{{ row.lineNumber }}</template></el-table-column>
+        </el-table>
+      </section>
+      <section v-if="rateGroups.length" aria-label="已有生产组气液目标">
+        <h3>已有生产组气液目标</h3>
+        <el-table :data="rateGroups" border size="small">
+          <el-table-column prop="group" label="生产组" /><el-table-column prop="controlMode" label="控制方式" />
+          <el-table-column label="原组目标"><template #default="{ row }">{{ row.originalTargetRate }} {{ row.unit }}</template></el-table-column>
+          <el-table-column label="参与分配的井"><template #default="{ row }">{{ row.members.map(m => m.well).join('、') }}</template></el-table-column>
+          <el-table-column label="来源"><template #default="{ row }">{{ row.sourceFile }}:{{ row.lineNumber }}</template></el-table-column>
+        </el-table>
+      </section>
+      <section v-if="productionGroups.length" aria-label="已有生产组目标">
+        <h3>已有生产组目标</h3>
+        <el-table :data="productionGroups" border size="small">
+          <el-table-column prop="group" label="生产组" /><el-table-column prop="controlMode" label="控制方式" />
+          <el-table-column label="原总产油目标"><template #default="{ row }">{{ row.originalTargetRate }} {{ row.unit }}</template></el-table-column>
+          <el-table-column label="参与分配的井"><template #default="{ row }">{{ row.members.map(m => m.well).join('、') }}</template></el-table-column>
+          <el-table-column label="来源"><template #default="{ row }">{{ row.sourceFile }}:{{ row.lineNumber }}</template></el-table-column>
+        </el-table>
+      </section>
       <p class="inspection-hint">仅展示 Worker 从官方 Schedule 关键字中提取的显示安全元数据；数值保持原始词法，不推断单位，也不替代 ECLIPSE 计算结果。</p>
       <div class="schedule-metadata-grid">
         <section class="schedule-metadata-card" aria-label="井组关系">

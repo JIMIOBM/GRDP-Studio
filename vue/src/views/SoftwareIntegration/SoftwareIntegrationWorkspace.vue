@@ -7,6 +7,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useSoftwareIntegrationStore } from '@/stores/softwareIntegration'
 import PipesimModelRunPage from './PipesimModelRunPage.vue'
 import PipesimTemplateCreator from './PipesimTemplateCreator.vue'
+import SoftwareEnvironmentWizard from './SoftwareEnvironmentWizard.vue'
 
 const store = useSoftwareIntegrationStore()
 const route = useRoute()
@@ -55,7 +56,7 @@ const importIntents = {
     accept: '.pips,.PIPS,.zip,.ZIP'
   },
   'import-eclipse-100': {
-    action: '导入 ECLIPSE 100 模型',
+    action: '导入 ECLIPSE 模型',
     guidance: '.DATA 文件或 ZIP 模型包可验证；ZIP 内的 INCLUDE 依赖会保留，若包含多个 .DATA/.pips 会先要求明确选择主模型入口。',
     accept: '.data,.DATA,.zip,.ZIP'
   }
@@ -77,13 +78,13 @@ const latestKnownModelKind = model => model?.versions?.find(version => version.s
 const modelFamily = model => {
   const kind = latestKnownModelKind(model)
   if (kind === 'network') return 'network'
-  if (kind === 'eclipse_100' || model?.versions?.some(version => /\.data$/i.test(version.originalName || ''))) return 'eclipse'
+  if (['eclipse_100', 'eclipse_300'].includes(kind) || model?.versions?.some(version => /\.data$/i.test(version.originalName || ''))) return 'eclipse'
   return wellModelKinds.has(kind) ? 'well' : 'unknown'
 }
 const simulatorTypeLabel = model => {
   const family = modelFamily(model)
   if (family === 'network') return 'PIPESIM 管网模型'
-  if (family === 'eclipse') return 'ECLIPSE 100 模型'
+  if (family === 'eclipse') return latestKnownModelKind(model) === 'eclipse_300' ? 'ECLIPSE 300 模型' : 'ECLIPSE 100 模型'
   return family === 'well' ? 'PIPESIM 井筒模型' : '待识别模拟模型'
 }
 const resourceTree = computed(() => projects.value
@@ -407,6 +408,7 @@ defineExpose({ openCreateDialog, openImportModel, importExternalFile })
       </template>
     </aside>
     <main class="software-content">
+    <SoftwareEnvironmentWizard @configured="store.loadCapabilities().catch(() => {})" />
     <PipesimTemplateCreator v-if="activeProjectId" :project-id="Number(activeProjectId)" @registered="refreshCreatedModel" />
     <PipesimModelRunPage v-if="activeModel" />
      <template v-else>

@@ -1,0 +1,12 @@
+{
+  "source": "test-data/ECLIPSE_LRAT.DATA",
+  "sourceSha256": "c128f7a4a20ee1680938af85b47aa76f5739789faa721941123acda605b8aad9",
+  "sampleSha256": "c128f7a4a20ee1680938af85b47aa76f5739789faa721941123acda605b8aad9",
+  "changes": [
+    "Filename only; all source bytes retained."
+  ],
+  "nativeProof": "C:/GRDP-TestOutput/ECLIPSE-P06-PVDO-native-a2/native-acceptance.json",
+  "physicalEquivalenceVerified": true,
+  "manualUiVerified": false,
+  "apiImplemented": false
+}

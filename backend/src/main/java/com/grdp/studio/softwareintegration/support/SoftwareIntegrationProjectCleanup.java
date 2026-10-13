@@ -22,7 +22,7 @@ import java.util.Map;
 public class SoftwareIntegrationProjectCleanup {
     private static final Logger LOGGER = LoggerFactory.getLogger(SoftwareIntegrationProjectCleanup.class);
     private static final List<String> ACTIVE_STATUSES = List.of(
-            "CLAIMED", "PREPARING", "RUNNING_NODAL", "RUNNING_PROFILE", "RUNNING_NETWORK",
+            "CLAIMED", "PREPARING", "RUNNING_NODAL", "RUNNING_PROFILE", "APPLYING_TRAJECTORY", "RUNNING_NETWORK",
             "RUNNING_ECLIPSE", "COLLECTING", "CANCEL_REQUESTED");
 
     private final JdbcTemplate jdbcTemplate;

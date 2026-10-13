@@ -96,7 +96,10 @@ class FakeNetworkModel:
     def __init__(self, include_sink=True, include_choke=False):
         self._catalog = Catalog()
         self.closed = False
+        self.saved = False
+        self.factory_calls = 0
         self.bean_size = 2.0
+        self.flowline_diameters = {"Line-1": 4.0, "Line-2": 6.0}
         self.network_task = NetworkTask()
         self.tasks = types.SimpleNamespace(networksimulation=self.network_task)
         self.components = {
@@ -113,19 +116,29 @@ class FakeNetworkModel:
         return self.components.get(component, [])
 
     def get_value(self, context, parameter):
-        if parameter != "BeanSize" or context != "Choke":
-            raise AssertionError((context, parameter))
-        return self.bean_size
+        if parameter == "BeanSize" and context == "Choke":
+            return self.bean_size
+        if parameter == "InnerDiameter" and context in self.flowline_diameters:
+            return self.flowline_diameters[context]
+        raise AssertionError((context, parameter))
 
-    def set_value(self, Choke, parameter, value):
-        if parameter != "BeanSize" or Choke != "Choke":
-            raise AssertionError((Choke, parameter))
-        self.bean_size = value
+    def set_value(self, parameter, value, **context):
+        if parameter == "BeanSize" and context.get("Choke") == "Choke":
+            self.bean_size = value
+            return
+        flowline = context.get("context")
+        if parameter == "InnerDiameter" and flowline in self.flowline_diameters:
+            self.flowline_diameters[flowline] = value
+            return
+        raise AssertionError((context, parameter))
 
     def describe(self, context, parameter):
-        if parameter != "BeanSize" or context != "Choke":
+        if parameter == "BeanSize" and context == "Choke":
+            return types.SimpleNamespace(units_symbol="in")
+        if parameter == "InnerDiameter" and context in self.flowline_diameters:
+            return types.SimpleNamespace(units_symbol="in")
+        else:
             raise AssertionError((context, parameter))
-        return types.SimpleNamespace(units_symbol="in")
 
     def connections(self):
         return [
@@ -137,6 +150,9 @@ class FakeNetworkModel:
 
     def close(self):
         self.closed = True
+
+    def save(self):
+        self.saved = True
 
 
 class OptimizerResults:
@@ -212,6 +228,7 @@ def fake_sixgill_modules():
     definitions.Parameters = types.SimpleNamespace(
         GasLiftInjection=types.SimpleNamespace(GASRATE="GasRate"),
         Choke=types.SimpleNamespace(BEANSIZE="BeanSize"),
+        Flowline=types.SimpleNamespace(INNERDIAMETER="InnerDiameter"),
     )
     resources = types.ModuleType("sixgill.core.resources")
     resources.ModelClasses = types.SimpleNamespace(STUDY="study")
@@ -228,8 +245,14 @@ class PtkNetworkContractTests(unittest.TestCase):
         model = FakeNetworkModel(include_choke=True)
         with patch.dict(sys.modules, fake_sixgill_modules()):
             inspection = ptk_validate._network_inspection(model, ["Study 1"])
-        self.assertEqual("pipesim-network-inspection/3", inspection["schemaVersion"])
+        self.assertEqual("pipesim-network-inspection/5", inspection["schemaVersion"])
+        self.assertEqual([], inspection["wellContexts"])
+        self.assertEqual(["Line-1", "Line-2"], inspection["flowlineContexts"])
         self.assertEqual([{"name": "Choke", "beanSize": 2.0, "unit": "in"}], inspection["chokes"])
+        self.assertEqual([
+            {"name": "Line-1", "innerDiameter": 4.0, "unit": "in"},
+            {"name": "Line-2", "innerDiameter": 6.0, "unit": "in"},
+        ], inspection["flowlines"])
         boundaries = inspection["studies"][0]["boundaries"]
         self.assertEqual(["Sink-1", "Source-1"], [item["node"] for item in boundaries])
         source = boundaries[1]
@@ -268,10 +291,51 @@ class PtkNetworkContractTests(unittest.TestCase):
         self.assertEqual(2.0, model.bean_size)
         self.assertEqual([], model.network_task.run_calls)
 
+    def test_network_flowline_diameter_saves_reopens_and_runs_same_study(self):
+        model = FakeNetworkModel()
+        envelope, events = self.execute(model, {
+            "schemaVersion": "pipesim-network-flowline-diameter-parameters/1",
+            "baselineRunId": 1001,
+            "flowline": "Line-1",
+            "originalInnerDiameter": 4.0,
+            "unit": "in",
+            "targetInnerDiameter": 5.0,
+        })
+
+        self.assertEqual("ok", envelope["status"])
+        self.assertEqual("VALID_FULL", envelope["result"]["resultContract"])
+        self.assertTrue(model.saved)
+        self.assertEqual(2, model.factory_calls)
+        self.assertEqual(5.0, model.flowline_diameters["Line-1"])
+        self.assertEqual("Study 1", model.network_task.validate_calls[-1]["study"])
+        self.assertEqual("Study 1", model.network_task.run_calls[-1]["study"])
+        self.assertIn("Saved Network Flowline Line-1 InnerDiameter 4.0->5.0 in; reopened and recalculated Study Study 1.", envelope["result"]["messages"])
+        self.assertEqual(["RUNNING_NETWORK", "COLLECTING"], [item[0] for item in events])
+
+    def test_network_flowline_diameter_rejects_stale_original_without_mutating(self):
+        model = FakeNetworkModel()
+        envelope, _ = self.execute(model, {
+            "schemaVersion": "pipesim-network-flowline-diameter-parameters/1",
+            "baselineRunId": 1001,
+            "flowline": "Line-1",
+            "originalInnerDiameter": 3.5,
+            "unit": "in",
+            "targetInnerDiameter": 5.0,
+        })
+
+        self.assertEqual("error", envelope["status"])
+        self.assertEqual("NETWORK_FLOWLINE_ORIGINAL_VALUE_MISMATCH", envelope["error"]["code"])
+        self.assertEqual(4.0, model.flowline_diameters["Line-1"])
+        self.assertFalse(model.saved)
+        self.assertEqual([], model.network_task.run_calls)
+
     def execute(self, model, parameters=None):
         events = []
         with tempfile.NamedTemporaryFile(suffix=".pips") as model_file:
             with patch.dict(sys.modules, fake_sixgill_modules()):
+                def model_factory(_):
+                    model.factory_calls += 1
+                    return model
                 envelope = ptk_run.execute_request(
                     {
                         "modelPath": model_file.name,
@@ -279,7 +343,7 @@ class PtkNetworkContractTests(unittest.TestCase):
                         "runTask": "network",
                         "parameters": parameters,
                     },
-                    model_factory=lambda _: model,
+                    model_factory=model_factory,
                     emit_event=lambda state, message: events.append((state, message)),
                 )
         return envelope, events
@@ -545,7 +609,7 @@ class PtkNetworkContractTests(unittest.TestCase):
         self.assertFalse(inspection["candidate"])
         self.assertFalse(inspection["valid"])
 
-    def test_well_completion_and_tubing_take_precedence_over_internal_surface_objects(self):
+    def test_well_completion_and_tubing_do_not_hide_a_network_workflow(self):
         model = FakeNetworkModel(include_sink=True)
         model.components.update({
             "Well": ["Well_1"],
@@ -556,7 +620,7 @@ class PtkNetworkContractTests(unittest.TestCase):
         inspection = inspect_network(model)
 
         self.assertTrue(inspection["well_model"])
-        self.assertFalse(inspection["candidate"])
+        self.assertTrue(inspection["candidate"])
 
 
 if __name__ == "__main__":

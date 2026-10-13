@@ -1,0 +1,12 @@
+{
+  "source": "C:\\ecl\\2024.1\\eclipse\\data\\BASE_WATER.DATA",
+  "sourceSha256": "329f86cf71d90b7920a6fc26404e228b4e617c78654e5ccf25640ae69e5047df",
+  "sample": "ECLIPSE_BASE_WATER_BHP.DATA",
+  "sampleSha256": "790f82a438229f3a5c8a3089c642f191da5f686e0d45021a784316ec45714ea4",
+  "sourceUnchanged": true,
+  "physicsAndScheduleUnchanged": true,
+  "reservoirAndWellGeometryUnchanged": true,
+  "changes": [
+    "SUMMARY requests: WOPR P1, WBHP P1/I1, WWIR I1. Formatted output retained."
+  ]
+}

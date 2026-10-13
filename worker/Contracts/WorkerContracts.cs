@@ -12,22 +12,44 @@ public sealed record ModelValidationResponse(
     string? ModelKind = null,
     string? Well = null,
     WorkerError? Error = null,
-    object? Inspection = null);
+    object? Inspection = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? EspContexts = null);
 
 public sealed record WellDataInspection(
     string SchemaVersion,
     WellPressureInspection? ReservoirPressure,
     IReadOnlyList<EclipsePackageFile>? PackageFiles = null,
-    string? Well = null);
+    string? Well = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? EspContexts = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<WellEspContextInspection>? WellContexts = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] NetworkCapabilityInspection? NetworkCapability = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<GasLiftCapabilityInspection>? GasLiftCapabilities = null);
+public sealed record GasLiftCapabilityInspection(string Well, string Study, string State, string Reason,
+    bool? UseGasliftValve, bool? TargetInjectionRateAvailable);
+public sealed record NetworkCapabilityInspection(
+    string SchemaVersion,
+    IReadOnlyList<string> Studies,
+    NetworkDataInspection NetworkInspection);
+public sealed record WellEspContextInspection(
+    string Context,
+    IReadOnlyList<string> EspContexts,
+    IReadOnlyList<string> CompletionContexts,
+    IReadOnlyList<string> TubingContexts,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<WellTubingComponentInspection>? TubingComponents = null);
+public sealed record WellTubingComponentInspection(string Context, double InnerDiameter, string Unit);
 public sealed record WellPressureInspection(double Value, string Unit);
 
 public sealed record NetworkDataInspection(
     string SchemaVersion,
     IReadOnlyList<NetworkStudyInspection> Studies,
     IReadOnlyList<NetworkChokeInspection>? Chokes = null,
-    IReadOnlyList<EclipsePackageFile>? PackageFiles = null);
+    IReadOnlyList<EclipsePackageFile>? PackageFiles = null,
+    IReadOnlyList<string>? WellContexts = null,
+    IReadOnlyList<string>? FlowlineContexts = null,
+    IReadOnlyList<NetworkFlowlineInspection>? Flowlines = null);
 public sealed record NetworkStudyInspection(string Study, IReadOnlyList<NetworkBoundaryInspection> Boundaries);
 public sealed record NetworkChokeInspection(string Name, double BeanSize, string Unit);
+public sealed record NetworkFlowlineInspection(string Name, double? InnerDiameter, string Unit);
 public sealed record NetworkBoundaryInspection(
     string Node,
     string BoundaryNodeType,
@@ -51,7 +73,71 @@ public sealed record EclipseDataInspection(
     IReadOnlyList<EclipseScheduleEvent>? ScheduleTimeline = null,
     IReadOnlyList<EclipsePackageFile>? PackageFiles = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    EclipseScheduleMetadata? ScheduleMetadata = null);
+    EclipseScheduleMetadata? ScheduleMetadata = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<EclipseVfpTable>? VfpTables = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<EclipseGroupProductionControl>? GroupControls = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<EclipseGroupInjectionControl>? InjectionGroupControls = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<EclipseGroupInjectionControl>? GasInjectionGroupControls = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<EclipseGroupProductionControl>? GroupRateControls = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<EclipseGroupWaterProductionControl>? WaterProductionGroupControls = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<EclipseAdvancedInjectionControl>? AdvancedInjectionGroupControls = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<EclipseGroupStructureControl>? GroupStructureControls = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    EclipseProductionControlPlan? ProductionControlPlan = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    JsonElement? Simulation = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    EclipseNewWellContext? NewWellContext = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    EclipsePvtwContext? PvtwContext = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    EclipseOilPvtContext? OilPvtContext = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] EclipseGasPvtContext? GasPvtContext = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] EclipseRelpermContext? RelpermContext = null);
+
+public sealed record EclipseOilPvtContext(string SchemaVersion,string SourceFile,int KeywordLineNumber,IReadOnlyList<EclipseOilPvtRow> Rows);
+public sealed record EclipseOilPvtRow(int LineNumber,IReadOnlyList<string> Values);
+
+public sealed record EclipsePvtwContext(string SchemaVersion, string SourceFile, int LineNumber, IReadOnlyList<string> RecordValues);
+
+public sealed record EclipseNewWellContext(string SchemaVersion, string SourceFile, int InsertionLine,
+    int MaxWells, int MaxConnections, int MaxGroups, int MaxWellsPerGroup);
+
+public sealed record EclipseGroupInjectionControl(string Group, string SourceFile, int LineNumber,
+    string ControlMode, string InjectionPhase, string Unit, double OriginalTargetRate, IReadOnlyList<EclipseGroupInjectionMember> Members);
+public sealed record EclipseGroupInjectionMember(string Well, double BhpLimit);
+
+public sealed record EclipseGroupProductionControl(string Group, string SourceFile, int LineNumber,
+    string ControlMode, string Unit, double OriginalTargetRate, IReadOnlyList<EclipseGroupProductionMember> Members);
+public sealed record EclipseGroupProductionMember(string Well, double BhpLimit);
+public sealed record EclipseGroupWaterProductionControl(string Group, string SourceFile, int LineNumber,
+    string ControlMode, string Unit, double OriginalTargetRate, IReadOnlyList<EclipseGroupWaterProductionMember> Members);
+public sealed record EclipseGroupWaterProductionMember(string Well, double BhpLimit, double OilRateLimit);
+public sealed record EclipseAdvancedInjectionControl(string Group, string SourceFile, int LineNumber,
+    string ControlMode, string InjectionPhase, string Unit, double OriginalTargetRate, IReadOnlyList<EclipseAdvancedInjectionMember> Members,
+    string? ReferenceGroup, IReadOnlyList<string> ReferenceMembers);
+public sealed record EclipseAdvancedInjectionMember(string Well, double BhpLimit, double SurfaceRateLimit);
+public sealed record EclipseGroupStructureControl(string ParentGroup, string ObjectName, string Keyword,
+    string SourceFile, int LineNumber, string Unit, double OriginalValue, double ParentTarget,
+    IReadOnlyList<EclipseGroupStructureLeaf> Leaves);
+public sealed record EclipseGroupStructureLeaf(string Group, double Efficiency, IReadOnlyList<EclipseGroupStructureMember> Members);
+public sealed record EclipseGroupStructureMember(string Well, double BhpLimit, double OilRateLimit, double GuideRate);
+public sealed record EclipseProductionControlPlan(string StartDate, int EndTimeDays, IReadOnlyList<EclipseProductionPlanRecord> Records);
+public sealed record EclipseProductionPlanRecord(string Well, string SourceFile, int LineNumber, string Date,
+    int TimeDays, string Unit, double OriginalOilRate, double BhpLimit);
+
+public sealed record EclipseVfpTable(int Number, double DatumDepth, string FlowType, string WaterFractionType,
+    string GasFractionType, string AlqType, string UnitSystem, string SourceFile, int LineNumber, string Sha256,
+    IReadOnlyList<double> FlowAxis, IReadOnlyList<double> ThpAxis, IReadOnlyList<double> WaterFractionAxis,
+    IReadOnlyList<double> GasFractionAxis, IReadOnlyList<double> AlqAxis);
 
 public sealed record EclipsePackageFile(string RelativePath, long SizeBytes, string Sha256);
 
@@ -112,7 +198,14 @@ public sealed record RunAcceptedResponse(
 
 public sealed record RunEvent(long Sequence, string State, DateTimeOffset OccurredAtUtc, string Message);
 
-public sealed record WorkerError(string Category, string Code, string Message, bool Retryable);
+public sealed record WorkerError(
+    string Category,
+    string Code,
+    string Message,
+    bool Retryable,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<WorkerDiagnostic>? Diagnostics = null);
+
+public sealed record WorkerDiagnostic(string Path, string Property, string Message);
 
 public sealed record ArtifactDescriptor(string StorageKey, long Size, string Sha256, string ContentType);
 
@@ -149,3 +242,10 @@ public static class WorkerApiError
     public static WorkerError Storage(string code, string message, bool retryable = false) => new("STORAGE", code, message, retryable);
     public static WorkerError Coordination(string code, string message, bool retryable = true) => new("COORDINATION", code, message, retryable);
 }
+
+public sealed record EclipseGasPvtContext(string SchemaVersion,string SourceFile,int KeywordLineNumber,IReadOnlyList<EclipseGasPvtRow> Rows);
+public sealed record EclipseGasPvtRow(int LineNumber,IReadOnlyList<string> Values);
+
+public sealed record EclipseRelpermContext(string SchemaVersion,string SourceFile,IReadOnlyList<EclipseRelpermTable> Tables);
+public sealed record EclipseRelpermTable(string Keyword,int KeywordLineNumber,IReadOnlyList<EclipseRelpermRow> Rows);
+public sealed record EclipseRelpermRow(int LineNumber,IReadOnlyList<string> Values);

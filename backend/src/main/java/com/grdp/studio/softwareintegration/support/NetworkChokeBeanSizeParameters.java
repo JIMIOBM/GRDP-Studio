@@ -27,7 +27,8 @@ public final class NetworkChokeBeanSizeParameters {
     }
 
     public static boolean matchesInspection(JsonNode value, JsonNode inspection) {
-        if (!valid(value) || inspection == null || !"pipesim-network-inspection/3".equals(inspection.path("schemaVersion").asText())) return false;
+        if (!valid(value) || inspection == null || !Set.of("pipesim-network-inspection/3", "pipesim-network-inspection/4", "pipesim-network-inspection/5")
+                .contains(inspection.path("schemaVersion").asText())) return false;
         for (JsonNode choke : inspection.path("chokes")) {
             if (value.path("choke").asText().equals(choke.path("name").asText())
                     && Double.compare(value.path("originalBeanSize").asDouble(), choke.path("beanSize").asDouble()) == 0) return true;

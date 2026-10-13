@@ -1,0 +1,7 @@
+{
+  "baselineRunId": 466,
+  "versionId": 157,
+  "sourceSha256": "b29df227965f5266b60bfc8701ea3c021114905371b87d7eb28c4b73ca822be9",
+  "nativeEvidence": "C:\\GRDP-TestOutput\\ECLIPSE-P06-GEOMETRY-native-a1\\native-acceptance.json",
+  "browserScope": "Actual native summaries; grid/artifact panels excluded. Full static input/geometry proof retained separately."
+}

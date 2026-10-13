@@ -133,7 +133,7 @@ public class SoftwareIntegrationServiceImpl implements SoftwareIntegrationServic
         if (!exists) throw new BusinessException(404, "软件集成项目不存在");
         Integer active = jdbcTemplate.queryForObject("""
                 SELECT COUNT(*) FROM software_integration_run
-                WHERE project_id = ? AND status IN ('CLAIMED','PREPARING','RUNNING_NODAL','RUNNING_PROFILE','RUNNING_NETWORK','RUNNING_ECLIPSE','COLLECTING','CANCEL_REQUESTED')
+                WHERE project_id = ? AND status IN ('CLAIMED','PREPARING','RUNNING_NODAL','RUNNING_PROFILE','APPLYING_TRAJECTORY','RUNNING_NETWORK','RUNNING_ECLIPSE','COLLECTING','CANCEL_REQUESTED')
                 """, Integer.class, projectId);
         if (active != null && active > 0) throw new BusinessException(409, "项目存在活动运行，不能删除");
         if (com.grdp.studio.softwareintegration.support.TemplateCreationJobStore.hasUnresolvedJobs(jdbcTemplate, projectId)) {
@@ -159,7 +159,7 @@ public class SoftwareIntegrationServiceImpl implements SoftwareIntegrationServic
 
         Integer active = jdbcTemplate.queryForObject("""
                 SELECT COUNT(*) FROM software_integration_run
-                WHERE model_id = ? AND status IN ('CLAIMED','PREPARING','RUNNING_NODAL','RUNNING_PROFILE','RUNNING_NETWORK','RUNNING_ECLIPSE','COLLECTING','CANCEL_REQUESTED')
+                WHERE model_id = ? AND status IN ('CLAIMED','PREPARING','RUNNING_NODAL','RUNNING_PROFILE','APPLYING_TRAJECTORY','RUNNING_NETWORK','RUNNING_ECLIPSE','COLLECTING','CANCEL_REQUESTED')
                 """, Integer.class, modelId);
         if (active != null && active > 0) throw new BusinessException(409, "模型存在活动运行，不能删除");
 
@@ -343,7 +343,7 @@ public class SoftwareIntegrationServiceImpl implements SoftwareIntegrationServic
                 .eq(SoftwareIntegrationModelEntity::getProjectId, projectId).eq(SoftwareIntegrationModelEntity::getName, name)
                 .isNull(SoftwareIntegrationModelEntity::getDeletedAt).last("FOR UPDATE"));
         if (existing != null) {
-            boolean existingEclipse = "ECLIPSE_100".equals(existing.getSimulatorType());
+            boolean existingEclipse = "ECLIPSE_100".equals(existing.getSimulatorType()) || "ECLIPSE_300".equals(existing.getSimulatorType());
             boolean requestedEclipse = "ECLIPSE_100".equals(initialSimulatorType);
             if (existingEclipse != requestedEclipse) {
                 throw new BusinessException(409, "同名模型不能混用 PIPESIM 与 ECLIPSE 文件类型");

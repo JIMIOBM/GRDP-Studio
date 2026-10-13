@@ -60,7 +60,7 @@ public class SoftwareIntegrationSchemaInitializer implements ApplicationRunner {
         String resultType = h2 ? "CLOB" : "LONGTEXT";
         String generated = h2
                 ? "GENERATED ALWAYS AS (CASE WHEN " + h2ActivePredicate() + " THEN 1 ELSE NULL END)"
-                : "GENERATED ALWAYS AS (CASE WHEN status IN ('CLAIMED','PREPARING','RUNNING_NODAL','RUNNING_PROFILE','RUNNING_NETWORK','RUNNING_ECLIPSE','COLLECTING','CANCEL_REQUESTED') THEN 1 ELSE NULL END) STORED";
+                : "GENERATED ALWAYS AS (CASE WHEN status IN ('CLAIMED','PREPARING','RUNNING_NODAL','RUNNING_PROFILE','APPLYING_TRAJECTORY','RUNNING_NETWORK','RUNNING_ECLIPSE','COLLECTING','CANCEL_REQUESTED') THEN 1 ELSE NULL END) STORED";
         jdbcTemplate.execute("""
                 CREATE TABLE IF NOT EXISTS software_integration_run (
                   id BIGINT AUTO_INCREMENT PRIMARY KEY, project_id BIGINT NOT NULL, model_id BIGINT NOT NULL, model_version_id BIGINT NOT NULL,
@@ -103,6 +103,28 @@ public class SoftwareIntegrationSchemaInitializer implements ApplicationRunner {
                   KEY idx_software_integration_artifact_run (run_id, id)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
                 """);
+        jdbcTemplate.execute("""
+                CREATE TABLE IF NOT EXISTS software_integration_eclipse_batch (
+                  id BIGINT AUTO_INCREMENT PRIMARY KEY, model_version_id BIGINT NOT NULL, baseline_run_id BIGINT NOT NULL,
+                  request_key CHAR(36) NOT NULL, name VARCHAR(100) NOT NULL, request_json %s NOT NULL,
+                  members_json %s NOT NULL, created_at DATETIME(3) NOT NULL,
+                  UNIQUE KEY uk_eclipse_batch_request (model_version_id, request_key),
+                  KEY idx_eclipse_batch_version (model_version_id, id),
+                  CONSTRAINT fk_eclipse_batch_version FOREIGN KEY (model_version_id) REFERENCES software_integration_model_version(id) ON DELETE CASCADE,
+                  CONSTRAINT fk_eclipse_batch_baseline FOREIGN KEY (baseline_run_id) REFERENCES software_integration_run(id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """.formatted(jsonType,jsonType));
+        jdbcTemplate.execute("""
+                CREATE TABLE IF NOT EXISTS software_integration_eclipse_history (
+                  id BIGINT AUTO_INCREMENT PRIMARY KEY, model_version_id BIGINT NOT NULL, baseline_run_id BIGINT NOT NULL,
+                  name VARCHAR(100) NOT NULL, source_file VARCHAR(128) NOT NULL, source_sha256 CHAR(64) NOT NULL,
+                  source_csv %s NOT NULL, observation_count INT NOT NULL, created_at DATETIME(3) NOT NULL,
+                  UNIQUE KEY uk_eclipse_history_source (model_version_id, source_sha256),
+                  KEY idx_eclipse_history_version (model_version_id, id),
+                  CONSTRAINT fk_eclipse_history_version FOREIGN KEY (model_version_id) REFERENCES software_integration_model_version(id) ON DELETE CASCADE,
+                  CONSTRAINT fk_eclipse_history_baseline FOREIGN KEY (baseline_run_id) REFERENCES software_integration_run(id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """.formatted(h2 ? "CLOB" : "MEDIUMTEXT"));
     }
 
     private void ensureRunColumn(String columnName, String ddl) {
@@ -189,7 +211,7 @@ public class SoftwareIntegrationSchemaInitializer implements ApplicationRunner {
         if (!runColumnExists("active_slot")) return;
         String expression = runColumnGenerationExpression();
         if (expression == null || !expression.toUpperCase().contains("RUNNING_ECLIPSE")) {
-            String statuses = "('CLAIMED','PREPARING','RUNNING_NODAL','RUNNING_PROFILE','RUNNING_NETWORK','RUNNING_ECLIPSE','COLLECTING','CANCEL_REQUESTED')";
+            String statuses = "('CLAIMED','PREPARING','RUNNING_NODAL','RUNNING_PROFILE','APPLYING_TRAJECTORY','RUNNING_NETWORK','RUNNING_ECLIPSE','COLLECTING','CANCEL_REQUESTED')";
             String ddl = h2
                     ? "ALTER TABLE software_integration_run ALTER COLUMN active_slot TINYINT GENERATED ALWAYS AS (CASE WHEN "
                         + h2ActivePredicate() + " THEN 1 ELSE NULL END)"
@@ -288,7 +310,7 @@ public class SoftwareIntegrationSchemaInitializer implements ApplicationRunner {
     }
 
     private static String h2ActivePredicate() {
-        return "REGEXP_LIKE(status, '^(CLAIMED|PREPARING|RUNNING_NODAL|RUNNING_PROFILE|RUNNING_NETWORK|RUNNING_ECLIPSE|COLLECTING|CANCEL_REQUESTED)$')";
+        return "REGEXP_LIKE(status, '^(CLAIMED|PREPARING|RUNNING_NODAL|RUNNING_PROFILE|APPLYING_TRAJECTORY|RUNNING_NETWORK|RUNNING_ECLIPSE|COLLECTING|CANCEL_REQUESTED)$')";
     }
 
     private static String columnType(Connection connection, String tableName, String columnName) throws SQLException {

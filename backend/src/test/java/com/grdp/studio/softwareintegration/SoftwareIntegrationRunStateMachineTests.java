@@ -33,6 +33,16 @@ class SoftwareIntegrationRunStateMachineTests {
         assertThat(SoftwareIntegrationRunStateMachine.allows(
                 SoftwareIntegrationRunStatus.RUNNING_PROFILE, SoftwareIntegrationRunStatus.RUNNING_NODAL, "esp-curves")).isTrue();
         assertThat(SoftwareIntegrationRunStateMachine.allows(
+                SoftwareIntegrationRunStatus.RUNNING_PROFILE, SoftwareIntegrationRunStatus.RUNNING_NODAL, "esp-parameter")).isTrue();
+        assertThat(SoftwareIntegrationRunStateMachine.allows(
+                SoftwareIntegrationRunStatus.RUNNING_PROFILE, SoftwareIntegrationRunStatus.APPLYING_TRAJECTORY, "trajectory")).isTrue();
+        assertThat(SoftwareIntegrationRunStateMachine.allows(
+                SoftwareIntegrationRunStatus.APPLYING_TRAJECTORY, SoftwareIntegrationRunStatus.RUNNING_PROFILE, "trajectory")).isTrue();
+        assertThat(SoftwareIntegrationRunStateMachine.allows(
+                SoftwareIntegrationRunStatus.RUNNING_PROFILE, SoftwareIntegrationRunStatus.APPLYING_TRAJECTORY, "profile")).isFalse();
+        assertThat(SoftwareIntegrationRunStateMachine.allows(
+                SoftwareIntegrationRunStatus.RUNNING_NODAL, SoftwareIntegrationRunStatus.RUNNING_PROFILE, "esp-parameter")).isTrue();
+        assertThat(SoftwareIntegrationRunStateMachine.allows(
                 SoftwareIntegrationRunStatus.RUNNING_PROFILE, SoftwareIntegrationRunStatus.RUNNING_NODAL, "profile")).isFalse();
         assertThatThrownBy(() -> SoftwareIntegrationRunStateMachine.requireAllowed(
                 SoftwareIntegrationRunStatus.SUCCEEDED, SoftwareIntegrationRunStatus.FAILED))

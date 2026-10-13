@@ -7,8 +7,10 @@ import java.util.Set;
 
 @Component
 public class PipesimEspCurvesResultValidator {
-    private static final Set<String> ROOT_FIELDS = Set.of(
+    private static final Set<String> ROOT_FIELDS_V1 = Set.of(
             "schemaVersion", "model_kind", "runTask", "resultContract", "producer", "pump", "nodalPump");
+    private static final Set<String> ROOT_FIELDS_V2 = Set.of(
+            "schemaVersion", "model_kind", "runTask", "resultContract", "producer", "espContext", "pump", "nodalPump");
     private static final Set<String> PUMP_FIELDS = Set.of("pumpName", "inputs", "frequencies", "operatingEnvelope");
     private static final Set<String> INPUT_FIELDS = Set.of(
             "frequency", "frequencyUnit", "manufacturer", "model", "minFlowRate", "maxFlowRate", "stages");
@@ -18,24 +20,32 @@ public class PipesimEspCurvesResultValidator {
     private static final Set<String> ENVELOPE_FIELDS = Set.of("qMin", "bep", "qMax");
 
     public PipesimWellResultValidator.ValidatedResult validate(JsonNode result) {
-        requireObject(result, ROOT_FIELDS, "ESP curves result");
-        requireText(result, "schemaVersion", "pipesim-esp-curves-result/1");
+        String schema = result != null && result.path("schemaVersion").isTextual()
+                ? result.path("schemaVersion").asText() : "";
+        boolean contextBound = "pipesim-esp-curves-result/2".equals(schema);
+        requireObject(result, contextBound ? ROOT_FIELDS_V2 : ROOT_FIELDS_V1, "ESP curves result");
+        require("pipesim-esp-curves-result/1".equals(schema) || contextBound, "Invalid ESP curves result schema");
         require(result.path("model_kind").isTextual()
-                        && ("black_oil_liquid".equals(result.path("model_kind").asText())
-                        || "basic_gas".equals(result.path("model_kind").asText())),
+                        && Set.of("black_oil_liquid", "basic_gas", "legacy_well").contains(result.path("model_kind").asText())
+                        && (!"pipesim-esp-curves-result/1".equals(schema) || !"legacy_well".equals(result.path("model_kind").asText())),
                 "Invalid model_kind");
         requireText(result, "runTask", "esp-curves");
         requireText(result, "resultContract", "VALID_FULL");
         requireSafeText(result, "producer");
-        validatePump(result.path("pump"));
-        validatePump(result.path("nodalPump"));
+        if (contextBound) {
+            requireSafeText(result, "espContext");
+            require(!"AUTO".equalsIgnoreCase(result.path("espContext").asText()), "ESP context must be explicit");
+        }
+        validatePump(result.path("pump"), !contextBound);
+        validatePump(result.path("nodalPump"), !contextBound);
         return new PipesimWellResultValidator.ValidatedResult(
                 SoftwareIntegrationRunStatus.SUCCEEDED, "VALID_FULL", result);
     }
 
-    private static void validatePump(JsonNode pump) {
+    private static void validatePump(JsonNode pump, boolean requireLegacyPumpName) {
         requireObject(pump, PUMP_FIELDS, "ESP pump");
-        requireText(pump, "pumpName", "B-ESP");
+        requireSafeText(pump, "pumpName");
+        if (requireLegacyPumpName) requireText(pump, "pumpName", "B-ESP");
         JsonNode inputs = pump.path("inputs");
         requireObject(inputs, INPUT_FIELDS, "ESP inputs");
         requireNumber(inputs.path("frequency"), 0D, 200D, "frequency");

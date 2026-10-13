@@ -1,0 +1,427 @@
+{
+  "sourceRunId": 450,
+  "sha256": "27337856bcca204948d3939c854f80ade753c194811d0af97f5339987646ad47",
+  "eclEnd": {
+    "comments": 1,
+    "warnings": 5,
+    "problems": 0,
+    "errors": 0,
+    "bugs": 0
+  },
+  "summary": {
+    "series": [
+      {
+        "keyword": "YEARS",
+        "objectName": null,
+        "unit": "YEARS",
+        "points": [
+          {
+            "timeDays": 0,
+            "value": 0
+          },
+          {
+            "timeDays": 1,
+            "value": 0.00273785088211298
+          },
+          {
+            "timeDays": 4,
+            "value": 0.01095140352845192
+          },
+          {
+            "timeDays": 10,
+            "value": 0.02737850695848465
+          },
+          {
+            "timeDays": 20,
+            "value": 0.0547570139169693
+          },
+          {
+            "timeDays": 30,
+            "value": 0.08213552087545395
+          },
+          {
+            "timeDays": 40,
+            "value": 0.1095140278339386
+          },
+          {
+            "timeDays": 50,
+            "value": 0.13689254224300385
+          },
+          {
+            "timeDays": 60,
+            "value": 0.1642710417509079
+          },
+          {
+            "timeDays": 70,
+            "value": 0.19164955615997314
+          },
+          {
+            "timeDays": 80,
+            "value": 0.2190280556678772
+          },
+          {
+            "timeDays": 90,
+            "value": 0.24640657007694244
+          },
+          {
+            "timeDays": 100,
+            "value": 0.2737850844860077
+          },
+          {
+            "timeDays": 110,
+            "value": 0.30116358399391174
+          },
+          {
+            "timeDays": 120,
+            "value": 0.3285420835018158
+          },
+          {
+            "timeDays": 130,
+            "value": 0.35592061281204224
+          },
+          {
+            "timeDays": 140,
+            "value": 0.3832991123199463
+          },
+          {
+            "timeDays": 150,
+            "value": 0.41067761182785034
+          },
+          {
+            "timeDays": 175,
+            "value": 0.47912389039993286
+          },
+          {
+            "timeDays": 200,
+            "value": 0.5475701689720154
+          },
+          {
+            "timeDays": 225,
+            "value": 0.6160164475440979
+          },
+          {
+            "timeDays": 250,
+            "value": 0.6844627261161804
+          },
+          {
+            "timeDays": 275,
+            "value": 0.7529089450836182
+          },
+          {
+            "timeDays": 300,
+            "value": 0.8213552236557007
+          }
+        ]
+      },
+      {
+        "keyword": "WWPR",
+        "objectName": "P",
+        "unit": "SM3/DAY",
+        "points": [
+          {
+            "timeDays": 0,
+            "value": 0
+          },
+          {
+            "timeDays": 1,
+            "value": 1000
+          },
+          {
+            "timeDays": 4,
+            "value": 1000
+          },
+          {
+            "timeDays": 10,
+            "value": 1000
+          },
+          {
+            "timeDays": 20,
+            "value": 1000
+          },
+          {
+            "timeDays": 30,
+            "value": 1000
+          },
+          {
+            "timeDays": 40,
+            "value": 1000
+          },
+          {
+            "timeDays": 50,
+            "value": 1000
+          },
+          {
+            "timeDays": 60,
+            "value": 1000
+          },
+          {
+            "timeDays": 70,
+            "value": 1000
+          },
+          {
+            "timeDays": 80,
+            "value": 1000
+          },
+          {
+            "timeDays": 90,
+            "value": 1000
+          },
+          {
+            "timeDays": 100,
+            "value": 1000
+          },
+          {
+            "timeDays": 110,
+            "value": 1000
+          },
+          {
+            "timeDays": 120,
+            "value": 1000
+          },
+          {
+            "timeDays": 130,
+            "value": 1000
+          },
+          {
+            "timeDays": 140,
+            "value": 1000
+          },
+          {
+            "timeDays": 150,
+            "value": 1000
+          },
+          {
+            "timeDays": 175,
+            "value": 1000
+          },
+          {
+            "timeDays": 200,
+            "value": 1000
+          },
+          {
+            "timeDays": 225,
+            "value": 1000
+          },
+          {
+            "timeDays": 250,
+            "value": 1000
+          },
+          {
+            "timeDays": 275,
+            "value": 1000
+          },
+          {
+            "timeDays": 300,
+            "value": 1000
+          }
+        ]
+      },
+      {
+        "keyword": "WBHP",
+        "objectName": "P",
+        "unit": "BARSA",
+        "points": [
+          {
+            "timeDays": 0,
+            "value": 4000
+          },
+          {
+            "timeDays": 1,
+            "value": 3859.700927734375
+          },
+          {
+            "timeDays": 4,
+            "value": 3859.221435546875
+          },
+          {
+            "timeDays": 10,
+            "value": 3859.21826171875
+          },
+          {
+            "timeDays": 20,
+            "value": 3859.22021484375
+          },
+          {
+            "timeDays": 30,
+            "value": 3859.22119140625
+          },
+          {
+            "timeDays": 40,
+            "value": 3859.222412109375
+          },
+          {
+            "timeDays": 50,
+            "value": 3859.22119140625
+          },
+          {
+            "timeDays": 60,
+            "value": 3859.222900390625
+          },
+          {
+            "timeDays": 70,
+            "value": 3859.22119140625
+          },
+          {
+            "timeDays": 80,
+            "value": 3859.223876953125
+          },
+          {
+            "timeDays": 90,
+            "value": 3859.22119140625
+          },
+          {
+            "timeDays": 100,
+            "value": 3859.220703125
+          },
+          {
+            "timeDays": 110,
+            "value": 3859.22265625
+          },
+          {
+            "timeDays": 120,
+            "value": 3859.22119140625
+          },
+          {
+            "timeDays": 130,
+            "value": 3859.223876953125
+          },
+          {
+            "timeDays": 140,
+            "value": 3859.221435546875
+          },
+          {
+            "timeDays": 150,
+            "value": 3859.220947265625
+          },
+          {
+            "timeDays": 175,
+            "value": 3859.220947265625
+          },
+          {
+            "timeDays": 200,
+            "value": 3859.22119140625
+          },
+          {
+            "timeDays": 225,
+            "value": 3859.218017578125
+          },
+          {
+            "timeDays": 250,
+            "value": 3859.220947265625
+          },
+          {
+            "timeDays": 275,
+            "value": 3859.220703125
+          },
+          {
+            "timeDays": 300,
+            "value": 3859.221435546875
+          }
+        ]
+      },
+      {
+        "keyword": "WWPT",
+        "objectName": "P",
+        "unit": "SM3",
+        "points": [
+          {
+            "timeDays": 0,
+            "value": 0
+          },
+          {
+            "timeDays": 1,
+            "value": 1000
+          },
+          {
+            "timeDays": 4,
+            "value": 4000
+          },
+          {
+            "timeDays": 10,
+            "value": 10000
+          },
+          {
+            "timeDays": 20,
+            "value": 20000
+          },
+          {
+            "timeDays": 30,
+            "value": 30000
+          },
+          {
+            "timeDays": 40,
+            "value": 40000
+          },
+          {
+            "timeDays": 50,
+            "value": 50000
+          },
+          {
+            "timeDays": 60,
+            "value": 60000
+          },
+          {
+            "timeDays": 70,
+            "value": 70000
+          },
+          {
+            "timeDays": 80,
+            "value": 80000
+          },
+          {
+            "timeDays": 90,
+            "value": 90000
+          },
+          {
+            "timeDays": 100,
+            "value": 100000
+          },
+          {
+            "timeDays": 110,
+            "value": 110000
+          },
+          {
+            "timeDays": 120,
+            "value": 120000
+          },
+          {
+            "timeDays": 130,
+            "value": 130000
+          },
+          {
+            "timeDays": 140,
+            "value": 140000
+          },
+          {
+            "timeDays": 150,
+            "value": 150000
+          },
+          {
+            "timeDays": 175,
+            "value": 175000
+          },
+          {
+            "timeDays": 200,
+            "value": 200000
+          },
+          {
+            "timeDays": 225,
+            "value": 225000
+          },
+          {
+            "timeDays": 250,
+            "value": 250000
+          },
+          {
+            "timeDays": 275,
+            "value": 275000
+          },
+          {
+            "timeDays": 300,
+            "value": 300000
+          }
+        ]
+      }
+    ]
+  }
+}

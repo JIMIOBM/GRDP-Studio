@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
+using Grdp.SoftwareIntegration.Worker.Inspection;
 
 namespace Grdp.SoftwareIntegration.Worker.Execution;
 
@@ -77,6 +78,8 @@ internal static partial class EclipseScheduleEditor
 
     internal static async Task<string> ApplyAsync(EclipseDeckPackage package, EclipseScheduleParameters parameters, CancellationToken cancellationToken)
     {
+        if (parameters.SchemaVersion is EclipseScheduleParameters.MultiEventSchema or EclipseScheduleParameters.MultiWellSchema or EclipseScheduleParameters.MultiDateSchema)
+            return await ApplyWellScheduleEventsAsync(package, parameters, cancellationToken);
         if (parameters.ControlMode == "ORAT")
         {
             return parameters.SchemaVersion == EclipseScheduleParameters.ProductionSchema
@@ -139,6 +142,169 @@ internal static partial class EclipseScheduleEditor
         }
         throw new EclipseDeckPackageException("ECLIPSE_SCHEDULE_TARGET_MISSING", "The requested well and DATES entry do not contain an existing whole-well WELOPEN row.");
     }
+
+    private static async Task<string> ApplyWellScheduleEventsAsync(EclipseDeckPackage package, EclipseScheduleParameters parameters, CancellationToken cancellationToken)
+    {
+        var events = parameters.Events;
+        if (events is null || events.Count < 2 || events.Count > (parameters.SchemaVersion == EclipseScheduleParameters.MultiDateSchema ? 24 : 2))
+            throw new EclipseDeckPackageException("ECLIPSE_SCHEDULE_EVENTS_INVALID", "The ECLIPSE well schedule requires ordered OPEN/SHUT events within the supported limit.");
+        IReadOnlyList<string> wells = parameters.Wells ?? [parameters.Well];
+
+        var matches = new Dictionary<DateOnly, List<(string File, string[] Lines, ScheduleDateBlock Block, string Newline)>>();
+        foreach (var file in package.Files.Where(IsScheduleFile))
+        {
+            var original = await File.ReadAllTextAsync(file, new UTF8Encoding(false, true), cancellationToken);
+            var lines = original.Split(["\r\n", "\n", "\r"], StringSplitOptions.None);
+            var newline = original.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : original.Contains('\n') ? "\n" : "\r";
+            foreach (var block in FindDateBlocks(lines))
+            {
+                if (events.Any(item => item.Date == block.Date))
+                {
+                    if (!matches.TryGetValue(block.Date, out var list)) matches[block.Date] = list = [];
+                    list.Add((file, lines, block, newline));
+                }
+            }
+        }
+
+        var selected = new List<(string File, string[] Lines, ScheduleDateBlock Block, string Newline)>(events.Count);
+        foreach (var item in events)
+        {
+            if (!matches.TryGetValue(item.Date, out var dateMatches) || dateMatches.Count != 1)
+                throw new EclipseDeckPackageException(dateMatches is { Count: > 1 } ? "ECLIPSE_SCHEDULE_DATE_AMBIGUOUS" : "ECLIPSE_SCHEDULE_TARGET_MISSING",
+                    dateMatches is { Count: > 1 } ? "A selected DATES date occurs more than once in the model package." : "A selected DATES date does not exist as one unambiguous schedule block.");
+            selected.Add(dateMatches[0]);
+        }
+        if (selected.Any(item => !string.Equals(selected[0].File, item.File, StringComparison.OrdinalIgnoreCase)))
+            throw new EclipseDeckPackageException("ECLIPSE_SCHEDULE_SPLIT_FILE_UNSUPPORTED", "The first supported two-event plan requires both DATES blocks in the same schedule file; INCLUDE files are preserved.");
+        if (parameters.SchemaVersion is EclipseScheduleParameters.MultiWellSchema or EclipseScheduleParameters.MultiDateSchema
+            && selected.Zip(selected.Skip(1)).Any(pair => pair.First.Block.ContentEnd >= pair.Second.Block.ContentStart))
+            throw new EclipseDeckPackageException("ECLIPSE_SCHEDULE_ORDER_UNPROVEN", "The selected event blocks must follow the requested date order in the schedule file.");
+
+        var scheduleFile = selected[0].File;
+        foreach (var file in package.Files.Where(IsScheduleFile))
+        {
+            if (string.Equals(file, scheduleFile, StringComparison.OrdinalIgnoreCase)) continue;
+            var text = await File.ReadAllTextAsync(file, new UTF8Encoding(false, true), cancellationToken);
+            if (ContainsScheduleControl(text))
+                throw new EclipseDeckPackageException("ECLIPSE_SCHEDULE_ORDER_UNPROVEN", "Schedule controls are split across INCLUDE files; the final event order cannot be proven for this first two-event workflow.");
+        }
+
+        var sourceLines = selected[0].Lines;
+        if (parameters.SchemaVersion is EclipseScheduleParameters.MultiWellSchema or EclipseScheduleParameters.MultiDateSchema)
+            ValidateGroupTargets(package, wells, scheduleFile, selected[0].Block.ContentEnd);
+        foreach (var target in selected)
+        {
+            if (sourceLines.Skip(target.Block.ContentStart).Take(target.Block.ContentEnd - target.Block.ContentStart)
+                .Any(line => StripComment(line).Trim().Equals("INCLUDE", StringComparison.OrdinalIgnoreCase)))
+                throw new EclipseDeckPackageException("ECLIPSE_SCHEDULE_ORDER_UNPROVEN", "An INCLUDE occurs inside a selected date block; the final same-date control order is ambiguous.");
+        }
+
+        var edits = selected.Select((target, index) => (target.Block.ContentEnd, Event: events[index]))
+            .OrderByDescending(item => item.ContentEnd).ToArray();
+        var updated = sourceLines.ToList();
+        foreach (var edit in edits)
+        {
+            var records = new List<string>
+            {
+                "",
+                "-- GRDP-Studio controlled final well-state event; original schedule records are retained.",
+                "WELOPEN"
+            };
+            records.AddRange(wells.Select(well => $"       '{well}' '{edit.Event.Status}' /"));
+            records.Add("/");
+            updated.InsertRange(edit.ContentEnd, records);
+        }
+
+        var content = string.Join(selected[0].Newline, updated);
+        await WriteAtomicallyAsync(scheduleFile, content, cancellationToken);
+        return $"Applied ordered WELOPEN events {string.Join(", ", wells)}={string.Join(", ", events.Select(item => $"{item.Status} at {item.Date:yyyy-MM-dd}"))} after same-date schedule controls in {Path.GetFileName(scheduleFile)}.";
+    }
+
+    private static void ValidateGroupTargets(EclipseDeckPackage package, IReadOnlyList<string> wells, string scheduleFile, int firstEventEnd)
+    {
+        var metadata = EclipseDataInspector.InspectPackage(package.Files, Path.GetFileName(package.MainFile)).ScheduleMetadata;
+        var file = Path.GetRelativePath(package.Root, scheduleFile).Replace('\\', '/');
+        foreach (var well in wells)
+        {
+            var definition = metadata?.Wells.SingleOrDefault(item => item.Name == well);
+            var declared = definition is { LineNumber: > 0 } && definition.LineNumber <= firstEventEnd
+                && string.Equals(definition.SourceFile, file, StringComparison.OrdinalIgnoreCase);
+            var controlled = metadata?.Records.Any(record => record.Keyword is "WCONHIST" or "WCONPROD"
+                && record.Values.Count > 0 && record.Values[0] == well && record.LineNumber <= firstEventEnd
+                && string.Equals(record.SourceFile, file, StringComparison.OrdinalIgnoreCase)) == true;
+            if (!declared || !controlled)
+                throw new EclipseDeckPackageException("ECLIPSE_SCHEDULE_GROUP_TARGET_INVALID",
+                    $"Selected producer '{well}' must be defined and have production controls before the first event in the supported schedule file.");
+        }
+    }
+
+    private static IReadOnlyList<ScheduleDateBlock> FindDateBlocks(string[] lines)
+    {
+        var result = new List<ScheduleDateBlock>();
+        for (var index = 0; index < lines.Length; index++)
+        {
+            if (!StripComment(lines[index]).Trim().Equals("DATES", StringComparison.OrdinalIgnoreCase)) continue;
+            var dates = new List<DateOnly>();
+            var malformed = false;
+            var cursor = index + 1;
+            var terminated = false;
+            for (; cursor < lines.Length; cursor++)
+            {
+                var record = StripComment(lines[cursor]).Trim();
+                if (record == "/") { terminated = true; cursor++; break; }
+                if (record.Length == 0) continue;
+                if (TryParseDate(record, out var date)) dates.Add(date);
+                else malformed = true;
+            }
+            if (terminated && !malformed && dates.Count == 1)
+            {
+                var end = cursor;
+                while (end < lines.Length)
+                {
+                    var next = StripComment(lines[end]).Trim();
+                    if (next.Equals("DATES", StringComparison.OrdinalIgnoreCase)
+                        || next.Equals("TSTEP", StringComparison.OrdinalIgnoreCase)
+                        || next.Equals("END", StringComparison.OrdinalIgnoreCase)) break;
+                    end++;
+                }
+                result.Add(new(dates[0], cursor, end));
+            }
+            index = Math.Max(index, cursor - 1);
+        }
+        return result;
+    }
+
+    private static bool IsScheduleFile(string path)
+    {
+        var extension = Path.GetExtension(path);
+        return extension.Equals(".DATA", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".SCH", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".INC", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool ContainsScheduleControl(string content)
+    {
+        string[] controls = ["DATES", "TSTEP", "WELOPEN", "WCONHIST", "WCONINJE", "WCONPROD", "COMPDAT", "COMPDATM"];
+        return content.Split(["\r\n", "\n", "\r"], StringSplitOptions.None)
+            .Select(line => StripComment(line).Trim())
+            .Any(line => controls.Contains(line, StringComparer.OrdinalIgnoreCase));
+    }
+
+    private static async Task WriteAtomicallyAsync(string path, string content, CancellationToken cancellationToken)
+    {
+        var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            await File.WriteAllTextAsync(temporary, content, new UTF8Encoding(false), cancellationToken);
+            File.Move(temporary, path, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporary)) File.Delete(temporary);
+        }
+    }
+
+    private sealed record ScheduleDateBlock(DateOnly Date, int ContentStart, int ContentEnd);
 
     private static async Task<string> ApplyWconHistAsync(EclipseDeckPackage package, EclipseScheduleParameters parameters, CancellationToken cancellationToken)
     {

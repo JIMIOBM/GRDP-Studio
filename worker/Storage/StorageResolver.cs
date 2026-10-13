@@ -186,6 +186,47 @@ public sealed class StorageResolver
         return target;
     }
 
+    public async Task<string> CopyPublishedEclipseInitArtifactToWorkAsync(
+        long baselineRunId, string fieldFile, string expectedSha256, string workRoot, CancellationToken cancellationToken)
+    {
+        var safeFieldFile = fieldFile ?? string.Empty;
+        if (baselineRunId <= 0 || !System.Text.RegularExpressions.Regex.IsMatch(safeFieldFile,
+                "^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\\.INIT$", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant)
+            || expectedSha256 is not { Length: 64 } || expectedSha256.Any(value => value is not (>= 'a' and <= 'f' or >= '0' and <= '9')))
+            throw new StorageException("INVALID_GRID_FIELD_ARTIFACT", "The baseline ECLIPSE INIT Artifact reference is invalid.");
+        var artifactName = "eclipse-output-" + safeFieldFile;
+        var source = ResolveExistingFile($"artifacts/{baselineRunId}/{artifactName}");
+        if (!string.Equals(await ComputeSha256Async(source, cancellationToken), expectedSha256, StringComparison.Ordinal))
+            throw new StorageException("GRID_FIELD_ARTIFACT_SHA256_MISMATCH", "The baseline INIT Artifact checksum does not match.");
+        var targetRoot = Path.GetFullPath(Path.Combine(workRoot, ".grdp-baseline"));
+        var target = Path.GetFullPath(Path.Combine(targetRoot, safeFieldFile));
+        if (!target.StartsWith(targetRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar,
+                StringComparison.OrdinalIgnoreCase))
+            throw new StorageException("GRID_FIELD_ARTIFACT_PATH_INVALID", "The baseline INIT Artifact target is invalid.");
+        Directory.CreateDirectory(targetRoot);
+        File.Copy(source, target, overwrite: false);
+        return target;
+    }
+
+    public async Task<string> CopyPublishedEclipseGridArtifactToWorkAsync(
+        long baselineRunId, string gridFile, string expectedSha256, string workRoot, CancellationToken cancellationToken)
+    {
+        if (baselineRunId <= 0 || !System.Text.RegularExpressions.Regex.IsMatch(gridFile ?? "",
+                "^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\\.EGRID$", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant)
+            || expectedSha256 is not { Length: 64 } || expectedSha256.Any(value => value is not (>= 'a' and <= 'f' or >= '0' and <= '9')))
+            throw new StorageException("INVALID_GRID_REGION_ARTIFACT", "The baseline EGRID reference is invalid.");
+        var source = ResolveExistingFile($"artifacts/{baselineRunId}/eclipse-output-{gridFile}");
+        if (await ComputeSha256Async(source, cancellationToken) != expectedSha256)
+            throw new StorageException("GRID_REGION_ARTIFACT_SHA256_MISMATCH", "The bound EGRID checksum does not match.");
+        var targetRoot = Path.GetFullPath(Path.Combine(workRoot, ".grdp-baseline"));
+        var target = Path.GetFullPath(Path.Combine(targetRoot, gridFile!));
+        if (!target.StartsWith(targetRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            throw new StorageException("GRID_REGION_ARTIFACT_PATH_INVALID", "The baseline EGRID target is invalid.");
+        Directory.CreateDirectory(targetRoot);
+        File.Copy(source, target, overwrite: false);
+        return target;
+    }
+
     public string ResolveModelPackageRoot(string sourceModel)
     {
         try { return ResolveModelVersionRoot(sourceModel); }

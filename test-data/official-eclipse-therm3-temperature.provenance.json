@@ -1,0 +1,16 @@
+{
+  "source": "C:\\ecl\\2024.1\\e300\\data\\thermal\\THERM3.DATA",
+  "sourceSha256": "1612e17b770a35181057627c4efb6bca3cccea788c53bcade751ccd45782404d",
+  "mainFile": "THERM3.DATA",
+  "dataSha256": "babef9f21032db39dda8ca424a5d8d9fdbf1bfaf4d64fda650372f1820a08de9",
+  "packageSha256": "f8a7f62d38d828c594260d53857f4d671f5c27ca1c2532bb23fd698498bcdc6b",
+  "physicsModified": false,
+  "controlsModified": false,
+  "summaryModified": true,
+  "outputChanges": [
+    "UNIFOUT for complete binary artifacts",
+    "BTEMP cells (1,1,1) and (9,1,4)",
+    "WTEMP I/PNEAR/PFAR"
+  ],
+  "scenario": "Official SPE steam-drive THERM3; steam quality 0.70 at 450 degF; original 3650-day plan."
+}

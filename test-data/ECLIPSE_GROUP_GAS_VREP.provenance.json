@@ -1,0 +1,42 @@
+{
+  "source": "C:\\ecl\\2024.1\\eclipse\\data\\BIG3D3P.DATA",
+  "sourceSha256": "940a5e181cc9dc65b4d8ff2ae9ffed21547c94a69057a5a5605aeade27fc8a1a",
+  "seed": "C:\\Users\\Violet\\Desktop\\Bei\\GRDP-Studio\\test-data\\ECLIPSE_GROUP_GAS_INJECTION.DATA",
+  "seedSha256": "636793487195691b612abc0042b85036ff5bc9d364179bf7b632878592dc668c",
+  "seedUnchanged": true,
+  "originalOfficialModel": false,
+  "sampleSha256": "0189da5fb318a1a9aa8269cd1a6718a480795236e1b18a22be86dffe14a5ed16",
+  "mode": "VREP",
+  "injectionPhase": "GAS",
+  "group": "I",
+  "members": [
+    "INJECTR1",
+    "INJECTR2",
+    "INJECTR3",
+    "INJECTR4"
+  ],
+  "referenceGroup": "G",
+  "referenceMembers": [
+    "PRODUCR1",
+    "PRODUCR2",
+    "PRODUCR3",
+    "PRODUCR4"
+  ],
+  "baselineTarget": 0.2,
+  "positiveTarget": 0.1,
+  "limitedTarget": 5,
+  "bhpUpperLimit": 4900,
+  "surfaceRateUpperLimit": 50000,
+  "unit": "fraction",
+  "changes": [
+    "All seed derivations retained; see ECLIPSE_GROUP_GAS_INJECTION.provenance.json (explicit BHP4900 and separate water group).",
+    "SUMMARY additionally requests complete injection surface/reservoir group and member flows, source production group/member flows, and BHP.",
+    "Original four GAS injector controls, phases and all limits preserved.",
+    "Group mode explicitly derived as VREP, target 0.2 with immutable production reference G.",
+    "No new wells or completion edits. Reservoir, fluid, initial conditions, other well controls and 10*365 report days unchanged."
+  ],
+  "nativeBaseline": "C:\\GRDP-TestOutput\\ECLIPSE-P03-ADVANCED-INJECTION-probe-a4\\GAS-VREP\\baseline\\CASE.DATA",
+  "nativeByteEquivalent": true,
+  "manualUiVerified": false,
+  "limitations": "E100 only; these are demonstrators, not field recommended targets. Source warnings retained. Higher targets may be constrained. Original0.5 fraction probes retained separately."
+}

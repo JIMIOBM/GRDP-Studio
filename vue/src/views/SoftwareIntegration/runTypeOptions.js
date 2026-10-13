@@ -1,9 +1,11 @@
+import { gasLiftEligibility } from './gasLiftTask.js'
+
 const scopedWellSchemas = new Set([
   'pipesim-well-inspection/5', 'pipesim-well-inspection/6',
-  'pipesim-well-inspection/7', 'pipesim-well-inspection/8'
+  'pipesim-well-inspection/7', 'pipesim-well-inspection/8', 'pipesim-well-inspection/9'
 ])
 const flowComponentSchemas = new Set([
-  'pipesim-well-inspection/6', 'pipesim-well-inspection/7', 'pipesim-well-inspection/8'
+  'pipesim-well-inspection/6', 'pipesim-well-inspection/7', 'pipesim-well-inspection/8', 'pipesim-well-inspection/9'
 ])
 const espOptions = () => [
   { value: 'esp-parameter', label: 'ESP 参数方案' },
@@ -39,7 +41,8 @@ export const buildRunTypeOptions = ({
   selectedStudy,
   networkPerformanceContextAvailable,
   wellAvailableTasks,
-  networkAvailableTasks
+  networkAvailableTasks,
+  gasLiftInspection
 }) => {
   const availableOptions = options => filterDeployedRunTypeOptions(options, wellAvailableTasks, networkAvailableTasks)
   if (isNetworkModel) return availableOptions(networkOptions(networkPerformanceContextAvailable))
@@ -78,6 +81,10 @@ export const buildRunTypeOptions = ({
   }
 
   options = options.filter(option => !['esp-parameter', 'esp-curves'].includes(option.value) || anyEsp)
+  if (inspectionSchemaVersion === 'pipesim-well-inspection/9' &&
+      !gasLiftEligibility(gasLiftInspection, selectedWellContext, selectedStudy).supported) {
+    options = options.filter(option => !['gas-lift-performance', 'gas-lift-diagnostics'].includes(option.value))
+  }
   if (hasNetworkCapability && networkCapabilityStudies?.includes(selectedStudy)) options.push(...networkOptions(networkPerformanceContextAvailable))
   return availableOptions(options)
 }

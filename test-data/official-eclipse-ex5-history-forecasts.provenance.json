@@ -1,0 +1,59 @@
+{
+  "mainFile": "EX5.DATA",
+  "officialDirectory": "C:\\ecl\\2024.1\\schedule\\tutorials\\ex5",
+  "officialMainSha256": "75fecd6aff580822e1219b1a26c94748a1da27b508a5a18b273177205993c4fb",
+  "changes": [
+    "History: only BASIC=3 FREQ=1 restart output and FOPT/WOPT cumulative output added.",
+    "Forecast derivatives: formatted unified RESTART EX5 report80; SOLUTION inherited completely, no aquifer reinitialization.",
+    "Eleven existing producers: ORAT500/350, BHP2000; existing injection and other state inherited; two future DATES."
+  ],
+  "historyCutoff": {
+    "report": 80,
+    "date": "1975-12-31",
+    "timeDays": 2190
+  },
+  "forecastDates": [
+    "1976-12-31",
+    "1977-12-31"
+  ],
+  "files": [
+    {
+      "relativePath": "BASE.SCH",
+      "sizeBytes": 91215,
+      "sha256": "b5c62c3fac5444d7c2bede27d1ca9988c35e6d6ac12d93955f46e53f2a2dfa89"
+    },
+    {
+      "relativePath": "EX5.DATA",
+      "sizeBytes": 6119,
+      "sha256": "2141d153f43b9b394283838b960fe63a7bf9dd104f2eebee03339d772465023f"
+    },
+    {
+      "relativePath": "EX5.GRDECL",
+      "sizeBytes": 271012,
+      "sha256": "1cf9308a8bcb85f0f77d4ae9b2ee1e74c4c6cd1834b2ba43230c46f6579b0c3a"
+    },
+    {
+      "relativePath": "FOREA.DATA",
+      "sizeBytes": 5044,
+      "sha256": "2dab0482aa8a92711158e5f7123f418c4fc53205553286624e159dd9f5bee226"
+    },
+    {
+      "relativePath": "FOREA.SCH",
+      "sizeBytes": 441,
+      "sha256": "f2e9ea8a078a1a2468a0627c1c56ec79f7208b0144c4ed976d808f6fd19edf79"
+    },
+    {
+      "relativePath": "FOREB.DATA",
+      "sizeBytes": 5044,
+      "sha256": "2da929ce8b0bd265d46706ee6670d53ab90e36dbd4ffa44beb062a5fe3cf197b"
+    },
+    {
+      "relativePath": "FOREB.SCH",
+      "sizeBytes": 441,
+      "sha256": "387b093c3c091c2a80c0e67f15286061d38ee882e63984e3f949cd8ead22da7f"
+    }
+  ],
+  "zipSha256": "2b1e79a014a2e98e98caa81885849753e7c472da74dca69cff875d3c93fdb034",
+  "platformVerified": false,
+  "manualUiVerified": false
+}

@@ -1,0 +1,13 @@
+{
+  "source": "Official SLB TRACERDISPERS.DATA via maintained ECLIPSE_PERMX_WATER output-only fixture",
+  "sourceSha256": "97b5fdebe5df1c4e5c85b9b67d6d8bb747ee48aff0bf1e3668cfdc0e8fa43222",
+  "sampleSha256": "b29df227965f5266b60bfc8701ea3c021114905371b87d7eb28c4b73ca822be9",
+  "changes": [
+    "Only P COMPDAT adds explicit KH=1000 mD.m and SKIN=0 after original diameter=1 m; original CF=0 remains calculated."
+  ],
+  "rationale": "100 mD Cartesian X/Y permeability and 10 m thickness; must verify explicit KH equivalence against complete original native outputs before acceptance.",
+  "physicalEquivalenceVerified": true,
+  "manualUiVerified": false,
+  "nativeEvidence": "C:\\GRDP-TestOutput\\ECLIPSE-P06-GEOMETRY-native-a1\\native-acceptance.json",
+  "nativeEvidenceSha256": "867cfda6e76eacae7e73d9e4c3c4431481e623f60f2b319043ce7565a2000228"
+}

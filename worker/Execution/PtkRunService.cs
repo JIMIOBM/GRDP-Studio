@@ -173,12 +173,17 @@ public sealed partial class PtkRunService : IDisposable
             };
             descriptors.Add(await artifacts.WriteJsonAsync(directories.Output, "request.json", requestArtifact));
             var adapterRequestPath = Path.Combine(directories.Work, "adapter-request.json");
+            var vfpEngineOutput = request.RunTask == "vfp-tables"
+                ? Path.Combine(directories.Output, "vfp-engine")
+                : null;
+            if (vfpEngineOutput is not null) Directory.CreateDirectory(vfpEngineOutput);
             await File.WriteAllTextAsync(adapterRequestPath, JsonSerializer.Serialize(new
             {
                 modelPath = directories.ModelCopy,
                 study = request.Study,
                 runTask = request.RunTask,
-                parameters = request.Parameters
+                parameters = request.Parameters,
+                artifactDirectory = vfpEngineOutput
             }));
 
             var remaining = deadline - DateTimeOffset.UtcNow;
@@ -195,7 +200,9 @@ public sealed partial class PtkRunService : IDisposable
                 linkedCancellation.Token,
                 (state, message) =>
                 {
-                    var controlledMessage = ControlledPhaseMessage(state);
+                    var controlledMessage = state == "RUNNING_NODAL" && request.RunTask is ("gas-lift-performance" or "gas-lift-diagnostics")
+                        ? "Running official PIPESIM Gas Lift task after successful preflight."
+                        : ControlledPhaseMessage(state);
                     if (string.Equals(registry.GetState(request.RunId), state, StringComparison.Ordinal))
                     {
                         registry.Report(request.RunId, state, controlledMessage);
@@ -250,8 +257,10 @@ public sealed partial class PtkRunService : IDisposable
                 return;
             }
 
-            descriptors.Add(await artifacts.WriteJsonElementAsync(directories.Output, "raw-response.json", envelope.Value));
-            if (!TryReadEnvelope(envelope.Value, request.RunTask!, out var envelopeStatus, out var parsedResult, out var parsedError, out var parsedWarning))
+            var rawResponse = request.RunTask == "network-well-performance-curves"
+                ? StripPwiContent(envelope.Value) : envelope.Value;
+            descriptors.Add(await artifacts.WriteJsonElementAsync(directories.Output, "raw-response.json", rawResponse));
+            if (!TryReadEnvelope(envelope.Value, request.RunTask!, out var envelopeStatus, out var parsedResult, out var parsedError, out var parsedWarning, request.Parameters, request.Study))
             {
                 terminalError = new WorkerError("PROTOCOL", "INVALID_RESULT_ENVELOPE", "The adapter result envelope violates the Worker protocol.", false);
                 terminalMessage = terminalError.Message;
@@ -266,6 +275,33 @@ public sealed partial class PtkRunService : IDisposable
             }
 
             result = parsedResult!.Value.Clone();
+            if (request.RunTask == "network-well-performance-curves")
+            {
+                var pwi = result.Value.GetProperty("pwiArtifact");
+                var pwiContent = pwi.GetProperty("content").GetString()
+                    ?? throw new InvalidDataException("The validated Well Performance Curves result has no PWI text.");
+                descriptors.Add(await artifacts.WritePipesimPwiAsync(directories.Output, pwiContent, CancellationToken.None));
+                var normalized = JsonNode.Parse(result.Value.GetRawText())?.AsObject()
+                    ?? throw new InvalidDataException("The Well Performance Curves result could not be normalized for publication.");
+                normalized["pwiArtifact"]?.AsObject().Remove("content");
+                result = JsonDocument.Parse(normalized.ToJsonString()).RootElement.Clone();
+            }
+            if (request.RunTask == "vfp-tables")
+            {
+                var vfpContent = result.Value.GetProperty("vfpTableContent").GetString()
+                    ?? throw new InvalidDataException("The validated VFP result has no official table text.");
+                descriptors.Add(await artifacts.WritePipesimVfpTableAsync(
+                    directories.Output, vfpContent, includeTemperature: false, cancellationToken: CancellationToken.None));
+                if (result.Value.GetProperty("includeTemperature").GetBoolean())
+                {
+                    var temperatureContent = result.Value.GetProperty("vfpTableWithTemperatureContent").GetString()
+                        ?? throw new InvalidDataException("The validated VFP result has no official temperature table text.");
+                    descriptors.Add(await artifacts.WritePipesimVfpTableAsync(
+                        directories.Output, temperatureContent, includeTemperature: true, cancellationToken: CancellationToken.None));
+                }
+                descriptors.AddRange(await artifacts.CopyPipesimVfpEngineFilesAsync(
+                    directories.Output, vfpEngineOutput!, CancellationToken.None));
+            }
             descriptors.Add(await artifacts.WriteJsonElementAsync(directories.Output, "normalized-result.json", result.Value));
             if (request.RunTask == "network-optimizer" && NetworkOptimizerApplyRequested(request.Parameters))
             {
@@ -274,6 +310,54 @@ public sealed partial class PtkRunService : IDisposable
                 // uploaded source model.
                 descriptors.Add(await artifacts.CopyPipesimAppliedModelAsync(
                     directories.Output, directories.ModelCopy, CancellationToken.None));
+            }
+            if (request.RunTask == "trajectory" && TrajectoryEditRequested(request.Parameters))
+            {
+                // Only publish the edited isolated copy when the adapter returned the
+                // strict edit-result schema after save/reopen, readback, and PT Profile.
+                if (result.Value.ValueKind != JsonValueKind.Object ||
+                    !result.Value.TryGetProperty("schemaVersion", out var trajectorySchema) ||
+                    trajectorySchema.GetString() != "pipesim-well-trajectory-result/2" ||
+                    !result.Value.TryGetProperty("application", out var application) ||
+                    application.ValueKind != JsonValueKind.Object ||
+                    !application.TryGetProperty("artifactName", out var artifactName) ||
+                    artifactName.GetString() != "pipesim-trajectory-applied.pips")
+                    throw new InvalidDataException("The edited trajectory result did not authorize its model artifact.");
+                descriptors.Add(await artifacts.CopyPipesimAppliedModelAsync(
+                    directories.Output, directories.ModelCopy, CancellationToken.None, artifactName.GetString()!));
+            }
+            if (request.RunTask == "profile" && TubingDiameterEditRequested(request.Parameters))
+            {
+                if (result.Value.ValueKind != JsonValueKind.Object ||
+                    !result.Value.TryGetProperty("schemaVersion", out var tubingSchema) ||
+                    tubingSchema.GetString() != "pipesim-well-result/2" ||
+                    !result.Value.TryGetProperty("application", out var application) ||
+                    application.ValueKind != JsonValueKind.Object ||
+                    !application.TryGetProperty("artifactName", out var artifactName) ||
+                    artifactName.GetString() != "pipesim-well-tubing-applied.pips")
+                    throw new InvalidDataException("The Tubing edit result did not authorize its model artifact.");
+                descriptors.Add(await artifacts.CopyPipesimAppliedModelAsync(
+                    directories.Output, directories.ModelCopy, CancellationToken.None, artifactName.GetString()!));
+            }
+            if (request.RunTask == "network" && NetworkFlowlineDiameterEditRequested(request.Parameters))
+            {
+                // The adapter publishes this only after set_value, save, close/reopen,
+                // readback, native Study validation and Network Simulation succeeded.
+                if (result.Value.ValueKind != JsonValueKind.Object ||
+                    !result.Value.TryGetProperty("resultContract", out var flowlineResultContract) ||
+                    flowlineResultContract.GetString() != "VALID_FULL")
+                    throw new InvalidDataException("The Flowline scheme did not produce a full validated Network result.");
+                descriptors.Add(await artifacts.CopyPipesimAppliedModelAsync(
+                    directories.Output, directories.ModelCopy, CancellationToken.None, "pipesim-network-flowline-applied.pips"));
+            }
+            if (request.RunTask == "network" && NetworkConnectionEditRequested(request.Parameters))
+            {
+                if (result.Value.ValueKind != JsonValueKind.Object ||
+                    !result.Value.TryGetProperty("resultContract", out var connectionResultContract) ||
+                    connectionResultContract.GetString() != "VALID_FULL")
+                    throw new InvalidDataException("The Network connection scheme did not produce a full validated result.");
+                descriptors.Add(await artifacts.CopyPipesimAppliedModelAsync(
+                    directories.Output, directories.ModelCopy, CancellationToken.None, "pipesim-network-connection-applied.pips"));
             }
             terminalState = envelopeStatus == "partial" ? "PARTIAL_SUCCEEDED" : "SUCCEEDED";
             terminalError = envelopeStatus == "partial" ? parsedWarning : null;
@@ -474,8 +558,8 @@ public sealed partial class PtkRunService : IDisposable
             return WorkerApiError.Request("INVALID_EXPECTED_SHA256", "expectedModelSha256 must be 64 lowercase hexadecimal characters.");
         if (string.IsNullOrWhiteSpace(request.Study) || request.Study.Length > 256 || request.Study.Any(char.IsControl))
             return WorkerApiError.Request("INVALID_STUDY", "study is required and must be a controlled model Study name.");
-        if (request.RunTask is not ("nodal" or "profile" or "combined" or "sensitivity" or "network" or "system-analysis" or "network-optimizer" or "gas-lift-performance" or "gas-lift-diagnostics" or "vfp-tables" or "esp-curves" or "trajectory"))
-            return WorkerApiError.Request("INVALID_RUN_TASK", "runTask must be nodal, profile, combined, sensitivity, network, system-analysis, network-optimizer, gas-lift-performance, gas-lift-diagnostics, vfp-tables, esp-curves, or trajectory.");
+        if (request.RunTask is not ("nodal" or "profile" or "combined" or "sensitivity" or "network" or "system-analysis" or "network-optimizer" or "network-well-performance-curves" or "gas-lift-performance" or "gas-lift-diagnostics" or "vfp-tables" or "esp-curves" or "esp-parameter" or "trajectory"))
+            return WorkerApiError.Request("INVALID_RUN_TASK", "runTask must be a supported PIPESIM task.");
         if (!WellScenarioParameters.Valid(request.Parameters, request.RunTask))
             return WorkerApiError.Request("INVALID_SCENARIO_PARAMETERS", "Only validated well/network scenarios, sensitivity parameters, or explicit null parameters are supported.");
         if (request.TimeoutSeconds <= 0 || request.TimeoutSeconds > options.MaxRunTimeoutSeconds)
@@ -493,30 +577,56 @@ public sealed partial class PtkRunService : IDisposable
         parameters.TryGetProperty("applyResults", out var applyResults) &&
         applyResults.ValueKind == JsonValueKind.True;
 
-    internal static string CompletionMessage(string terminalState, string runTask) =>
-        terminalState == "PARTIAL_SUCCEEDED"
-                ? runTask == "system-analysis"
-                ? "PIPESIM System Analysis completed with a limited display result."
-            : runTask is "network" or "network-optimizer"
-                ? "PIPESIM Network calculation completed with a limited display result."
-                : "Nodal result succeeded; profile failed and was retained as an empty partial result."
-            : runTask == "system-analysis"
-                ? "PIPESIM System Analysis result completed successfully."
-            : runTask is "network" or "network-optimizer"
-                ? "PIPESIM Network result completed successfully."
-            : runTask == "sensitivity"
-                    ? "PIPESIM sensitivity calculation completed successfully."
-                : runTask == "gas-lift-performance"
-                    ? "PIPESIM Gas Lift Performance calculation completed successfully."
-                : runTask == "gas-lift-diagnostics"
-                    ? "PIPESIM Gas Lift Diagnostics calculation completed successfully."
-                : runTask == "vfp-tables"
-                    ? "PIPESIM VFP Tables calculation completed successfully."
-                : runTask == "esp-curves"
-                    ? "PIPESIM ESP curve calculation completed successfully."
-                : runTask == "trajectory"
-                    ? "PIPESIM well trajectory read completed successfully."
-                : "PIPESIM result completed successfully.";
+    private static bool TrajectoryEditRequested(JsonElement parameters) =>
+        parameters.ValueKind == JsonValueKind.Object &&
+        parameters.TryGetProperty("schemaVersion", out var schema) &&
+        schema.ValueKind == JsonValueKind.String &&
+        schema.GetString() == "pipesim-well-trajectory-parameters/3";
+
+    private static bool TubingDiameterEditRequested(JsonElement parameters) =>
+        parameters.ValueKind == JsonValueKind.Object &&
+        parameters.TryGetProperty("schemaVersion", out var schema) &&
+        schema.ValueKind == JsonValueKind.String &&
+        schema.GetString() == "pipesim-well-tubing-diameter-parameters/1";
+
+    private static bool NetworkFlowlineDiameterEditRequested(JsonElement parameters) =>
+        parameters.ValueKind == JsonValueKind.Object &&
+        parameters.TryGetProperty("schemaVersion", out var schema) &&
+        schema.ValueKind == JsonValueKind.String &&
+        schema.GetString() == "pipesim-network-flowline-diameter-parameters/1";
+
+    private static bool NetworkConnectionEditRequested(JsonElement parameters) =>
+        parameters.ValueKind == JsonValueKind.Object &&
+        parameters.TryGetProperty("schemaVersion", out var schema) &&
+        schema.ValueKind == JsonValueKind.String &&
+        schema.GetString() == "pipesim-network-connection-parameters/1";
+
+    internal static string CompletionMessage(string terminalState, string runTask)
+    {
+        if (terminalState == "PARTIAL_SUCCEEDED")
+        {
+            return runTask switch
+            {
+                "system-analysis" => "PIPESIM System Analysis completed with a limited display result.",
+                "network" or "network-optimizer" => "PIPESIM Network calculation completed with a limited display result.",
+                _ => "Nodal result succeeded; profile failed and was retained as an empty partial result."
+            };
+        }
+        return runTask switch
+        {
+            "system-analysis" => "PIPESIM System Analysis result completed successfully.",
+            "network-well-performance-curves" => "PIPESIM Well Performance Curves calculation completed successfully.",
+            "network" or "network-optimizer" => "PIPESIM Network result completed successfully.",
+            "sensitivity" => "PIPESIM sensitivity calculation completed successfully.",
+            "gas-lift-performance" => "PIPESIM Gas Lift Performance calculation completed successfully.",
+            "gas-lift-diagnostics" => "PIPESIM Gas Lift Diagnostics calculation completed successfully.",
+            "vfp-tables" => "PIPESIM VFP Tables calculation completed successfully.",
+            "esp-curves" => "PIPESIM ESP curve calculation completed successfully.",
+            "esp-parameter" => "PIPESIM ESP parameter scheme calculation completed successfully.",
+            "trajectory" => "PIPESIM well trajectory operation completed successfully.",
+            _ => "PIPESIM result completed successfully."
+        };
+    }
 
     internal static bool TryReadEnvelope(
         JsonElement envelope,
@@ -524,7 +634,9 @@ public sealed partial class PtkRunService : IDisposable
         out string? status,
         out JsonElement? result,
         out WorkerError? error,
-        out WorkerError? warning)
+        out WorkerError? warning,
+        JsonElement? expectedParameters = null,
+        string? expectedStudy = null)
     {
         status = null;
         result = null;
@@ -547,6 +659,12 @@ public sealed partial class PtkRunService : IDisposable
         if (expectedRunTask == "network-optimizer")
         {
             if (status != "ok" || !HasValidNetworkOptimizerResult(resultElement)) return false;
+            result = resultElement.Clone();
+            return true;
+        }
+        if (expectedRunTask == "network-well-performance-curves")
+        {
+            if (status != "ok" || !HasValidNetworkWellPerformanceResult(resultElement)) return false;
             result = resultElement.Clone();
             return true;
         }
@@ -591,7 +709,7 @@ public sealed partial class PtkRunService : IDisposable
         }
         if (expectedRunTask == "system-analysis")
         {
-            if (status != "ok" || !HasValidSystemAnalysisResult(resultElement)) return false;
+            if (status != "ok" || !HasValidSystemAnalysisResult(resultElement, expectedParameters, expectedStudy)) return false;
             result = resultElement.Clone();
             return true;
         }
@@ -619,9 +737,23 @@ public sealed partial class PtkRunService : IDisposable
             result = resultElement.Clone();
             return true;
         }
+        if (expectedRunTask == "esp-parameter")
+        {
+            if (status != "ok" || !HasValidEspParameterResult(resultElement)) return false;
+            result = resultElement.Clone();
+            return true;
+        }
         if (expectedRunTask == "trajectory")
         {
             if (status != "ok" || !HasValidTrajectoryResult(resultElement)) return false;
+            result = resultElement.Clone();
+            return true;
+        }
+        if (expectedRunTask == "profile" && resultElement.TryGetProperty("schemaVersion", out var profileSchema) &&
+            profileSchema.ValueKind == JsonValueKind.String && profileSchema.GetString() == "pipesim-well-result/2")
+        {
+            if (status != "ok" || expectedParameters is not { } parameters ||
+                !HasValidTubingDiameterResult(resultElement, parameters)) return false;
             result = resultElement.Clone();
             return true;
         }
@@ -647,6 +779,79 @@ public sealed partial class PtkRunService : IDisposable
         result = resultElement.Clone();
         return true;
     }
+
+    private static bool HasValidTubingDiameterResult(JsonElement result, JsonElement parameters)
+    {
+        if (result.ValueKind != JsonValueKind.Object ||
+            !HasExactlyProperties(result, "schemaVersion", "model_kind", "runTask", "resultContract", "units", "ipr", "vlp", "profile", "application") ||
+            !IsSafeTextValue(result.GetProperty("model_kind"), false) ||
+            result.GetProperty("model_kind").GetString() is not ("black_oil_liquid" or "basic_gas" or "legacy_well") ||
+            !IsSafeTextValue(result.GetProperty("runTask"), false) ||
+            result.GetProperty("runTask").GetString() != "profile" || !IsSafeTextValue(result.GetProperty("resultContract"), false) ||
+            result.GetProperty("resultContract").GetString() != "VALID_FULL" ||
+            !HasValidTubingUnits(result.GetProperty("units"), result.GetProperty("model_kind").GetString()!) ||
+            result.GetProperty("ipr").ValueKind != JsonValueKind.Array || result.GetProperty("ipr").GetArrayLength() != 0 ||
+            result.GetProperty("vlp").ValueKind != JsonValueKind.Array || result.GetProperty("vlp").GetArrayLength() != 0 ||
+            !IsSafeEspParameterProfilePointArray(result.GetProperty("profile")) ||
+            parameters.ValueKind != JsonValueKind.Object ||
+            !HasExactlyProperties(parameters, "schemaVersion", "baselineRunId", "wellContext", "tubingContext", "originalInnerDiameter", "unit", "targetInnerDiameter") ||
+            !IsSafeTextValue(parameters.GetProperty("schemaVersion"), false) ||
+            parameters.GetProperty("schemaVersion").GetString() != "pipesim-well-tubing-diameter-parameters/1") return false;
+
+        var application = result.GetProperty("application");
+        if (application.ValueKind != JsonValueKind.Object ||
+            !HasExactlyProperties(application, "applied", "isolatedCopy", "sourceModelUnchanged", "artifactName", "wellContext", "tubingContext", "unit", "originalInnerDiameter", "targetInnerDiameter", "appliedInnerDiameter") ||
+            application.GetProperty("applied").ValueKind != JsonValueKind.True ||
+            application.GetProperty("isolatedCopy").ValueKind != JsonValueKind.True ||
+            application.GetProperty("sourceModelUnchanged").ValueKind != JsonValueKind.True ||
+            !IsSafeTextValue(application.GetProperty("artifactName"), false) ||
+            application.GetProperty("artifactName").GetString() != "pipesim-well-tubing-applied.pips" ||
+            !IsSafeTextValue(application.GetProperty("wellContext"), false) ||
+            !IsSafeTextValue(application.GetProperty("tubingContext"), false) ||
+            !IsSafeTextValue(application.GetProperty("unit"), false) ||
+            application.GetProperty("wellContext").GetString() != parameters.GetProperty("wellContext").GetString() ||
+            application.GetProperty("tubingContext").GetString() != parameters.GetProperty("tubingContext").GetString() ||
+            application.GetProperty("unit").GetString() != parameters.GetProperty("unit").GetString() ||
+            !FiniteInRange(application.GetProperty("originalInnerDiameter"), 0, 1000) ||
+            !FiniteInRange(application.GetProperty("targetInnerDiameter"), 0, 1000) ||
+            !FiniteInRange(application.GetProperty("appliedInnerDiameter"), 0, 1000)) return false;
+
+        var original = application.GetProperty("originalInnerDiameter").GetDouble();
+        var target = application.GetProperty("targetInnerDiameter").GetDouble();
+        var applied = application.GetProperty("appliedInnerDiameter").GetDouble();
+        return original > 0 && target > 0 && applied > 0 &&
+            FiniteInRange(parameters.GetProperty("originalInnerDiameter"), 0, 1000) &&
+            FiniteInRange(parameters.GetProperty("targetInnerDiameter"), 0, 1000) &&
+            Math.Abs(original - parameters.GetProperty("originalInnerDiameter").GetDouble()) <= Math.Max(1e-9, Math.Abs(original) * 1e-9) &&
+            Math.Abs(target - parameters.GetProperty("targetInnerDiameter").GetDouble()) <= Math.Max(1e-9, Math.Abs(target) * 1e-9) &&
+            Math.Abs(applied - target) <= Math.Max(1e-9, Math.Abs(target) * 1e-9) &&
+            Math.Abs(original - target) > Math.Max(1e-12, Math.Abs(original) * 1e-12);
+    }
+
+    private static bool HasValidTubingUnits(JsonElement units, string modelKind)
+    {
+        if (units.ValueKind != JsonValueKind.Object || !HasExactlyProperties(units, "flow", "pressure", "depth", "temperature")) return false;
+        var gasModel = modelKind == "basic_gas";
+        foreach (var field in new[] { "flow", "pressure", "depth", "temperature" })
+        {
+            var unit = units.GetProperty(field);
+            if (unit.ValueKind != JsonValueKind.Object || !HasExactlyProperties(unit, "displayUnit", "semantics")) return false;
+            var display = unit.GetProperty("displayUnit");
+            var semantics = unit.GetProperty("semantics");
+            if (semantics.ValueKind != JsonValueKind.String) return false;
+            if (field == "flow" && gasModel)
+            {
+                if (display.ValueKind != JsonValueKind.String || display.GetString() != "mmscf/d" ||
+                    semantics.GetString() != "standard_gas_volume_rate") return false;
+            }
+            else if (display.ValueKind != JsonValueKind.Null || semantics.GetString() != "unspecified") return false;
+        }
+        return true;
+    }
+
+    private static bool IsSafeEspParameterProfilePointArray(JsonElement profile) =>
+        profile.ValueKind == JsonValueKind.Array && profile.GetArrayLength() is >= 1 and <= 4096 &&
+        profile.EnumerateArray().All(point => IsSafeEspParameterProfilePoint(point) && point.GetProperty("depth").GetDouble() >= 0);
 
     private static bool HasValidNetworkOptimizerResult(JsonElement result)
     {
@@ -693,6 +898,69 @@ public sealed partial class PtkRunService : IDisposable
                 item.GetProperty("code").GetString() != "UNAVAILABLE" || !quality.Add(item.GetProperty("path").GetString()!)) return false;
         }
         return quality.SetEquals(missing) && (!applied || HasValidOptimizerApplication(result.GetProperty("application")));
+    }
+
+    private static bool HasValidNetworkWellPerformanceResult(JsonElement result)
+    {
+        var fields = new[] { "schemaVersion", "model_kind", "runTask", "resultContract", "study", "producerContext",
+            "branchTerminator", "sensitivity", "flowratePoints", "simulationState", "system", "cases", "summary",
+            "messages", "quality", "pwiArtifact" };
+        if (result.ValueKind != JsonValueKind.Object || !HasExactlyProperties(result, fields) ||
+            !IsSafeTextProperty(result, "schemaVersion", false) || result.GetProperty("schemaVersion").GetString() != "pipesim-network-well-performance-result/1" ||
+            !IsSafeTextProperty(result, "model_kind", false) || result.GetProperty("model_kind").GetString() != "network" ||
+            !IsSafeTextProperty(result, "runTask", false) || result.GetProperty("runTask").GetString() != "network-well-performance-curves" ||
+            !IsSafeTextProperty(result, "resultContract", false) || result.GetProperty("resultContract").GetString() != "VALID_FULL" ||
+            !IsSafeTextProperty(result, "study", false) || !IsSafeTextProperty(result, "producerContext", false) ||
+            !IsSafeTextProperty(result, "branchTerminator", false) || !IsSafeTextProperty(result, "simulationState", false) ||
+            result.GetProperty("simulationState").GetString() != "Completed" ||
+            !result.GetProperty("flowratePoints").TryGetInt32(out var flowratePoints) || flowratePoints != 50 ||
+            result.GetProperty("system").ValueKind != JsonValueKind.Array || result.GetProperty("system").GetArrayLength() == 0 ||
+            result.GetProperty("cases").ValueKind != JsonValueKind.Array || result.GetProperty("cases").GetArrayLength() is < 2 or > 8 ||
+            !IsSafeNetworkSummary(result.GetProperty("summary")) || !IsSafeTextArray(result.GetProperty("messages")) ||
+            !IsSafeNetworkQuality(result.GetProperty("quality"))) return false;
+
+        var sensitivity = result.GetProperty("sensitivity");
+        if (sensitivity.ValueKind != JsonValueKind.Object || !HasExactlyProperties(sensitivity, "variable", "unit", "values") ||
+            !IsSafeTextProperty(sensitivity, "variable", false) || sensitivity.GetProperty("variable").GetString() != "InnerDiameter" ||
+            !IsSafeTextProperty(sensitivity, "unit", false) || sensitivity.GetProperty("unit").GetString() != "in" ||
+            sensitivity.GetProperty("values").ValueKind != JsonValueKind.Array ||
+            sensitivity.GetProperty("values").GetArrayLength() != result.GetProperty("cases").GetArrayLength()) return false;
+        var sensitivityValues = sensitivity.GetProperty("values").EnumerateArray().ToArray();
+        var previous = double.NegativeInfinity;
+        for (var index = 0; index < sensitivityValues.Length; index++)
+        {
+            var value = sensitivityValues[index];
+            if (value.ValueKind != JsonValueKind.Number || !value.TryGetDouble(out var number) || !double.IsFinite(number) ||
+                number <= previous || number <= 0 || number > 1000) return false;
+            previous = number;
+        }
+        if (!result.GetProperty("system").EnumerateArray().All(IsSafeScalarSeries)) return false;
+
+        var caseIndex = 0;
+        foreach (var item in result.GetProperty("cases").EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object || !HasExactlyProperties(item, "caseId", "caseIndex", "sensitivityValueIn", "node") ||
+                !IsSafeTextProperty(item, "caseId", false) || !item.GetProperty("caseIndex").TryGetInt32(out var actualIndex) || actualIndex != caseIndex ||
+                !item.GetProperty("sensitivityValueIn").TryGetDouble(out var caseValue) || !double.IsFinite(caseValue) ||
+                caseValue != sensitivityValues[caseIndex].GetDouble() || item.GetProperty("node").ValueKind != JsonValueKind.Array ||
+                item.GetProperty("node").GetArrayLength() == 0 || !item.GetProperty("node").EnumerateArray().All(IsSafeScalarSeries)) return false;
+            caseIndex++;
+        }
+
+        var pwi = result.GetProperty("pwiArtifact");
+        return pwi.ValueKind == JsonValueKind.Object && HasExactlyProperties(pwi, "artifactName", "content") &&
+               IsSafeTextProperty(pwi, "artifactName", false) && pwi.GetProperty("artifactName").GetString() == "pipesim-network-well-performance.pwi" &&
+               pwi.GetProperty("content").ValueKind == JsonValueKind.String &&
+               pwi.GetProperty("content").GetString()!.Length > 0 && Encoding.UTF8.GetByteCount(pwi.GetProperty("content").GetString()!) <= 2_000_000 &&
+               !pwi.GetProperty("content").GetString()!.Contains('\0');
+    }
+
+    private static JsonElement StripPwiContent(JsonElement envelope)
+    {
+        var node = JsonNode.Parse(envelope.GetRawText()) as JsonObject;
+        if (node?["result"] is JsonObject result && result["pwiArtifact"] is JsonObject pwi) pwi.Remove("content");
+        using var document = JsonDocument.Parse(node?.ToJsonString() ?? envelope.GetRawText());
+        return document.RootElement.Clone();
     }
 
     private static bool HasValidOptimizerApplication(JsonElement application)
@@ -908,18 +1176,23 @@ public sealed partial class PtkRunService : IDisposable
          (displayUnit is not null && unit.GetProperty("displayUnit").ValueKind == JsonValueKind.String && unit.GetProperty("displayUnit").GetString() == displayUnit)) &&
         IsSafeTextValue(unit.GetProperty("semantics"), false) && unit.GetProperty("semantics").GetString() == semantics;
 
-    private static bool HasValidSystemAnalysisResult(JsonElement result)
+    private static bool HasValidSystemAnalysisResult(JsonElement result, JsonElement? expectedParameters = null, string? expectedStudy = null)
     {
+        if (result.ValueKind != JsonValueKind.Object) return false;
+        var dynamic = result.TryGetProperty("schemaVersion", out var schema)
+            && schema.ValueKind == JsonValueKind.String && schema.GetString() == "pipesim-system-analysis-result/2";
         if (result.ValueKind != JsonValueKind.Object ||
             !HasExactlyProperties(result, "schemaVersion", "model_kind", "runTask", "resultContract", "study",
                 "producer", "branchTerminator", "outletPressurePsi", "scanVariable", "cases") ||
-            result.GetProperty("schemaVersion").GetString() != "pipesim-system-analysis-result/1" ||
+            !new[] { "schemaVersion", "model_kind", "runTask", "resultContract", "study", "producer", "branchTerminator", "scanVariable" }
+                .All(field => IsSafeTextProperty(result, field, false)) ||
+            (!dynamic && result.GetProperty("schemaVersion").GetString() != "pipesim-system-analysis-result/1") ||
             result.GetProperty("model_kind").GetString() != "network" ||
             result.GetProperty("runTask").GetString() != "system-analysis" ||
             result.GetProperty("resultContract").GetString() != "VALID_FULL" ||
             !IsSafeTextValue(result.GetProperty("study"), false) ||
             !IsSafeTextValue(result.GetProperty("producer"), false) ||
-            result.GetProperty("producer").GetString() != "Well" ||
+            (!dynamic && result.GetProperty("producer").GetString() != "Well") ||
             !IsSafeTextValue(result.GetProperty("branchTerminator"), false) ||
             !IsSafeTextValue(result.GetProperty("scanVariable"), false) ||
             result.GetProperty("scanVariable").GetString() != "liquidFlowRate" ||
@@ -929,9 +1202,13 @@ public sealed partial class PtkRunService : IDisposable
         {
             return false;
         }
+        if ((dynamic && string.IsNullOrWhiteSpace(expectedStudy)) ||
+            (expectedStudy is not null && result.GetProperty("study").GetString() != expectedStudy)) return false;
 
         var cases = result.GetProperty("cases");
         if (cases.ValueKind != JsonValueKind.Array || cases.GetArrayLength() is < 2 or > 8) return false;
+        if ((dynamic || expectedParameters is { ValueKind: JsonValueKind.Object }) &&
+            !SystemAnalysisRequestMatches(result, expectedParameters, dynamic)) return false;
         var previous = double.NegativeInfinity;
         foreach (var item in cases.EnumerateArray())
         {
@@ -943,12 +1220,67 @@ public sealed partial class PtkRunService : IDisposable
                 !double.IsFinite(scanValue) || scanValue <= 0 || scanValue <= previous ||
                 !IsSafeSystemSeries(item.GetProperty("system")) ||
                 !IsSafeSystemNodes(item.GetProperty("node")) ||
-                !IsSafeSystemProfile(item.GetProperty("profile")))
+                !IsSafeSystemProfile(item.GetProperty("profile")) ||
+                (dynamic && !SystemAnalysisUnitsAvailable(item)))
             {
                 return false;
             }
             previous = scanValue;
         }
+        return true;
+    }
+
+    private static bool SystemAnalysisRequestMatches(JsonElement result, JsonElement? expected, bool dynamic)
+    {
+        if (expected is not { } parameters || !SystemAnalysisParameters.Valid(parameters) ||
+            parameters.GetProperty("schemaVersion").GetString() != (dynamic
+                ? "pipesim-system-analysis-parameters/2" : "pipesim-system-analysis-parameters/1")) return false;
+        foreach (var field in new[] { "producer", "branchTerminator", "scanVariable" })
+            if (result.GetProperty(field).GetString() != parameters.GetProperty(field).GetString()) return false;
+        if (result.GetProperty("outletPressurePsi").GetDouble() != parameters.GetProperty("outletPressurePsi").GetDouble()) return false;
+        var cases = result.GetProperty("cases");
+        var values = parameters.GetProperty("values");
+        if (cases.GetArrayLength() != values.GetArrayLength()) return false;
+        for (var index = 0; index < cases.GetArrayLength(); index++)
+        {
+            if (cases[index].ValueKind != JsonValueKind.Object || !cases[index].TryGetProperty("scanValue", out var scan) || scan.ValueKind != JsonValueKind.Number ||
+                !scan.TryGetDouble(out var value) || value != values[index].GetDouble()) return false;
+        }
+        return true;
+    }
+
+    private static bool SystemAnalysisUnitsAvailable(JsonElement item)
+    {
+        static bool NativeNumber(JsonElement value) => HasSafeFiniteNumber(value)
+            && value.GetDouble() != -1e31
+            && Math.Abs(value.GetDouble() - 1.2345e25) > 1.2345e25 * 1e-12;
+        static bool HasUnit(JsonElement variable)
+        {
+            var expected = variable.GetProperty("variable").GetString() switch
+            {
+                "TotalDistance" => "ft",
+                "Pressure" or "BottomHolePressure" => "psia",
+                "Temperature" => "degF",
+                "VolumeFlowrateLiquidStockTank" => "STB/d",
+                _ => null
+            };
+            return expected is not null && variable.TryGetProperty("unit", out var unit)
+                && unit.ValueKind == JsonValueKind.String && unit.GetString() == expected;
+        }
+        var names = new HashSet<string>();
+        foreach (var variable in item.GetProperty("profile").GetProperty("variables").EnumerateArray())
+        {
+            var name = variable.GetProperty("variable").GetString()!;
+            if (!names.Add(name)) return false;
+            if (name != "BranchEquipment" && (!HasUnit(variable) ||
+                !variable.GetProperty("values").EnumerateArray().All(NativeNumber))) return false;
+        }
+        if (!names.IsSupersetOf(["TotalDistance", "Pressure", "Temperature"])) return false;
+        foreach (var variable in item.GetProperty("system").EnumerateArray())
+            if (!HasUnit(variable) || !NativeNumber(variable.GetProperty("value"))) return false;
+        foreach (var node in item.GetProperty("node").EnumerateArray())
+            foreach (var variable in node.GetProperty("variables").EnumerateArray())
+                if (!HasUnit(variable) || !NativeNumber(variable.GetProperty("value"))) return false;
         return true;
     }
 
@@ -1074,7 +1406,7 @@ public sealed partial class PtkRunService : IDisposable
             !HasExactlyProperties(result, "schemaVersion", "model_kind", "runTask", "resultContract", "producer",
                 "reservoirSimulator", "tableNumber", "includeTemperature", "bottomHoleDatumDepth", "axes", "table",
                 "temperatureTable", "vfpTableContent", "vfpTableWithTemperatureContent") ||
-            result.GetProperty("schemaVersion").GetString() != "pipesim-vfp-tables-result/1" ||
+            result.GetProperty("schemaVersion").GetString() != "pipesim-vfp-tables-result/2" ||
             result.GetProperty("model_kind").GetString() != "black_oil_liquid" ||
             result.GetProperty("runTask").GetString() != "vfp-tables" ||
             result.GetProperty("resultContract").GetString() != "VALID_FULL" ||
@@ -1084,9 +1416,12 @@ public sealed partial class PtkRunService : IDisposable
             !result.GetProperty("tableNumber").TryGetInt32(out var tableNumber) || tableNumber <= 0 ||
             result.GetProperty("includeTemperature").ValueKind is not (JsonValueKind.True or JsonValueKind.False) ||
             !FiniteInRange(result.GetProperty("bottomHoleDatumDepth"), 0, 100000) ||
-            !IsSafeVfpAxes(result.GetProperty("axes")) ||
-            !IsSafeVfpTable(result.GetProperty("table"), "BHP", "psia", result.GetProperty("axes"), false) ||
-            !IsSafeVfpTable(result.GetProperty("temperatureTable"), "TEMP", "F", result.GetProperty("axes"), result.GetProperty("includeTemperature").ValueKind == JsonValueKind.False) ||
+            !IsSafeVfpAxes(result.GetProperty("axes"))) return false;
+        var axes = result.GetProperty("axes");
+        var includeTemperature = result.GetProperty("includeTemperature").GetBoolean();
+        if (!IsSafeVfpTable(result.GetProperty("table"), "BHP", "psia", axes, false, out var bhpRows) ||
+            !IsSafeVfpTable(result.GetProperty("temperatureTable"), "TEMP", "F", axes, !includeTemperature, out var temperatureRows) ||
+            includeTemperature && !bhpRows.SetEquals(temperatureRows) ||
             !IsSafeVfpContent(result.GetProperty("vfpTableContent")) ||
             !IsSafeVfpContent(result.GetProperty("vfpTableWithTemperatureContent"))) return false;
         return true;
@@ -1094,29 +1429,122 @@ public sealed partial class PtkRunService : IDisposable
 
     private static bool HasValidEspCurvesResult(JsonElement result)
     {
+        var schema = result.ValueKind == JsonValueKind.Object && result.TryGetProperty("schemaVersion", out var schemaValue)
+            && schemaValue.ValueKind == JsonValueKind.String ? schemaValue.GetString() : null;
+        var legacyResult = schema == "pipesim-esp-curves-result/1";
+        var contextBoundResult = schema == "pipesim-esp-curves-result/2";
+        var modelKind = result.ValueKind == JsonValueKind.Object && result.TryGetProperty("model_kind", out var modelKindValue)
+            && modelKindValue.ValueKind == JsonValueKind.String ? modelKindValue.GetString() : null;
         if (result.ValueKind != JsonValueKind.Object ||
-            !HasExactlyProperties(result, "schemaVersion", "model_kind", "runTask", "resultContract", "producer", "pump", "nodalPump") ||
-            result.GetProperty("schemaVersion").GetString() != "pipesim-esp-curves-result/1" ||
-            result.GetProperty("model_kind").GetString() is not ("black_oil_liquid" or "basic_gas") ||
+            !(legacyResult && HasExactlyProperties(result, "schemaVersion", "model_kind", "runTask", "resultContract", "producer", "pump", "nodalPump") ||
+              contextBoundResult && HasExactlyProperties(result, "schemaVersion", "model_kind", "runTask", "resultContract", "producer", "espContext", "pump", "nodalPump")) ||
+            !(legacyResult && (modelKind is "black_oil_liquid" or "basic_gas") ||
+              contextBoundResult && (modelKind is "black_oil_liquid" or "basic_gas" or "legacy_well")) ||
             result.GetProperty("runTask").GetString() != "esp-curves" ||
             result.GetProperty("resultContract").GetString() != "VALID_FULL" ||
             !IsSafeTextValue(result.GetProperty("producer"), false) ||
-            !IsSafeEspPump(result.GetProperty("pump")) ||
-            !IsSafeEspPump(result.GetProperty("nodalPump"))) return false;
+            contextBoundResult && (!IsSafeTextValue(result.GetProperty("espContext"), false) ||
+                result.GetProperty("espContext").GetString() == "AUTO") ||
+            !IsSafeEspPump(result.GetProperty("pump"), legacyResult) ||
+            !IsSafeEspPump(result.GetProperty("nodalPump"), legacyResult)) return false;
         return true;
     }
+
+    private static bool HasValidEspParameterResult(JsonElement result)
+    {
+        var schema = result.ValueKind == JsonValueKind.Object && result.TryGetProperty("schemaVersion", out var schemaValue)
+            && schemaValue.ValueKind == JsonValueKind.String ? schemaValue.GetString() : null;
+        var parameter = result.ValueKind == JsonValueKind.Object && result.TryGetProperty("parameter", out var parameterValue)
+            && parameterValue.ValueKind == JsonValueKind.String ? parameterValue.GetString() : null;
+        var legacyFrequency = schema == "pipesim-esp-parameter-result/1" && parameter == "operatingFrequency";
+        var headFactor = schema == "pipesim-esp-parameter-result/2" && parameter == "headFactor";
+        var caseParameterField = legacyFrequency ? "frequencyHz" : "parameterValue";
+        var maxParameterValue = headFactor ? 2d : 200d;
+        if (result.ValueKind != JsonValueKind.Object ||
+            !HasExactlyProperties(result, "schemaVersion", "model_kind", "runTask", "resultContract", "producer", "espContext",
+                "parameter", "unit", "originalValue", "targetValue", "appliedValue", "sourceModelUnchanged", "isolatedCopy",
+                "baseline", "target", "comparison") ||
+            !(legacyFrequency || headFactor) ||
+            result.GetProperty("model_kind").GetString() is not ("black_oil_liquid" or "basic_gas" or "legacy_well") ||
+            result.GetProperty("runTask").GetString() != "esp-parameter" ||
+            result.GetProperty("resultContract").GetString() != "VALID_FULL" ||
+            !IsSafeTextValue(result.GetProperty("producer"), false) ||
+            !IsSafeTextValue(result.GetProperty("espContext"), false) ||
+            result.GetProperty("unit").GetString() != (legacyFrequency ? "Hz" : "1") ||
+            !FiniteInRange(result.GetProperty("originalValue"), 0, double.MaxValue) || result.GetProperty("originalValue").GetDouble() <= 0 ||
+            !FiniteInRange(result.GetProperty("targetValue"), 0, maxParameterValue) || result.GetProperty("targetValue").GetDouble() <= 0 ||
+            !FiniteInRange(result.GetProperty("appliedValue"), 0, maxParameterValue) || result.GetProperty("appliedValue").GetDouble() <= 0 ||
+            result.GetProperty("sourceModelUnchanged").ValueKind != JsonValueKind.True ||
+            result.GetProperty("isolatedCopy").ValueKind != JsonValueKind.True ||
+            Math.Abs(result.GetProperty("targetValue").GetDouble() - result.GetProperty("appliedValue").GetDouble()) > 1e-6 ||
+            Math.Abs(result.GetProperty("originalValue").GetDouble() - result.GetProperty("targetValue").GetDouble()) <= 1e-6 ||
+            !IsSafeEspParameterCase(result.GetProperty("baseline"), caseParameterField, headFactor ? double.MaxValue : maxParameterValue) ||
+            !IsSafeEspParameterCase(result.GetProperty("target"), caseParameterField, maxParameterValue) ||
+            !IsSafeEspParameterComparison(result.GetProperty("comparison"))) return false;
+        return Math.Abs(result.GetProperty("baseline").GetProperty(caseParameterField).GetDouble() - result.GetProperty("originalValue").GetDouble()) <= 1e-6 &&
+               Math.Abs(result.GetProperty("target").GetProperty(caseParameterField).GetDouble() - result.GetProperty("appliedValue").GetDouble()) <= 1e-6;
+    }
+
+    private static bool IsSafeEspParameterCase(JsonElement value, string parameterField, double maxParameterValue)
+    {
+        if (value.ValueKind != JsonValueKind.Object ||
+            !HasExactlyProperties(value, parameterField, "ipr", "vlp", "profile") ||
+            !FiniteInRange(value.GetProperty(parameterField), 0, maxParameterValue) ||
+            value.GetProperty(parameterField).GetDouble() <= 0 ||
+            !IsSafeEspParameterCurve(value.GetProperty("ipr")) ||
+            !IsSafeEspParameterCurve(value.GetProperty("vlp"))) return false;
+        var profile = value.GetProperty("profile");
+        return profile.ValueKind == JsonValueKind.Array && profile.GetArrayLength() is >= 1 and <= 4096 &&
+               profile.EnumerateArray().All(IsSafeEspParameterProfilePoint);
+    }
+
+    private static bool IsSafeEspParameterCurve(JsonElement values) =>
+        values.ValueKind == JsonValueKind.Array && values.GetArrayLength() is >= 1 and <= 4096 &&
+        values.EnumerateArray().All(point => point.ValueKind == JsonValueKind.Object &&
+            HasExactlyProperties(point, "flow", "pressure") &&
+            FiniteInRange(point.GetProperty("flow"), -1000000, 100000000) &&
+            FiniteInRange(point.GetProperty("pressure"), -1000000, 100000000));
+
+    private static bool IsSafeEspParameterProfilePoint(JsonElement point) =>
+        point.ValueKind == JsonValueKind.Object && HasExactlyProperties(point, "depth", "pressure", "temperature") &&
+        FiniteInRange(point.GetProperty("depth"), 0, 1000000) &&
+        FiniteInRange(point.GetProperty("pressure"), -1000000, 100000000) &&
+        FiniteInRange(point.GetProperty("temperature"), -1000000, 100000000);
+
+    private static bool IsSafeEspParameterComparison(JsonElement value) =>
+        value.ValueKind == JsonValueKind.Object &&
+        HasExactlyProperties(value, "maxIprPressureDelta", "maxVlpPressureDelta", "maxProfilePressureDelta", "maxProfileTemperatureDelta") &&
+        IsOptionalFiniteInRange(value.GetProperty("maxIprPressureDelta"), 0, 100000000) &&
+        IsOptionalFiniteInRange(value.GetProperty("maxVlpPressureDelta"), 0, 100000000) &&
+        IsOptionalFiniteInRange(value.GetProperty("maxProfilePressureDelta"), 0, 100000000) &&
+        IsOptionalFiniteInRange(value.GetProperty("maxProfileTemperatureDelta"), 0, 100000000);
+
+    private static bool IsOptionalFiniteInRange(JsonElement value, double minimum, double maximum) =>
+        value.ValueKind == JsonValueKind.Null || FiniteInRange(value, minimum, maximum);
 
     private static bool HasValidTrajectoryResult(JsonElement result)
     {
         if (result.ValueKind != JsonValueKind.Object ||
-            !HasExactlyProperties(result, "schemaVersion", "model_kind", "runTask", "resultContract", "producer", "units", "points") ||
-            result.GetProperty("schemaVersion").GetString() != "pipesim-well-trajectory-result/1" ||
+            !result.TryGetProperty("schemaVersion", out var schema) || schema.ValueKind != JsonValueKind.String ||
+            schema.GetString() is not ("pipesim-well-trajectory-result/1" or "pipesim-well-trajectory-result/2")) return false;
+        var edited = schema.GetString() == "pipesim-well-trajectory-result/2";
+        var fields = edited
+            ? new[] { "schemaVersion", "model_kind", "runTask", "resultContract", "producer", "units", "points", "application", "profileComparison" }
+            : new[] { "schemaVersion", "model_kind", "runTask", "resultContract", "producer", "units", "points" };
+        if (!HasExactlyProperties(result, fields) ||
             result.GetProperty("model_kind").GetString() is not ("black_oil_liquid" or "basic_gas" or "legacy_well") ||
             result.GetProperty("runTask").GetString() != "trajectory" ||
             result.GetProperty("resultContract").GetString() != "VALID_FULL" ||
             !IsSafeTextValue(result.GetProperty("producer"), false) ||
             !HasValidTrajectoryUnits(result.GetProperty("units"))) return false;
-        var points = result.GetProperty("points");
+        var trajectoryPoints = result.GetProperty("points");
+        return HasValidTrajectoryPoints(trajectoryPoints) &&
+            (!edited || HasValidTrajectoryEditApplication(result.GetProperty("application"), trajectoryPoints) &&
+             HasValidTrajectoryProfileComparison(result.GetProperty("profileComparison")));
+    }
+
+    private static bool HasValidTrajectoryPoints(JsonElement points)
+    {
         if (points.ValueKind != JsonValueKind.Array || points.GetArrayLength() is < 2 or > 4096) return false;
         var previousDepth = -1D;
         foreach (var point in points.EnumerateArray())
@@ -1126,6 +1554,111 @@ public sealed partial class PtkRunService : IDisposable
         }
         return true;
     }
+
+    private static bool HasValidTrajectoryEditApplication(JsonElement application, JsonElement points) =>
+        application.ValueKind == JsonValueKind.Object &&
+        HasExactlyProperties(application, "applied", "isolatedCopy", "sourceModelUnchanged", "artifactName", "stationIndex",
+            "originalInclinationDeg", "targetInclinationDeg", "maxTvdBeforeFt", "maxTvdAfterFt") &&
+        application.GetProperty("applied").ValueKind == JsonValueKind.True &&
+        application.GetProperty("isolatedCopy").ValueKind == JsonValueKind.True &&
+        application.GetProperty("sourceModelUnchanged").ValueKind == JsonValueKind.True &&
+        IsSafeTextValue(application.GetProperty("artifactName"), false) &&
+        application.GetProperty("artifactName").GetString() == "pipesim-trajectory-applied.pips" &&
+        application.GetProperty("stationIndex").TryGetInt32(out var station) && station is >= 1 and <= 4094 && station < points.GetArrayLength() - 1 &&
+        FiniteInRange(application.GetProperty("originalInclinationDeg"), 0, 90) &&
+        FiniteInRange(application.GetProperty("targetInclinationDeg"), 0, 90) &&
+        Math.Abs(application.GetProperty("originalInclinationDeg").GetDouble() - application.GetProperty("targetInclinationDeg").GetDouble()) > 1e-9 &&
+        FiniteInRange(application.GetProperty("maxTvdBeforeFt"), 0, 1000000) &&
+        FiniteInRange(application.GetProperty("maxTvdAfterFt"), 0, 1000000) &&
+        Math.Abs(points[station].GetProperty("inclination").GetDouble() - application.GetProperty("targetInclinationDeg").GetDouble()) <= 1e-6 &&
+        Math.Abs(points[points.GetArrayLength() - 1].GetProperty("trueVerticalDepth").GetDouble() - application.GetProperty("maxTvdAfterFt").GetDouble()) <= 1e-6;
+
+    private static bool HasValidTrajectoryProfileComparison(JsonElement comparison)
+    {
+        if (comparison.ValueKind != JsonValueKind.Object ||
+            !HasExactlyProperties(comparison, "method", "baselinePointCount", "targetPointCount", "matchedPointCount",
+                "baseline", "target", "matchedPoints", "maxAbsPressureDelta", "maxAbsTemperatureDelta") ||
+            !IsSafeTextValue(comparison.GetProperty("method"), false) ||
+            comparison.GetProperty("method").GetString() != "exact-depth-match-no-interpolation" ||
+            !comparison.GetProperty("baselinePointCount").TryGetInt32(out var baselineCount) || baselineCount is < 1 or > 4096 ||
+            !comparison.GetProperty("targetPointCount").TryGetInt32(out var targetCount) || targetCount is < 1 or > 4096 ||
+            !comparison.GetProperty("matchedPointCount").TryGetInt32(out var matchedCount) || matchedCount < 0 || matchedCount > Math.Min(baselineCount, targetCount) ||
+            !HasValidTrajectoryProfileCurve(comparison.GetProperty("baseline")) ||
+            !HasValidTrajectoryProfileCurve(comparison.GetProperty("target")) ||
+            comparison.GetProperty("baseline").GetArrayLength() != baselineCount ||
+            comparison.GetProperty("target").GetArrayLength() != targetCount) return false;
+
+        var matched = comparison.GetProperty("matchedPoints");
+        if (matched.ValueKind != JsonValueKind.Array || matched.GetArrayLength() != matchedCount) return false;
+        var baselineByDepth = TrajectoryProfileByDepth(comparison.GetProperty("baseline"));
+        var targetByDepth = TrajectoryProfileByDepth(comparison.GetProperty("target"));
+        var expectedDepths = baselineByDepth.Keys.Intersect(targetByDepth.Keys).Order().ToArray();
+        if (expectedDepths.Length != matchedCount) return false;
+        var previousDepth = double.NegativeInfinity;
+        var maxPressureDelta = 0D;
+        var maxTemperatureDelta = 0D;
+        var matchedIndex = 0;
+        foreach (var point in matched.EnumerateArray())
+        {
+            if (point.ValueKind != JsonValueKind.Object || !HasExactlyProperties(point, "depth", "baselinePressure", "targetPressure", "pressureDelta", "baselineTemperature", "targetTemperature", "temperatureDelta") ||
+                !FiniteInRange(point.GetProperty("depth"), -1000000, 1000000) ||
+                !FiniteInRange(point.GetProperty("baselinePressure"), -1000000, 100000000) ||
+                !FiniteInRange(point.GetProperty("targetPressure"), -1000000, 100000000) ||
+                !FiniteInRange(point.GetProperty("pressureDelta"), -100000000, 100000000) ||
+                !FiniteInRange(point.GetProperty("baselineTemperature"), -100000, 100000) ||
+                !FiniteInRange(point.GetProperty("targetTemperature"), -100000, 100000) ||
+                !FiniteInRange(point.GetProperty("temperatureDelta"), -200000, 200000) ||
+                point.GetProperty("depth").GetDouble() <= previousDepth ||
+                Math.Abs(point.GetProperty("pressureDelta").GetDouble() - (point.GetProperty("targetPressure").GetDouble() - point.GetProperty("baselinePressure").GetDouble())) > 1e-6 ||
+                Math.Abs(point.GetProperty("temperatureDelta").GetDouble() - (point.GetProperty("targetTemperature").GetDouble() - point.GetProperty("baselineTemperature").GetDouble())) > 1e-6) return false;
+            previousDepth = point.GetProperty("depth").GetDouble();
+            var depthKey = expectedDepths[matchedIndex++];
+            if (Math.Abs(point.GetProperty("depth").GetDouble() - depthKey / 1_000_000D) > 1e-6 ||
+                !MatchesProfilePoint(point, baselineByDepth[depthKey], "baselinePressure", "baselineTemperature") ||
+                !MatchesProfilePoint(point, targetByDepth[depthKey], "targetPressure", "targetTemperature")) return false;
+            maxPressureDelta = Math.Max(maxPressureDelta, Math.Abs(point.GetProperty("pressureDelta").GetDouble()));
+            maxTemperatureDelta = Math.Max(maxTemperatureDelta, Math.Abs(point.GetProperty("temperatureDelta").GetDouble()));
+        }
+        return NullableDeltaMatches(comparison.GetProperty("maxAbsPressureDelta"), maxPressureDelta, matchedCount) &&
+            NullableDeltaMatches(comparison.GetProperty("maxAbsTemperatureDelta"), maxTemperatureDelta, matchedCount);
+    }
+
+    private static bool HasValidTrajectoryProfileCurve(JsonElement curve)
+    {
+        if (curve.ValueKind != JsonValueKind.Array || curve.GetArrayLength() is < 1 or > 4096) return false;
+        var previousDepthKey = long.MinValue;
+        foreach (var point in curve.EnumerateArray())
+        {
+            if (point.ValueKind != JsonValueKind.Object || !HasExactlyProperties(point, "depth", "pressure", "temperature") ||
+                !FiniteInRange(point.GetProperty("depth"), -1000000, 1000000) ||
+                !FiniteInRange(point.GetProperty("pressure"), -1000000, 100000000) ||
+                !FiniteInRange(point.GetProperty("temperature"), -100000, 100000) ||
+                (long)Math.Round(point.GetProperty("depth").GetDouble() * 1_000_000D, MidpointRounding.AwayFromZero) < previousDepthKey) return false;
+            previousDepthKey = (long)Math.Round(point.GetProperty("depth").GetDouble() * 1_000_000D, MidpointRounding.AwayFromZero);
+        }
+        return true;
+    }
+
+    private static Dictionary<long, JsonElement> TrajectoryProfileByDepth(JsonElement curve)
+    {
+        var values = new Dictionary<long, JsonElement>();
+        var ambiguousDepths = new HashSet<long>();
+        foreach (var point in curve.EnumerateArray())
+        {
+            var depthKey = (long)Math.Round(point.GetProperty("depth").GetDouble() * 1_000_000D, MidpointRounding.AwayFromZero);
+            if (!values.TryAdd(depthKey, point)) ambiguousDepths.Add(depthKey);
+        }
+        foreach (var depthKey in ambiguousDepths) values.Remove(depthKey);
+        return values;
+    }
+
+    private static bool MatchesProfilePoint(JsonElement matched, JsonElement source, string pressureField, string temperatureField) =>
+        Math.Abs(matched.GetProperty(pressureField).GetDouble() - source.GetProperty("pressure").GetDouble()) <= 1e-6 &&
+        Math.Abs(matched.GetProperty(temperatureField).GetDouble() - source.GetProperty("temperature").GetDouble()) <= 1e-6;
+
+    private static bool NullableDeltaMatches(JsonElement value, double expected, int matchedCount) =>
+        matchedCount == 0 ? value.ValueKind == JsonValueKind.Null :
+        FiniteInRange(value, 0, 100000000) && Math.Abs(value.GetDouble() - expected) <= 1e-6;
 
     private static bool HasValidTrajectoryUnits(JsonElement units) =>
         units.ValueKind == JsonValueKind.Object && HasExactlyProperties(units, "measuredDepth", "trueVerticalDepth", "inclination", "azimuth", "maxDogLegSeverity") &&
@@ -1147,10 +1680,11 @@ public sealed partial class PtkRunService : IDisposable
         return true;
     }
 
-    private static bool IsSafeEspPump(JsonElement pump)
+    private static bool IsSafeEspPump(JsonElement pump, bool requireLegacyName)
     {
         if (pump.ValueKind != JsonValueKind.Object || !HasExactlyProperties(pump, "pumpName", "inputs", "frequencies", "operatingEnvelope") ||
-            !IsSafeTextValue(pump.GetProperty("pumpName"), false) || pump.GetProperty("pumpName").GetString() != "B-ESP") return false;
+            !IsSafeTextValue(pump.GetProperty("pumpName"), false) ||
+            requireLegacyName && pump.GetProperty("pumpName").GetString() != "B-ESP") return false;
         var inputs = pump.GetProperty("inputs");
         if (inputs.ValueKind != JsonValueKind.Object || !HasExactlyProperties(inputs, "frequency", "frequencyUnit", "manufacturer", "model", "minFlowRate", "maxFlowRate", "stages") ||
             !FiniteInRange(inputs.GetProperty("frequency"), 0, 200) || !IsSafeTextValue(inputs.GetProperty("frequencyUnit"), true) ||
@@ -1209,26 +1743,40 @@ public sealed partial class PtkRunService : IDisposable
         return true;
     }
 
-    private static bool IsSafeVfpTable(JsonElement table, string valueName, string unit, JsonElement axes, bool allowEmpty)
+    private static bool IsSafeVfpTable(JsonElement table, string valueName, string unit, JsonElement axes, bool allowEmpty, out HashSet<string> rowKeys)
     {
+        rowKeys = new HashSet<string>(StringComparer.Ordinal);
         if (table.ValueKind != JsonValueKind.Object || !HasExactlyProperties(table, "valueName", "unit", "rows") ||
             table.GetProperty("valueName").GetString() != valueName || table.GetProperty("unit").GetString() != unit) return false;
         var rows = table.GetProperty("rows");
         if (rows.ValueKind != JsonValueKind.Array || rows.GetArrayLength() > 65536 || (!allowEmpty && rows.GetArrayLength() < 1)) return false;
         if (rows.GetArrayLength() == 0) return true;
-        var valueCount = axes.GetProperty("outletPressuresPsi").GetArrayLength();
+        var liquidCount = axes.GetProperty("liquidRatesStbPerDay").GetArrayLength();
+        var thpCount = axes.GetProperty("outletPressuresPsi").GetArrayLength();
+        var waterCutCount = axes.GetProperty("waterCutFraction").GetArrayLength();
+        var gorCount = axes.GetProperty("gorMscfPerStb").GetArrayLength();
+        var artificialLiftCount = axes.GetProperty("artificialLiftInjectionDpPsi").GetArrayLength();
+        var expectedRows = thpCount * waterCutCount * gorCount * artificialLiftCount;
+        if (rows.GetArrayLength() != expectedRows) return false;
         foreach (var row in rows.EnumerateArray())
         {
-            if (row.ValueKind != JsonValueKind.Object || !HasExactlyProperties(row, "liquidRateIndex", "waterCutIndex", "gorIndex", "artificialLiftIndex", "values") ||
-                !PositiveIndex(row.GetProperty("liquidRateIndex")) ||
-                !PositiveIndex(row.GetProperty("waterCutIndex")) || !PositiveIndex(row.GetProperty("gorIndex")) || !PositiveIndex(row.GetProperty("artificialLiftIndex"))) return false;
+            if (row.ValueKind != JsonValueKind.Object || !HasExactlyProperties(row, "thpIndex", "waterCutIndex", "gorIndex", "artificialLiftIndex", "values") ||
+                !IndexInRange(row.GetProperty("thpIndex"), thpCount, out var thpIndex) ||
+                !IndexInRange(row.GetProperty("waterCutIndex"), waterCutCount, out var waterCutIndex) ||
+                !IndexInRange(row.GetProperty("gorIndex"), gorCount, out var gorIndex) ||
+                !IndexInRange(row.GetProperty("artificialLiftIndex"), artificialLiftCount, out var artificialLiftIndex)) return false;
+            if (!rowKeys.Add($"{thpIndex}:{waterCutIndex}:{gorIndex}:{artificialLiftIndex}")) return false;
             var values = row.GetProperty("values");
-            if (values.ValueKind != JsonValueKind.Array || values.GetArrayLength() != valueCount || !values.EnumerateArray().All(FiniteNumber)) return false;
+            if (values.ValueKind != JsonValueKind.Array || values.GetArrayLength() != liquidCount || !values.EnumerateArray().All(FiniteNumber)) return false;
         }
-        return true;
+        return rowKeys.Count == expectedRows;
     }
 
-    private static bool PositiveIndex(JsonElement value) => value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var number) && number > 0;
+    private static bool IndexInRange(JsonElement value, int upperInclusive, out int index)
+    {
+        index = 0;
+        return value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out index) && index >= 1 && index <= upperInclusive;
+    }
 
     private static bool IsSafeVfpContent(JsonElement value) => value.ValueKind == JsonValueKind.String &&
         value.GetString()!.Length <= 500000 && !value.GetString()!.Contains('\0');
@@ -1483,6 +2031,7 @@ public sealed partial class PtkRunService : IDisposable
     {
         "RUNNING_NODAL" => "Running the selected Study nodal analysis.",
         "RUNNING_PROFILE" => "Running the selected Study pressure-temperature profile.",
+        "APPLYING_TRAJECTORY" => "Applying the validated trajectory edit to the isolated model copy.",
         "RUNNING_NETWORK" => "Running the selected Study network simulation.",
         "READING_TRAJECTORY" => "Reading the official PIPESIM well trajectory.",
         "COLLECTING" => "Collecting and normalizing PIPESIM result arrays.",

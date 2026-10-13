@@ -1,0 +1,14 @@
+{
+  "source": "ECLIPSE_COMPLETION_GEOMETRY.DATA, official TRACERDISPERS-derived water case",
+  "sourceSha256": "b29df227965f5266b60bfc8701ea3c021114905371b87d7eb28c4b73ca822be9",
+  "sampleSha256": "dbae4c8a9f20f0a9c521f77d63fae3bbbdd3ec22cb8ab962897db5cb05a028c2",
+  "changes": [
+    "Only SUMMARY WWPR/WBHP/WWPT well selector P becomes * to report existing and later introduced wells. All physical inputs/control bytes unchanged.",
+    "Add WSTAT for all wells to verify solver shut-in explicitly; no physical input changes.",
+    "WELLDIMS maximum wells 10->3: existing two wells plus one new producer; storage capacity only, no physical/control input change."
+  ],
+  "physicalEquivalenceVerified": true,
+  "manualUiVerified": false,
+  "nativeEvidence": "C:\\GRDP-TestOutput\\ECLIPSE-P06-NEW-WELL-native-a3\\native-acceptance.json",
+  "nativeEvidenceSha256": "04e8b71bc05774e033ff334d7da4f57436a327d8a788370ba0b1a633d56cbe75"
+}

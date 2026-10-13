@@ -23,6 +23,7 @@ import tools.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
@@ -34,7 +35,7 @@ public class SoftwareIntegrationRunStore {
     private static final Set<String> NETWORK_RESULT_REASON_CLASSES = Set.of(
             "schema", "topology", "profile", "quality", "study", "numeric");
     private static final List<String> ACTIVE_STATUSES = List.of(
-            "CLAIMED", "PREPARING", "RUNNING_NODAL", "RUNNING_PROFILE", "RUNNING_NETWORK", "RUNNING_ECLIPSE", "COLLECTING", "CANCEL_REQUESTED");
+            "CLAIMED", "PREPARING", "RUNNING_NODAL", "RUNNING_PROFILE", "APPLYING_TRAJECTORY", "RUNNING_NETWORK", "RUNNING_ECLIPSE", "COLLECTING", "CANCEL_REQUESTED");
     private final SoftwareIntegrationRunMapper runMapper;
     private final SoftwareIntegrationRunEventMapper eventMapper;
     private final SoftwareIntegrationArtifactMapper artifactMapper;
@@ -283,11 +284,12 @@ public class SoftwareIntegrationRunStore {
         });
     }
 
-    public void persistWorkerEvents(long runId, List<WorkerRunEvent> workerEvents) {
-        if (workerEvents == null || workerEvents.isEmpty()) return;
-        transactions.executeWithoutResult(status -> {
+    public List<WorkerRunEvent> persistWorkerEvents(long runId, List<WorkerRunEvent> workerEvents) {
+        if (workerEvents == null || workerEvents.isEmpty()) return List.of();
+        return transactions.execute(status -> {
             SoftwareIntegrationRunEntity run = runMapper.selectForUpdate(runId);
-            if (run == null || SoftwareIntegrationRunStatus.valueOf(run.getStatus()).isTerminal()) return;
+            if (run == null || SoftwareIntegrationRunStatus.valueOf(run.getStatus()).isTerminal()) return List.of();
+            List<WorkerRunEvent> accepted = new ArrayList<>();
             long last = run.getLastWorkerSequence() == null ? 0 : run.getLastWorkerSequence();
             for (WorkerRunEvent event : workerEvents.stream().sorted(Comparator.comparingLong(WorkerRunEvent::sequence)).toList()) {
                 if (event.sequence() <= 0) throw new IllegalArgumentException("Worker event sequence must be positive");
@@ -300,6 +302,7 @@ public class SoftwareIntegrationRunStore {
                             ? SoftwareIntegrationEclipseSanitizer.sanitizeText(event.message()) : event.message();
                     appendEvent(runId, event.sequence(), "STATE", event.state(),
                             message, null, LocalDateTime.ofInstant(event.occurredAtUtc(), ZoneOffset.UTC));
+                    accepted.add(event);
                 }
                 last = Math.max(last, event.sequence());
             }
@@ -308,6 +311,7 @@ public class SoftwareIntegrationRunStore {
                     .eq(SoftwareIntegrationRunEntity::getStatusVersion, run.getStatusVersion())
                     .set(SoftwareIntegrationRunEntity::getLastWorkerSequence, last)
                     .set(SoftwareIntegrationRunEntity::getUpdatedAt, LocalDateTime.now()));
+            return List.copyOf(accepted);
         });
     }
 

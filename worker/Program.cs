@@ -6,6 +6,7 @@ using Grdp.SoftwareIntegration.Worker.Inspection;
 using Grdp.SoftwareIntegration.Worker.Storage;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.Extensions.Options;
+using Grdp.SoftwareIntegration.Worker.EnvironmentSetup;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Configuration.AddEnvironmentVariables(prefix: "GRDP_WORKER_");
@@ -34,6 +35,7 @@ builder.Services.AddOptions<WorkerOptions>()
          options.ProcessExitConfirmationSeconds > 0 &&
          options.EclipseMaxRunTimeoutSeconds > 0 &&
          options.EclipseCleanupTimeoutSeconds > 0 &&
+         options.IamDemoTimeoutSeconds > 0 &&
          (options.EclrunPath is null || Path.IsPathFullyQualified(options.EclrunPath)),
         "Worker identity, storage, PIPESIM, and timeout configuration must be valid.")
     .ValidateOnStart();
@@ -45,6 +47,7 @@ builder.Services.Configure<JsonOptions>(options =>
     options.SerializerOptions.UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow;
 });
 builder.Services.AddSingleton<WorkerIdentity>();
+builder.Services.AddSingleton<SimulatorEnvironment>();
 builder.Services.AddSingleton<StorageResolver>();
 builder.Services.AddSingleton<PtkExecutionCoordinator>();
 builder.Services.AddSingleton<PtkRunRegistry>();
@@ -58,8 +61,10 @@ builder.Services.AddSingleton<EclipseExecutionCoordinator>();
 builder.Services.AddSingleton<EclipseValidationService>();
 builder.Services.AddSingleton<EclipseDataInspectionService>();
 builder.Services.AddSingleton<EclipseRunService>();
+builder.Services.AddSingleton<IamPipesimDemoRunService>();
 
 var app = builder.Build();
+app.MapSimulatorEnvironment();
 app.MapTemplateCreation();
 
 app.MapGet("/api/health", (WorkerIdentity identity, PtkRunRegistry registry, PtkExecutionCoordinator coordinator) =>
@@ -78,14 +83,19 @@ app.MapGet("/api/health", (WorkerIdentity identity, PtkRunRegistry registry, Ptk
     });
 });
 
-app.MapGet("/api/capabilities", async (WorkerIdentity identity, PtkRunRegistry registry, PtkExecutionCoordinator coordinator, EclipseExecutionCoordinator eclipseCoordinator, EclipseLauncher eclipse, IOptions<WorkerOptions> configuredOptions, CancellationToken cancellationToken) =>
+app.MapGet("/api/capabilities", async (WorkerIdentity identity, PtkRunRegistry registry, PtkExecutionCoordinator coordinator, EclipseExecutionCoordinator eclipseCoordinator, EclipseLauncher eclipse, SimulatorEnvironment environment, IOptions<WorkerOptions> configuredOptions, CancellationToken cancellationToken) =>
 {
     var options = configuredOptions.Value;
     var installationFound = Directory.Exists(options.PipesimHome);
     var pythonToolkitFound = File.Exists(options.EffectivePipesimPtkPath);
     var pythonFound = File.Exists(options.EffectivePythonPath);
     var activeRunId = registry.ActiveRunId;
-    var eclipseCapability = await eclipse.GetCapabilityAsync(cancellationToken);
+    var pipesimCheckTask = environment.CheckCurrentPipesimAsync(cancellationToken);
+    var eclipseTask = eclipse.GetCapabilityAsync(cancellationToken);
+    var compositionalTask = eclipse.GetCapabilityAsync(300, cancellationToken);
+    var eclipseCapability = await eclipseTask;
+    var compositionalCapability = await compositionalTask;
+    var pipesimReady = (await pipesimCheckTask).Status == "READY";
     return Results.Ok(new
     {
         workerId = identity.WorkerId,
@@ -98,8 +108,8 @@ app.MapGet("/api/capabilities", async (WorkerIdentity identity, PtkRunRegistry r
             installationFound,
             pythonToolkitFound,
             pythonFound,
-            status = installationFound && pythonToolkitFound && pythonFound ? "AVAILABLE" : "UNAVAILABLE",
-            runTasks = new[] { "nodal", "profile", "combined", "sensitivity", "gas-lift-performance", "gas-lift-diagnostics", "vfp-tables", "esp-curves", "trajectory" },
+            status = pipesimReady ? "AVAILABLE" : "UNAVAILABLE",
+            runTasks = new[] { "nodal", "profile", "combined", "sensitivity", "gas-lift-performance", "gas-lift-diagnostics", "vfp-tables", "esp-curves", "esp-parameter", "trajectory" },
             maxTimeoutSeconds = options.MaxRunTimeoutSeconds
         },
         pipesimNetwork = new
@@ -108,12 +118,15 @@ app.MapGet("/api/capabilities", async (WorkerIdentity identity, PtkRunRegistry r
             installationFound,
             pythonToolkitFound,
             pythonFound,
-            status = installationFound && pythonToolkitFound && pythonFound ? "AVAILABLE" : "UNAVAILABLE",
-            runTasks = new[] { "network", "system-analysis", "network-optimizer" },
+            status = pipesimReady ? "AVAILABLE" : "UNAVAILABLE",
+            runTasks = new[] { "network", "system-analysis", "network-optimizer", "network-well-performance-curves" },
             maxTimeoutSeconds = options.MaxRunTimeoutSeconds
         },
         eclipse100 = new { version = "2024.1", launcherFound = eclipseCapability.LauncherFound,
             status = eclipseCapability.Available ? "AVAILABLE" : "UNAVAILABLE", runTasks = new[] { "eclipse" },
+            maxTimeoutSeconds = options.EclipseMaxRunTimeoutSeconds },
+        eclipse300 = new { version = "2024.1", launcherFound = compositionalCapability.LauncherFound,
+            status = compositionalCapability.Available ? "AVAILABLE" : "UNAVAILABLE", runTasks = new[] { "eclipse" },
             maxTimeoutSeconds = options.EclipseMaxRunTimeoutSeconds }
     });
 });
@@ -194,6 +207,54 @@ app.MapPost("/api/runs/{runId:long}/cancel", (long runId, PtkRunRegistry registr
         CancelRequestStatus.TerminalConflict => Results.Conflict(outcome.Body),
         _ => Results.NotFound(outcome.Body)
     };
+});
+
+app.MapGet("/api/iam-pipesim-demo/capabilities", (IamPipesimDemoRunService service) =>
+    Results.Ok(service.GetCapability()));
+
+app.MapGet("/api/iam-pipesim-demo/runs", (IamPipesimDemoRunService service) =>
+    Results.Ok(service.List()));
+
+app.MapPost("/api/iam-pipesim-demo/runs", async (HttpRequest request, IamPipesimDemoRunService service) =>
+{
+    IamPipesimDemoRunRequest input;
+    try
+    {
+        input = request.ContentLength is > 0
+            ? await request.ReadFromJsonAsync<IamPipesimDemoRunRequest>() ?? new IamPipesimDemoRunRequest()
+            : new IamPipesimDemoRunRequest();
+    }
+    catch (System.Text.Json.JsonException)
+    {
+        return Results.BadRequest(WorkerApiError.Request("INVALID_DEMO_REQUEST", "The IAM PIPESIM demo request must be valid JSON."));
+    }
+
+    var outcome = service.Start(input);
+    return outcome.HttpStatus switch
+    {
+        StatusCodes.Status202Accepted => Results.Json(outcome.Body, statusCode: outcome.HttpStatus),
+        StatusCodes.Status400BadRequest => Results.BadRequest(outcome.Body),
+        StatusCodes.Status409Conflict => Results.Conflict(outcome.Body),
+        StatusCodes.Status503ServiceUnavailable => Results.Json(outcome.Body, statusCode: outcome.HttpStatus),
+        _ => Results.BadRequest(outcome.Body)
+    };
+});
+
+app.MapGet("/api/iam-pipesim-demo/runs/{runId}", (string runId, IamPipesimDemoRunService service) =>
+{
+    if (runId.Length != 32 || !runId.All(Uri.IsHexDigit))
+        return Results.BadRequest(WorkerApiError.Request("INVALID_DEMO_RUN_ID", "runId must be a 32-character hexadecimal identifier."));
+    var snapshot = service.Get(runId);
+    return snapshot is null ? Results.NotFound(WorkerApiError.Request("DEMO_RUN_NOT_FOUND", "IAM PIPESIM demo run was not found.")) : Results.Ok(snapshot);
+});
+
+app.MapPost("/api/iam-pipesim-demo/runs/{runId}/cancel", (string runId, IamPipesimDemoRunService service) =>
+{
+    if (runId.Length != 32 || !runId.All(Uri.IsHexDigit))
+        return Results.BadRequest(WorkerApiError.Request("INVALID_DEMO_RUN_ID", "runId must be a 32-character hexadecimal identifier."));
+    return service.Cancel(runId)
+        ? Results.Accepted($"/api/iam-pipesim-demo/runs/{runId}", new { runId, state = "CANCELLING" })
+        : Results.Conflict(WorkerApiError.Request("DEMO_RUN_NOT_CANCELLABLE", "Run is missing or already completed."));
 });
 
 app.Run();

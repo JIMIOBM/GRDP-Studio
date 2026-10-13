@@ -43,7 +43,7 @@ public final class EclipseCompletionParameters {
     }
 
     public static boolean matchesInspection(JsonNode value, JsonNode inspection) {
-        if (!valid(value) || inspection == null || !"eclipse-data-inspection/4".equals(inspection.path("schemaVersion").asText())) return false;
+        if (!valid(value) || inspection == null || !Set.of("eclipse-data-inspection/4", "eclipse-data-inspection/5", "eclipse-data-inspection/6", "eclipse-data-inspection/7", "eclipse-data-inspection/8", "eclipse-data-inspection/9", "eclipse-data-inspection/10", "eclipse-data-inspection/11", "eclipse-data-inspection/12", "eclipse-data-inspection/13").contains(inspection.path("schemaVersion").asText())) return false;
         String well = value.path("well").asText();
         for (JsonNode completion : inspection.path("scheduleMetadata").path("completions")) {
             if ("COMPDAT".equals(completion.path("keyword").asText())

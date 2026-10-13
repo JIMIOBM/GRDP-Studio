@@ -1,10 +1,56 @@
 <script setup>
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { completionFactorUnit, completionFactorResponse } from './eclipseCompletionFactor'
+import { validGridRegionParameters, gridRegionUnit, gridRegionResponse } from './eclipseGridRegion'
+import { validCompletionGeometry, completionGeometryLabels, completionGeometryResponse } from './eclipseCompletionGeometry'
+import EclipseCompletionGeometryEditor from './EclipseCompletionGeometryEditor.vue'
+import EclipseHistoryPanel from './EclipseHistoryPanel.vue'
+import EclipseBatchPanel from './EclipseBatchPanel.vue'
+import EclipseRelpermEditor from './EclipseRelpermEditor.vue'
+import { validRelperm, relpermResponse } from './eclipseRelperm'
+import EclipseGasPvtEditor from './EclipseGasPvtEditor.vue'
+import { validGasPvt, gasPvtResponse } from './eclipseGasPvt'
+import EclipseOilPvtEditor from './EclipseOilPvtEditor.vue'
+import { validOilPvt, oilPvtResponse } from './eclipseOilPvt'
+import EclipsePvtwEditor from './EclipsePvtwEditor.vue'
+import { validPvtw, pvtwResponse, pvtwLabels } from './eclipsePvtw'
+import { validNewWellParameters, newWellOutcome, newWellResponse } from './eclipseNewWell'
+import EclipseNewWellEditor from './EclipseNewWellEditor.vue'
+import EclipseNewCompletionEditor from './EclipseNewCompletionEditor.vue'
+import { validNewCompletionParameters, newCompletionResponse } from './eclipseNewCompletion'
 import { ElMessage } from 'element-plus'
 import { softwareIntegrationApi } from '@/api/softwareIntegration'
 import EclipseSummaryExplorer from './EclipseSummaryExplorer.vue'
+import EclipseRestartForecastCompare from './EclipseRestartForecastCompare.vue'
+import { validRestartForecast } from './eclipseRestartForecast'
 import EclipseGridSlice from './EclipseGridSlice.vue'
 import EclipseGrid3D from './EclipseGrid3D.vue'
+import { createFieldRequestGate, snapshotField } from './eclipseFieldRequest'
+import { compareEclipseWellRates, validateEclipseWellEvents, validateEclipseMultiDateEvents } from './eclipseWellEvents'
+import { validProductionTarget } from './eclipseProductionTarget'
+import { validPressureControl } from './eclipsePressureControl'
+import { validProductionControl, productionControlResultUnitMatches } from './eclipseProductionControl'
+import { validThpControl, thpTableCoverage } from './eclipseThpControl'
+import { validNewDates, newDatesResponse } from './eclipseNewDates'
+import { validTstep, tstepResponse } from './eclipseTstep'
+import { validGroupProduction, groupProductionResponse } from './eclipseGroupProduction'
+import { validGroupRate, groupRateResponse } from './eclipseGroupRate'
+import { validGroupWaterProduction, groupWaterProductionResponse } from './eclipseGroupWaterProduction'
+import { validControlPlan, controlPlanResponse } from './eclipseControlPlan'
+import { validGroupStructure, groupStructureResponse } from './eclipseGroupStructure'
+import { validAdvancedInjection, advancedInjectionResponse } from './eclipseAdvancedInjection'
+import { validGroupInjection, groupInjectionResponse } from './eclipseGroupInjection'
+import { validGroupGasInjection, groupGasInjectionResponse } from './eclipseGroupGasInjection'
+
+const emit = defineEmits(['create-grid-field-run', 'create-completion-geometry-run', 'create-new-well-run', 'create-new-completion-run', 'create-pvtw-run', 'create-oil-pvt-run', 'create-gas-pvt-run', 'create-relperm-run', 'select-run'])
+const batchPanel = ref(null)
+function addGridBatchCase(candidate) {
+  try {
+    if (!batchPanel.value) throw new Error('批量方案面板尚未就绪。')
+    batchPanel.value.addGridCase(candidate)
+    ElMessage.success('已加入批量方案清单；加入至少两项后点击“运行全部方案”。')
+  } catch (error) { ElMessage.error(error?.message || '区域方案加入失败。') }
+}
 
 const props = defineProps({
   run: { type: Object, default: null },
@@ -15,10 +61,15 @@ const props = defineProps({
 
 const isFiniteNumber = value => typeof value === 'number' && Number.isFinite(value)
 const isNonNegativeInteger = value => Number.isSafeInteger(value) && value >= 0
+const isIsoCalendarDate = value => {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const date = new Date(`${value}T00:00:00Z`)
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value
+}
 const validateFieldIndex = fieldIndex => {
   if (fieldIndex === undefined || fieldIndex === null) return true
   if (fieldIndex?.schemaVersion !== 'eclipse-binary-field-index/1' || !Array.isArray(fieldIndex.files) || fieldIndex.files.length > 64) return false
-  return fieldIndex.files.every(file => typeof file?.name === 'string' && /^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\.(EGRID|INIT|UNRST)$/i.test(file.name) &&
+  return fieldIndex.files.every(file => typeof file?.name === 'string' && /^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\.(EGRID|INIT|UNRST|FUNRST)$/i.test(file.name) &&
     ['BIG', 'LITTLE'].includes(file.byteOrder) &&
     isNonNegativeInteger(file.sizeBytes) && Array.isArray(file.fields) && file.fields.length <= 8192 && file.fields.every(field => {
       const elementSize = field.dataType === 'DOUB' ? 8 : field.dataType === 'CHAR' ? 8 : 4
@@ -112,6 +163,57 @@ const countItems = computed(() => [
 const series = computed(() => result.value?.summary?.series || [])
 const hasSummary = computed(() => result.value?.summary !== null && Array.isArray(result.value?.summary?.series))
 const hasUsableSummary = computed(() => series.value.some(item => item.points.length > 0))
+const forecastScenario = computed(() => {
+  const parameters = props.run?.parameters
+  if (!(['eclipse-history-forecast-parameters/1', 'eclipse-history-forecast-parameters/2'].includes(parameters?.schemaVersion)) ||
+    parameters?.schemaVersion === 'eclipse-history-forecast-parameters/2' && !validRestartForecast(parameters) ||
+    !Number.isSafeInteger(Number(parameters.historyRunId)) || Number(parameters.historyRunId) <= 0 ||
+    typeof parameters.forecastDataFile !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._ /-]{0,511}\.DATA$/i.test(parameters.forecastDataFile) ||
+    parameters.forecastDataFile.includes('\\') || parameters.forecastDataFile.split('/').some(part => !part || part === '.' || part === '..') ||
+    typeof parameters.restartArtifactName !== 'string' || !/^eclipse-output-[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\.FUNRST$/i.test(parameters.restartArtifactName) ||
+    typeof parameters.restartArtifactSha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(parameters.restartArtifactSha256) ||
+    !Number.isSafeInteger(Number(parameters.restartReport)) || Number(parameters.restartReport) <= 0) return null
+  return {
+    historyRunId: Number(parameters.historyRunId), forecastDataFile: parameters.forecastDataFile,
+    restartArtifactName: parameters.restartArtifactName, restartArtifactSha256: parameters.restartArtifactSha256.toLowerCase(),
+    restartReport: Number(parameters.restartReport)
+  }
+})
+const forecastHistoryRun = ref(null)
+const forecastHistoryLoading = ref(false)
+const forecastHistoryError = ref('')
+let forecastHistoryGeneration = 0
+const loadForecastHistory = async () => {
+  const generation = ++forecastHistoryGeneration
+  forecastHistoryRun.value = null
+  forecastHistoryError.value = ''
+  forecastHistoryLoading.value = false
+  const scenario = forecastScenario.value
+  if (!scenario) return
+  forecastHistoryLoading.value = true
+  try {
+    const response = await softwareIntegrationApi.getRun(scenario.historyRunId)
+    if (generation !== forecastHistoryGeneration) return
+    const candidate = response?.data
+    const artifactMatches = candidate?.artifacts?.some(artifact => artifact?.name === scenario.restartArtifactName &&
+      typeof artifact.sha256 === 'string' && artifact.sha256.toLowerCase() === scenario.restartArtifactSha256)
+    if (response?.code !== 200 || candidate?.id !== scenario.historyRunId || candidate.modelId !== props.run?.modelId ||
+      candidate.modelVersionId !== props.run?.modelVersionId || candidate.runType !== 'eclipse' ||
+      candidate.status !== 'SUCCEEDED' || candidate.resultContract !== 'VALID_FULL' ||
+      (candidate.parameters !== null && candidate.parameters !== undefined) || !artifactMatches) {
+      forecastHistoryError.value = '历史来源与当前模型版本不匹配，或成功历史 Run 未包含指定 SHA-256 的 FUNRST Artifact。'
+      return
+    }
+    forecastHistoryRun.value = candidate
+  } catch {
+    if (generation === forecastHistoryGeneration) forecastHistoryError.value = '历史来源读取失败；请从同版本成功运行重新建立预测方案。'
+  } finally {
+    if (generation === forecastHistoryGeneration) forecastHistoryLoading.value = false
+  }
+}
+watch([() => props.run?.id, () => props.run?.parameters?.historyRunId, () => props.run?.parameters?.restartArtifactSha256], loadForecastHistory, { immediate: true })
+onBeforeUnmount(() => { forecastHistoryGeneration++ })
+const forecastHistoryVerified = computed(() => Boolean(forecastScenario.value && forecastHistoryRun.value))
 const isTerminalSuccess = computed(() => ['SUCCEEDED', 'PARTIAL_SUCCEEDED'].includes(props.run?.status))
 const resultExpired = computed(() => props.run?.resultExpired === true)
 const successfulResultUnavailable = computed(() => isTerminalSuccess.value && !result.value)
@@ -167,13 +269,69 @@ const scheduleTimelineSummary = computed(() => {
 })
 const scheduleCompletions = computed(() => {
   const metadata = props.inspection?.scheduleMetadata
-  if (props.inspection?.schemaVersion !== 'eclipse-data-inspection/4' || !Array.isArray(metadata?.completions)) return []
+  if (!['eclipse-data-inspection/4', 'eclipse-data-inspection/5', 'eclipse-data-inspection/6', 'eclipse-data-inspection/7', 'eclipse-data-inspection/8', 'eclipse-data-inspection/9', 'eclipse-data-inspection/10', 'eclipse-data-inspection/11', 'eclipse-data-inspection/12', 'eclipse-data-inspection/13'].includes(props.inspection?.schemaVersion) || !Array.isArray(metadata?.completions)) return []
   return metadata.completions.filter(completion => completion && typeof completion.well === 'string' &&
     ['COMPDAT', 'COMPDATM'].includes(completion.keyword) &&
     ['i', 'j', 'k1', 'k2', 'status'].every(key => typeof completion[key] === 'string'))
 })
 const scheduleScenario = computed(() => {
   const parameters = props.run?.parameters
+  if (parameters?.schemaVersion === 'eclipse-group-gas-injection-parameters/1') {
+    if (!validGroupGasInjection(parameters)) return null
+    return { ...parameters, scenarioType: 'GROUP_GAS_INJECTION', well: null, date: null }
+  }
+  if (parameters?.schemaVersion === 'eclipse-group-injection-parameters/1') {
+    if (!validGroupInjection(parameters)) return null
+    return { ...parameters, scenarioType: 'GROUP_INJECTION', well: null, date: null }
+  }
+  if (parameters?.schemaVersion === 'eclipse-control-plan-parameters/1') {
+    if (!validControlPlan(parameters)) return null
+    return { ...parameters, scenarioType: 'CONTROL_PLAN', well: null, wells: [...new Set(parameters.edits.map(e => e.well))], date: null }
+  }
+  if (parameters?.schemaVersion === 'eclipse-group-structure-parameters/1') {
+    if (!validGroupStructure(parameters)) return null
+    return { ...parameters, scenarioType: 'GROUP_STRUCTURE', well: null, date: null }
+  }
+  if (parameters?.schemaVersion === 'eclipse-advanced-injection-parameters/1') {
+    if (!validAdvancedInjection(parameters)) return null
+    return { ...parameters, scenarioType: 'ADVANCED_INJECTION', well: null, date: null }
+  }
+  if (parameters?.schemaVersion === 'eclipse-group-water-production-parameters/1') {
+    if (!validGroupWaterProduction(parameters)) return null
+    return { ...parameters, scenarioType: 'GROUP_WATER_PRODUCTION', well: null, date: null }
+  }
+  if (parameters?.schemaVersion === 'eclipse-group-rate-parameters/1') {
+    if (!validGroupRate(parameters)) return null
+    return { ...parameters, scenarioType: 'GROUP_RATE', well: null, date: null }
+  }
+  if (parameters?.schemaVersion === 'eclipse-group-production-parameters/1') {
+    if (!validGroupProduction(parameters)) return null
+    return { ...parameters, scenarioType: 'GROUP_PRODUCTION', well: null, date: null }
+  }
+  if (parameters?.schemaVersion === 'eclipse-tstep-parameters/1') {
+    if (!validTstep(parameters)) return null
+    return { ...parameters, scenarioType: 'TSTEP', well: null, date: null }
+  }
+  if (parameters?.schemaVersion === 'eclipse-new-dates-parameters/1') {
+    if (!validNewDates(parameters)) return null
+    return { ...parameters, scenarioType: 'NEW_DATES', date: null, events: [{ date: parameters.shutDate, status: 'SHUT' }, { date: parameters.openDate, status: 'OPEN' }] }
+  }
+  if (parameters?.schemaVersion === 'eclipse-thp-control-parameters/1') {
+    if (!validThpControl(parameters)) return null
+    return { ...parameters, scenarioType: 'THP_CONTROL', status: 'OPEN', controlMode: 'THP', date: null }
+  }
+  if (parameters?.schemaVersion === 'eclipse-production-control-parameters/1') {
+    if (!validProductionControl(parameters)) return null
+    return { ...parameters, scenarioType: 'PRODUCTION_CONTROL', status: 'OPEN', date: null }
+  }
+  if (parameters?.schemaVersion === 'eclipse-pressure-control-parameters/1') {
+    if (!validPressureControl(parameters)) return null
+    return { ...parameters, scenarioType: 'PRESSURE_CONTROL', status: 'OPEN', controlMode: 'BHP', date: null }
+  }
+  if (parameters?.schemaVersion === 'eclipse-production-target-parameters/1') {
+    if (!validProductionTarget(parameters)) return null
+    return { ...parameters, scenarioType: 'PRODUCTION_TARGET', status: 'OPEN', controlMode: 'ORAT', date: null }
+  }
   if (parameters?.schemaVersion === 'eclipse-completion-factor-parameters/1') {
     if (!Number.isSafeInteger(Number(parameters.baselineRunId)) || Number(parameters.baselineRunId) <= 0 ||
       typeof parameters.well !== 'string' || typeof parameters.sourceFile !== 'string' ||
@@ -203,6 +361,27 @@ const scheduleScenario = computed(() => {
       lineNumber: Number(parameters.lineNumber), i: parameters.i, j: parameters.j, k1: parameters.k1, k2: parameters.k2
     }
   }
+  if (parameters?.schemaVersion === 'eclipse-schedule-parameters/5') {
+    const events = parameters.events
+    if (!Number.isSafeInteger(Number(parameters.baselineRunId)) || Number(parameters.baselineRunId) <= 0 ||
+      typeof parameters.well !== 'string' || !Array.isArray(events) || events.length !== 2 ||
+      !events.every(event => event && isIsoCalendarDate(event.date) && ['SHUT', 'OPEN'].includes(event.status)) ||
+      events[0].status !== 'SHUT' || events[1].status !== 'OPEN' || events[0].date >= events[1].date) return null
+    return {
+      baselineRunId: Number(parameters.baselineRunId), well: parameters.well, date: null, phase: null,
+      status: null, scenarioType: 'WELOPEN_EVENTS', events: events.map(event => ({ date: event.date, status: event.status })),
+      controlMode: null, targetOilRate: null, injectionType: null, targetInjectionRate: null
+    }
+  }
+  if (['eclipse-schedule-parameters/6', 'eclipse-schedule-parameters/7'].includes(parameters?.schemaVersion)) {
+    if (!(parameters.schemaVersion.endsWith('/7') ? validateEclipseMultiDateEvents : validateEclipseWellEvents)(parameters)) return null
+    return {
+      baselineRunId: parameters.baselineRunId, well: parameters.wells.join('、'), wells: [...parameters.wells],
+      date: null, phase: null, status: null, scenarioType: 'WELOPEN_EVENTS',
+      events: parameters.events.map(event => ({ ...event })), controlMode: null,
+      targetOilRate: null, injectionType: null, targetInjectionRate: null
+    }
+  }
   if (!['eclipse-schedule-parameters/1', 'eclipse-schedule-parameters/2', 'eclipse-schedule-parameters/3', 'eclipse-schedule-parameters/4'].includes(parameters?.schemaVersion) ||
     !Number.isSafeInteger(Number(parameters.baselineRunId)) || Number(parameters.baselineRunId) <= 0 ||
     typeof parameters.well !== 'string') return null
@@ -227,6 +406,30 @@ const scheduleScenario = computed(() => {
     targetInjectionRate: wconInje ? Number(parameters.targetInjectionRate) : null
   }
 })
+const scheduleScenarioTitle = computed(() => ({
+  CONTROL_PLAN: '多井分阶段产油目标验收',
+  GROUP_STRUCTURE: '生产组树、井导向与开工比例验收',
+  ADVANCED_INJECTION: 'GCONINJE 注入目标与回注比例验收',
+  GROUP_WATER_PRODUCTION: 'GCONPROD 生产组产水方案验收',
+  GROUP_RATE: 'GCONPROD 生产组气液方案验收',
+  GROUP_PRODUCTION: 'GCONPROD 生产组控方案验收',
+  GROUP_GAS_INJECTION: 'GCONINJE 注气组控方案验收',
+  GROUP_INJECTION: 'GCONINJE 注入组控方案验收',
+  TSTEP: 'TSTEP 报告间隔方案验收',
+  THP_CONTROL: '井口压力 THP / VFP 方案验收',
+  PRODUCTION_CONTROL: `${scheduleScenario.value?.controlMode || ''} 生产目标方案验收`,
+  PRESSURE_CONTROL: '井底压力 BHP 方案验收',
+  PRODUCTION_TARGET: '开井产油目标方案', COMPDAT_FACTOR: 'COMPDAT 连接因子方案验收', COMPDAT: 'COMPDAT 完井方案验收', WCONPROD: 'WCONPROD 方案验收',
+  NEW_DATES: '新增日期停井／复产方案验收', WCONINJE: 'WCONINJE 方案验收', WCONHIST: 'WCONHIST 方案验收', WELOPEN_EVENTS: scheduleScenario.value?.events?.length > 2 ? 'WELOPEN 多日期调度方案验收' : 'WELOPEN 双事件调度方案验收', WELOPEN: 'WELOPEN 方案验收'
+}[scheduleScenario.value?.scenarioType] || 'ECLIPSE Schedule 方案验收'))
+const regionScenario = computed(() => validGridRegionParameters(props.run?.parameters) ? props.run.parameters : null)
+const geometryScenario = computed(() => validCompletionGeometry(props.run?.parameters) ? props.run.parameters : null)
+const newWellScenario = computed(() => validNewWellParameters(props.run?.parameters) ? props.run.parameters : null)
+const newCompletionScenario = computed(() => validNewCompletionParameters(props.run?.parameters) ? props.run.parameters : null)
+const relpermScenario = computed(() => validRelperm(props.run?.parameters) ? props.run.parameters : null)
+const gasPvtScenario = computed(() => validGasPvt(props.run?.parameters) ? props.run.parameters : null)
+const oilPvtScenario = computed(() => validOilPvt(props.run?.parameters) ? props.run.parameters : null)
+const pvtwScenario = computed(() => validPvtw(props.run?.parameters) ? props.run.parameters : null)
 const scheduleBaseline = ref(null)
 const scheduleBaselineLoading = ref(false)
 const scheduleBaselineError = ref('')
@@ -236,7 +439,7 @@ const loadScheduleBaseline = async () => {
   scheduleBaseline.value = null
   scheduleBaselineError.value = ''
   scheduleBaselineLoading.value = false
-  const scenario = scheduleScenario.value
+  const scenario = scheduleScenario.value || regionScenario.value || geometryScenario.value || newWellScenario.value || newCompletionScenario.value || pvtwScenario.value || oilPvtScenario.value || gasPvtScenario.value || relpermScenario.value
   if (!scenario) return
   scheduleBaselineLoading.value = true
   try {
@@ -258,6 +461,22 @@ const loadScheduleBaseline = async () => {
 }
 watch([() => props.run?.id, () => props.run?.parameters?.baselineRunId], loadScheduleBaseline, { immediate: true })
 const scheduleBaselineResult = computed(() => validateResult(scheduleBaseline.value))
+const regionResponse = computed(() => regionScenario.value ? gridRegionResponse(result.value?.summary, scheduleBaselineResult.value?.summary) : null)
+const geometryResponse = computed(() => geometryScenario.value ? completionGeometryResponse(result.value?.summary, scheduleBaselineResult.value?.summary, geometryScenario.value.well) : null)
+const newWellActual = computed(() => newWellScenario.value ? newWellOutcome(result.value?.summary, newWellScenario.value) : null)
+const newWellDiff = computed(() => newWellScenario.value ? newWellResponse(result.value?.summary, scheduleBaselineResult.value?.summary) : null)
+const newCompletionDiff = computed(() => newCompletionScenario.value ? newCompletionResponse(result.value?.summary, scheduleBaselineResult.value?.summary) : null)
+const relpermDiff = computed(() => relpermScenario.value ? relpermResponse(result.value?.summary, scheduleBaselineResult.value?.summary) : null)
+const gasPvtDiff = computed(() => gasPvtScenario.value ? gasPvtResponse(result.value?.summary, scheduleBaselineResult.value?.summary) : null)
+const gasPvtDay = ref(null)
+watch(() => props.run?.id, () => { gasPvtDay.value = null })
+const gasPvtTimes = computed(() => [...new Set((gasPvtDiff.value?.rows || []).filter(row => row.difference != null).map(row => row.timeDays))].sort((a,b) => a-b))
+const gasPvtRows = computed(() => (gasPvtDiff.value?.rows || []).filter(row => gasPvtDay.value == null || row.timeDays === gasPvtDay.value))
+const oilPvtDiff = computed(() => oilPvtScenario.value ? oilPvtResponse(result.value?.summary, scheduleBaselineResult.value?.summary) : null)
+const pvtwDiff = computed(() => pvtwScenario.value ? pvtwResponse(result.value?.summary, scheduleBaselineResult.value?.summary) : null)
+const factorUnit = computed(() => completionFactorUnit(props.inspection?.unitSystem))
+const factorResponse = computed(() => scheduleScenario.value?.scenarioType === 'COMPDAT_FACTOR'
+  ? completionFactorResponse(result.value?.summary, scheduleBaselineResult.value?.summary, scheduleScenario.value.well) : null)
 const scheduleCounts = computed(() => {
   if (!result.value?.eclEnd || !scheduleBaselineResult.value?.eclEnd) return null
   return [['comments', 'Comments'], ['warnings', 'Warnings'], ['problems', 'Problems'], ['errors', 'Errors'], ['bugs', 'Bugs']]
@@ -276,15 +495,93 @@ const scheduleOutputDiff = computed(() => {
   })
   return { rows, changedCount: rows.filter(row => row.status !== '相同').length }
 })
+const scheduleWellRateDiff = computed(() => {
+  const scenario = scheduleScenario.value
+  if (!['NEW_DATES', 'WELOPEN_EVENTS', 'PRODUCTION_TARGET', 'PRODUCTION_CONTROL', 'WCONHIST', 'WCONINJE', 'PRESSURE_CONTROL', 'THP_CONTROL'].includes(scenario?.scenarioType)) return null
+  let keyword = scenario.scenarioType === 'WCONINJE' || scenario.keyword === 'WCONINJE'
+    ? ({ WATER: 'WWIR', WAT: 'WWIR', GAS: 'WGIR', OIL: 'WOIR' }[scenario.injectionType?.toUpperCase()] || null) : 'WOPR'
+  if (scenario.scenarioType === 'PRESSURE_CONTROL' && scenario.keyword === 'WCONPROD') {
+    const controls = { ORAT: 'WOPR', WRAT: 'WWPR', GRAT: 'WGPR', LRAT: 'WLPR' }
+    keyword = controls[scenario.originalControlMode] || ['WOPR', 'WGPR', 'WWPR', 'WLPR'].find(k => {
+      const matches = (scheduleBaselineResult.value?.summary?.series || []).filter(s => s.keyword === k && s.objectName === scenario.well)
+      return matches.length === 1 && matches[0].points?.some(p => Number.isFinite(p.value) && p.timeDays > 0 && p.value > 1e-9)
+    }) || 'WOPR'
+  }
+  if (!keyword) return null
+  if (scenario.scenarioType === 'PRODUCTION_CONTROL') keyword = { WRAT: 'WWPR', GRAT: 'WGPR', LRAT: 'WLPR' }[scenario.controlMode]
+  if (scenario.scenarioType === 'THP_CONTROL') keyword = 'WLPR'
+  const comparison = compareEclipseWellRates(result.value?.summary, scheduleBaselineResult.value?.summary, scenario.wells || [scenario.well], keyword)
+  if (scenario.scenarioType === 'PRODUCTION_CONTROL' && !productionControlResultUnitMatches(comparison.unit, scenario.unit)) return { ...comparison, keyword, available: false, rows: [], changedCount: 0 }
+  if (scenario.scenarioType === 'THP_CONTROL' && !productionControlResultUnitMatches(comparison.unit, 'STB/day')) return { ...comparison, keyword, available: false, rows: [], changedCount: 0 }
+  return { ...comparison, keyword }
+})
+const schedulePressureKeyword = computed(() => scheduleScenario.value?.scenarioType === 'THP_CONTROL' ? 'WTHP' : 'WBHP')
+const schedulePressureDiff = computed(() => {
+  if (!['PRESSURE_CONTROL', 'THP_CONTROL'].includes(scheduleScenario.value?.scenarioType)) return null
+  const diff = compareEclipseWellRates(result.value?.summary, scheduleBaselineResult.value?.summary, [scheduleScenario.value.well], schedulePressureKeyword.value)
+  return scheduleScenario.value.scenarioType === 'THP_CONTROL' && diff.unit?.trim().toUpperCase() !== 'PSIA' ? { ...diff, available: false, rows: [], changedCount: 0 } : diff
+})
+const scheduleThpCoverage = computed(() => scheduleScenario.value?.scenarioType === 'THP_CONTROL'
+  ? thpTableCoverage(result.value?.summary, scheduleScenario.value, props.inspection?.vfpTables) : null)
+const scheduleThpBhpDiff = computed(() => scheduleScenario.value?.scenarioType === 'THP_CONTROL'
+  ? compareEclipseWellRates(result.value?.summary, scheduleBaselineResult.value?.summary, [scheduleScenario.value.well], 'WBHP') : null)
+const scheduleThpBaselineCoverage = computed(() => scheduleScenario.value?.scenarioType === 'THP_CONTROL'
+  ? thpTableCoverage(scheduleBaselineResult.value?.summary, scheduleScenario.value, props.inspection?.vfpTables) : null)
+const scheduleThpReached = computed(() => {
+  if (!scheduleThpCoverage.value?.inRange || !scheduleThpBaselineCoverage.value?.inRange || !schedulePressureDiff.value?.available || !scheduleWellRateDiff.value?.available) return false
+  const pressures = new Map(schedulePressureDiff.value.rows.filter(row => row.timeDays > 0 && Math.abs(row.difference) > 1e-9).map(row => [row.timeDays, row.current]))
+  return scheduleWellRateDiff.value.rows.some(row => row.timeDays > 0 && row.current > 0 && Math.abs(row.difference) > 1e-9 && pressures.has(row.timeDays) &&
+    Math.abs(pressures.get(row.timeDays) - scheduleScenario.value.targetThp) <= Math.max(0.1, scheduleScenario.value.targetThp * 1e-6))
+})
+const scheduleBhpResponse = computed(() => {
+  if (!schedulePressureDiff.value?.available || !scheduleWellRateDiff.value?.available) return null
+  const pressures = new Map(schedulePressureDiff.value.rows.filter(row => row.timeDays > 0).map(row => [row.timeDays, row.current]))
+  const active = scheduleWellRateDiff.value.rows.filter(row => row.timeDays > 0 && row.current > 1e-9 && pressures.has(row.timeDays))
+  return { active: active.length > 0, targetReached: active.some(row =>
+    Math.abs(pressures.get(row.timeDays) - scheduleScenario.value.targetBhp) <= Math.max(0.1, scheduleScenario.value.targetBhp * 1e-6)) }
+})
+const scheduleRateComparisonRequired = computed(() => ['WELOPEN_EVENTS', 'PRODUCTION_TARGET', 'PRODUCTION_CONTROL', 'WCONHIST', 'WCONINJE', 'PRESSURE_CONTROL', 'THP_CONTROL'].includes(scheduleScenario.value?.scenarioType))
+const scheduleProductionTargetReached = computed(() => scheduleWellRateDiff.value?.available && scheduleWellRateDiff.value.rows.some(row => row.timeDays > 0 && row.current > 0 && Math.abs(row.difference) > 1e-9 && Math.abs(row.current - scheduleScenario.value?.targetRate) <= Math.max(0.1, scheduleScenario.value.targetRate * 1e-6)))
 const scheduleCountsChanged = computed(() => scheduleCounts.value?.some(item => item.baseline !== item.current) === true)
-const scheduleHasObservableDifference = computed(() => Boolean(scheduleOutputDiff.value && (scheduleOutputDiff.value.changedCount > 0 || scheduleCountsChanged.value)))
+const scheduleNewDatesResponse = computed(() => scheduleScenario.value?.scenarioType === 'NEW_DATES' ? newDatesResponse(result.value?.summary, scheduleBaselineResult.value?.summary, scheduleScenario.value && props.run.parameters) : null)
+const scheduleTstepResponse = computed(() => scheduleScenario.value?.scenarioType === 'TSTEP' ? tstepResponse(result.value?.summary, props.run.parameters, props.inspection) : null)
+const scheduleControlPlanResponse = computed(() => scheduleScenario.value?.scenarioType === 'CONTROL_PLAN' ? controlPlanResponse(result.value?.summary, scheduleBaselineResult.value?.summary, props.run.parameters, props.inspection) : null)
+const scheduleGroupStructureResponse = computed(() => scheduleScenario.value?.scenarioType === 'GROUP_STRUCTURE' ? groupStructureResponse(result.value?.summary, scheduleBaselineResult.value?.summary, props.run.parameters, props.inspection) : null)
+const scheduleAdvancedInjectionResponse = computed(() => scheduleScenario.value?.scenarioType === 'ADVANCED_INJECTION' ? advancedInjectionResponse(result.value?.summary, scheduleBaselineResult.value?.summary, props.run.parameters, props.inspection) : null)
+const scheduleGroupWaterProductionResponse = computed(() => scheduleScenario.value?.scenarioType === 'GROUP_WATER_PRODUCTION' ? groupWaterProductionResponse(result.value?.summary, scheduleBaselineResult.value?.summary, props.run.parameters, props.inspection) : null)
+const scheduleGroupRateResponse = computed(() => scheduleScenario.value?.scenarioType === 'GROUP_RATE' ? groupRateResponse(result.value?.summary, scheduleBaselineResult.value?.summary, props.run.parameters, props.inspection) : null)
+const scheduleGroupProductionResponse = computed(() => scheduleScenario.value?.scenarioType === 'GROUP_PRODUCTION' ? groupProductionResponse(result.value?.summary, scheduleBaselineResult.value?.summary, props.run.parameters, props.inspection) : null)
+const scheduleGroupInjectionResponse = computed(() => scheduleScenario.value?.scenarioType === 'GROUP_INJECTION' ? groupInjectionResponse(result.value?.summary, scheduleBaselineResult.value?.summary, props.run.parameters, props.inspection) : null)
+const scheduleGroupGasInjectionResponse = computed(() => scheduleScenario.value?.scenarioType === 'GROUP_GAS_INJECTION' ? groupGasInjectionResponse(result.value?.summary, scheduleBaselineResult.value?.summary, props.run.parameters, props.inspection) : null)
+const scheduleHasObservableDifference = computed(() => scheduleScenario.value?.scenarioType === 'CONTROL_PLAN' ? scheduleControlPlanResponse.value?.verified === true : scheduleScenario.value?.scenarioType === 'GROUP_STRUCTURE' ? scheduleGroupStructureResponse.value?.verified === true : scheduleScenario.value?.scenarioType === 'ADVANCED_INJECTION' ? scheduleAdvancedInjectionResponse.value?.verified === true : scheduleScenario.value?.scenarioType === 'GROUP_WATER_PRODUCTION' ? scheduleGroupWaterProductionResponse.value?.verified === true : scheduleScenario.value?.scenarioType === 'GROUP_RATE' ? scheduleGroupRateResponse.value?.verified === true : scheduleScenario.value?.scenarioType === 'GROUP_GAS_INJECTION' ? scheduleGroupGasInjectionResponse.value?.verified === true : scheduleScenario.value?.scenarioType === 'GROUP_INJECTION' ? scheduleGroupInjectionResponse.value?.verified === true : scheduleScenario.value?.scenarioType === 'GROUP_PRODUCTION' ? scheduleGroupProductionResponse.value?.verified === true : scheduleScenario.value?.scenarioType === 'TSTEP' ? scheduleTstepResponse.value?.verified === true : scheduleScenario.value?.scenarioType === 'NEW_DATES' ? scheduleNewDatesResponse.value?.verified === true : scheduleScenario.value?.scenarioType === 'PRESSURE_CONTROL'
+  ? schedulePressureDiff.value?.available === true && schedulePressureDiff.value.changedCount > 0 && scheduleWellRateDiff.value?.available === true && scheduleWellRateDiff.value.changedCount > 0 && scheduleBhpResponse.value?.targetReached === true
+  : scheduleScenario.value?.scenarioType === 'THP_CONTROL' ? scheduleThpReached.value
+  : scheduleScenario.value?.scenarioType === 'PRODUCTION_CONTROL' ? scheduleWellRateDiff.value?.available === true && scheduleWellRateDiff.value.changedCount > 0 && scheduleProductionTargetReached.value
+  : scheduleRateComparisonRequired.value
+  ? (scheduleWellRateDiff.value?.available === true && scheduleWellRateDiff.value.changedCount > 0)
+  : Boolean(scheduleOutputDiff.value && (scheduleOutputDiff.value.changedCount > 0 || scheduleCountsChanged.value)))
 const scheduleBaselineIsClean = computed(() => scheduleBaseline.value?.parameters === null || scheduleBaseline.value?.parameters === undefined)
 const scheduleAcceptanceType = computed(() => scheduleBaselineLoading.value ? 'info' :
   scheduleBaselineError.value || !scheduleBaselineResult.value ? 'warning' :
-  !scheduleBaselineIsClean.value ? 'warning' : scheduleHasObservableDifference.value ? 'success' : 'warning')
+  !scheduleBaselineIsClean.value || result.value?.resultContract !== 'VALID_FULL' ? 'warning' : scheduleHasObservableDifference.value ? 'success' : 'warning')
 const scheduleAcceptanceLabel = computed(() => scheduleBaselineLoading.value ? '读取基线中' :
   scheduleBaselineError.value || !scheduleBaselineResult.value ? '无法比较' :
-  !scheduleBaselineIsClean.value ? '基线不合规' : scheduleHasObservableDifference.value ? '检测到真实差异' : '未检测到差异')
+  !scheduleBaselineIsClean.value ? '基线不合规' : result.value?.resultContract !== 'VALID_FULL' ? '部分成功，需审阅诊断' :
+    scheduleScenario.value?.scenarioType === 'TSTEP' ? scheduleTstepResponse.value?.verified ? '新报告时间点均已在真实结果中找到' : '报告时间点缺失或源绑定失效，需核对输出' :
+    scheduleScenario.value?.scenarioType === 'CONTROL_PLAN' ? !scheduleControlPlanResponse.value?.available ? '缺少完整目标链或井油量、压力曲线，无法核对阶段' : !scheduleControlPlanResponse.value.consistent ? '阶段目标、生效链或井压力下限不一致，需核对' : scheduleControlPlanResponse.value.verified ? '分阶段目标达标，已核对后续覆盖与井压力' : scheduleControlPlanResponse.value.constrained ? '分阶段目标未达标：井已触及原 BHP 下限' : '阶段目标或逐项响应不足，需审阅后续控制' :
+    scheduleScenario.value?.scenarioType === 'GROUP_STRUCTURE' ? !scheduleGroupStructureResponse.value?.available ? '缺少完整组树、累计量、井效率或压力曲线，无法验证' : !scheduleGroupStructureResponse.value.consistent ? '父子贡献、累计量或井限值不一致，需核对' : scheduleGroupStructureResponse.value.verified ? '组树目标达标，已验证井分配与开工比例影响' : scheduleGroupStructureResponse.value.constrained ? '目标或分配未达标：井已触及原压力或产油上限' : '目标或分配响应不足，需审阅约束' :
+    scheduleScenario.value?.scenarioType === 'ADVANCED_INJECTION' ? !scheduleAdvancedInjectionResponse.value?.available ? '缺少完整同时间注入、压力或来源生产曲线，无法验证' : !scheduleAdvancedInjectionResponse.value.consistent ? '组总量、来源产量或单井上限不一致，需核对' : scheduleAdvancedInjectionResponse.value.verified ? '注入目标达标，已核对各井分配与来源生产量' : scheduleAdvancedInjectionResponse.value.constrained ? scheduleAdvancedInjectionResponse.value.rows.some(r => r.targetReached) ? '部分时刻未达标：各井已触及原压力或流量上限' : '目标未达标：各井已触及原压力或流量上限' : '注入目标或井分配响应不足，需审阅约束' :
+    scheduleScenario.value?.scenarioType === 'GROUP_WATER_PRODUCTION' ? !scheduleGroupWaterProductionResponse.value?.available ? '缺少同时间的 GWPR、WWPR、WOPR 或 BHP，无法验证生产分配' : !scheduleGroupWaterProductionResponse.value.consistent ? '生产组总量、井归属或压力下限不一致，需核对' : scheduleGroupWaterProductionResponse.value.verified ? '生产组目标达标，已验证各井分配与压力下限' : scheduleGroupWaterProductionResponse.value.constrained ? scheduleGroupWaterProductionResponse.value.rows.some(r => r.targetReached) ? '生产组部分时刻未达标：各井已触及原压力或产油上限' : '生产组目标未达标：各井已触及原压力或产油上限' : '生产组目标或井分配响应不足，需审阅约束' :
+    scheduleScenario.value?.scenarioType === 'GROUP_RATE' ? !scheduleGroupRateResponse.value?.available ? '缺少同时间的 GGPR/GLPR、WGPR/WLPR 或 BHP，无法验证生产分配' : !scheduleGroupRateResponse.value.consistent ? '生产组总量、井归属或压力下限不一致，需核对' : scheduleGroupRateResponse.value.verified ? '生产组目标达标，已验证各井分配与压力下限' : scheduleGroupRateResponse.value.constrained ? scheduleGroupRateResponse.value.rows.some(r => r.targetReached) ? '生产组部分时刻未达标：各井已触及 BHP 下限' : '生产组目标未达标：各井已触及 BHP 下限' : '生产组目标或井分配响应不足，需审阅约束' :
+    scheduleScenario.value?.scenarioType === 'GROUP_GAS_INJECTION' ? !scheduleGroupGasInjectionResponse.value?.available ? '缺少同时间的 GGIR、WGIR 或 BHP，无法验证注入分配' : !scheduleGroupGasInjectionResponse.value.consistent ? '注气组总量、井归属或压力上限不一致，需核对' : scheduleGroupGasInjectionResponse.value.verified ? '组总注气达标，已验证各井分配与压力上限' : scheduleGroupGasInjectionResponse.value.constrained ? scheduleGroupGasInjectionResponse.value.rows.some(r => r.targetReached) ? '注气组部分时刻未达标：各井已触及 BHP 上限' : '注气组目标未达标：各井已触及 BHP 上限' : '注气组目标或井分配响应不足，需审阅约束' :
+    scheduleScenario.value?.scenarioType === 'GROUP_INJECTION' ? !scheduleGroupInjectionResponse.value?.available ? '缺少同时间的 GWIR、WWIR 或 BHP，无法验证注入分配' : !scheduleGroupInjectionResponse.value.consistent ? '注水组总量、井归属或压力上限不一致，需核对' : scheduleGroupInjectionResponse.value.verified ? '组总注水达标，已验证各井分配与压力上限' : scheduleGroupInjectionResponse.value.constrained ? '注水组目标未达标：各井已触及 BHP 上限' : '注水组目标或井分配响应不足，需审阅约束' :
+    scheduleScenario.value?.scenarioType === 'GROUP_PRODUCTION' ? !scheduleGroupProductionResponse.value?.available ? '缺少同时间的组、井流量或 BHP，无法验证分配' : !scheduleGroupProductionResponse.value.consistent ? '组总量、井归属或压力边界不一致，需核对' : scheduleGroupProductionResponse.value.verified ? '组总产油达标，已验证各井分配与压力下限' : scheduleGroupProductionResponse.value.constrained ? '组目标未达标：各井已触及 BHP 下限' : '组目标或井分配响应不足，需审阅约束' :
+    scheduleScenario.value?.scenarioType === 'NEW_DATES' ? !scheduleNewDatesResponse.value?.available ? '缺少真实日历与 WOPR，需核对报告日期' : scheduleNewDatesResponse.value.verified ? '检测到停井零产量与复产非零响应' : '停井或复产响应不足，需审阅控制约束' :
+    scheduleRateComparisonRequired.value && !scheduleWellRateDiff.value?.available ? '缺少可对齐目标井流量' :
+      scheduleScenario.value?.scenarioType === 'PRESSURE_CONTROL' ? (!schedulePressureDiff.value?.available ? '缺少可对齐井底压力' : !scheduleBhpResponse.value?.active ? '目标井对照流量为零，需审阅压力约束' : scheduleHasObservableDifference.value ? '检测到井底压力与流量差异' : schedulePressureDiff.value.changedCount > 0 && scheduleWellRateDiff.value.changedCount > 0 ? 'BHP未达到目标，需审阅其它约束' : '压力或流量未发生差异，需审阅约束') :
+      scheduleScenario.value?.scenarioType === 'THP_CONTROL' ? !schedulePressureDiff.value?.available ? '缺少可对齐井口压力 WTHP' : !scheduleThpCoverage.value?.available || !scheduleThpBaselineCoverage.value?.available ? '缺少核对 VFP 范围的完整流量与压力' : !scheduleThpCoverage.value.inRange || !scheduleThpBaselineCoverage.value.inRange ? '工况超出 VFP 表范围，需审阅外推' : scheduleThpReached.value ? '井口压力达到新目标且总液产量发生变化' : 'THP 未达到目标或产量无变化，需审阅其它约束' :
+      scheduleScenario.value?.scenarioType === 'PRODUCTION_CONTROL' ? scheduleHasObservableDifference.value ? '检测到目标流量差异并达到新目标' : '目标流量未达到或无差异，需审阅其它约束' :
+      scheduleHasObservableDifference.value ? (scheduleScenario.value?.scenarioType === 'WCONINJE' ? '检测到目标井注入量差异' : '检测到目标井产油率差异') : '未检测到目标井流量差异')
 const safeCode = value => typeof value === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(value) ? value : null
 const cleanupFields = new Map([
   ['processTreeExitConfirmed', '进程树已退出'],
@@ -399,6 +696,7 @@ const fieldPreviewPage = ref(1)
 const fieldPreviewPageSize = 200
 const fieldPreviewLoading = ref(false)
 const fieldPreviewError = ref('')
+const previewRequests = createFieldRequestGate()
 const artifactDownloadPending = ref(null)
 const downloadableArtifacts = computed(() => artifacts.value.map(artifact => ({
   ...artifact,
@@ -439,12 +737,20 @@ const decodeFieldValues = (bytes, field, byteOrder) => {
   return values
 }
 const previewField = async (field, resetPage = true) => {
-  if (!props.run?.id || fieldPreviewLoading.value) return
+  const isCurrent = previewRequests.begin()
+  const runId = props.run?.id
+  field = snapshotField(field)
+  fieldPreviewLoading.value = false
+  fieldPreview.value = null
+  fieldPreviewError.value = ''
+  if (!runId || !field) return
   if (resetPage) {
-    selectedField.value = field
+    selectedField.value = snapshotField(field)
     fieldPreviewPage.value = 1
   }
-  const artifact = fieldArtifact(field)
+  const sourceArtifact = fieldArtifact(field)
+  const artifact = sourceArtifact ? { ...sourceArtifact } : null
+  const page = fieldPreviewPage.value
   if (!artifact?.id) {
     fieldPreview.value = null
     fieldPreviewError.value = '对应的二进制 Artifact 不可用或已过期。'
@@ -455,7 +761,6 @@ const previewField = async (field, resetPage = true) => {
   fieldPreview.value = null
   try {
     const values = []
-    const page = fieldPreviewPage.value
     const startValue = (page - 1) * fieldPreviewPageSize
     const maxValues = Math.min(field.count - startValue, fieldPreviewPageSize)
     let skippedValues = startValue
@@ -472,12 +777,15 @@ const previewField = async (field, resetPage = true) => {
       const requested = Math.min(availableBytes, remainingBytes)
       const alignedLength = requested - (requested % field.elementSize)
       if (alignedLength <= 0) continue
-      const payload = await softwareIntegrationApi.downloadArtifactRange(props.run.id, artifact.id, segmentOffset, alignedLength)
+      if (!isCurrent()) return
+      const payload = await softwareIntegrationApi.downloadArtifactRange(runId, artifact.id, segmentOffset, alignedLength)
       const blob = payload instanceof Blob ? payload : new Blob([payload])
       const bytes = new Uint8Array(await blob.arrayBuffer())
+      if (!isCurrent()) return
       values.push(...decodeFieldValues(bytes, field, field.byteOrder))
       skippedValues = 0
     }
+    if (!isCurrent()) return
     fieldPreview.value = {
       ...field,
       artifactName: artifact.name,
@@ -486,9 +794,9 @@ const previewField = async (field, resetPage = true) => {
       values: values.slice(0, maxValues)
     }
   } catch {
-    fieldPreviewError.value = '二进制场值读取失败，请检查 Artifact 有效期或重新加载运行记录。'
+    if (isCurrent()) fieldPreviewError.value = '二进制场值读取失败，请检查 Artifact 有效期或重新加载运行记录。'
   } finally {
-    fieldPreviewLoading.value = false
+    if (isCurrent()) fieldPreviewLoading.value = false
   }
 }
 const loadFieldPreviewPage = page => {
@@ -496,6 +804,8 @@ const loadFieldPreviewPage = page => {
   if (selectedField.value) previewField(selectedField.value, false)
 }
 watch(() => props.run, () => {
+  previewRequests.invalidate()
+  fieldPreviewLoading.value = false
   fieldPreview.value = null
   selectedField.value = null
   fieldPreviewPage.value = 1
@@ -504,7 +814,16 @@ watch(() => props.run, () => {
   fieldTimeStepFilter.value = 'all'
   fieldKeywordFilter.value = ''
   fieldIndexPage.value = 1
-})
+}, { deep: true, flush: 'sync' })
+watch([fieldFileFilter, fieldTimeStepFilter, fieldKeywordFilter], () => {
+  previewRequests.invalidate()
+  fieldPreview.value = null
+  selectedField.value = null
+  fieldPreviewPage.value = 1
+  fieldPreviewLoading.value = false
+  fieldPreviewError.value = ''
+}, { flush: 'sync' })
+onBeforeUnmount(() => { previewRequests.dispose() })
 watch([fieldFileFilter, fieldTimeStepFilter, fieldKeywordFilter, fieldIndexPageSize], () => { fieldIndexPage.value = 1 })
 watch(() => filteredFieldRows.value.length, total => {
   const lastPage = Math.max(1, Math.ceil(total / fieldIndexPageSize.value))
@@ -514,6 +833,8 @@ watch(() => filteredFieldRows.value.length, total => {
 
 <template>
   <section class="eclipse-result">
+    <EclipseHistoryPanel :run="run" @select-run="emit('select-run', $event)" />
+    <EclipseBatchPanel ref="batchPanel" :run="run" :inspection="inspection" @select-run="emit('select-run', $event)" />
     <el-result v-if="!result" icon="info" :title="resultExpired ? '本次 ECLIPSE 结果已超过 30 天保留期限' : (successfulResultUnavailable ? '本次 ECLIPSE 运行已成功结束，但可验证运行结果不可用' : '尚无已验证真实计算结果')" :sub-title="resultExpired ? '运行状态、ECLEND 审计和事件仍保留；解析结果和原始结果包按保留策略不可再展示。' : (successfulResultUnavailable ? '未接收到符合结果契约的运行结果，因此无法确认是否存在 RSM Summary，也不会展示推测数据。' : (error ? failedRunGuidance : '尚未选择成功运行；仅在真实运行通过结果契约后展示 ECLEND、Summary 和 Artifact。'))">
       <template v-if="error" #extra>
         <el-tag type="danger">{{ error.category }} / {{ error.code }}</el-tag>
@@ -521,6 +842,155 @@ watch(() => filteredFieldRows.value.length, total => {
     </el-result>
     <template v-else>
     <el-alert v-if="summaryNotice" :type="isPartialResult ? 'warning' : 'info'" :closable="false" :title="summaryNotice" />
+    <EclipseCompletionGeometryEditor :run="run" :inspection="inspection" @create-completion-geometry-run="emit('create-completion-geometry-run', $event)" />
+    <EclipseNewWellEditor :run="run" :inspection="inspection" :grid="gridMetadata" :fields="fieldRows" :artifacts="artifacts" @create-new-well-run="emit('create-new-well-run', $event)" />
+    <EclipseNewCompletionEditor :run="run" :inspection="inspection" :grid="gridMetadata" :fields="fieldRows" :artifacts="artifacts" @create-new-completion-run="emit('create-new-completion-run', $event)" />
+    <EclipseRelpermEditor :run="run" :inspection="inspection" @create-relperm-run="emit('create-relperm-run', $event)" />
+    <section v-if="relpermScenario" class="result-panel" aria-label="ECLIPSE 相渗方案验收">
+      <h2>相渗方案验收</h2>
+      <p>基线 #{{relpermScenario.baselineRunId}} · {{relpermScenario.keyword}} · {{relpermScenario.rows.length}} 行相渗 × {{relpermScenario.multiplier}} · 无量纲。饱和度、毛管压力、PVT和原井控保留；SOF3两列联动。</p>
+      <el-alert v-if="scheduleBaselineError" type="error" :closable="false" :title="scheduleBaselineError" />
+      <el-alert v-else-if="!relpermDiff?.available" type="info" :closable="false" :title="scheduleBaselineLoading ? '读取基线中' : relpermDiff?.message || '缺少实际可比曲线'" />
+      <template v-else>
+        <p>{{relpermDiff.rows.length}} 项实际井级数值，{{relpermDiff.changedCount}} 项变化，{{relpermDiff.unmatchedCount}} 项缺少同时间值。仅同时间、同单位给出差值，不推算产量。</p>
+        <el-table :data="relpermDiff.rows" max-height="320" border size="small" aria-label="ECLIPSE 相渗井级响应">
+          <el-table-column prop="well" label="井"/><el-table-column prop="keyword" label="指标"/><el-table-column prop="timeDays" label="时间（天）"/><el-table-column prop="unit" label="单位"/>
+          <el-table-column prop="baseline" label="原基线"/><el-table-column prop="current" label="方案"/><el-table-column prop="difference" label="实际差值"/>
+        </el-table>
+      </template>
+    </section>
+    <EclipseGasPvtEditor :run="run" :inspection="inspection" @create-gas-pvt-run="emit('create-gas-pvt-run', $event)" />
+    <section v-if="gasPvtScenario" class="result-panel" aria-label="ECLIPSE 气物性方案验收">
+      <h2>气黏度方案验收</h2>
+      <p>基线 #{{ gasPvtScenario.baselineRunId }} · 全部 {{ gasPvtScenario.rows.length }} 行气黏度 × {{ gasPvtScenario.multiplier }} · cP。压力与气体积系数原列、原井控及地质网格保留。</p>
+      <el-alert v-if="scheduleBaselineError" type="error" :closable="false" :title="scheduleBaselineError" />
+      <el-alert v-else-if="!gasPvtDiff?.available" type="info" :closable="false" :title="scheduleBaselineLoading ? '读取基线中' : gasPvtDiff?.message || '缺少实际可比曲线'" />
+      <template v-else>
+        <p>{{ gasPvtDiff.rows.length }} 项实际井级数值，{{ gasPvtDiff.changedCount }} 项变化，{{ gasPvtDiff.unmatchedCount }} 项缺少同时间值。内部时间步可不同，仅同时间、同单位给出差值；缺少对应点保留空值。只显示工程实际请求的井压力、注采气量、累计量及水量。</p>
+        <el-select v-model="gasPvtDay" clearable placeholder="全部报告时刻" aria-label="气物性对比时间">
+          <el-option v-for="day in gasPvtTimes" :key="day" :value="day" :label="`${day}天`" />
+        </el-select>
+        <el-table :data="gasPvtRows" max-height="320" border size="small" aria-label="ECLIPSE 气物性井级响应">
+          <el-table-column prop="well" label="井" /><el-table-column prop="keyword" label="指标" /><el-table-column prop="unit" label="单位" />
+          <el-table-column prop="timeDays" label="天" /><el-table-column prop="baseline" label="基线" /><el-table-column prop="current" label="方案" /><el-table-column prop="difference" label="差值" />
+        </el-table>
+      </template>
+    </section>
+    <EclipseOilPvtEditor :run="run" :inspection="inspection" @create-oil-pvt-run="emit('create-oil-pvt-run', $event)" />
+    <section v-if="oilPvtScenario" class="result-panel" aria-label="ECLIPSE 油物性方案验收">
+      <h2>油黏度方案验收</h2>
+      <p>基线 #{{ oilPvtScenario.baselineRunId }} · 全部 {{ oilPvtScenario.rows.length }} 行油黏度 × {{ oilPvtScenario.multiplier }} · cP。压力与油体积系数原列、原井控及地质网格保留。</p>
+      <el-alert v-if="scheduleBaselineError" type="error" :closable="false" :title="scheduleBaselineError" />
+      <el-alert v-else-if="!oilPvtDiff?.available" type="info" :closable="false" :title="scheduleBaselineLoading ? '读取基线中' : oilPvtDiff?.message || '缺少实际可比曲线'" />
+      <template v-else>
+        <p>{{ oilPvtDiff.rows.length }} 项实际井级数值，{{ oilPvtDiff.changedCount }} 项变化，{{ oilPvtDiff.unmatchedCount }} 项缺少同时间值。受压力下限约束时，请比较实际产油、产水及总液量。</p>
+        <el-table :data="oilPvtDiff.rows" max-height="320" border size="small" aria-label="ECLIPSE 油物性井级响应">
+          <el-table-column prop="well" label="井" /><el-table-column prop="keyword" label="指标" /><el-table-column prop="unit" label="单位" />
+          <el-table-column prop="timeDays" label="天" /><el-table-column prop="baseline" label="基线" /><el-table-column prop="current" label="方案" /><el-table-column prop="difference" label="差值" />
+        </el-table>
+      </template>
+    </section>
+    <EclipsePvtwEditor :run="run" :inspection="inspection" @create-pvtw-run="emit('create-pvtw-run', $event)" />
+    <section v-if="pvtwScenario" class="result-panel" aria-label="ECLIPSE 水物性方案验收">
+      <h2>{{ pvtwLabels[pvtwScenario.field] }}方案验收</h2>
+      <p>基线 #{{ pvtwScenario.baselineRunId }} · {{ pvtwScenario.originalValue }} → {{ pvtwScenario.targetValue }} {{ pvtwScenario.unit }}。作用于全模型唯一水PVT区；原井控及地质网格保持。</p>
+      <el-alert v-if="scheduleBaselineError" type="error" :closable="false" :title="scheduleBaselineError" />
+      <el-alert v-else-if="!pvtwDiff?.available" type="info" :closable="false" :title="scheduleBaselineLoading ? '读取基线中' : pvtwDiff?.message || '缺少实际可比曲线'" />
+      <template v-else>
+        <p>{{ pvtwDiff.rows.length }} 项实际井级数值，{{ pvtwDiff.changedCount }} 项变化，{{ pvtwDiff.unmatchedCount }} 项缺少同时间值。定产量井请比较井底压力；井状态请查看原始Summary。</p>
+        <el-table :data="pvtwDiff.rows" max-height="320" border size="small" aria-label="ECLIPSE 水物性井级响应">
+          <el-table-column prop="well" label="井" /><el-table-column prop="keyword" label="指标" /><el-table-column prop="unit" label="单位" />
+          <el-table-column prop="timeDays" label="天" /><el-table-column prop="baseline" label="基线" /><el-table-column prop="current" label="方案" /><el-table-column prop="difference" label="差值" />
+        </el-table>
+      </template>
+      <p>下载输入工程ZIP，在另一项目选择包内DATA作为主文件并直接计算，可复核物性修改与结果。</p>
+    </section>
+    <section v-if="newCompletionScenario" class="result-panel" aria-label="ECLIPSE 新完井方案验收">
+      <h2>已有井 {{ newCompletionScenario.well }} · 新增完井连接</h2>
+      <p>基线 #{{ newCompletionScenario.baselineRunId }} · 新连接 I{{ newCompletionScenario.i }}/J{{ newCompletionScenario.j }}/K{{ newCompletionScenario.k }}。原井口、压力基准、井组和井控保留。</p>
+      <p>井径{{ newCompletionScenario.diameter }} {{ newCompletionScenario.lengthUnit }}、KH{{ newCompletionScenario.kh }} mD.{{ newCompletionScenario.lengthUnit }}、皮肤{{ newCompletionScenario.skin }}，CF自动计算；原地质输入和网格几何保持。</p>
+      <el-alert v-if="scheduleBaselineError" type="warning" :closable="false" :title="scheduleBaselineError" />
+      <el-alert v-else-if="!newCompletionDiff?.available" type="info" :closable="false" :title="scheduleBaselineLoading ? '读取原井基线中' : newCompletionDiff?.message || '缺少可对比实际结果'" />
+      <template v-else>
+        <p>{{ newCompletionDiff.rows.length }} 项实际报告数值，{{ newCompletionDiff.changedCount }} 项共有时刻变化，{{ newCompletionDiff.unmatchedCount }} 项缺少同时间值。控量井可能表现为压力变化，不能把新增连接直接算作增产。</p>
+        <el-table :data="newCompletionDiff.rows" max-height="320" border size="small" aria-label="ECLIPSE 新完井井级响应">
+          <el-table-column prop="keyword" label="曲线" /><el-table-column prop="well" label="井" /><el-table-column prop="unit" label="单位" /><el-table-column prop="timeDays" label="天数" />
+          <el-table-column prop="baseline" label="基线" /><el-table-column prop="current" label="方案" /><el-table-column prop="difference" label="同时间差值" />
+        </el-table>
+      </template>
+      <p>下载eclipse-schedule-applied-package.zip，另一项目上传完整工程无参数复算；检查原连接保留且新增连接坐标正确。多连接轨迹、后期射孔和复杂工程继续扩展。</p>
+    </section>
+    <section v-if="newWellScenario" class="result-panel" aria-label="ECLIPSE 新井方案验收">
+      <h2>新井 {{ newWellScenario.well }} · 组 {{ newWellScenario.group }}</h2>
+      <p>基线 #{{ newWellScenario.baselineRunId }} · I{{ newWellScenario.i }}/J{{ newWellScenario.j }}/K{{ newWellScenario.k }} · 基准深度{{ newWellScenario.referenceDepth }} {{ newWellScenario.lengthUnit }}。</p>
+      <p>井径{{ newWellScenario.diameter }} {{ newWellScenario.lengthUnit }}、KH{{ newWellScenario.kh }} mD.{{ newWellScenario.lengthUnit }}、皮肤{{ newWellScenario.skin }}，CF自动计算；产水目标{{ newWellScenario.waterRate }} {{ newWellScenario.rateUnit }}、BHP下限{{ newWellScenario.bhpLimit }} {{ newWellScenario.pressureUnit }}。</p>
+      <el-alert v-if="!newWellActual?.available" type="warning" :closable="false" :title="newWellActual?.message || '缺少新井实际结果'" />
+      <template v-else>
+        <p>实际{{ newWellActual.rows.length }}个报告，{{ newWellActual.limitedReports }}项压力约束下减产，{{ newWellActual.shutReports }}项关井/停井报告。状态取自原生WSTAT；关井压力可能输出0，不套用开井压力下限。新井在原基线不存在，不把其基线填为0。</p>
+        <el-table :data="newWellActual.rows" max-height="320" border size="small" aria-label="ECLIPSE 新井实际生产与状态">
+          <el-table-column prop="timeDays" label="天数" /><el-table-column prop="stateLabel" label="实际井状态" /><el-table-column prop="state" label="WSTAT" />
+          <el-table-column prop="rate" :label="`WWPR ${newWellScenario.rateUnit}`" /><el-table-column prop="bhp" :label="`WBHP ${newWellScenario.pressureUnit}`" /><el-table-column prop="total" :label="`WWPT ${newWellActual.cumulativeUnit}`" />
+        </el-table>
+      </template>
+      <el-alert v-if="scheduleBaselineError" type="warning" :closable="false" :title="scheduleBaselineError" />
+      <el-alert v-else-if="!newWellDiff?.available" type="info" :closable="false" :title="scheduleBaselineLoading ? '读取原井基线中' : newWellDiff?.message || '缺少原井可对比结果'" />
+      <el-table v-if="newWellDiff?.available && !scheduleBaselineError" :data="newWellDiff.rows" max-height="280" border size="small" aria-label="ECLIPSE 新井对原井影响">
+        <el-table-column prop="keyword" label="曲线" /><el-table-column prop="well" label="井" /><el-table-column prop="unit" label="单位" /><el-table-column prop="timeDays" label="天数" />
+        <el-table-column prop="baseline" label="基线（新井为空）" /><el-table-column prop="current" label="方案" /><el-table-column prop="difference" label="共有时刻差值" />
+      </el-table>
+      <p>审阅求解警告与原井影响，下载eclipse-schedule-applied-package.zip，另一项目上传完整工程无参数复算。原地质与已有井控保持，新增井会改变油藏压力和实际供给分配。</p>
+    </section>
+    <section v-if="geometryScenario" class="result-panel" aria-label="ECLIPSE 完井数值方案验收">
+      <h2>{{ completionGeometryLabels[geometryScenario.field] }}方案验收</h2>
+      <p>井 {{ geometryScenario.well.trim() }} · {{ geometryScenario.sourceFile }}:{{ geometryScenario.lineNumber }} · I{{ geometryScenario.i }}/J{{ geometryScenario.j }}/K{{ geometryScenario.k1 }}</p>
+      <p>基线 #{{ geometryScenario.baselineRunId }} · {{ geometryScenario.originalValue }} → {{ geometryScenario.targetValue }} {{ geometryScenario.unit === '1' ? '（无量纲）' : geometryScenario.unit }} · CF保持自动计算。</p>
+      <p>核对井底压力、产量与累计量；原控制可能维持原流量。下载 eclipse-schedule-applied-package.zip，另一项目上传完整工程、不启用方案复算。</p>
+      <el-alert v-if="scheduleBaselineError" type="warning" :closable="false" :title="scheduleBaselineError" />
+      <el-alert v-else-if="!geometryResponse?.available" type="info" :closable="false" :title="scheduleBaselineLoading ? '读取同源基线中' : geometryResponse?.message || '缺少可对比结果'" />
+      <template v-else>
+        <p>{{ geometryResponse.rows.length }} 项实际报告数值，{{ geometryResponse.changedCount }} 项共有时刻变化，{{ geometryResponse.unmatchedCount }} 项缺少同时间值；空差值不插值。</p>
+        <el-table :data="geometryResponse.rows" max-height="320" border size="small" aria-label="ECLIPSE 完井数值井级响应">
+          <el-table-column prop="keyword" label="曲线" /><el-table-column prop="well" label="井" /><el-table-column prop="unit" label="单位" />
+          <el-table-column prop="timeDays" label="天数" /><el-table-column prop="baseline" label="基线" /><el-table-column prop="current" label="方案" /><el-table-column prop="difference" label="实际差值" />
+        </el-table>
+      </template>
+    </section>
+    <section v-if="regionScenario" class="result-panel" aria-label="ECLIPSE 区域物性方案验收">
+      <div class="panel-heading"><div><h2>{{ regionScenario.keyword }} 区域物性方案验收</h2><p>选区物性以实际INIT核对；下面比较原生井压力、产量和累计量，不按输入倍率推算流量。</p></div></div>
+      <dl class="scenario-metadata">
+        <div><dt>基线</dt><dd>#{{ regionScenario.baselineRunId }}</dd></div>
+        <div><dt>I / J / K范围</dt><dd>{{ regionScenario.i1 }}–{{ regionScenario.i2 }} / {{ regionScenario.j1 }}–{{ regionScenario.j2 }} / {{ regionScenario.k1 }}–{{ regionScenario.k2 }}</dd></div>
+        <div><dt>选区单元</dt><dd>{{ regionScenario.originalValues.length }}</dd></div>
+        <div><dt>单位 / 乘数</dt><dd>{{ gridRegionUnit(regionScenario.keyword) }} / {{ regionScenario.multiplier }}</dd></div>
+      </dl>
+      <p>下载 eclipse-grid-field-applied-package.zip，另一项目上传完整工程、不启用方案复算。修改范围外的场值仍需在INIT中核对。</p>
+      <el-alert v-if="scheduleBaselineError" type="warning" :closable="false" :title="scheduleBaselineError" />
+      <el-alert v-else-if="!regionResponse?.available" type="info" :closable="false" :title="scheduleBaselineLoading ? '读取同源基线中' : regionResponse?.message || '缺少可对比结果'" />
+      <template v-else>
+        <p>{{ regionResponse.rows.length }} 项实际报告数值，{{ regionResponse.changedCount }} 项共有时刻变化，{{ regionResponse.unmatchedCount }} 项缺少同时间值。差值为空时不插值；控制或压力限制可能保持原流量。</p>
+        <el-table :data="regionResponse.rows" max-height="320" border size="small" aria-label="ECLIPSE 区域物性井级响应">
+          <el-table-column prop="keyword" label="曲线" /><el-table-column prop="well" label="井" /><el-table-column prop="unit" label="单位" />
+          <el-table-column prop="timeDays" label="天数" /><el-table-column prop="baseline" label="基线" /><el-table-column prop="current" label="方案" /><el-table-column prop="difference" label="实际差值" />
+        </el-table>
+      </template>
+    </section>
+    <section v-if="forecastScenario" class="result-panel forecast-provenance" aria-label="ECLIPSE 历史预测来源链">
+      <div class="panel-heading">
+        <div><span class="kicker">ECLIPSE HISTORY → FORECAST</span><h2>历史—预测来源链</h2><p>当前 Run 的参数合同明确绑定历史来源、预测 DATA 与 Restart；此处不把两段 Summary 按未验证的时间原点自动拼接。</p></div>
+        <el-tag :type="forecastHistoryLoading ? 'info' : forecastHistoryVerified ? 'success' : 'warning'">{{ forecastHistoryLoading ? '核对来源中' : forecastHistoryVerified ? '来源已核对' : '来源待核对' }}</el-tag>
+      </div>
+      <dl class="scenario-metadata">
+        <div><dt>历史 Run</dt><dd>#{{ forecastScenario.historyRunId }}</dd></div>
+        <div><dt>预测 DATA</dt><dd>{{ forecastScenario.forecastDataFile }}</dd></div>
+        <div><dt>Restart Artifact</dt><dd>{{ forecastScenario.restartArtifactName }}</dd></div>
+        <div><dt>Restart report</dt><dd>{{ forecastScenario.restartReport }}</dd></div>
+        <div><dt>Artifact SHA-256</dt><dd>{{ forecastScenario.restartArtifactSha256 }}</dd></div>
+      </dl>
+      <el-alert v-if="forecastHistoryError" type="warning" :closable="false" :title="forecastHistoryError" />
+      <el-alert v-else-if="forecastHistoryVerified" type="success" :closable="false" :title="`已确认历史 Run #${forecastHistoryRun.id} 属于同一模型版本、为无参数完整成功运行，且包含匹配哈希的 Restart Artifact。`" />
+      <el-alert v-else-if="forecastHistoryLoading" type="info" :closable="false" title="正在读取历史 Run 并核对 Artifact 来源；核对结束前不将来源链标为通过。" />
+      <el-alert type="info" :closable="false" title="本页 Summary 只代表当前预测 Run。历史与预测阶段分别保留各自的模拟时间原点；如需跨阶段曲线比较，须先确认 ECLIPSE restart 时间语义，平台不会按索引或日期猜测拼接。" />
+    </section>
     <section v-if="scheduleTimelineSummary" class="result-panel schedule-timeline" aria-label="ECLIPSE Schedule 时间轴">
       <div class="panel-heading">
         <div><span class="kicker">ECLIPSE SCHEDULE</span><h2>Schedule 时间轴</h2><p>来自已验证 DATA 检查的 DATES/TSTEP 原始顺序；页面不根据时间或井名臆测历史/预测分界。</p></div>
@@ -536,7 +1006,7 @@ watch(() => filteredFieldRows.value.length, total => {
     </section>
     <section v-if="scheduleScenario" class="result-panel scenario-acceptance" aria-label="ECLIPSE Schedule 方案验收">
       <div class="panel-heading">
-        <div><span class="kicker">ECLIPSE SCHEDULE</span><h2>{{ scheduleScenario.scenarioType === 'COMPDAT_FACTOR' ? 'COMPDAT 连接因子方案验收' : scheduleScenario.scenarioType === 'COMPDAT' ? 'COMPDAT 完井方案验收' : scheduleScenario.scenarioType === 'WCONPROD' ? 'WCONPROD 方案验收' : scheduleScenario.scenarioType === 'WCONINJE' ? 'WCONINJE 方案验收' : scheduleScenario.scenarioType === 'WCONHIST' ? 'WCONHIST 方案验收' : 'WELOPEN 方案验收' }}</h2><p>当前运行与无参数基线运行的真实 ECLEND 计数和输出文件 SHA-256 对比。</p></div>
+        <div><span class="kicker">ECLIPSE SCHEDULE</span><h2>{{ scheduleScenarioTitle }}</h2><p v-if="scheduleScenario.scenarioType === 'PRESSURE_CONTROL'">按相同模拟时间对照目标井的 WBHP 和产量／注入量，核对压力调整的实际影响。</p><p v-else-if="scheduleScenario.scenarioType === 'WELOPEN_EVENTS'">显示派生方案中的井状态事件，并按相同时间点对照真实 WOPR；只读，不把日志或文件变化当作计算效果。</p><p v-else>当前运行与无参数基线运行的真实 ECLEND 计数和输出文件 SHA-256 对比。</p></div>
         <el-tag :type="scheduleAcceptanceType">{{ scheduleAcceptanceLabel }}</el-tag>
       </div>
       <dl class="scenario-metadata">
@@ -544,22 +1014,249 @@ watch(() => filteredFieldRows.value.length, total => {
         <div><dt>基线运行</dt><dd>#{{ scheduleScenario.baselineRunId }}</dd></div>
         <div><dt>目标井</dt><dd>{{ scheduleScenario.well }}</dd></div>
         <div v-if="scheduleScenario.date"><dt>生效日期</dt><dd>{{ scheduleScenario.date }}</dd></div>
-        <div v-if="scheduleScenario.phase"><dt>计划段</dt><dd>{{ scheduleScenario.phase === 'FORECAST_INITIAL' ? '预测初始段' : scheduleScenario.phase }}</dd></div>
+        <div v-if="scheduleScenario.phase"><dt>计划段</dt><dd>{{ scheduleScenario.phase === 'INITIAL' ? '初始调度阶段' : scheduleScenario.phase === 'FORECAST_INITIAL' ? '预测初始段' : scheduleScenario.phase }}</dd></div>
         <div v-if="scheduleScenario.status"><dt>目标状态</dt><dd>{{ scheduleScenario.status }}</dd></div>
         <div v-if="scheduleScenario.controlMode"><dt>控制关键字</dt><dd>{{ scheduleScenario.controlMode }}</dd></div>
+        <template v-if="scheduleScenario.scenarioType === 'PRESSURE_CONTROL'">
+          <div><dt>原控制模式</dt><dd>{{ scheduleScenario.originalControlMode }}</dd></div>
+          <div><dt>原 BHP 设定／限值</dt><dd>{{ scheduleScenario.originalBhp }} psia</dd></div>
+          <div><dt>目标井底压力</dt><dd>{{ scheduleScenario.targetBhp }} psia</dd></div>
+          <div v-if="scheduleScenario.keyword === 'WCONINJE'"><dt>注入流体</dt><dd>{{ scheduleScenario.injectionType }}</dd></div>
+        </template>
         <div v-if="['COMPDAT', 'COMPDAT_FACTOR'].includes(scheduleScenario.scenarioType)"><dt>完井坐标</dt><dd>I{{ scheduleScenario.i }} / J{{ scheduleScenario.j }} / K{{ scheduleScenario.k1 }}-{{ scheduleScenario.k2 }}</dd></div>
         <div v-if="['COMPDAT', 'COMPDAT_FACTOR'].includes(scheduleScenario.scenarioType)"><dt>源定位</dt><dd>{{ scheduleScenario.sourceFile }}:{{ scheduleScenario.lineNumber }}</dd></div>
-        <div v-if="scheduleScenario.scenarioType === 'COMPDAT_FACTOR'"><dt>原连接因子</dt><dd>{{ scheduleScenario.originalConnectionFactor }}</dd></div>
-        <div v-if="scheduleScenario.scenarioType === 'COMPDAT_FACTOR'"><dt>目标连接因子</dt><dd>{{ scheduleScenario.targetConnectionFactor }}</dd></div>
+        <div v-if="scheduleScenario.scenarioType === 'COMPDAT_FACTOR'"><dt>原连接因子</dt><dd>{{ scheduleScenario.originalConnectionFactor }} {{ factorUnit || '单位未核准' }}</dd></div>
+        <div v-if="scheduleScenario.scenarioType === 'COMPDAT_FACTOR'"><dt>目标连接因子</dt><dd>{{ scheduleScenario.targetConnectionFactor }} {{ factorUnit || '单位未核准' }}</dd></div>
         <div v-if="scheduleScenario.scenarioType === 'WCONHIST'"><dt>目标 ORAT 原值</dt><dd>{{ scheduleScenario.targetOilRate }}</dd></div>
         <div v-if="scheduleScenario.scenarioType === 'WCONPROD'"><dt>目标 ORAT 原值</dt><dd>{{ scheduleScenario.targetOilRate }}</dd></div>
+        <template v-if="scheduleScenario.scenarioType === 'PRODUCTION_TARGET'">
+          <div><dt>原产油目标</dt><dd>{{ scheduleScenario.originalOilRate }} {{ scheduleScenario.unit }}</dd></div>
+          <div><dt>新产油目标</dt><dd>{{ scheduleScenario.targetOilRate }} {{ scheduleScenario.unit }}</dd></div>
+        </template>
+        <template v-if="scheduleScenario.scenarioType === 'PRODUCTION_CONTROL'">
+          <div><dt>原生产目标</dt><dd>{{ scheduleScenario.originalTargetRate }} {{ scheduleScenario.unit }}</dd></div>
+          <div><dt>新生产目标</dt><dd>{{ scheduleScenario.targetRate }} {{ scheduleScenario.unit }}</dd></div>
+          <div><dt>源记录</dt><dd>{{ scheduleScenario.sourceFile }}:{{ scheduleScenario.lineNumber }}</dd></div>
+        </template>
+        <template v-if="scheduleScenario.scenarioType === 'THP_CONTROL'">
+          <div><dt>原井口压力</dt><dd>{{ scheduleScenario.originalThp }} psia</dd></div>
+          <div><dt>新井口压力</dt><dd>{{ scheduleScenario.targetThp }} psia</dd></div>
+          <div><dt>VFP 表 / ALQ</dt><dd>{{ scheduleScenario.vfpTableNumber }} / {{ scheduleScenario.originalAlq }}</dd></div>
+        </template>
         <div v-if="scheduleScenario.scenarioType === 'WCONINJE'"><dt>注入流体</dt><dd>{{ scheduleScenario.injectionType }}</dd></div>
         <div v-if="scheduleScenario.scenarioType === 'WCONINJE'"><dt>目标 RATE 原值</dt><dd>{{ scheduleScenario.targetInjectionRate }}</dd></div>
       </dl>
+      <section v-if="scheduleScenario.scenarioType === 'COMPDAT_FACTOR'" aria-label="连接因子井级实际响应">
+        <h3>目标井产量、压力与累计量</h3>
+        <p>CF是完井连接导流能力，不是产油目标。保留原井控及其它完井，实际响应可能体现在压力或产量；不能按CF比例直接推算产量。</p>
+        <p v-if="factorResponse?.available">共有时刻有{{ factorResponse.changedCount }}项数值变化；{{ factorResponse.unmatchedCount }}项只有单次报告，保持空值，不插值。</p>
+        <p v-if="factorResponse?.missingIndicators?.length">工程没有请求{{ factorResponse.missingIndicators.join('、') }}，不补算；如需累计量对比，请在原工程SUMMARY请求WOPT后重新计算基线。</p>
+        <el-table v-if="factorResponse?.available" :data="factorResponse.rows" border size="small" max-height="360" aria-label="CF目标井真实对比">
+          <el-table-column prop="keyword" label="指标" /><el-table-column prop="timeDays" label="实际累计天数" />
+          <el-table-column prop="unit" label="原生单位" /><el-table-column label="基线"><template #default="{ row }">{{ row.baseline ?? '—' }}</template></el-table-column>
+          <el-table-column label="方案"><template #default="{ row }">{{ row.current ?? '—' }}</template></el-table-column>
+          <el-table-column label="方案减基线"><template #default="{ row }">{{ row.difference ?? '—' }}</template></el-table-column>
+        </el-table>
+        <p v-else>同源基线或目标井指标尚不可核对；请审阅诊断，不能据此判为无影响。</p>
+        <p>在“结果文件”下载eclipse-schedule-applied-package.zip，另一项目上传完整工程后不启用方案复算。</p>
+      </section>
+      <div v-if="['WELOPEN_EVENTS', 'NEW_DATES'].includes(scheduleScenario.scenarioType)" class="scenario-output-diff">
+        <h3>计划井事件</h3>
+        <p v-if="scheduleScenario.scenarioType === 'NEW_DATES'">在 {{ scheduleScenario.beforeDate }} 与 {{ scheduleScenario.afterDate }} 之间新增两个日期。日历和流量取自真实 SUMMARY；报告反映刚结束的时段。自动步长可能改变，只比较真实共有时间点。</p>
+        <el-table :data="scheduleScenario.events" border size="small" :aria-label="scheduleScenario.events.length > 2 ? 'ECLIPSE 多日期时间轴' : 'ECLIPSE 双事件时间轴'">
+          <el-table-column prop="date" label="DATES 日期" min-width="160" />
+          <el-table-column label="WELOPEN 状态" min-width="160"><template #default="{ row }">{{ row.status === 'SHUT' ? 'SHUT（关井）' : 'OPEN（开井）' }}</template></el-table-column>
+          <el-table-column label="应用位置" min-width="240"><template #default>{{ scheduleScenario.scenarioType === 'NEW_DATES' ? '所选区间已有控制之后，下一原日期之前' : '对应日期现有控制记录之后；源行保留' }}</template></el-table-column>
+        </el-table>
+      </div>
+      <div v-if="scheduleScenario.scenarioType === 'GROUP_INJECTION'" class="scenario-output-diff">
+        <h3>注水组 {{ scheduleScenario.group }}：{{ scheduleScenario.originalTargetRate }} → {{ scheduleScenario.targetRate }} {{ scheduleScenario.unit }}</h3>
+        <p>只比较真实共有时刻。GWIR 应等于组内各井 WWIR 合计，BHP 不得超过原上限；按潜力分配，各井不一定均分。</p>
+        <p v-if="scheduleGroupInjectionResponse?.available">{{ scheduleGroupInjectionResponse.rows.length }} 个共有时刻，其中 {{ scheduleGroupInjectionResponse.rows.filter(r => r.targetReached).length }} 个达标。分配验证通过不代表整个开发期始终达标。</p>
+        <el-table :data="scheduleGroupInjectionResponse?.rows || []" max-height="280" border size="small" aria-label="ECLIPSE 注水组总量核对">
+          <el-table-column prop="timeDays" label="天数" /><el-table-column prop="baselineRate" label="基线 GWIR" />
+          <el-table-column prop="target" label="新目标" /><el-table-column prop="rate" label="实际 GWIR" /><el-table-column prop="wellTotal" label="各井 WWIR 合计" />
+          <el-table-column label="该时刻达标"><template #default="{ row }">{{ row.targetReached ? '是' : '否' }}</template></el-table-column>
+          <el-table-column label="总量一致"><template #default="{ row }">{{ row.consistent ? '是' : '否' }}</template></el-table-column>
+        </el-table>
+        <p>注入量单位 {{ scheduleGroupInjectionResponse?.unit || scheduleScenario.unit }}；压力单位 {{ scheduleGroupInjectionResponse?.pressureUnit || '见模型单位' }}。</p>
+        <el-table :data="scheduleGroupInjectionResponse?.members || []" max-height="280" border size="small" aria-label="ECLIPSE 注水组各井分配">
+          <el-table-column prop="timeDays" label="天数" /><el-table-column prop="well" label="井" /><el-table-column prop="baselineRate" label="基线 WWIR" />
+          <el-table-column prop="rate" label="方案 WWIR" /><el-table-column prop="bhp" label="实际 BHP" /><el-table-column prop="bhpLimit" label="BHP 上限" />
+          <el-table-column label="压力限制"><template #default="{ row }">{{ row.atBhpLimit ? '已触及上限' : '低于上限' }}</template></el-table-column>
+        </el-table>
+      </div>
+      <div v-if="scheduleScenario.scenarioType === 'CONTROL_PLAN'" class="scenario-output-diff">
+        <p>{{ scheduleScenario.edits.length }} 条目标修改，{{ scheduleScenario.wells.length }} 口井；已有日期和未选井控保留。日期边界报告反映刚结束的时段；后续已有记录覆盖前期。基线空白表示该时刻没有同时间报告，不插值。</p>
+        <p v-if="scheduleControlPlanResponse?.available">全部 {{ scheduleControlPlanResponse.rows.length }} 个井/时间输出均参与核对；流量 {{ scheduleControlPlanResponse.flowUnit }}，BHP {{ scheduleControlPlanResponse.pressureUnit }}。</p>
+        <el-table :data="scheduleControlPlanResponse?.edits || []" max-height="260" border size="small" aria-label="ECLIPSE 阶段修改逐项核对"><el-table-column prop="well" label="井" /><el-table-column prop="date" label="生效日期" /><el-table-column prop="originalOilRate" label="原目标" /><el-table-column prop="targetOilRate" label="新目标" /><el-table-column prop="pointCount" label="生效期间输出点" /><el-table-column prop="targetCount" label="达标点" /><el-table-column prop="changedCount" label="共有时刻响应点" /><el-table-column prop="lineNumber" label="源行" /></el-table>
+        <p v-if="scheduleControlPlanResponse?.rows.length > 500">下表预览前 500 条；全部输出已完成核对，完整数据可从运行产物下载。</p>
+        <el-table :data="(scheduleControlPlanResponse?.rows || []).slice(0, 500)" max-height="320" border size="small" aria-label="ECLIPSE 阶段目标与实际井响应"><el-table-column prop="timeDays" label="报告天数" /><el-table-column prop="well" label="井" /><el-table-column prop="date" label="当前控制日期" /><el-table-column prop="nextDate" label="下一覆盖日期" /><el-table-column prop="target" label="当期目标" /><el-table-column prop="baselineRate" label="基线产油量" /><el-table-column prop="rate" label="实际产油量" /><el-table-column prop="bhp" label="BHP" /><el-table-column prop="bhpLimit" label="原 BHP 下限" /><el-table-column label="目标"><template #default="{ row }">{{ row.targetReached ? '达标' : '未达标' }}</template></el-table-column></el-table>
+      </div>
+      <div v-if="scheduleScenario.scenarioType === 'GROUP_STRUCTURE'" class="scenario-output-diff">
+        <p>{{ scheduleScenario.keyword }} · {{ scheduleScenario.objectName }}：{{ scheduleScenario.originalValue }} → {{ scheduleScenario.targetValue }} {{ scheduleScenario.unit }}；父组 {{ scheduleScenario.parentGroup }}。</p>
+        <p v-if="scheduleGroupStructureResponse?.available">{{ scheduleGroupStructureResponse.rows.length }} 个时刻，{{ scheduleGroupStructureResponse.rows.filter(r => r.targetReached).length }} 个目标与分配达标。产油量 {{ scheduleGroupStructureResponse.flowUnit }}；累计量 {{ scheduleGroupStructureResponse.volumeUnit }}；BHP {{ scheduleGroupStructureResponse.pressureUnit }}。基线为空表示该时刻没有同时间输出。</p>
+        <p>父组流量按子组开工比例折算；井和子组流量为开工时流量。累计量已计入开工比例，父组累计量直接求子组累计量之和。</p>
+        <el-table :data="scheduleGroupStructureResponse?.rows || []" max-height="280" border size="small" aria-label="ECLIPSE 父组目标与累计量核对"><el-table-column prop="timeDays" label="天数" /><el-table-column prop="target" label="父组目标" /><el-table-column prop="baselineRate" label="基线产油量" /><el-table-column prop="rate" label="实际产油量" /><el-table-column prop="contribution" label="子组折算贡献合计" /><el-table-column prop="total" label="父组累计量" /><el-table-column label="目标与分配"><template #default="{ row }">{{ row.targetReached ? '达标' : '未达标' }}</template></el-table-column></el-table>
+        <el-table :data="scheduleGroupStructureResponse?.leaves || []" max-height="280" border size="small" aria-label="ECLIPSE 子组开工贡献与累计量"><el-table-column prop="timeDays" label="天数" /><el-table-column prop="group" label="子组" /><el-table-column prop="baselineRate" label="基线流量" /><el-table-column prop="rate" label="开工时流量" /><el-table-column prop="efficiency" label="开工比例" /><el-table-column prop="contribution" label="计入父组流量" /><el-table-column prop="baselineTotal" label="基线累计量" /><el-table-column prop="total" label="当前累计量" /></el-table>
+        <el-table :data="scheduleGroupStructureResponse?.members || []" max-height="280" border size="small" aria-label="ECLIPSE 组树井分配与限值"><el-table-column prop="timeDays" label="天数" /><el-table-column prop="group" label="子组" /><el-table-column prop="well" label="井" /><el-table-column prop="baselineRate" label="基线产油量" /><el-table-column prop="rate" label="实际产油量" /><el-table-column prop="guideRate" label="固定导向权重" /><el-table-column prop="guideTarget" label="权重理论分配" /><el-table-column prop="efficiency" label="实际井效率" /><el-table-column prop="bhp" label="BHP" /><el-table-column prop="bhpLimit" label="BHP 下限" /><el-table-column prop="oilRateLimit" label="产油上限" /></el-table>
+      </div>
+      <div v-if="scheduleScenario.scenarioType === 'ADVANCED_INJECTION'" class="scenario-output-diff">
+        <h3>注入组 {{ scheduleScenario.group }} · {{ scheduleScenario.injectionPhase }} {{ scheduleScenario.controlMode }}：{{ scheduleScenario.originalTargetRate }} → {{ scheduleScenario.targetRate }} {{ scheduleScenario.unit === 'fraction' ? '倍' : scheduleScenario.unit }}</h3>
+        <p>组注入量应等于全部注入井合计；BHP 与地面注入量不得超过模型原上限。显示方案全部真实输出时刻；基线只在共有时刻显示，不插值。</p>
+        <p v-if="scheduleScenario.referenceGroup">来源生产组 {{ scheduleScenario.referenceGroup }}（{{ scheduleScenario.referenceMembers.join('、') }}）；REIN 使用地面产气量，VREP 使用总油藏采出体积。每个时刻分别按当时产量折算目标；实际比例绝对误差允许 {{ scheduleAdvancedInjectionResponse?.fractionTolerance || 0.0001 }}。</p>
+        <p v-if="scheduleAdvancedInjectionResponse?.available">{{ scheduleAdvancedInjectionResponse.rows.length }} 个时刻，{{ scheduleAdvancedInjectionResponse.rows.filter(r => r.targetReached).length }} 个达标。注入量单位 {{ scheduleAdvancedInjectionResponse.flowUnit }}；地面注入量 {{ scheduleAdvancedInjectionResponse.surfaceUnit }}；BHP {{ scheduleAdvancedInjectionResponse.pressureUnit }}。</p>
+        <el-table :data="scheduleAdvancedInjectionResponse?.rows || []" max-height="280" border size="small" aria-label="ECLIPSE 注入方案总量核对">
+          <el-table-column prop="timeDays" label="天数" /><el-table-column prop="baselineRate" label="基线注入量" />
+          <el-table-column v-if="scheduleScenario.referenceGroup" prop="referenceRate" label="方案来源组产量" />
+          <el-table-column v-if="scheduleScenario.referenceGroup" prop="baselineReferenceRate" label="基线来源组产量" />
+          <el-table-column prop="target" label="方案折算目标" /><el-table-column prop="rate" label="实际注入量" /><el-table-column prop="wellTotal" label="各注入井合计" />
+          <el-table-column v-if="scheduleScenario.referenceGroup" prop="actualRatio" label="实际比例" /><el-table-column v-if="scheduleScenario.referenceGroup" prop="ratioError" label="比例误差" />
+          <el-table-column label="该时刻达标"><template #default="{ row }">{{ row.targetReached ? '是' : '否' }}</template></el-table-column>
+          <el-table-column label="总量一致"><template #default="{ row }">{{ row.consistent ? '是' : '否' }}</template></el-table-column>
+        </el-table>
+        <el-table :data="scheduleAdvancedInjectionResponse?.members || []" max-height="280" border size="small" aria-label="ECLIPSE 注入方案各井分配">
+          <el-table-column prop="timeDays" label="天数" /><el-table-column prop="well" label="井" /><el-table-column prop="baselineRate" label="基线注入量" /><el-table-column prop="rate" label="方案注入量" />
+          <el-table-column prop="surfaceRate" label="地面注入量" /><el-table-column prop="surfaceRateLimit" label="原地面上限" /><el-table-column prop="bhp" label="实际 BHP" /><el-table-column prop="bhpLimit" label="原 BHP 上限" />
+          <el-table-column label="压力或流量限制"><template #default="{ row }">{{ row.atBhpLimit || row.atSurfaceLimit ? '已触及上限' : '低于上限' }}</template></el-table-column>
+        </el-table>
+        <el-table v-if="scheduleScenario.referenceGroup" :data="scheduleAdvancedInjectionResponse?.referenceRows || []" max-height="280" border size="small" aria-label="ECLIPSE 回注来源生产井">
+          <el-table-column prop="timeDays" label="天数" /><el-table-column prop="well" label="来源生产井" /><el-table-column prop="baselineRate" label="基线产量" /><el-table-column prop="rate" label="方案产量" />
+        </el-table>
+      </div>
+      <div v-if="scheduleScenario.scenarioType === 'GROUP_WATER_PRODUCTION'" class="scenario-output-diff">
+        <h3>生产组 {{ scheduleScenario.group }} · {{ scheduleScenario.controlMode }}：{{ scheduleScenario.originalTargetRate }} → {{ scheduleScenario.targetRate }} {{ scheduleScenario.unit }}</h3>
+        <p>只比较真实共有时刻。GWPR 应等于全部成员井 WWPR 合计，BHP 不得低于原下限，WOPR 不得超过原产油上限；按潜力分配，各井不一定均分。</p>
+        <p v-if="scheduleGroupWaterProductionResponse?.available">{{ scheduleGroupWaterProductionResponse.rows.length }} 个共有时刻，其中 {{ scheduleGroupWaterProductionResponse.rows.filter(r => r.targetReached).length }} 个达标。分配验证通过不代表整个开发期始终达标。</p>
+        <el-table :data="scheduleGroupWaterProductionResponse?.rows || []" max-height="280" border size="small" aria-label="ECLIPSE 生产组产水总量核对">
+          <el-table-column prop="timeDays" label="天数" /><el-table-column prop="baselineRate" :label="`基线 ${'GWPR'}`" />
+          <el-table-column prop="target" label="新目标" /><el-table-column prop="rate" :label="`实际 ${'GWPR'}`" /><el-table-column prop="wellTotal" :label="`各井 ${'WWPR'} 合计`" />
+          <el-table-column label="该时刻达标"><template #default="{ row }">{{ row.targetReached ? '是' : '否' }}</template></el-table-column>
+          <el-table-column label="总量一致"><template #default="{ row }">{{ row.consistent ? '是' : '否' }}</template></el-table-column>
+        </el-table>
+        <p>产量单位 {{ scheduleGroupWaterProductionResponse?.unit || scheduleScenario.unit }}；压力单位 {{ scheduleGroupWaterProductionResponse?.pressureUnit || '见模型单位' }}。</p>
+        <el-table :data="scheduleGroupWaterProductionResponse?.members || []" max-height="280" border size="small" aria-label="ECLIPSE 生产组产水各井分配">
+          <el-table-column prop="timeDays" label="天数" /><el-table-column prop="well" label="井" /><el-table-column prop="baselineRate" :label="`基线 ${'WWPR'}`" />
+          <el-table-column prop="rate" :label="`方案 ${'WWPR'}`" /><el-table-column prop="bhp" label="实际 BHP" /><el-table-column prop="bhpLimit" label="BHP 下限" />
+          <el-table-column prop="oilRate" label="实际 WOPR" /><el-table-column prop="oilRateLimit" label="原产油上限" />
+          <el-table-column label="产油限制"><template #default="{ row }">{{ row.atOilRateLimit ? '已触及上限' : '低于上限' }}</template></el-table-column>
+          <el-table-column label="压力限制"><template #default="{ row }">{{ row.atBhpLimit ? '已触及下限' : '高于下限' }}</template></el-table-column>
+        </el-table>
+      </div>
+      <div v-if="scheduleScenario.scenarioType === 'GROUP_RATE'" class="scenario-output-diff">
+        <h3>生产组 {{ scheduleScenario.group }} · {{ scheduleScenario.controlMode }}：{{ scheduleScenario.originalTargetRate }} → {{ scheduleScenario.targetRate }} {{ scheduleScenario.unit }}</h3>
+        <p>只比较真实共有时刻。GRAT 的 GGPR/WGPR、LRAT 的 GLPR/WLPR 按模式核对组总量与各井合计，BHP 不得低于原下限；按潜力分配，各井不一定均分。</p>
+        <p v-if="scheduleGroupRateResponse?.available">{{ scheduleGroupRateResponse.rows.length }} 个共有时刻，其中 {{ scheduleGroupRateResponse.rows.filter(r => r.targetReached).length }} 个达标。分配验证通过不代表整个开发期始终达标。</p>
+        <el-table :data="scheduleGroupRateResponse?.rows || []" max-height="280" border size="small" aria-label="ECLIPSE 生产组气液总量核对">
+          <el-table-column prop="timeDays" label="天数" /><el-table-column prop="baselineRate" :label="`基线 ${scheduleScenario.controlMode === 'GRAT' ? 'GGPR' : 'GLPR'}`" />
+          <el-table-column prop="target" label="新目标" /><el-table-column prop="rate" :label="`实际 ${scheduleScenario.controlMode === 'GRAT' ? 'GGPR' : 'GLPR'}`" /><el-table-column prop="wellTotal" :label="`各井 ${scheduleScenario.controlMode === 'GRAT' ? 'WGPR' : 'WLPR'} 合计`" />
+          <el-table-column label="该时刻达标"><template #default="{ row }">{{ row.targetReached ? '是' : '否' }}</template></el-table-column>
+          <el-table-column label="总量一致"><template #default="{ row }">{{ row.consistent ? '是' : '否' }}</template></el-table-column>
+        </el-table>
+        <p>产量单位 {{ scheduleGroupRateResponse?.unit || scheduleScenario.unit }}；压力单位 {{ scheduleGroupRateResponse?.pressureUnit || '见模型单位' }}。</p>
+        <el-table :data="scheduleGroupRateResponse?.members || []" max-height="280" border size="small" aria-label="ECLIPSE 生产组气液各井分配">
+          <el-table-column prop="timeDays" label="天数" /><el-table-column prop="well" label="井" /><el-table-column prop="baselineRate" :label="`基线 ${scheduleScenario.controlMode === 'GRAT' ? 'WGPR' : 'WLPR'}`" />
+          <el-table-column prop="rate" :label="`方案 ${scheduleScenario.controlMode === 'GRAT' ? 'WGPR' : 'WLPR'}`" /><el-table-column prop="bhp" label="实际 BHP" /><el-table-column prop="bhpLimit" label="BHP 下限" />
+          <el-table-column label="压力限制"><template #default="{ row }">{{ row.atBhpLimit ? '已触及下限' : '高于下限' }}</template></el-table-column>
+        </el-table>
+      </div>
+      <div v-if="scheduleScenario.scenarioType === 'GROUP_GAS_INJECTION'" class="scenario-output-diff">
+        <h3>注气组 {{ scheduleScenario.group }}：{{ scheduleScenario.originalTargetRate }} → {{ scheduleScenario.targetRate }} {{ scheduleScenario.unit }}</h3>
+        <p>只比较真实共有时刻。GGIR 应等于组内各井 WGIR 合计，BHP 不得超过原上限；按潜力分配，各井不一定均分。</p>
+        <p v-if="scheduleGroupGasInjectionResponse?.available">{{ scheduleGroupGasInjectionResponse.rows.length }} 个共有时刻，其中 {{ scheduleGroupGasInjectionResponse.rows.filter(r => r.targetReached).length }} 个达标。分配验证通过不代表整个开发期始终达标。</p>
+        <el-table :data="scheduleGroupGasInjectionResponse?.rows || []" max-height="280" border size="small" aria-label="ECLIPSE 注气组总量核对">
+          <el-table-column prop="timeDays" label="天数" /><el-table-column prop="baselineRate" label="基线 GGIR" />
+          <el-table-column prop="target" label="新目标" /><el-table-column prop="rate" label="实际 GGIR" /><el-table-column prop="wellTotal" label="各井 WGIR 合计" />
+          <el-table-column label="该时刻达标"><template #default="{ row }">{{ row.targetReached ? '是' : '否' }}</template></el-table-column>
+          <el-table-column label="总量一致"><template #default="{ row }">{{ row.consistent ? '是' : '否' }}</template></el-table-column>
+        </el-table>
+        <p>注入量单位 {{ scheduleGroupGasInjectionResponse?.unit || scheduleScenario.unit }}；压力单位 {{ scheduleGroupGasInjectionResponse?.pressureUnit || '见模型单位' }}。</p>
+        <el-table :data="scheduleGroupGasInjectionResponse?.members || []" max-height="280" border size="small" aria-label="ECLIPSE 注气组各井分配">
+          <el-table-column prop="timeDays" label="天数" /><el-table-column prop="well" label="井" /><el-table-column prop="baselineRate" label="基线 WGIR" />
+          <el-table-column prop="rate" label="方案 WGIR" /><el-table-column prop="bhp" label="实际 BHP" /><el-table-column prop="bhpLimit" label="BHP 上限" />
+          <el-table-column label="压力限制"><template #default="{ row }">{{ row.atBhpLimit ? '已触及上限' : '低于上限' }}</template></el-table-column>
+        </el-table>
+      </div>
+      <div v-if="scheduleScenario.scenarioType === 'GROUP_PRODUCTION'" class="scenario-output-diff">
+        <h3>生产组 {{ scheduleScenario.group }}：{{ scheduleScenario.originalTargetRate }} → {{ scheduleScenario.targetRate }} {{ scheduleScenario.unit }}</h3>
+        <p>仅比较基线和方案真实共有时间点。按潜力分配，不能预设各井必然均分；后期若触及压力或流量限制，实际总量可低于目标。下表保留全部共有时刻。</p>
+        <p v-if="scheduleGroupProductionResponse?.available">共有 {{ scheduleGroupProductionResponse.rows.length }} 个真实时刻，其中 {{ scheduleGroupProductionResponse.rows.filter(r => r.targetReached).length }} 个达到新组目标。分配验证通过不代表整个开发期始终达标。</p>
+        <el-table :data="scheduleGroupProductionResponse?.rows || []" max-height="280" border size="small" aria-label="ECLIPSE 组总量核对">
+          <el-table-column prop="timeDays" label="天数" /><el-table-column prop="baselineOil" label="基线 GOPR" />
+          <el-table-column prop="target" label="新目标" /><el-table-column prop="oil" label="实际 GOPR" /><el-table-column prop="wellTotal" label="各井 WOPR 合计" />
+          <el-table-column label="该时刻达标"><template #default="{ row }">{{ row.targetReached ? '是' : '否' }}</template></el-table-column>
+          <el-table-column label="总量一致"><template #default="{ row }">{{ row.consistent ? '是' : '否' }}</template></el-table-column>
+        </el-table>
+        <p>产量单位 {{ scheduleGroupProductionResponse?.unit || scheduleScenario.unit }}；压力单位 {{ scheduleGroupProductionResponse?.pressureUnit || '见模型单位' }}。</p>
+        <el-table :data="scheduleGroupProductionResponse?.members || []" max-height="280" border size="small" aria-label="ECLIPSE 组内各井分配">
+          <el-table-column prop="timeDays" label="天数" /><el-table-column prop="well" label="井" /><el-table-column prop="baselineOil" label="基线 WOPR" />
+          <el-table-column prop="oil" label="方案 WOPR" /><el-table-column prop="bhp" label="实际 BHP" /><el-table-column prop="bhpLimit" label="BHP 下限" />
+          <el-table-column label="压力限制"><template #default="{ row }">{{ row.atBhpLimit ? '已触及下限' : '高于下限' }}</template></el-table-column>
+        </el-table>
+      </div>
+      <div v-if="scheduleScenario.scenarioType === 'TSTEP'" class="scenario-output-diff">
+        <p>原报告间隔 {{ scheduleScenario.originalSteps.join('、') }} 天 → 新间隔 {{ scheduleScenario.targetSteps.join('、') }} 天；此段合计时长保持不变。后续控制仍在原时刻生效，曲线内部点可能因自动步长改变。</p>
+        <el-table :data="scheduleTstepResponse?.rows || []" border size="small" aria-label="ECLIPSE TSTEP 真实报告时间">
+          <el-table-column prop="interval" label="间隔（天）" />
+          <el-table-column prop="timeDays" label="累计模拟天数" />
+          <el-table-column label="实际输出"><template #default="{ row }">{{ row.present ? '已找到' : '缺失' }}</template></el-table-column>
+        </el-table>
+      </div>
+      <div v-if="scheduleNewDatesResponse?.available" class="scenario-output-diff">
+        <h3>按真实日历核对停井与复产</h3>
+        <el-table :data="scheduleNewDatesResponse.rows" border size="small" max-height="260" aria-label="ECLIPSE 新日期真实响应">
+          <el-table-column prop="date" label="报告日期" />
+          <el-table-column prop="timeDays" label="模拟天数" />
+          <el-table-column prop="phase" label="刚结束的时段" />
+          <el-table-column prop="value" label="实际 WOPR" />
+          <el-table-column prop="unit" label="单位" />
+        </el-table>
+      </div>
       <el-alert v-if="scheduleBaselineError" type="warning" :closable="false" :title="scheduleBaselineError" />
       <el-alert v-else-if="!scheduleBaselineLoading && scheduleBaselineResult && !scheduleBaselineIsClean" type="warning" :closable="false" title="当前基线本身带有参数方案，不是干净基线；请重新运行并选择不覆盖参数的 ECLIPSE 运行作为基线。" />
-      <el-alert v-else-if="!scheduleBaselineLoading && scheduleBaselineResult && scheduleHasObservableDifference" type="success" :closable="false" title="已检测到真实计算差异：ECLEND 计数或至少一个 ECLIPSE 输出文件发生变化。" />
+      <el-alert v-else-if="!scheduleBaselineLoading && scheduleBaselineResult && scheduleRateComparisonRequired && !scheduleWellRateDiff?.available" type="warning" :closable="false" title="缺少同单位、同时间点的目标井流量，暂不能确认业务影响。" />
+      <el-alert v-else-if="!scheduleBaselineLoading && scheduleBaselineResult && scheduleScenario.scenarioType === 'PRESSURE_CONTROL' && !schedulePressureDiff?.available" type="warning" :closable="false" title="缺少同单位、同时间点的目标井 WBHP，暂不能确认压力影响。" />
+      <el-alert v-else-if="!scheduleBaselineLoading && scheduleBaselineResult && ['NEW_DATES', 'TSTEP'].includes(scheduleScenario.scenarioType)" :type="scheduleHasObservableDifference ? 'success' : 'warning'" :closable="false" :title="scheduleAcceptanceLabel" />
+      <el-alert v-else-if="!scheduleBaselineLoading && scheduleBaselineResult && scheduleHasObservableDifference" type="success" :closable="false" :title="scheduleRateComparisonRequired ? '已检测到目标井流量的实际差异；请结合完整曲线和求解诊断审阅。' : '已检测到真实计算差异：ECLEND 计数或至少一个 ECLIPSE 输出文件发生变化。'" />
+      <el-alert v-else-if="!scheduleBaselineLoading && scheduleBaselineResult && scheduleScenario.scenarioType === 'PRESSURE_CONTROL'" type="warning" :closable="false" :title="scheduleAcceptanceLabel" />
+      <el-alert v-else-if="!scheduleBaselineLoading && scheduleBaselineResult && scheduleScenario.scenarioType === 'PRODUCTION_CONTROL'" type="warning" :closable="false" :title="scheduleAcceptanceLabel" />
+      <el-alert v-else-if="!scheduleBaselineLoading && scheduleBaselineResult && scheduleScenario.scenarioType === 'THP_CONTROL'" type="warning" :closable="false" :title="scheduleAcceptanceLabel" />
       <el-alert v-else-if="!scheduleBaselineLoading && scheduleBaselineResult" type="warning" :closable="false" title="本次方案与基线的可展示输出没有差异；不能仅凭运行成功判定方案生效。" />
+      <el-alert v-if="scheduleScenario.scenarioType === 'PRODUCTION_TARGET'" type="info" :closable="false" title="产油目标保留其它压力与供给限制；实际产量可能低于目标。方案工程可从下方文件列表下载并重新上传计算。" />
+      <el-alert v-if="scheduleScenario.scenarioType === 'PRESSURE_CONTROL'" type="info" :closable="false" title="保留原流量等限制；实际压力可能无法达到设定目标。请核对 WBHP、流量和求解诊断，再下载方案工程复算。" />
+      <el-alert v-if="scheduleScenario.scenarioType === 'PRODUCTION_CONTROL'" type="info" :closable="false" title="保留其它压力和流量限制；核对 WWPR／WGPR／WLPR 是否达到新目标，审阅求解诊断，再下载方案工程复算。" />
+      <el-alert v-if="scheduleScenario.scenarioType === 'THP_CONTROL'" type="info" :closable="false" title="沿用原 VFP 表和其它约束；检查 WTHP、WLPR 和 Summary 中的 WBHP。若流量、含水率或气油比超出表范围，线性外推结果需要审阅。方案 ZIP 可下载后重新上传复算。" />
+      <div v-if="schedulePressureDiff?.available" class="scenario-output-diff">
+        <h3>目标井 {{ schedulePressureKeyword }} · {{ schedulePressureDiff.unit }}</h3>
+        <p>差异点 {{ schedulePressureDiff.changedCount }} 个，共 {{ schedulePressureDiff.rows.length }} 个对齐点。</p>
+        <el-table :data="schedulePressureDiff.rows" border size="small" max-height="260" :aria-label="`ECLIPSE 目标井 ${schedulePressureKeyword} 基线差异`">
+          <el-table-column prop="well" label="井" min-width="100" />
+          <el-table-column prop="timeDays" label="模拟时间（天）" min-width="150" />
+          <el-table-column :label="`基线 ${schedulePressureKeyword}`" min-width="140"><template #default="{ row }">{{ Number(row.baseline).toPrecision(7) }}</template></el-table-column>
+          <el-table-column :label="`方案 ${schedulePressureKeyword}`" min-width="140"><template #default="{ row }">{{ Number(row.current).toPrecision(7) }}</template></el-table-column>
+          <el-table-column label="差值" min-width="140"><template #default="{ row }">{{ Number(row.difference).toPrecision(7) }}</template></el-table-column>
+        </el-table>
+      </div>
+      <div v-if="scheduleRateComparisonRequired && scheduleWellRateDiff?.available" class="scenario-output-diff">
+        <h3>目标井 {{ scheduleWellRateDiff.keyword }} · {{ scheduleWellRateDiff.unit || '单位未提供' }}</h3>
+        <p>仅比较基线与方案都提供的相同模拟时间点；差异点 {{ scheduleWellRateDiff.changedCount }} 个，共 {{ scheduleWellRateDiff.rows.length }} 个对齐点。</p>
+        <el-table :data="scheduleWellRateDiff.rows" border size="small" max-height="260" :aria-label="`ECLIPSE 目标井 ${scheduleWellRateDiff.keyword} 基线差异`">
+          <el-table-column prop="well" label="井" min-width="100" />
+          <el-table-column prop="unit" label="单位" min-width="110" />
+          <el-table-column prop="timeDays" label="模拟时间（天）" min-width="150" />
+          <el-table-column :label="`基线 ${scheduleWellRateDiff.keyword}`" min-width="140"><template #default="{ row }">{{ Number(row.baseline).toPrecision(7) }}</template></el-table-column>
+          <el-table-column :label="`方案 ${scheduleWellRateDiff.keyword}`" min-width="140"><template #default="{ row }">{{ Number(row.current).toPrecision(7) }}</template></el-table-column>
+          <el-table-column label="差值" min-width="140"><template #default="{ row }">{{ Number(row.difference).toPrecision(7) }}</template></el-table-column>
+        </el-table>
+      </div>
+      <div v-if="scheduleThpBhpDiff?.available && scheduleThpBhpDiff.unit?.trim().toUpperCase() === 'PSIA'" class="scenario-output-diff">
+        <h3>目标井 WBHP · psia</h3>
+        <el-table :data="scheduleThpBhpDiff.rows" border size="small" max-height="260" aria-label="ECLIPSE THP 方案 WBHP 基线差异">
+          <el-table-column prop="timeDays" label="模拟时间（天）" min-width="150" />
+          <el-table-column label="基线 WBHP" min-width="140"><template #default="{ row }">{{ Number(row.baseline).toPrecision(7) }}</template></el-table-column>
+          <el-table-column label="方案 WBHP" min-width="140"><template #default="{ row }">{{ Number(row.current).toPrecision(7) }}</template></el-table-column>
+        </el-table>
+      </div>
       <div v-if="scheduleCounts" class="scenario-count-strip">
         <div v-for="item in scheduleCounts" :key="item.key"><span>{{ item.label }}</span><strong>{{ item.current }}</strong><small>基线 {{ item.baseline }} · {{ item.current - item.baseline >= 0 ? '+' : '' }}{{ item.current - item.baseline }}</small></div>
       </div>
@@ -597,11 +1294,13 @@ watch(() => filteredFieldRows.value.length, total => {
       </nav>
     </section>
     <section id="eclipse-summary-result" class="result-anchor">
+    <EclipseRestartForecastCompare v-if="run?.parameters?.schemaVersion === 'eclipse-history-forecast-parameters/2'" :run="run" :history="history" :inspection="inspection" />
     <div v-if="hasUsableSummary" class="eclipse-comparison">
       <span>当前运行 #{{ run.id }}</span>
-      <el-select v-model="comparisonId" filterable clearable :loading="comparisonLoading" placeholder="选择同版本历史计算" aria-label="ECLIPSE 历史结果对比">
+      <el-select v-if="!forecastScenario" v-model="comparisonId" filterable clearable :loading="comparisonLoading" placeholder="选择同版本历史计算" aria-label="ECLIPSE 历史结果对比">
         <el-option v-for="item in comparisonOptions" :key="item.id" :value="item.id" :label="`运行 #${item.id} · ${item.createdAt || ''}`" />
       </el-select>
+      <span v-else>预测段独立显示；待确认 Restart 时间原点后再开放跨阶段对比</span>
       <span v-if="comparisonError" role="status">{{ comparisonError }}</span>
       <span v-else-if="comparison">实线：当前运行；虚线：历史运行。仅同单位序列可叠加。</span>
     </div>
@@ -631,7 +1330,7 @@ watch(() => filteredFieldRows.value.length, total => {
     <el-empty v-else class="result-panel result-empty" description="本次运行没有结构化 ECLIPSE 诊断消息" :image-size="56" />
     </section>
     <section id="eclipse-3d-result" class="result-anchor">
-      <EclipseGrid3D v-if="gridMetadata" :run-id="run?.id" :grid="gridMetadata" :fields="fieldRows" :artifacts="artifacts" :well-completions="scheduleCompletions" />
+      <EclipseGrid3D v-if="gridMetadata" :run="run" :run-id="run?.id" :grid="gridMetadata" :fields="fieldRows" :artifacts="artifacts" :well-completions="scheduleCompletions" @create-grid-field-run="emit('create-grid-field-run', $event)" @add-grid-batch-case="addGridBatchCase" />
       <section v-else class="result-panel result-capability-empty" aria-label="ECLIPSE 三维结果不可用">
         <div class="panel-heading"><div><span class="kicker">ECLIPSE 3D</span><h2>三维几何、井定位与场值编辑</h2><p>三维入口已保留，但本次 Run 没有发布可读取的 EGRID 网格。</p></div><el-tag type="warning">不可用</el-tag></div>
         <el-alert type="warning" :closable="false" :title="threeDReadinessDescription" />
@@ -670,7 +1369,7 @@ watch(() => filteredFieldRows.value.length, total => {
     </section>
 
     <section class="result-panel">
-      <div class="panel-heading"><div><h2>二进制场索引</h2><p>列出真实 EGRID、INIT、UNRST 中可读取的关键字和数据范围；当前运行 JSON 不展开网格场值。</p></div><span>{{ fieldRows.length }} 个字段</span></div>
+      <div class="panel-heading"><div><h2>二进制场索引</h2><p>列出真实 EGRID、INIT、UNRST、FUNRST 中可读取的关键字和数据范围；当前运行 JSON 不展开网格场值。</p></div><span>{{ fieldRows.length }} 个字段</span></div>
       <div v-if="fieldRows.length" class="field-index-toolbar">
         <el-select v-model="fieldFileFilter" filterable aria-label="筛选 ECLIPSE 二进制文件" placeholder="全部文件">
           <el-option value="all" label="全部文件" />
@@ -711,6 +1410,7 @@ watch(() => filteredFieldRows.value.length, total => {
 .diagnostic-note { color: #737a84; font-size: 12px; }
 .eclipse-comparison { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 10px; background: #f3f3f0; font-size: 12px; }
 .schedule-timeline-note { margin: 12px 0 0; color: #737a84; font-size: 12px; line-height: 1.6; }
+.forecast-provenance .scenario-metadata dd { overflow-wrap: anywhere; }
 .scenario-acceptance { padding: 14px; }.scenario-metadata { display: grid; grid-template-columns: repeat(5, minmax(110px, 1fr)); gap: 8px; margin: 0 0 12px; }.scenario-metadata div { padding: 8px 10px; background: #f5f7fa; }.scenario-metadata dt { color: #909399; font-size: 12px; }.scenario-metadata dd { margin: 3px 0 0; color: #303133; font-size: 13px; font-weight: 600; }.scenario-count-strip { display: grid; grid-template-columns: repeat(5, minmax(90px, 1fr)); margin-top: 12px; border: 1px solid #e8edf3; }.scenario-count-strip div { padding: 9px 11px; border-right: 1px solid #e8edf3; }.scenario-count-strip div:last-child { border-right: 0; }.scenario-count-strip span, .scenario-count-strip small { display: block; color: #737a84; font-size: 12px; }.scenario-count-strip strong { display: block; margin: 2px 0; color: #2b3d52; font-size: 18px; }.scenario-output-diff { margin-top: 12px; color: #606266; font-size: 12px; }.scenario-output-diff .el-table { margin-top: 7px; } @media (max-width: 900px) { .scenario-metadata { grid-template-columns: repeat(3, minmax(110px, 1fr)); } } @media (max-width: 600px) { .scenario-metadata, .scenario-count-strip { grid-template-columns: repeat(2, minmax(90px, 1fr)); }.scenario-count-strip div:nth-child(2n) { border-right: 0; } }
 .field-preview-notice { margin-top: 12px; }.field-preview { margin-top: 12px; padding-top: 12px; border-top: 1px solid #e5e7eb; }.field-preview-pagination, .field-index-pagination { justify-content: flex-end; margin-top: 10px; }.field-index-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }.field-index-toolbar .el-select { width: min(190px, 100%); }.field-index-toolbar .el-input { width: min(190px, 100%); }.field-index-toolbar > span { color: #737a84; font-size: 12px; }
 .eclipse-comparison .el-select { width: min(320px, 100%); }

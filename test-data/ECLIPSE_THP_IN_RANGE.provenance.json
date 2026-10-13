@@ -1,0 +1,10 @@
+{
+  "officialSource": "C:\\ecl\\2024.1\\eclipse\\data\\HORZWFRI.DATA",
+  "officialSha256": "812fcefb4fb9e28c5aa94d4d08ad53bd66a592e03fd43f171989c91309af6da7",
+  "sampleSha256": "1d7ac1ac9879710e0e48f6742c68d10a1f395995f8ff1a2f01e20f27628e8a9d",
+  "changes": [
+    "Replace SUMMARY requests only; preserve reservoir, fluid, horizontal completions, friction, VFP table 1, THP 500 psia, BHP limit 400 psia and original time steps.",
+    "Explicit GRID PERMX/PERMY 100 to 5 mD and PERMZ 10 to 0.5 mD across 504 cells, to create a separate lower-productivity reference with rates inside the original VFP axes. VFP, completions, friction, fluid, controls and time steps unchanged. Not an unmodified official example."
+  ],
+  "physicsAndScheduleUnchanged": false
+}

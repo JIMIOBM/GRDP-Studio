@@ -1,0 +1,22 @@
+{
+  "source": "C:\\ecl\\2024.1\\eclipse\\data\\BASE_WATER.DATA",
+  "sourceSha256": "329f86cf71d90b7920a6fc26404e228b4e617c78654e5ccf25640ae69e5047df",
+  "baseSample": "ECLIPSE_BASE_WATER_BHP.DATA",
+  "baseSha256": "790f82a438229f3a5c8a3089c642f191da5f686e0d45021a784316ec45714ea4",
+  "sample": "ECLIPSE_NEW_DATES.DATA",
+  "sampleSha256": "18f61bccdc01257f7984764acafadf5072adfe908140195147cb81fdb11b6070",
+  "physicsAndWellControlsUnchanged": true,
+  "startDate": "1996-01-01",
+  "endDate": "1996-04-10",
+  "changes": [
+    "SUMMARY DATE added for real calendar series.",
+    "Two 10*5 TSTEP blocks converted to equivalent midnight DATES; three report markers at 10/15/20 days omitted to create 5-25 day window. Total simulation length remains 100 days. No solver rates or limits changed."
+  ],
+  "scenario": {
+    "well": "P1",
+    "beforeDate": "1996-01-06",
+    "afterDate": "1996-01-26",
+    "shutDate": "1996-01-11",
+    "openDate": "1996-01-21"
+  }
+}

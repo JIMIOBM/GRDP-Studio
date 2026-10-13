@@ -1,0 +1,503 @@
+{
+  "metadata": {
+    "id": 3,
+    "modelVersionId": 177,
+    "baselineRunId": 553,
+    "name": "真实气体报告时刻验算（非现场实测）",
+    "sourceFile": "gas-clock-algorithm.csv",
+    "sourceSha256": "7ed23c4e688ac51a5d3e328c462573841df9b0c273c81d2b89e0cf5e04561e35",
+    "observationCount": 61,
+    "createdAt": "2026-10-13T02:14:53.853"
+  },
+  "csv": "well,keyword,unit,timeDays,value\r\nI,WGIT,MSCF,0,0\r\nI,WGIT,MSCF,1,200\r\nI,WGIT,MSCF,2.781773567199707,556.354736328125\r\nI,WGIT,MSCF,6.3908867835998535,1278.1773681640625\r\nI,WGIT,MSCF,10,2000\r\nI,WGIT,MSCF,20.369098663330078,4073.819580078125\r\nI,WGIT,MSCF,28.713682174682617,5742.736328125\r\nI,WGIT,MSCF,38.928550720214844,7785.7099609375\r\nI,WGIT,MSCF,58.12540054321289,11625.080078125\r\nI,WGIT,MSCF,73.025390625,14605.078125\r\nI,WGIT,MSCF,96.71941375732422,19343.8828125\r\nI,WGIT,MSCF,123.40023040771484,24680.046875\r\nI,WGIT,MSCF,149.4106903076172,29882.138671875\r\nI,WGIT,MSCF,182.7341766357422,36546.8359375\r\nI,WGIT,MSCF,219.33251953125,43866.50390625\r\nI,WGIT,MSCF,264.5641174316406,52912.8203125\r\nI,WGIT,MSCF,322.6971740722656,64539.43359375\r\nI,WGIT,MSCF,378.3599853515625,75672\r\nI,WGIT,MSCF,437.1197509765625,87423.9453125\r\nI,WGIT,MSCF,505.53155517578125,101106.3125\r\nI,WGIT,MSCF,574.203125,114840.6171875\r\nI,WGIT,MSCF,660.892333984375,132178.46875\r\nI,WGIT,MSCF,745.957763671875,149191.5625\r\nI,WGIT,MSCF,836.6346435546875,167326.9375\r\nI,WGIT,MSCF,928.6387329101562,185727.75\r\nI,WGIT,MSCF,1029.9063720703125,205981.265625\r\nI,WGIT,MSCF,1137.3507080078125,227470.140625\r\nI,WGIT,MSCF,1245.14453125,249028.921875\r\nI,WGIT,MSCF,1354.724853515625,270944.96875\r\nI,WGIT,MSCF,1471.8819580078125,294376.40625\r\nI,WGIT,MSCF,1602.2838134765625,320456.78125\r\nI,WGIT,MSCF,1729.8409423828125,345968.1875\r\nI,WGIT,MSCF,1860.767822265625,372153.5625\r\nI,WGIT,MSCF,2003.69921875,400739.84375\r\nI,WGIT,MSCF,2147.306640625,429461.3125\r\nI,WGIT,MSCF,2303.1162109375,460623.25\r\nI,WGIT,MSCF,2463.087646484375,492617.53125\r\nI,WGIT,MSCF,2637.358154296875,527471.625\r\nI,WGIT,MSCF,2818.678955078125,563735.8125\r\nI,WGIT,MSCF,2909.339599609375,581867.875\r\nI,WGIT,MSCF,3000,600000\r\nI,WGIT,MSCF,3010,600000\r\nI,WGIT,MSCF,3019.76123046875,600000\r\nI,WGIT,MSCF,3033.9951171875,600000\r\nI,WGIT,MSCF,3058.019775390625,600000\r\nI,WGIT,MSCF,3098.211181640625,600000\r\nI,WGIT,MSCF,3165.708984375,600000\r\nI,WGIT,MSCF,3241.562255859375,600000\r\nI,WGIT,MSCF,3333.905517578125,600000\r\nI,WGIT,MSCF,3453.176513671875,600000\r\nI,WGIT,MSCF,3605.4052734375,600000\r\nI,WGIT,MSCF,3766.0771484375,600000\r\nI,WGIT,MSCF,3960.4091796875,600000\r\nI,WGIT,MSCF,4186.0771484375,600000\r\nI,WGIT,MSCF,4427.384765625,600000\r\nI,WGIT,MSCF,4687.89013671875,600000\r\nI,WGIT,MSCF,4947.1064453125,600000\r\nI,WGIT,MSCF,5244.9921875,600000\r\nI,WGIT,MSCF,5590.267578125,600000\r\nI,WGIT,MSCF,5795.1337890625,600000\r\nI,WGIT,MSCF,6000,600000\r\n",
+  "observations": [
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 0.0,
+      "value": 0.0,
+      "sourceLine": 2
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 1.0,
+      "value": 200.0,
+      "sourceLine": 3
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 2.781773567199707,
+      "value": 556.354736328125,
+      "sourceLine": 4
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 6.3908867835998535,
+      "value": 1278.1773681640625,
+      "sourceLine": 5
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 10.0,
+      "value": 2000.0,
+      "sourceLine": 6
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 20.369098663330078,
+      "value": 4073.819580078125,
+      "sourceLine": 7
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 28.713682174682617,
+      "value": 5742.736328125,
+      "sourceLine": 8
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 38.928550720214844,
+      "value": 7785.7099609375,
+      "sourceLine": 9
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 58.12540054321289,
+      "value": 11625.080078125,
+      "sourceLine": 10
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 73.025390625,
+      "value": 14605.078125,
+      "sourceLine": 11
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 96.71941375732422,
+      "value": 19343.8828125,
+      "sourceLine": 12
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 123.40023040771484,
+      "value": 24680.046875,
+      "sourceLine": 13
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 149.4106903076172,
+      "value": 29882.138671875,
+      "sourceLine": 14
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 182.7341766357422,
+      "value": 36546.8359375,
+      "sourceLine": 15
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 219.33251953125,
+      "value": 43866.50390625,
+      "sourceLine": 16
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 264.5641174316406,
+      "value": 52912.8203125,
+      "sourceLine": 17
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 322.6971740722656,
+      "value": 64539.43359375,
+      "sourceLine": 18
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 378.3599853515625,
+      "value": 75672.0,
+      "sourceLine": 19
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 437.1197509765625,
+      "value": 87423.9453125,
+      "sourceLine": 20
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 505.53155517578125,
+      "value": 101106.3125,
+      "sourceLine": 21
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 574.203125,
+      "value": 114840.6171875,
+      "sourceLine": 22
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 660.892333984375,
+      "value": 132178.46875,
+      "sourceLine": 23
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 745.957763671875,
+      "value": 149191.5625,
+      "sourceLine": 24
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 836.6346435546875,
+      "value": 167326.9375,
+      "sourceLine": 25
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 928.6387329101562,
+      "value": 185727.75,
+      "sourceLine": 26
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 1029.9063720703125,
+      "value": 205981.265625,
+      "sourceLine": 27
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 1137.3507080078125,
+      "value": 227470.140625,
+      "sourceLine": 28
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 1245.14453125,
+      "value": 249028.921875,
+      "sourceLine": 29
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 1354.724853515625,
+      "value": 270944.96875,
+      "sourceLine": 30
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 1471.8819580078125,
+      "value": 294376.40625,
+      "sourceLine": 31
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 1602.2838134765625,
+      "value": 320456.78125,
+      "sourceLine": 32
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 1729.8409423828125,
+      "value": 345968.1875,
+      "sourceLine": 33
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 1860.767822265625,
+      "value": 372153.5625,
+      "sourceLine": 34
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 2003.69921875,
+      "value": 400739.84375,
+      "sourceLine": 35
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 2147.306640625,
+      "value": 429461.3125,
+      "sourceLine": 36
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 2303.1162109375,
+      "value": 460623.25,
+      "sourceLine": 37
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 2463.087646484375,
+      "value": 492617.53125,
+      "sourceLine": 38
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 2637.358154296875,
+      "value": 527471.625,
+      "sourceLine": 39
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 2818.678955078125,
+      "value": 563735.8125,
+      "sourceLine": 40
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 2909.339599609375,
+      "value": 581867.875,
+      "sourceLine": 41
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 3000.0,
+      "value": 600000.0,
+      "sourceLine": 42
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 3010.0,
+      "value": 600000.0,
+      "sourceLine": 43
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 3019.76123046875,
+      "value": 600000.0,
+      "sourceLine": 44
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 3033.9951171875,
+      "value": 600000.0,
+      "sourceLine": 45
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 3058.019775390625,
+      "value": 600000.0,
+      "sourceLine": 46
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 3098.211181640625,
+      "value": 600000.0,
+      "sourceLine": 47
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 3165.708984375,
+      "value": 600000.0,
+      "sourceLine": 48
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 3241.562255859375,
+      "value": 600000.0,
+      "sourceLine": 49
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 3333.905517578125,
+      "value": 600000.0,
+      "sourceLine": 50
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 3453.176513671875,
+      "value": 600000.0,
+      "sourceLine": 51
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 3605.4052734375,
+      "value": 600000.0,
+      "sourceLine": 52
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 3766.0771484375,
+      "value": 600000.0,
+      "sourceLine": 53
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 3960.4091796875,
+      "value": 600000.0,
+      "sourceLine": 54
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 4186.0771484375,
+      "value": 600000.0,
+      "sourceLine": 55
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 4427.384765625,
+      "value": 600000.0,
+      "sourceLine": 56
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 4687.89013671875,
+      "value": 600000.0,
+      "sourceLine": 57
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 4947.1064453125,
+      "value": 600000.0,
+      "sourceLine": 58
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 5244.9921875,
+      "value": 600000.0,
+      "sourceLine": 59
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 5590.267578125,
+      "value": 600000.0,
+      "sourceLine": 60
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 5795.1337890625,
+      "value": 600000.0,
+      "sourceLine": 61
+    },
+    {
+      "well": "I",
+      "keyword": "WGIT",
+      "unit": "MSCF",
+      "timeDays": 6000.0,
+      "value": 600000.0,
+      "sourceLine": 62
+    }
+  ]
+}

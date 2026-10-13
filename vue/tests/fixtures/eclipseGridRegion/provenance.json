@@ -1,0 +1,15 @@
+{
+  "source": "Official TRACERDISPERS based water sample, native E100 output from Run436. Static metadata subset only; all retained field sizes/segments/data unchanged.",
+  "files": [
+    {
+      "name": "ECLIPSE_PERMX_WATER.INIT",
+      "sha256": "ba815a88154eac8b4e42e3270d8c2a8d8fe388103040629a018f9dd8a30955e5",
+      "sizeBytes": 27340
+    },
+    {
+      "name": "ECLIPSE_PERMX_WATER.EGRID",
+      "sha256": "f2d10823871dacaa4e045cc2353bc96c84433fbbe548f4d5de0b3c086f0ec82b",
+      "sizeBytes": 15364
+    }
+  ]
+}

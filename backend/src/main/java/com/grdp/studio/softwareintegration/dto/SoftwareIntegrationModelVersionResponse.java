@@ -19,7 +19,7 @@ public record SoftwareIntegrationModelVersionResponse(
         List<String> studies = entity.getStudiesJson() == null || entity.getStudiesJson().isBlank()
                 ? List.of() : Arrays.stream(entity.getStudiesJson().split("\\n"))
                 .map(SoftwareIntegrationDiagnosticSanitizer::sanitize).toList();
-        JsonNode inspection = "READY".equals(entity.getStatus()) && "eclipse_100".equals(entity.getModelKind())
+        JsonNode inspection = "READY".equals(entity.getStatus()) && ("eclipse_100".equals(entity.getModelKind()) || "eclipse_300".equals(entity.getModelKind()))
                 ? EclipseDataInspectionValidator.parsePersisted(entity.getInspectionJson()) : null;
         if ("READY".equals(entity.getStatus()) && PipesimWellInspectionValidator.supports(entity.getModelKind())) {
             inspection = PipesimWellInspectionValidator.parsePersisted(entity.getInspectionJson());

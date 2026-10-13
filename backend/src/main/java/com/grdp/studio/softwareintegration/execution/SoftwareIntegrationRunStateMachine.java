@@ -24,6 +24,8 @@ public final class SoftwareIntegrationRunStateMachine {
                 SoftwareIntegrationRunStatus.FAILED, SoftwareIntegrationRunStatus.WORKER_LOST);
         allow(SoftwareIntegrationRunStatus.RUNNING_PROFILE, SoftwareIntegrationRunStatus.COLLECTING,
                 SoftwareIntegrationRunStatus.CANCEL_REQUESTED, SoftwareIntegrationRunStatus.FAILED, SoftwareIntegrationRunStatus.WORKER_LOST);
+        allow(SoftwareIntegrationRunStatus.APPLYING_TRAJECTORY, SoftwareIntegrationRunStatus.CANCEL_REQUESTED,
+                SoftwareIntegrationRunStatus.FAILED, SoftwareIntegrationRunStatus.WORKER_LOST);
         allow(SoftwareIntegrationRunStatus.RUNNING_NETWORK, SoftwareIntegrationRunStatus.COLLECTING,
                 SoftwareIntegrationRunStatus.CANCEL_REQUESTED, SoftwareIntegrationRunStatus.FAILED, SoftwareIntegrationRunStatus.WORKER_LOST);
         allow(SoftwareIntegrationRunStatus.RUNNING_ECLIPSE, SoftwareIntegrationRunStatus.COLLECTING,
@@ -43,9 +45,18 @@ public final class SoftwareIntegrationRunStateMachine {
     }
 
     public static boolean allows(SoftwareIntegrationRunStatus from, SoftwareIntegrationRunStatus to, String runType) {
-        return ("esp-curves".equals(runType)
+        return (("esp-curves".equals(runType) || "esp-parameter".equals(runType))
                 && from == SoftwareIntegrationRunStatus.RUNNING_PROFILE
                 && to == SoftwareIntegrationRunStatus.RUNNING_NODAL)
+                || ("esp-parameter".equals(runType)
+                && from == SoftwareIntegrationRunStatus.RUNNING_NODAL
+                && to == SoftwareIntegrationRunStatus.RUNNING_PROFILE)
+                || ("trajectory".equals(runType)
+                && from == SoftwareIntegrationRunStatus.RUNNING_PROFILE
+                && to == SoftwareIntegrationRunStatus.APPLYING_TRAJECTORY)
+                || ("trajectory".equals(runType)
+                && from == SoftwareIntegrationRunStatus.APPLYING_TRAJECTORY
+                && to == SoftwareIntegrationRunStatus.RUNNING_PROFILE)
                 || allows(from, to);
     }
 

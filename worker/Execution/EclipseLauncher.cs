@@ -17,13 +17,21 @@ public sealed class EclipseLauncher
     private string Launcher => string.IsNullOrWhiteSpace(options.EclrunPath) ? "eclrun.exe" : options.EclrunPath;
 
     public async Task<EclipseCapability> GetCapabilityAsync(CancellationToken cancellationToken)
+        => await GetCapabilityAsync(100, cancellationToken);
+
+    public async Task<EclipseCapability> GetCapabilityAsync(int solver, CancellationToken cancellationToken)
     {
-        var query = await InvokeAsync(["--report-versions", "eclipse"], Environment.CurrentDirectory, TimeSpan.FromSeconds(10), cancellationToken);
+        var query = await InvokeAsync(["--report-versions", SolverCommand(solver)], Environment.CurrentDirectory, TimeSpan.FromSeconds(10), cancellationToken);
         return new(query.Error is null, query.Error is null && query.ExitCode == 0 && EclipseRunRules.IsSupportedVersion(query.Diagnostics));
     }
 
     public Task<EclipseLaunchResult> RunAsync(string caseFile, string workDirectory, TimeSpan timeout, CancellationToken cancellationToken) =>
         InvokeAsync(["-v", "2024.1", "eclipse", caseFile], workDirectory, timeout, cancellationToken);
+
+    public Task<EclipseLaunchResult> RunAsync(int solver, string caseFile, string workDirectory, TimeSpan timeout, CancellationToken cancellationToken) =>
+        InvokeAsync(["-v", "2024.1", SolverCommand(solver), caseFile], workDirectory, timeout, cancellationToken);
+
+    private static string SolverCommand(int solver) => solver switch { 100 => "eclipse", 300 => "e300", _ => throw new ArgumentOutOfRangeException(nameof(solver)) };
 
     public async Task<EclipseLaunchResult> CleanupAsync(string caseFile, string workDirectory, bool cancelled, CancellationToken cancellationToken)
     {

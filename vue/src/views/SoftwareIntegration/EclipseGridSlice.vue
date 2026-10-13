@@ -1,6 +1,7 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { softwareIntegrationApi } from '@/api/softwareIntegration'
+import { createFieldRequestGate, snapshotField, snapshotRangeContext } from './eclipseFieldRequest'
 
 const props = defineProps({
   runId: { type: [Number, String], default: null },
@@ -22,6 +23,7 @@ const layer = ref(1)
 const loading = ref(false)
 const error = ref('')
 const slice = ref(null)
+const sliceRequests = createFieldRequestGate()
 
 const totalCells = computed(() => {
   const grid = props.grid
@@ -51,8 +53,8 @@ const sliceScale = computed(() => {
   if (!values.length) return null
   return values.reduce((scale, value) => ({ min: Math.min(scale.min, value), max: Math.max(scale.max, value) }), { min: values[0], max: values[0] })
 })
-const fieldKey = field => `${field.file}:${field.keyword}:${field.dataType}:${field.segments?.[0]?.offset ?? 0}`
-const fieldArtifact = field => props.artifacts.find(artifact => artifact?.name === `eclipse-output-${field.file}` &&
+const fieldKey = field => `${field.file}:${field.keyword}:${field.dataType}:${field.timeStep ?? 'static'}:${field.segments?.[0]?.offset ?? 0}`
+const fieldArtifact = (field, artifacts) => artifacts.find(artifact => artifact?.name === `eclipse-output-${field.file}` &&
   artifact?.contentType === 'application/octet-stream' && Number.isSafeInteger(artifact.id) && artifact.id > 0)
 const decode = (bytes, field) => {
   const values = []
@@ -65,8 +67,8 @@ const decode = (bytes, field) => {
   }
   return values
 }
-const readValues = async (field, startValue, valueCount) => {
-  const artifact = fieldArtifact(field)
+const readValues = async (field, startValue, valueCount, context, isCurrent) => {
+  const artifact = fieldArtifact(field, context.artifacts)
   if (!artifact) throw new Error('对应的 ECLIPSE 二进制 Artifact 不可用。')
   const values = []
   let skippedValues = startValue
@@ -87,9 +89,12 @@ const readValues = async (field, startValue, valueCount) => {
       )
       const offset = segment.offset + segmentValueOffset * field.elementSize
       const length = chunkValues * field.elementSize
-      const payload = await softwareIntegrationApi.downloadArtifactRange(props.runId, artifact.id, offset, length)
+      if (!isCurrent()) return []
+      const payload = await softwareIntegrationApi.downloadArtifactRange(context.runId, artifact.id, offset, length)
       const blob = payload instanceof Blob ? payload : new Blob([payload])
-      values.push(...decode(new Uint8Array(await blob.arrayBuffer()), field))
+      const bytes = new Uint8Array(await blob.arrayBuffer())
+      if (!isCurrent()) return []
+      values.push(...decode(bytes, field))
       segmentValueOffset += chunkValues
       remainingValues -= chunkValues
     }
@@ -99,41 +104,52 @@ const readValues = async (field, startValue, valueCount) => {
   return values
 }
 const loadSlice = async () => {
-  const field = selectedField.value
-  const grid = props.grid
-  if (!props.runId || !field || !grid || !totalCells.value || layer.value < 1 || layer.value > grid.nz) return
+  const isCurrent = sliceRequests.begin()
+  const field = snapshotField(selectedField.value)
+  const grid = props.grid ? { ...props.grid } : null
+  const context = snapshotRangeContext(props.runId, props.artifacts)
+  const selectedLayer = layer.value
+  const cellCount = totalCells.value
+  const cellsPerLayer = layerCells.value
+  const actnumIndex = snapshotField(actnumField.value)
+  loading.value = false
+  slice.value = null
+  error.value = ''
+  if (!context.runId || !field || !grid || !cellCount || selectedLayer < 1 || selectedLayer > grid.nz) return
   loading.value = true
   error.value = ''
   slice.value = null
   try {
-    const layerStart = (layer.value - 1) * layerCells.value
+    const layerStart = (selectedLayer - 1) * cellsPerLayer
     let values
     let activeMask = null
-    if (field.count === totalCells.value) {
-      values = await readValues(field, layerStart, layerCells.value)
+    if (field.count === cellCount) {
+      values = await readValues(field, layerStart, cellsPerLayer, context, isCurrent)
     } else {
-      if (!actnumField.value || layerStart + layerCells.value > MAX_ACTNUM_VALUES) {
+      if (!actnumIndex || layerStart + cellsPerLayer > MAX_ACTNUM_VALUES) {
         throw new Error('该字段使用活动单元压缩格式，当前网格规模暂不支持安全切片。')
       }
-      const actnum = await readValues(actnumField.value, 0, layerStart + layerCells.value)
-      activeMask = actnum.slice(layerStart, layerStart + layerCells.value).map(value => value > 0)
+      const actnum = await readValues(actnumIndex, 0, layerStart + cellsPerLayer, context, isCurrent)
+      if (!isCurrent()) return
+      activeMask = actnum.slice(layerStart, layerStart + cellsPerLayer).map(value => value > 0)
       const activeBefore = actnum.slice(0, layerStart).filter(value => value > 0).length
       const activeInLayer = activeMask.filter(Boolean).length
-      const compressed = await readValues(field, activeBefore, activeInLayer)
+      const compressed = await readValues(field, activeBefore, activeInLayer, context, isCurrent)
       values = []
       let cursor = 0
       activeMask.forEach(isActive => { values.push(isActive ? compressed[cursor++] : null) })
     }
+    if (!isCurrent()) return
     const rows = values.map((value, index) => ({
       i: index % grid.nx + 1,
       j: Math.floor(index / grid.nx) + 1,
       value: value === null || (typeof value === 'number' && !Number.isFinite(value)) ? null : value
     }))
-    slice.value = { field, layer: layer.value, rows, activeCount: rows.filter(row => row.value !== null).length }
+    slice.value = { field, layer: selectedLayer, rows, activeCount: rows.filter(row => row.value !== null).length }
   } catch (exception) {
-    error.value = exception?.message || 'ECLIPSE 网格层切片读取失败。'
+    if (isCurrent()) error.value = exception?.message || 'ECLIPSE 网格层切片读取失败。'
   } finally {
-    loading.value = false
+    if (isCurrent()) loading.value = false
   }
 }
 const interpolateColor = (from, to, ratio) => {
@@ -184,6 +200,13 @@ watch(() => [props.runId, props.grid], () => {
   slice.value = null
   error.value = ''
 }, { deep: true })
+watch(() => [props.runId, props.grid, props.fields, props.artifacts, props.timeStep, selectedFieldKey.value, layer.value], () => {
+  sliceRequests.invalidate()
+  slice.value = null
+  error.value = ''
+  loading.value = false
+}, { deep: true, flush: 'sync' })
+onBeforeUnmount(() => { sliceRequests.dispose() })
 </script>
 
 <template>

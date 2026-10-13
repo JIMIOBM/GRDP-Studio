@@ -1,0 +1,130 @@
+{
+  "dataset": {
+    "id": 1,
+    "modelVersionId": 179,
+    "baselineRunId": 570,
+    "name": "算法验算样例（非现场实测）",
+    "sourceFile": "ECLIPSE_HISTORY_ALGORITHM_SAMPLE.csv",
+    "sourceSha256": "5f1370c1dc3457e6bcfdf73cbcc22e8f1cf2bff4fb5eb9056bf623800f01d3d1",
+    "observationCount": 6,
+    "createdAt": "2026-10-13T02:03:59.128"
+  },
+  "runId": 594,
+  "comparison": {
+    "points": [
+      {
+        "well": "P1",
+        "keyword": "WOPR",
+        "unit": "STB/DAY",
+        "timeDays": 5.0,
+        "observed": 4994.2900390625,
+        "simulated": 4998.04931640625,
+        "difference": 3.75927734375,
+        "sourceLine": 2,
+        "reason": ""
+      },
+      {
+        "well": "P1",
+        "keyword": "WOPR",
+        "unit": "STB/DAY",
+        "timeDays": 100.0,
+        "observed": 788.87451171875,
+        "simulated": 787.296142578125,
+        "difference": -1.578369140625,
+        "sourceLine": 3,
+        "reason": ""
+      },
+      {
+        "well": "P1",
+        "keyword": "WOPR",
+        "unit": "STB/DAY",
+        "timeDays": 102.5,
+        "observed": 800.0,
+        "simulated": null,
+        "difference": null,
+        "sourceLine": 4,
+        "reason": "没有同一报告时刻"
+      },
+      {
+        "well": "P1",
+        "keyword": "WBHP",
+        "unit": "PSIA",
+        "timeDays": 5.0,
+        "observed": 3658.781005859375,
+        "simulated": 3608.197998046875,
+        "difference": -50.5830078125,
+        "sourceLine": 5,
+        "reason": ""
+      },
+      {
+        "well": "P1",
+        "keyword": "WBHP",
+        "unit": "PSIA",
+        "timeDays": 100.0,
+        "observed": 2980.0,
+        "simulated": 3000.0,
+        "difference": 20.0,
+        "sourceLine": 6,
+        "reason": ""
+      },
+      {
+        "well": "P1",
+        "keyword": "WWPR",
+        "unit": "STB/DAY",
+        "timeDays": 100.0,
+        "observed": 0.0,
+        "simulated": 0.6931211352348328,
+        "difference": 0.6931211352348328,
+        "sourceLine": 7,
+        "reason": ""
+      }
+    ],
+    "metrics": [
+      {
+        "well": "P1",
+        "keyword": "WOPR",
+        "unit": "STB/DAY",
+        "observedCount": 3,
+        "matchedCount": 2,
+        "missingCount": 1,
+        "coverage": 0.6666666666666666,
+        "mae": 2.6688232421875,
+        "rmse": 2.8830032337225497,
+        "bias": 1.0904541015625,
+        "mape": 0.13767505709191702,
+        "mapeCount": 2,
+        "mapeOverflowCount": 0
+      },
+      {
+        "well": "P1",
+        "keyword": "WBHP",
+        "unit": "PSIA",
+        "observedCount": 2,
+        "matchedCount": 2,
+        "missingCount": 0,
+        "coverage": 1.0,
+        "mae": 35.29150390625,
+        "rmse": 38.46193364457536,
+        "bias": -15.29150390625,
+        "mape": 1.026825395025032,
+        "mapeCount": 2,
+        "mapeOverflowCount": 0
+      },
+      {
+        "well": "P1",
+        "keyword": "WWPR",
+        "unit": "STB/DAY",
+        "observedCount": 1,
+        "matchedCount": 1,
+        "missingCount": 0,
+        "coverage": 1.0,
+        "mae": 0.6931211352348328,
+        "rmse": 0.6931211352348328,
+        "bias": 0.6931211352348328,
+        "mape": null,
+        "mapeCount": 0,
+        "mapeOverflowCount": 0
+      }
+    ]
+  }
+}

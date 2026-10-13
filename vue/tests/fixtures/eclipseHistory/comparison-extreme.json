@@ -1,0 +1,45 @@
+{
+  "dataset": {
+    "id": 4,
+    "modelVersionId": 179,
+    "baselineRunId": 570,
+    "name": "极端百分比算法验算",
+    "sourceFile": "extreme-algorithm.csv",
+    "sourceSha256": "b73f2b5d59b2eebbcca4a8b9ebf6965bb470e53f3d111d534359179ae5abfe16",
+    "observationCount": 1,
+    "createdAt": "2026-10-13T02:14:54.474"
+  },
+  "runId": 570,
+  "comparison": {
+    "points": [
+      {
+        "well": "P1",
+        "keyword": "WOPR",
+        "unit": "STB/DAY",
+        "timeDays": 5.0,
+        "observed": 1e-308,
+        "simulated": 4996.2900390625,
+        "difference": 4996.2900390625,
+        "sourceLine": 2,
+        "reason": ""
+      }
+    ],
+    "metrics": [
+      {
+        "well": "P1",
+        "keyword": "WOPR",
+        "unit": "STB/DAY",
+        "observedCount": 1,
+        "matchedCount": 1,
+        "missingCount": 0,
+        "coverage": 1.0,
+        "mae": 4996.2900390625,
+        "rmse": 4996.2900390625,
+        "bias": 4996.2900390625,
+        "mape": null,
+        "mapeCount": 1,
+        "mapeOverflowCount": 1
+      }
+    ]
+  }
+}

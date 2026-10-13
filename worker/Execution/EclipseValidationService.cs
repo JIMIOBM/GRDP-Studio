@@ -20,9 +20,11 @@ public sealed class EclipseValidationService
             try
             {
                 if (await storage.ComputeSha256Async(directories.ModelCopy, cancellationToken) != request.ExpectedSha256) return new(422, WorkerApiError.Storage("MODEL_COPY_SHA256_MISMATCH", "The validation model copy failed SHA-256 verification."));
-                packages.Resolve(directories.ModelCopy, directories.Input);
-                var capability = await launcher.GetCapabilityAsync(cancellationToken);
-                return capability.Available ? new(200, new ModelValidationResponse("READY", [], "ECLIPSE 100 deck validated.", "eclipse_100")) : new(503, new ModelValidationResponse("ENVIRONMENT_ERROR", [], "ECLIPSE launcher is unavailable.", Error: new WorkerError("ENVIRONMENT", "ECLIPSE_UNAVAILABLE", "ECLIPSE launcher is unavailable.", true)));
+                var package = packages.Resolve(directories.ModelCopy, directories.Input);
+                var simulation = EclipseSimulationModelReader.Read(package);
+                var solver = simulation?.Solver ?? 100;
+                var capability = await launcher.GetCapabilityAsync(solver, cancellationToken);
+                return capability.Available ? new(200, new ModelValidationResponse("READY", [], $"ECLIPSE {solver} deck validated.", solver == 300 ? "eclipse_300" : "eclipse_100")) : new(503, new ModelValidationResponse("ENVIRONMENT_ERROR", [], "ECLIPSE launcher is unavailable.", Error: new WorkerError("ENVIRONMENT", "ECLIPSE_UNAVAILABLE", "ECLIPSE launcher is unavailable.", true)));
             }
             finally { StorageResolver.TryDeleteDirectory(directories.Root); }
         }

@@ -1,0 +1,39 @@
+{
+  "source": "C:\\ecl\\2024.1\\eclipse\\data\\BIG3D3P.DATA",
+  "sourceSha256": "940a5e181cc9dc65b4d8ff2ae9ffed21547c94a69057a5a5605aeade27fc8a1a",
+  "seed": "C:\\Users\\Violet\\Desktop\\Bei\\GRDP-Studio\\test-data\\ECLIPSE_GROUP_PRODUCTION.DATA",
+  "seedSha256": "057e9672f369c0ae5c444b4ff200fb81d862b35bae1cb61ce9933c05e59da463",
+  "seedUnchanged": true,
+  "originalOfficialModel": false,
+  "sampleSha256": "b2dd92c32892e32d45497a02c9a18c2eb324583332628502d91e5233238e55b7",
+  "kind": "tree",
+  "parentGroup": "P",
+  "leafGroups": [
+    "GA",
+    "GB"
+  ],
+  "members": [
+    "PRODUCR1",
+    "PRODUCR2",
+    "PRODUCR3",
+    "PRODUCR4"
+  ],
+  "nativeBaseline": "C:\\GRDP-TestOutput\\ECLIPSE-P03-GROUP-STRUCTURE-probe-a2\\tree-baseline\\CASE.DATA",
+  "nativeByteEquivalent": true,
+  "changes": [
+    "Seed derivations retained; see ECLIPSE_GROUP_PRODUCTION.provenance.json.",
+    "Existing PRODUCR1/2 reassigned GA, PRODUCR3/4 GB, GRUPTREE declares GA/GB under P; no added wells.",
+    "Group capacity increased2 to10; geometry/completions/reservoir/fluid/initialization and all other well controls unchanged.",
+    "Parent ORAT2000 and explicit leafFLD; complete10*365 days retained.",
+    "SUMMARY requests parent/leaf/well oil rates and totals, BHP and efficiency product."
+  ],
+  "baselineTarget": 2000,
+  "positiveTarget": 1000,
+  "editedObject": "P",
+  "limitedTarget": 100000,
+  "bhpLowerLimit": 2500,
+  "oilRateUpperLimit": 20000,
+  "unit": "STB/day",
+  "manualUiVerified": false,
+  "limitations": "E100 FIELD native reference; delivered group-structure subset awaits human acceptance. Deep trees, formula guides, multiplied efficiency and extra constraints remain unsupported. High-target partial and convergence-problem cases remain preserved; original warnings retained."
+}

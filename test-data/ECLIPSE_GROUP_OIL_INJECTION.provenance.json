@@ -1,0 +1,37 @@
+{
+  "source": "C:\\ecl\\2024.1\\eclipse\\data\\BIG3D3P.DATA",
+  "sourceSha256": "940a5e181cc9dc65b4d8ff2ae9ffed21547c94a69057a5a5605aeade27fc8a1a",
+  "seed": "C:\\Users\\Violet\\Desktop\\Bei\\GRDP-Studio\\test-data\\ECLIPSE_GROUP_GAS_INJECTION.DATA",
+  "seedSha256": "636793487195691b612abc0042b85036ff5bc9d364179bf7b632878592dc668c",
+  "seedUnchanged": true,
+  "originalOfficialModel": false,
+  "sampleSha256": "7d52648842589275c3a14d1622f1223781e17defa52ea81b68f1956d7480a73e",
+  "mode": "RATE",
+  "injectionPhase": "OIL",
+  "group": "I",
+  "members": [
+    "INJECTR1",
+    "INJECTR2",
+    "INJECTR3",
+    "INJECTR4"
+  ],
+  "referenceGroup": null,
+  "referenceMembers": [],
+  "baselineTarget": 5000,
+  "positiveTarget": 2500,
+  "limitedTarget": 100000,
+  "bhpUpperLimit": 4900,
+  "surfaceRateUpperLimit": 50000,
+  "unit": "STB/day",
+  "changes": [
+    "All seed derivations retained; see ECLIPSE_GROUP_GAS_INJECTION.provenance.json (explicit BHP4900 and separate water group).",
+    "SUMMARY additionally requests complete injection surface/reservoir group and member flows, source production group/member flows, and BHP.",
+    "OIL/RATE only: existing four injector types and preferred phase GAS -> OIL; existing surface limit50000 now has oil units STB/day. This is an explicit derived injection scenario, not a phase-neutral edit.",
+    "Group mode explicitly derived as RATE, target 5000.",
+    "No new wells or completion edits. Reservoir, fluid, initial conditions, other well controls and 10*365 report days unchanged."
+  ],
+  "nativeBaseline": "C:\\GRDP-TestOutput\\ECLIPSE-P03-ADVANCED-INJECTION-probe-a3\\OIL-RATE\\baseline\\CASE.DATA",
+  "nativeByteEquivalent": true,
+  "manualUiVerified": false,
+  "limitations": "E100 only; these are demonstrators, not field recommended targets. Source warnings retained. Higher targets may be constrained. Original0.5 fraction probes retained separately."
+}

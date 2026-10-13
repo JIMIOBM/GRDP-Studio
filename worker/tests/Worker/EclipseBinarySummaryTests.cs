@@ -18,7 +18,7 @@ public sealed class EclipseBinarySummaryTests
             File.WriteAllBytes(smspec, Section("FILEHEAD", Array.Empty<byte>())
                 .Concat(Section("KEYWORDS", Strings("TIME", "FOPR")))
                 .Concat(Section("WGNAMES", Strings(":+:+:+:+", "FIELD")))
-                .Concat(Section("UNITS", Strings("DAYS", "STB/DAY"))).ToArray());
+                .Concat(Section("UNITS", Strings("  DAYS", "STB/DAY"))).ToArray());
             File.WriteAllBytes(unsmry, Section("SEQHDR", Ints(1))
                 .Concat(Section("PARAMS", Floats(0, 12.5f)))
                 .Concat(Section("MINISTEP", Ints(1, 1)))
@@ -85,9 +85,54 @@ public sealed class EclipseBinarySummaryTests
         finally { Directory.Delete(root, true); }
     }
 
+    [Theory]
+    [InlineData("YEARS", "YEARS")]
+    [InlineData("TIME", "YEARS")]
+    [InlineData("FOPR", "DAYS")]
+    public void RejectsAbsentOrNonDayTimeAxesRatherThanInventingDays(string axis, string unit)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "grdp-eclipse-binary-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var spec = Path.Combine(root, "CASE.SMSPEC");
+            var data = Path.Combine(root, "CASE.UNSMRY");
+            File.WriteAllBytes(spec, Section("KEYWORDS", Strings(axis, "FOPR"))
+                .Concat(Section("WGNAMES", Strings("FIELD", "FIELD")))
+                .Concat(Section("UNITS", Strings(unit, "STB/DAY"))).ToArray());
+            File.WriteAllBytes(data, Section("PARAMS", Floats(1, 12.5f)));
+            Assert.Throws<InvalidDataException>(() => EclipseBinarySummaryParser.Parse(spec, data));
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public void OfficialBlankDimensionlessUnitsRemainNullWithoutDiscardingOtherSeries()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "grdp-eclipse-binary-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var spec = Path.Combine(root, "CASE.SMSPEC");
+            var data = Path.Combine(root, "CASE.UNSMRY");
+            File.WriteAllBytes(spec, Section("KEYWORDS", Strings("TIME", "WWCT"))
+                .Concat(Section("WGNAMES", Strings("FIELD", "G1")))
+                .Concat(Section("UNITS", Strings("DAYS", ""))).ToArray());
+            File.WriteAllBytes(data, Section("PARAMS", Floats(1, 0.25f)));
+            var result = EclipseBinarySummaryParser.Parse(spec, data);
+            Assert.Null(Assert.Single(result).Unit);
+            Assert.True(EclipseParsers.IsPublishableSummary(result));
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
     private static byte[] Section(string keyword, byte[] data)
     {
-        return Record(Encoding.ASCII.GetBytes(keyword.PadRight(8)[..8]).Concat(data).ToArray());
+        var type = keyword is "KEYWORDS" or "WGNAMES" or "UNITS" ? "CHAR" : keyword == "PARAMS" ? "REAL" : "INTE";
+        var size = type == "CHAR" ? 8 : 4;
+        var header = Encoding.ASCII.GetBytes(keyword.PadRight(8)[..8]).Concat(Ints(data.Length / size))
+            .Concat(Encoding.ASCII.GetBytes(type)).ToArray();
+        return data.Length == 0 ? Record(header) : Record(header).Concat(Record(data)).ToArray();
     }
 
     private static byte[] Strings(params string[] values) => values.SelectMany(value => Encoding.ASCII.GetBytes(value.PadRight(8)[..8])).ToArray();

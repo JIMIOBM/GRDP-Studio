@@ -19,6 +19,78 @@ public sealed class EclipseScheduleScenarioTests
     }
 
     [Fact]
+    public async Task ForecastRestartBindingMustMatchTheSelectedDataDeclaration()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "grdp-eclipse-scenario-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var forecast = Path.Combine(root, "EX3_PRED.DATA");
+            await File.WriteAllTextAsync(forecast,
+                "SOLUTION\n-- RESTART 'COMMENT_ONLY' 9 /\nRESTART\n 'EX3' 14 /\n/\n",
+                TestContext.Current.CancellationToken);
+            using var valid = JsonDocument.Parse("{\"schemaVersion\":\"eclipse-history-forecast-parameters/1\",\"historyRunId\":88,\"forecastDataFile\":\"EX3_PRED.DATA\",\"restartArtifactName\":\"eclipse-output-EX3.FUNRST\",\"restartArtifactSha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"restartReport\":14}");
+            using var wrongReport = JsonDocument.Parse("{\"schemaVersion\":\"eclipse-history-forecast-parameters/1\",\"historyRunId\":88,\"forecastDataFile\":\"EX3_PRED.DATA\",\"restartArtifactName\":\"eclipse-output-EX3.FUNRST\",\"restartArtifactSha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"restartReport\":41}");
+            Assert.True(EclipseHistoryForecastParameters.TryParse(valid.RootElement, out var validParameters));
+            Assert.True(EclipseHistoryForecastParameters.TryParse(wrongReport.RootElement, out var wrongReportParameters));
+            var package = new EclipseDeckPackage(forecast, root, [forecast]);
+
+            EclipseHistoryForecastParameters.ValidateRestartBinding(package, validParameters!);
+            var mismatch = Assert.Throws<EclipseDeckPackageException>(() =>
+                EclipseHistoryForecastParameters.ValidateRestartBinding(package, wrongReportParameters!));
+
+            Assert.Equal("ECLIPSE_FORECAST_RESTART_MISMATCH", mismatch.Code);
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public async Task ForecastRestartBindingRejectsAmbiguousDeclarations()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "grdp-eclipse-scenario-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var forecast = Path.Combine(root, "EX3_PRED.DATA");
+            await File.WriteAllTextAsync(forecast, "SOLUTION\nRESTART 'EX3' 14 /\nRESTART 'EX3' 15 /\n", TestContext.Current.CancellationToken);
+            using var parametersJson = JsonDocument.Parse("{\"schemaVersion\":\"eclipse-history-forecast-parameters/1\",\"historyRunId\":88,\"forecastDataFile\":\"EX3_PRED.DATA\",\"restartArtifactName\":\"eclipse-output-EX3.FUNRST\",\"restartArtifactSha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"restartReport\":14}");
+            Assert.True(EclipseHistoryForecastParameters.TryParse(parametersJson.RootElement, out var parameters));
+
+            var exception = Assert.Throws<EclipseDeckPackageException>(() =>
+                EclipseHistoryForecastParameters.ValidateRestartBinding(new(forecast, root, [forecast]), parameters!));
+
+            Assert.Equal("ECLIPSE_FORECAST_RESTART_AMBIGUOUS", exception.Code);
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public async Task ForecastRestartBindingReadsResolvedIncludeAndRejectsWrongArtifactRoot()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "grdp-eclipse-scenario-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var forecast = Path.Combine(root, "EX3_PRED.DATA");
+            var restartInclude = Path.Combine(root, "restart.inc");
+            await File.WriteAllTextAsync(forecast, "SOLUTION\nINCLUDE 'restart.inc' /\n", TestContext.Current.CancellationToken);
+            await File.WriteAllTextAsync(restartInclude, "RESTART\n \"EX3\"\n 14 /\n", TestContext.Current.CancellationToken);
+            using var valid = JsonDocument.Parse("{\"schemaVersion\":\"eclipse-history-forecast-parameters/1\",\"historyRunId\":88,\"forecastDataFile\":\"EX3_PRED.DATA\",\"restartArtifactName\":\"eclipse-output-EX3.FUNRST\",\"restartArtifactSha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"restartReport\":14}");
+            using var wrongRoot = JsonDocument.Parse("{\"schemaVersion\":\"eclipse-history-forecast-parameters/1\",\"historyRunId\":88,\"forecastDataFile\":\"EX3_PRED.DATA\",\"restartArtifactName\":\"eclipse-output-OTHER.FUNRST\",\"restartArtifactSha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"restartReport\":14}");
+            Assert.True(EclipseHistoryForecastParameters.TryParse(valid.RootElement, out var validParameters));
+            Assert.True(EclipseHistoryForecastParameters.TryParse(wrongRoot.RootElement, out var wrongRootParameters));
+            var package = new EclipseDeckPackage(forecast, root, [forecast, restartInclude]);
+
+            EclipseHistoryForecastParameters.ValidateRestartBinding(package, validParameters!);
+            var mismatch = Assert.Throws<EclipseDeckPackageException>(() =>
+                EclipseHistoryForecastParameters.ValidateRestartBinding(package, wrongRootParameters!));
+
+            Assert.Equal("ECLIPSE_FORECAST_RESTART_MISMATCH", mismatch.Code);
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
     public void ParametersRequireTheClosedWholeWellContract()
     {
         using var valid = JsonDocument.Parse("{\"schemaVersion\":\"eclipse-schedule-parameters/1\",\"baselineRunId\":74,\"well\":\"G1\",\"date\":\"1970-01-15\",\"status\":\"OPEN\"}");
@@ -66,6 +138,23 @@ public sealed class EclipseScheduleScenarioTests
         Assert.Null(parameters.Date);
         Assert.Equal("ORAT", parameters.ControlMode);
         Assert.False(EclipseScheduleParameters.TryParse(invalid.RootElement, out _));
+    }
+
+    [Fact]
+    public void ParametersRequireAnOrderedTwoEventShutThenOpenPlan()
+    {
+        using var valid = JsonDocument.Parse("{\"schemaVersion\":\"eclipse-schedule-parameters/5\",\"baselineRunId\":74,\"well\":\"G1\",\"events\":[{\"date\":\"1970-01-15\",\"status\":\"SHUT\"},{\"date\":\"1970-02-01\",\"status\":\"OPEN\"}]}");
+        using var reversed = JsonDocument.Parse("{\"schemaVersion\":\"eclipse-schedule-parameters/5\",\"baselineRunId\":74,\"well\":\"G1\",\"events\":[{\"date\":\"1970-02-01\",\"status\":\"SHUT\"},{\"date\":\"1970-01-15\",\"status\":\"OPEN\"}]}");
+        using var duplicateDate = JsonDocument.Parse("{\"schemaVersion\":\"eclipse-schedule-parameters/5\",\"baselineRunId\":74,\"well\":\"G1\",\"events\":[{\"date\":\"1970-01-15\",\"status\":\"SHUT\"},{\"date\":\"1970-01-15\",\"status\":\"OPEN\"}]}");
+        using var extraEventField = JsonDocument.Parse("{\"schemaVersion\":\"eclipse-schedule-parameters/5\",\"baselineRunId\":74,\"well\":\"G1\",\"events\":[{\"date\":\"1970-01-15\",\"status\":\"SHUT\",\"override\":true},{\"date\":\"1970-02-01\",\"status\":\"OPEN\"}]}");
+
+        Assert.True(EclipseScheduleParameters.TryParse(valid.RootElement, out var parameters));
+        Assert.Equal(2, parameters!.Events!.Count);
+        Assert.Equal("SHUT", parameters.Events[0].Status);
+        Assert.Equal("OPEN", parameters.Events[1].Status);
+        Assert.False(EclipseScheduleParameters.TryParse(reversed.RootElement, out _));
+        Assert.False(EclipseScheduleParameters.TryParse(duplicateDate.RootElement, out _));
+        Assert.False(EclipseScheduleParameters.TryParse(extraEventField.RootElement, out _));
     }
 
     [Fact]
@@ -132,6 +221,105 @@ public sealed class EclipseScheduleScenarioTests
                 EclipseScheduleEditor.ApplyAsync(new(schedule, root, [schedule]), parameters!, TestContext.Current.CancellationToken));
 
             Assert.Equal("ECLIPSE_SCHEDULE_TARGET_MISSING", exception.Code);
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public async Task MultiEventEditorAppendsBothEventsAfterSameDateControlsWithoutChangingExistingRows()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "grdp-eclipse-scenario-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var schedule = Path.Combine(root, "BASE.SCH");
+            const string original = "DATES\n15 'JAN' 1970/\n/\nWELOPEN\n 'G1' 'SHUT' 0 0 0 /\n/\nWCONHIST\n 'G1' 'OPEN' 'ORAT' 35.686 0.119 45436.102 4* /\n/\nDATES\n1 'FEB' 1970/\n/\nWCONHIST\n 'G1' 'OPEN' 'ORAT' 64.598 0.231 80094.703 4* /\n/\nDATES\n1 'MAR' 1970/\n/\n";
+            await File.WriteAllTextAsync(schedule, original, TestContext.Current.CancellationToken);
+            using var document = JsonDocument.Parse("{\"schemaVersion\":\"eclipse-schedule-parameters/5\",\"baselineRunId\":74,\"well\":\"G1\",\"events\":[{\"date\":\"1970-01-15\",\"status\":\"SHUT\"},{\"date\":\"1970-02-01\",\"status\":\"OPEN\"}]}");
+            Assert.True(EclipseScheduleParameters.TryParse(document.RootElement, out var parameters));
+
+            var message = await EclipseScheduleEditor.ApplyAsync(new(schedule, root, [schedule]), parameters!, TestContext.Current.CancellationToken);
+            var updated = await File.ReadAllTextAsync(schedule, TestContext.Current.CancellationToken);
+
+            Assert.Contains("Applied ordered WELOPEN events G1=SHUT at 1970-01-15, OPEN at 1970-02-01", message);
+            Assert.Contains("'G1' 'SHUT' 0 0 0 /", updated);
+            Assert.Contains("'G1' 'OPEN' 'ORAT' 35.686 0.119 45436.102 4* /", updated);
+            Assert.True(updated.IndexOf("'G1' 'OPEN' 'ORAT' 35.686", StringComparison.Ordinal)
+                < updated.IndexOf("'G1' 'SHUT' /", StringComparison.Ordinal));
+            Assert.True(updated.IndexOf("'G1' 'OPEN' 'ORAT' 64.598", StringComparison.Ordinal)
+                < updated.IndexOf("'G1' 'OPEN' /", StringComparison.Ordinal));
+            Assert.Contains("DATES\n1 'MAR' 1970/", updated);
+            Assert.DoesNotContain("\r\n", updated);
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public async Task MultiEventEditorValidatesBothDatesBeforeWritingAnything()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "grdp-eclipse-scenario-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var schedule = Path.Combine(root, "BASE.SCH");
+            const string original = "DATES\n15 'JAN' 1970/\n/\nWCONHIST\n 'G1' 'OPEN' 'ORAT' 35.686 0.119 45436.102 4* /\n/\n";
+            await File.WriteAllTextAsync(schedule, original, TestContext.Current.CancellationToken);
+            using var document = JsonDocument.Parse("{\"schemaVersion\":\"eclipse-schedule-parameters/5\",\"baselineRunId\":74,\"well\":\"G1\",\"events\":[{\"date\":\"1970-01-15\",\"status\":\"SHUT\"},{\"date\":\"1970-02-01\",\"status\":\"OPEN\"}]}");
+            Assert.True(EclipseScheduleParameters.TryParse(document.RootElement, out var parameters));
+
+            var exception = await Assert.ThrowsAsync<EclipseDeckPackageException>(() =>
+                EclipseScheduleEditor.ApplyAsync(new(schedule, root, [schedule]), parameters!, TestContext.Current.CancellationToken));
+
+            Assert.Equal("ECLIPSE_SCHEDULE_TARGET_MISSING", exception.Code);
+            Assert.Equal(original, await File.ReadAllTextAsync(schedule, TestContext.Current.CancellationToken));
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public async Task MultiEventEditorRejectsMalformedDatesBlockWithoutWriting()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "grdp-eclipse-scenario-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var schedule = Path.Combine(root, "BASE.SCH");
+            const string original = "DATES\n15 'JAN' 1970/\nnot-a-date/\n/\nWCONHIST\n 'G1' 'OPEN' 'ORAT' 35.686 0.119 45436.102 4* /\n/\nDATES\n1 'FEB' 1970/\n/\nWCONHIST\n 'G1' 'OPEN' 'ORAT' 64.598 0.231 80094.703 4* /\n/\n";
+            await File.WriteAllTextAsync(schedule, original, TestContext.Current.CancellationToken);
+            using var document = JsonDocument.Parse("{\"schemaVersion\":\"eclipse-schedule-parameters/5\",\"baselineRunId\":74,\"well\":\"G1\",\"events\":[{\"date\":\"1970-01-15\",\"status\":\"SHUT\"},{\"date\":\"1970-02-01\",\"status\":\"OPEN\"}]}");
+            Assert.True(EclipseScheduleParameters.TryParse(document.RootElement, out var parameters));
+
+            var exception = await Assert.ThrowsAsync<EclipseDeckPackageException>(() =>
+                EclipseScheduleEditor.ApplyAsync(new(schedule, root, [schedule]), parameters!, TestContext.Current.CancellationToken));
+
+            Assert.Equal("ECLIPSE_SCHEDULE_TARGET_MISSING", exception.Code);
+            Assert.Equal(original, await File.ReadAllTextAsync(schedule, TestContext.Current.CancellationToken));
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public async Task MultiEventEditorRejectsScheduleControlsInAnotherIncludeFile()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "grdp-eclipse-scenario-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var schedule = Path.Combine(root, "BASE.SCH");
+            var include = Path.Combine(root, "CONTROLS.inc");
+            const string scheduleOriginal = "DATES\n15 'JAN' 1970/\n/\nDATES\n1 'FEB' 1970/\n/\n";
+            const string includeOriginal = "WCONHIST\n 'G1' 'OPEN' 'ORAT' 35.686 0.119 45436.102 4* /\n/\n";
+            await File.WriteAllTextAsync(schedule, scheduleOriginal, TestContext.Current.CancellationToken);
+            await File.WriteAllTextAsync(include, includeOriginal, TestContext.Current.CancellationToken);
+            using var document = JsonDocument.Parse("{\"schemaVersion\":\"eclipse-schedule-parameters/5\",\"baselineRunId\":74,\"well\":\"G1\",\"events\":[{\"date\":\"1970-01-15\",\"status\":\"SHUT\"},{\"date\":\"1970-02-01\",\"status\":\"OPEN\"}]}");
+            Assert.True(EclipseScheduleParameters.TryParse(document.RootElement, out var parameters));
+
+            var exception = await Assert.ThrowsAsync<EclipseDeckPackageException>(() =>
+                EclipseScheduleEditor.ApplyAsync(new(schedule, root, [schedule, include]), parameters!, TestContext.Current.CancellationToken));
+
+            Assert.Equal("ECLIPSE_SCHEDULE_ORDER_UNPROVEN", exception.Code);
+            Assert.Equal(scheduleOriginal, await File.ReadAllTextAsync(schedule, TestContext.Current.CancellationToken));
+            Assert.Equal(includeOriginal, await File.ReadAllTextAsync(include, TestContext.Current.CancellationToken));
         }
         finally { Directory.Delete(root, true); }
     }

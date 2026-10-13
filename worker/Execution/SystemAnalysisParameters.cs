@@ -8,8 +8,12 @@ internal static class SystemAnalysisParameters
     {
         if (value.ValueKind != JsonValueKind.Object
             || value.EnumerateObject().Count() != 6
-            || !Text(value, "schemaVersion", "pipesim-system-analysis-parameters/1")
-            || !Text(value, "producer", "Well")
+            || !(Text(value, "schemaVersion", "pipesim-system-analysis-parameters/1")
+                 || Text(value, "schemaVersion", "pipesim-system-analysis-parameters/2"))
+            || (Text(value, "schemaVersion", "pipesim-system-analysis-parameters/1") && !Text(value, "producer", "Well"))
+            || (Text(value, "schemaVersion", "pipesim-system-analysis-parameters/2")
+                && (!value.TryGetProperty("producer", out var producer) || !SafeDynamicName(producer)
+                    || !value.TryGetProperty("branchTerminator", out var dynamicBranch) || !SafeDynamicName(dynamicBranch)))
             || !Text(value, "scanVariable", "liquidFlowRate")
             || !value.TryGetProperty("branchTerminator", out var branch)
             || !SafeName(branch)
@@ -50,4 +54,8 @@ internal static class SystemAnalysisParameters
         value.TryGetProperty(name, out var item) && item.ValueKind == JsonValueKind.Number
         && item.TryGetDouble(out var number) && double.IsFinite(number)
         && number > lowerExclusive && number <= upperInclusive;
+
+    private static bool SafeDynamicName(JsonElement value) => SafeName(value)
+        && value.GetString() == value.GetString()!.Trim()
+        && !value.GetString()!.Any(character => character < 32 || character == 127);
 }

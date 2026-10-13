@@ -72,4 +72,41 @@ public sealed class WellInspectionTests
         Assert.Equal("Well_1", persisted.Well);
         Assert.Equal("pipesim-well-inspection/3", persisted.SchemaVersion);
     }
+
+    [Fact]
+    public void PreservesExplicitEspContextInventoryInV4Inspection()
+    {
+        using var document = JsonDocument.Parse("""
+            {"well":"Well_1","espContexts":["Well_1:ESP","Well_2:ESP"],"inspection":{"schemaVersion":"pipesim-well-inspection/1","reservoirPressure":null}}
+            """);
+        var inspection = WellInspectionReader.Read(document.RootElement, "READY", "black_oil_liquid");
+        var persisted = inspection! with
+        {
+            SchemaVersion = "pipesim-well-inspection/4",
+            PackageFiles = [new EclipsePackageFile("model.pips", 12, new string('a', 64))],
+            Well = document.RootElement.GetProperty("well").GetString(),
+            EspContexts = ["Well_1:ESP", "Well_2:ESP"]
+        };
+
+        Assert.Equal("pipesim-well-inspection/4", persisted.SchemaVersion);
+        Assert.Equal(["Well_1:ESP", "Well_2:ESP"], persisted.EspContexts);
+    }
+
+    [Fact]
+    public void SerializesWellScopedEspContextsInV5InspectionWithoutImplicitWellSelection()
+    {
+        var inspection = new WellDataInspection("pipesim-well-inspection/6", null,
+            [new EclipsePackageFile("model.pips", 12, new string('a', 64))], null,
+            ["Well_1:ESP", "Well_2:ESP"],
+            [new WellEspContextInspection("Well_1", ["Well_1:ESP"], ["Well_1:Completion"], ["Well_1:Tubing"]),
+             new WellEspContextInspection("Well_2", ["Well_2:ESP"], [], [])]);
+        var json = JsonSerializer.SerializeToElement(inspection, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+        Assert.Null(json.GetProperty("well").GetString());
+        Assert.Equal("pipesim-well-inspection/6", json.GetProperty("schemaVersion").GetString());
+        Assert.Equal("Well_1", json.GetProperty("wellContexts")[0].GetProperty("context").GetString());
+        Assert.Equal("Well_2:ESP", json.GetProperty("wellContexts")[1].GetProperty("espContexts")[0].GetString());
+        Assert.Equal("Well_1:Completion", json.GetProperty("wellContexts")[0].GetProperty("completionContexts")[0].GetString());
+        Assert.Empty(json.GetProperty("wellContexts")[1].GetProperty("tubingContexts").EnumerateArray());
+    }
 }

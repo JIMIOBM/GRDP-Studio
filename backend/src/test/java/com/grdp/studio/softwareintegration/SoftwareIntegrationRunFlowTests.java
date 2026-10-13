@@ -20,6 +20,7 @@ import com.grdp.studio.softwareintegration.entity.SoftwareIntegrationModelEntity
 import com.grdp.studio.softwareintegration.entity.SoftwareIntegrationModelVersionEntity;
 import com.grdp.studio.softwareintegration.entity.SoftwareIntegrationProjectEntity;
 import com.grdp.studio.softwareintegration.entity.SoftwareIntegrationRunEntity;
+import com.grdp.studio.softwareintegration.entity.SoftwareIntegrationArtifactEntity;
 import com.grdp.studio.softwareintegration.execution.PipesimWellResultValidator;
 import com.grdp.studio.softwareintegration.execution.PipesimResultValidator;
 import com.grdp.studio.softwareintegration.execution.EclipseSummaryResultValidator;
@@ -30,6 +31,7 @@ import com.grdp.studio.softwareintegration.mapper.SoftwareIntegrationModelMapper
 import com.grdp.studio.softwareintegration.mapper.SoftwareIntegrationModelVersionMapper;
 import com.grdp.studio.softwareintegration.mapper.SoftwareIntegrationProjectMapper;
 import com.grdp.studio.softwareintegration.mapper.SoftwareIntegrationRunMapper;
+import com.grdp.studio.softwareintegration.mapper.SoftwareIntegrationArtifactMapper;
 import com.grdp.studio.softwareintegration.service.SoftwareIntegrationRunService;
 import com.grdp.studio.softwareintegration.service.SoftwareIntegrationService;
 import com.grdp.studio.softwareintegration.service.SoftwareIntegrationCapabilityService;
@@ -77,6 +79,7 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.function.LongConsumer;
@@ -114,8 +117,11 @@ class SoftwareIntegrationRunFlowTests {
     @Autowired SoftwareIntegrationModelMapper modelMapper;
     @Autowired SoftwareIntegrationModelVersionMapper versionMapper;
     @Autowired SoftwareIntegrationRunMapper runMapper;
+    @Autowired SoftwareIntegrationArtifactMapper artifactMapper;
     @Autowired SoftwareIntegrationRunStore runStore;
     @Autowired SoftwareIntegrationRunService runService;
+    @Autowired com.grdp.studio.softwareintegration.service.EclipseBatchService eclipseBatches;
+    @Autowired com.grdp.studio.softwareintegration.service.EclipseHistoryService eclipseHistory;
     @Autowired SoftwareIntegrationService softwareIntegrationService;
     @Autowired SoftwareIntegrationProperties integrationProperties;
     @Autowired SoftwareIntegrationStorageKeyNormalizer normalizer;
@@ -338,6 +344,170 @@ class SoftwareIntegrationRunFlowTests {
                 .satisfies(error -> assertThat(((RunException) error).status()).isEqualTo(HttpStatus.CONFLICT));
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"eclipse-compositional-inspection.json", "eclipse-thermal-inspection.json"})
+    void e300RequiresOwnCapabilityAndRejectsLegacyEditsBeforeCreatingRun(String resource) throws Exception {
+        Seed eclipse = seed("READY", resource.contains("thermal") ? "models/eclipse/e300/THERM3.DATA" : "models/eclipse/e300/SPE3_GASCOND.DATA", "ECLIPSE_100");
+        eclipse.version().setModelKind("eclipse_300");
+        eclipse.model().setSimulatorType("ECLIPSE_300");
+        modelMapper.updateById(eclipse.model());
+        eclipse.version().setOriginalName("official.zip");
+        try (var input = getClass().getResourceAsStream("/" + resource)) {
+            eclipse.version().setInspectionJson(new String(input.readAllBytes(), StandardCharsets.UTF_8));
+        }
+        versionMapper.updateById(eclipse.version());
+        String normal = "{\"study\":null,\"runType\":\"eclipse\",\"parameters\":null}";
+        mockMvc.perform(post("/software-integration/model-versions/{id}/runs", eclipse.version().getId())
+                .contentType("application/json").content(normal)).andExpect(status().isServiceUnavailable());
+        assertThat(runStore.listByVersion(eclipse.version().getId(), 100)).isEmpty();
+        fakeWorker.compositionalAvailable = true;
+        fakeWorker.eclipseCapability = new WorkerEclipseCapability(null, "UNAVAILABLE", "ECLIPSE_UNAVAILABLE", List.of(), 1800);
+        mockMvc.perform(post("/software-integration/model-versions/{id}/runs", eclipse.version().getId())
+                .contentType("application/json").content("{\"study\":null,\"runType\":\"eclipse\",\"parameters\":{}}"))
+                .andExpect(status().isBadRequest());
+        assertThat(runStore.listByVersion(eclipse.version().getId(), 100)).isEmpty();
+        mockMvc.perform(post("/software-integration/model-versions/{id}/runs", eclipse.version().getId())
+                .contentType("application/json").content(normal)).andExpect(status().isCreated());
+        assertThat(runStore.listByVersion(eclipse.version().getId(), 100)).hasSize(1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"WCONPROD", "WCONINJE"})
+    void eclipseBhpHttpBindingSurvivesMapSerializationAndRejectsStalePressure(String keyword) throws Exception {
+        Seed eclipse = seed("READY", "models/eclipse/bhp/CASE.DATA", "ECLIPSE_100");
+        String inspection = """
+          {"schemaVersion":"eclipse-data-inspection/4","caseName":"CASE.DATA","sections":["RUNSPEC","SCHEDULE"],
+           "unitSystem":"FIELD","phases":["OIL","WATER"],"dimensions":{"nx":1,"ny":1,"nz":1},"wellNames":["P1","I1"],
+           "packageFiles":[{"relativePath":"CASE.DATA","sizeBytes":5,"sha256":"%s"}],"scheduleTimeline":[],
+           "scheduleMetadata":{"wells":[{"name":"P1","group":"G","sourceFile":"CASE.DATA","lineNumber":3},
+             {"name":"I1","group":"G","sourceFile":"CASE.DATA","lineNumber":4}],"groups":[],"completions":[],"records":[
+             {"keyword":"WCONPROD","sourceFile":"CASE.DATA","lineNumber":5,"values":["P1","OPEN","BHP","5*","3000"]},
+             {"keyword":"WCONINJE","sourceFile":"CASE.DATA","lineNumber":8,"values":["I1","WATER","OPEN","RESV","1*","1000","6000"]}]}}
+          """.formatted("a".repeat(64));
+        eclipse.version().setInspectionJson(inspection);
+        versionMapper.updateById(eclipse.version());
+        var base = runService.create(eclipse.version().getId(), request(null, "eclipse"));
+        var baseline = runStore.find(base.id());
+        baseline.setStatus("SUCCEEDED"); baseline.setResultContract("VALID_FULL"); baseline.setParametersJson("null");
+        runMapper.updateById(baseline);
+        boolean injection = keyword.equals("WCONINJE");
+        var p = new java.util.HashMap<String, Object>(Map.ofEntries(
+            Map.entry("schemaVersion", "eclipse-pressure-control-parameters/1"), Map.entry("baselineRunId", baseline.getId()),
+            Map.entry("well", injection ? "I1" : "P1"), Map.entry("phase", "INITIAL"), Map.entry("sourceFile", "CASE.DATA"),
+            Map.entry("lineNumber", injection ? 8 : 5), Map.entry("keyword", keyword), Map.entry("originalControlMode", injection ? "RESV" : "BHP"),
+            Map.entry("originalBhp", injection ? 6000 : 3000), Map.entry("targetBhp", injection ? 5000 : 3500), Map.entry("unit", "psia"),
+            Map.entry("injectionType", injection ? "WATER" : "NONE")));
+        // Application non_null serialization must not lose a required production field.
+        assertThat(objectMapper.valueToTree(p).size()).isEqualTo(12);
+        var bad = new java.util.HashMap<>(p); bad.put("originalBhp", 2900);
+        mockMvc.perform(post("/software-integration/model-versions/{id}/runs", eclipse.version().getId())
+            .contentType("application/json").content("{\"study\":null,\"runType\":\"eclipse\",\"parameters\":" + objectMapper.writeValueAsString(bad) + "}"))
+            .andExpect(status().isBadRequest());
+        assertThat(runStore.listByVersion(eclipse.version().getId(), 10)).hasSize(1);
+        String body = "{\"study\":null,\"runType\":\"eclipse\",\"parameters\":" + objectMapper.writeValueAsString(p) + "}";
+        mockMvc.perform(post("/software-integration/model-versions/{id}/runs", eclipse.version().getId()).contentType("application/json").content(body))
+            .andExpect(status().isCreated()).andExpect(jsonPath("$.data.parameters.keyword").value(keyword))
+            .andExpect(jsonPath("$.data.parameters.originalBhp").value(injection ? 6000 : 3000))
+            .andExpect(jsonPath("$.data.parameters.injectionType").value(injection ? "WATER" : "NONE"));
+        assertThat(runStore.listByVersion(eclipse.version().getId(), 10)).hasSize(2);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"WRAT", "GRAT", "LRAT"})
+    void eclipseProductionControlsBindExpandedTargetsAndRejectStaleOriginal(String mode) throws Exception {
+        Seed eclipse = seed("READY", "models/eclipse/rates/CASE.DATA", "ECLIPSE_100");
+        String defaults = mode.equals("WRAT") ? "1*" : mode.equals("GRAT") ? "2*" : "3*";
+        eclipse.version().setInspectionJson("""
+          {"schemaVersion":"eclipse-data-inspection/4","caseName":"CASE.DATA","unitSystem":"METRIC",
+           "sections":["RUNSPEC","SCHEDULE"],"phases":["OIL","WATER","GAS"],"dimensions":{"nx":1,"ny":1,"nz":1},
+           "wellNames":["P1"],"packageFiles":[{"relativePath":"CASE.DATA","sizeBytes":5,"sha256":"%s"}],
+           "scheduleTimeline":[{"kind":"TSTEP","steps":["5"],"sourceFile":"CASE.DATA","lineNumber":10}],
+           "scheduleMetadata":{"wells":[{"name":"P1","group":"G","sourceFile":"CASE.DATA","lineNumber":3}],
+           "groups":[],"completions":[],"records":[{"keyword":"WCONPROD","sourceFile":"CASE.DATA","lineNumber":5,
+           "values":["P1","OPEN","%s","%s","1000"]}]}}
+          """.formatted("a".repeat(64), mode, defaults));
+        versionMapper.updateById(eclipse.version());
+        var base = runService.create(eclipse.version().getId(), request(null, "eclipse"));
+        var baseline = runStore.find(base.id());
+        baseline.setStatus("SUCCEEDED"); baseline.setResultContract("VALID_FULL"); baseline.setParametersJson("null");
+        runMapper.updateById(baseline);
+        var p = new java.util.HashMap<String, Object>(Map.ofEntries(
+            Map.entry("schemaVersion", "eclipse-production-control-parameters/1"), Map.entry("baselineRunId", baseline.getId()),
+            Map.entry("well", "P1"), Map.entry("phase", "INITIAL"), Map.entry("sourceFile", "CASE.DATA"),
+            Map.entry("lineNumber", 5), Map.entry("controlMode", mode), Map.entry("originalTargetRate", 1000),
+            Map.entry("targetRate", 500), Map.entry("unit", "sm3/day")));
+        assertThat(com.grdp.studio.softwareintegration.support.EclipseProductionControlParameters.valid(objectMapper.valueToTree(p))).isTrue();
+        var persisted = com.grdp.studio.softwareintegration.support.EclipseDataInspectionValidator.parsePersisted(eclipse.version().getInspectionJson());
+        assertThat(persisted).isNotNull();
+        assertThat(com.grdp.studio.softwareintegration.support.EclipseProductionControlParameters.matchesInspection(objectMapper.valueToTree(p), persisted)).isTrue();
+        for (String fault : new String[]{"originalTargetRate", "unit", "lineNumber"}) {
+            var bad = new java.util.HashMap<>(p); bad.put(fault, fault.equals("unit") ? "STB/day" : 999);
+            mockMvc.perform(post("/software-integration/model-versions/{id}/runs", eclipse.version().getId())
+                .contentType("application/json").content("{\"study\":null,\"runType\":\"eclipse\",\"parameters\":" + objectMapper.writeValueAsString(bad) + "}"))
+                .andExpect(status().isBadRequest());
+        }
+        assertThat(runStore.listByVersion(eclipse.version().getId(), 10)).hasSize(1);
+        mockMvc.perform(post("/software-integration/model-versions/{id}/runs", eclipse.version().getId())
+            .contentType("application/json").content("{\"study\":null,\"runType\":\"eclipse\",\"parameters\":" + objectMapper.writeValueAsString(p) + "}"))
+            .andExpect(status().isCreated()).andExpect(jsonPath("$.data.parameters.controlMode").value(mode))
+            .andExpect(jsonPath("$.data.parameters.originalTargetRate").value(1000))
+            .andExpect(jsonPath("$.data.parameters.unit").value("sm3/day"));
+        assertThat(runStore.listByVersion(eclipse.version().getId(), 10)).hasSize(2);
+    }
+
+    @Test
+    void eclipseGridFieldRunRequiresAndPersistsAnExactFullBaselineBinding() throws Exception {
+        Seed eclipse = seed("READY", "models/eclipse/grid-field/CASE.DATA", "ECLIPSE_100");
+        var baselineSummary = runService.create(eclipse.version().getId(), request(null, "eclipse"));
+        var baseline = runStore.find(baselineSummary.id());
+        String sha = "b".repeat(64);
+        baseline.setStatus("SUCCEEDED");
+        baseline.setResultContract("VALID_FULL");
+        baseline.setParametersJson("null");
+        baseline.setResultJson("""
+                {"schemaVersion":"eclipse-summary-result/1","resultContract":"VALID_FULL",
+                 "grid":{"nx":2,"ny":2,"nz":1},
+                 "fieldIndex":{"files":[{"name":"CASE.INIT","fields":[
+                   {"keyword":"PERMX","dataType":"REAL","count":4}]}]},
+                 "outputFiles":[{"name":"CASE.INIT","sha256":"%s"}]}
+                """.formatted(sha));
+        runMapper.updateById(baseline);
+        SoftwareIntegrationArtifactEntity artifact = new SoftwareIntegrationArtifactEntity();
+        artifact.setRunId(baseline.getId());
+        artifact.setArtifactName("eclipse-output-CASE.INIT");
+        artifact.setArtifactType("output");
+        artifact.setContentType("application/octet-stream");
+        artifact.setStorageKey("artifacts/" + baseline.getId() + "/eclipse-output-CASE.INIT");
+        artifact.setSizeBytes(48L);
+        artifact.setSha256(sha);
+        artifact.setCreatedAt(LocalDateTime.now());
+        artifact.setExpiresAt(LocalDateTime.now().plusDays(30));
+        artifactMapper.insert(artifact);
+
+        var parameters = Map.ofEntries(
+                Map.entry("schemaVersion", "eclipse-grid-field-parameters/1"),
+                Map.entry("baselineRunId", baseline.getId()), Map.entry("fieldFile", "CASE.INIT"),
+                Map.entry("fieldArtifactSha256", sha), Map.entry("nx", 2), Map.entry("ny", 2),
+                Map.entry("nz", 1), Map.entry("i", 2), Map.entry("j", 1), Map.entry("k", 1),
+                Map.entry("originalValue", 2.5), Map.entry("multiplier", 0.5));
+        var request = request(null, "eclipse");
+        request.setParameters(parameters);
+
+        var created = runService.create(eclipse.version().getId(), request);
+
+        assertThat(created.parameters().path("schemaVersion").asText()).isEqualTo("eclipse-grid-field-parameters/1");
+        assertThat(created.parameters().path("baselineRunId").asLong()).isEqualTo(baseline.getId());
+        assertThat(runStore.find(created.id()).getParametersJson()).contains("CASE.INIT");
+
+        var staleArtifactRequest = request(null, "eclipse");
+        var staleParameters = new java.util.HashMap<>(parameters);
+        staleParameters.put("fieldArtifactSha256", "c".repeat(64));
+        staleArtifactRequest.setParameters(staleParameters);
+        assertThatThrownBy(() -> runService.create(eclipse.version().getId(), staleArtifactRequest))
+                .isInstanceOf(RunException.class)
+                .satisfies(error -> assertThat(((RunException) error).status()).isEqualTo(HttpStatus.CONFLICT));
+    }
+
     @Test
     void eclipseRunCreationRequiresValidPersistedInspectionWithoutDisclosingItsContents() throws Exception {
         Seed eclipse = seed("READY", "models/eclipse/inspection/CASE.DATA", "ECLIPSE_100");
@@ -500,6 +670,89 @@ class SoftwareIntegrationRunFlowTests {
     }
 
     @Test
+    void eclipseGroupInspectionZipCanRunWithoutScenarioForReimport() throws Exception {
+        Seed eclipse = seed("READY", "models/eclipse/group/CASE.DATA", "ECLIPSE_100");
+        eclipse.version().setOriginalName("applied.zip");
+        eclipse.version().setInspectionJson("""
+            {"schemaVersion":"eclipse-data-inspection/6","caseName":"CASE.DATA","sections":["RUNSPEC","SCHEDULE"],"unitSystem":"FIELD","phases":["OIL"],"dimensions":null,"wellNames":["P1","P2"],"scheduleTimeline":[],"packageFiles":[{"relativePath":"CASE.DATA","sizeBytes":5,"sha256":"%s"}],"vfpTables":[],"scheduleMetadata":{"wells":[{"name":"P1","group":"G","sourceFile":"CASE.DATA","lineNumber":4},{"name":"P2","group":"G","sourceFile":"CASE.DATA","lineNumber":5}],"groups":[],"records":[],"completions":[]},"groupControls":[{"group":"G","sourceFile":"CASE.DATA","lineNumber":10,"controlMode":"ORAT","unit":"STB/day","originalTargetRate":30000,"members":[{"well":"P1","bhpLimit":2500},{"well":"P2","bhpLimit":2500}]}]}
+            """.formatted("a".repeat(64)));
+        versionMapper.updateById(eclipse.version());
+        mockMvc.perform(post("/software-integration/model-versions/{id}/runs", eclipse.version().getId())
+                .contentType("application/json").content("{\"study\":null,\"runType\":\"eclipse\",\"parameters\":null}"))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.data.parameters").doesNotExist());
+    }
+
+    @Test
+    void eclipseInjectionGroupInspectionZipCanRunWithoutScenarioForReimport() throws Exception {
+        Seed eclipse = seed("READY", "models/eclipse/group/CASE.DATA", "ECLIPSE_100");
+        eclipse.version().setOriginalName("applied.zip");
+        eclipse.version().setInspectionJson("""
+            {"schemaVersion":"eclipse-data-inspection/7","caseName":"CASE.DATA","sections":["RUNSPEC","SCHEDULE"],"unitSystem":"FIELD","phases":["WATER"],"dimensions":null,"wellNames":["P1","P2"],"scheduleTimeline":[],"packageFiles":[{"relativePath":"CASE.DATA","sizeBytes":5,"sha256":"%s"}],"vfpTables":[],"scheduleMetadata":{"wells":[{"name":"P1","group":"G","sourceFile":"CASE.DATA","lineNumber":4},{"name":"P2","group":"G","sourceFile":"CASE.DATA","lineNumber":5}],"groups":[],"records":[],"completions":[]},"injectionGroupControls":[{"group":"G","sourceFile":"CASE.DATA","lineNumber":10,"controlMode":"RATE","injectionPhase":"WATER","unit":"STB/day","originalTargetRate":30000,"members":[{"well":"P1","bhpLimit":6000},{"well":"P2","bhpLimit":6000}]}]}
+            """.formatted("a".repeat(64)));
+        versionMapper.updateById(eclipse.version());
+        mockMvc.perform(post("/software-integration/model-versions/{id}/runs", eclipse.version().getId())
+                .contentType("application/json").content("{\"study\":null,\"runType\":\"eclipse\",\"parameters\":null}"))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.data.parameters").doesNotExist());
+    }
+
+    @Test
+    void eclipseGasInjectionGroupInspectionZipCanRunWithoutScenarioForReimport() throws Exception {
+        Seed eclipse = seed("READY", "models/eclipse/group/CASE.DATA", "ECLIPSE_100");
+        eclipse.version().setOriginalName("applied.zip");
+        eclipse.version().setInspectionJson("""
+            {"schemaVersion":"eclipse-data-inspection/8","caseName":"CASE.DATA","sections":["RUNSPEC","SCHEDULE"],"unitSystem":"FIELD","phases":["GAS"],"dimensions":null,"wellNames":["P1","P2"],"scheduleTimeline":[],"packageFiles":[{"relativePath":"CASE.DATA","sizeBytes":5,"sha256":"%s"}],"vfpTables":[],"scheduleMetadata":{"wells":[{"name":"P1","group":"G","sourceFile":"CASE.DATA","lineNumber":4},{"name":"P2","group":"G","sourceFile":"CASE.DATA","lineNumber":5}],"groups":[],"records":[],"completions":[]},"gasInjectionGroupControls":[{"group":"G","sourceFile":"CASE.DATA","lineNumber":10,"controlMode":"RATE","injectionPhase":"GAS","unit":"Mscf/day","originalTargetRate":30000,"members":[{"well":"P1","bhpLimit":6000},{"well":"P2","bhpLimit":6000}]}]}
+            """.formatted("a".repeat(64)));
+        versionMapper.updateById(eclipse.version());
+        mockMvc.perform(post("/software-integration/model-versions/{id}/runs", eclipse.version().getId())
+                .contentType("application/json").content("{\"study\":null,\"runType\":\"eclipse\",\"parameters\":null}"))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.data.parameters").doesNotExist());
+    }
+
+    @Test
+    void eclipseWaterProductionGroupInspectionZipCanRunWithoutScenarioForReimport() throws Exception {
+        Seed eclipse = seed("READY", "models/eclipse/group/CASE.DATA", "ECLIPSE_100");
+        eclipse.version().setOriginalName("applied.zip");
+        eclipse.version().setInspectionJson("""
+            {"schemaVersion":"eclipse-data-inspection/10","caseName":"CASE.DATA","sections":["RUNSPEC","SCHEDULE"],"unitSystem":"FIELD","phases":["GAS"],"dimensions":null,"wellNames":["P1","P2"],"scheduleTimeline":[],"packageFiles":[{"relativePath":"CASE.DATA","sizeBytes":5,"sha256":"%s"}],"vfpTables":[],"scheduleMetadata":{"wells":[{"name":"P1","group":"G","sourceFile":"CASE.DATA","lineNumber":4},{"name":"P2","group":"G","sourceFile":"CASE.DATA","lineNumber":5}],"groups":[],"records":[],"completions":[]},"waterProductionGroupControls":[{"group":"G","sourceFile":"CASE.DATA","lineNumber":10,"controlMode":"WRAT","unit":"STB/day","originalTargetRate":30000,"members":[{"well":"P1","bhpLimit":2500,"oilRateLimit":20000},{"well":"P2","bhpLimit":2500,"oilRateLimit":20000}]}]}
+            """.formatted("a".repeat(64)));
+        versionMapper.updateById(eclipse.version());
+        mockMvc.perform(post("/software-integration/model-versions/{id}/runs", eclipse.version().getId())
+                .contentType("application/json").content("{\"study\":null,\"runType\":\"eclipse\",\"parameters\":null}"))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.data.parameters").doesNotExist());
+    }
+
+    @Test
+    void advancedInjectionExplicitNullSurvivesConfiguredMapperAndMissingReferenceRejects() throws Exception {
+        Seed eclipse = seed("READY", "models/eclipse/group/CASE.DATA", "ECLIPSE_100");
+        eclipse.version().setInspectionJson("""
+            {"schemaVersion":"eclipse-data-inspection/11","caseName":"CASE.DATA","sections":["RUNSPEC","SCHEDULE"],"unitSystem":"FIELD","phases":["OIL"],"dimensions":null,"wellNames":["I1","I2"],"scheduleTimeline":[],"packageFiles":[{"relativePath":"CASE.DATA","sizeBytes":5,"sha256":"%s"}],"vfpTables":[],"scheduleMetadata":{"wells":[{"name":"I1","group":"I","sourceFile":"CASE.DATA","lineNumber":4},{"name":"I2","group":"I","sourceFile":"CASE.DATA","lineNumber":5}],"groups":[],"records":[],"completions":[]},"advancedInjectionGroupControls":[{"group":"I","sourceFile":"CASE.DATA","lineNumber":10,"controlMode":"RATE","injectionPhase":"OIL","unit":"STB/day","originalTargetRate":5000,"members":[{"well":"I1","bhpLimit":4900,"surfaceRateLimit":50000},{"well":"I2","bhpLimit":4900,"surfaceRateLimit":50000}],"referenceGroup":null,"referenceMembers":[]}]}
+            """.formatted("a".repeat(64)));
+        versionMapper.updateById(eclipse.version());
+        String parameters="""
+            {"schemaVersion":"eclipse-advanced-injection-parameters/1","baselineRunId":99999999,"group":"I","phase":"INITIAL","sourceFile":"CASE.DATA","lineNumber":10,"controlMode":"RATE","injectionPhase":"OIL","unit":"STB/day","originalTargetRate":5000,"targetRate":2500,"members":["I1","I2"],"referenceGroup":null,"referenceMembers":[]}
+            """;
+        mockMvc.perform(post("/software-integration/model-versions/{id}/runs", eclipse.version().getId())
+                .contentType("application/json").content("{\"study\":null,\"runType\":\"eclipse\",\"parameters\":"+parameters+"}"))
+                .andExpect(status().isConflict());
+        mockMvc.perform(post("/software-integration/model-versions/{id}/runs", eclipse.version().getId())
+                .contentType("application/json").content("{\"study\":null,\"runType\":\"eclipse\",\"parameters\":"+parameters.replace("\"referenceGroup\":null,", "")+"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void eclipseProductionGroupRateInspectionZipCanRunWithoutScenarioForReimport() throws Exception {
+        Seed eclipse = seed("READY", "models/eclipse/group/CASE.DATA", "ECLIPSE_100");
+        eclipse.version().setOriginalName("applied.zip");
+        eclipse.version().setInspectionJson("""
+            {"schemaVersion":"eclipse-data-inspection/9","caseName":"CASE.DATA","sections":["RUNSPEC","SCHEDULE"],"unitSystem":"FIELD","phases":["GAS"],"dimensions":null,"wellNames":["P1","P2"],"scheduleTimeline":[],"packageFiles":[{"relativePath":"CASE.DATA","sizeBytes":5,"sha256":"%s"}],"vfpTables":[],"scheduleMetadata":{"wells":[{"name":"P1","group":"G","sourceFile":"CASE.DATA","lineNumber":4},{"name":"P2","group":"G","sourceFile":"CASE.DATA","lineNumber":5}],"groups":[],"records":[],"completions":[]},"groupRateControls":[{"group":"G","sourceFile":"CASE.DATA","lineNumber":10,"controlMode":"GRAT","unit":"Mscf/day","originalTargetRate":30000,"members":[{"well":"P1","bhpLimit":2500},{"well":"P2","bhpLimit":2500}]}]}
+            """.formatted("a".repeat(64)));
+        versionMapper.updateById(eclipse.version());
+        mockMvc.perform(post("/software-integration/model-versions/{id}/runs", eclipse.version().getId())
+                .contentType("application/json").content("{\"study\":null,\"runType\":\"eclipse\",\"parameters\":null}"))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.data.parameters").doesNotExist());
+    }
+
+    @Test
     void runTypeMustMatchPersistedSimulatorType() throws Exception {
         Seed well = seed("READY", "models/well/1/model.pips");
         assertThatThrownBy(() -> runService.create(well.version().getId(), request("Study 1", "network")))
@@ -522,6 +775,242 @@ class SoftwareIntegrationRunFlowTests {
         assertThatThrownBy(() -> runService.create(well.version().getId(), request("Study 1", "nodal")))
                 .isInstanceOf(RunException.class)
                 .satisfies(error -> assertThat(((RunException) error).status()).isEqualTo(HttpStatus.CONFLICT));
+    }
+
+    @Test
+    void mixedWellModelRunsOnlyNetworkStudiesThatPassedValidation() throws Exception {
+        Seed mixed = seed("READY", "models/mixed-network/1/model.pips");
+        mixed.version().setModelKind("basic_gas");
+        mixed.version().setInspectionJson(validMixedWellNetworkInspection());
+        versionMapper.updateById(mixed.version());
+
+        var created = runService.create(mixed.version().getId(), request("Study 1", "network"));
+        assertThat(created.runType()).isEqualTo("network");
+        assertThat(runStore.find(created.id()).getParametersJson()).isEqualTo("null");
+        assertThatThrownBy(() -> runService.create(mixed.version().getId(), request("Study 2", "network")))
+                .isInstanceOf(RunException.class)
+                .satisfies(error -> assertThat(((RunException) error).status()).isEqualTo(HttpStatus.BAD_REQUEST));
+        assertThatThrownBy(() -> runService.create(mixed.version().getId(), request("Study 1", "system-analysis")))
+                .isInstanceOf(RunException.class)
+                .satisfies(error -> assertThat(((RunException) error).status()).isEqualTo(HttpStatus.BAD_REQUEST));
+    }
+
+    @Test
+    void networkFlowlineDiameterRequiresSameVersionAndStudySuccessfulBaseline() throws Exception {
+        Seed network = seed("READY", "models/network/flowline-variant.pips", "PIPESIM_NETWORK");
+        network.version().setInspectionJson("""
+                {"schemaVersion":"pipesim-network-inspection/5",
+                 "studies":[
+                   {"study":"Study 1","boundaries":[{"node":"Source_1","boundaryNodeType":"Source","isActive":true,"isSurfaceCondition":true,"flowRateType":"GasFlowRate","pressure":100,"temperature":80,"gasFlowRate":5,"liquidFlowRate":null,"massFlowRate":null}]},
+                   {"study":"Network Study","boundaries":[{"node":"Source_1","boundaryNodeType":"Source","isActive":true,"isSurfaceCondition":true,"flowRateType":"GasFlowRate","pressure":100,"temperature":80,"gasFlowRate":5,"liquidFlowRate":null,"massFlowRate":null}]}],
+                 "chokes":[],"packageFiles":[{"relativePath":"model.pips","sizeBytes":5,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],
+                 "wellContexts":[],"flowlineContexts":["FL-2"],"flowlines":[{"name":"FL-2","innerDiameter":4.0,"unit":"in"}]}
+                """);
+        versionMapper.updateById(network.version());
+
+        var sameStudyBaseline = successfulNetworkBaseline(network, "Study 1");
+        var otherStudyBaseline = successfulNetworkBaseline(network, "Network Study");
+        var validRequest = flowlineDiameterRequest("Study 1", sameStudyBaseline.getId(), 4.0, "in", 5.0);
+
+        var accepted = runService.create(network.version().getId(), validRequest);
+
+        assertThat(accepted.runType()).isEqualTo("network");
+        assertThat(runStore.find(accepted.id()).getParametersJson()).contains("pipesim-network-flowline-diameter-parameters/1");
+        assertThatThrownBy(() -> runService.create(network.version().getId(),
+                flowlineDiameterRequest("Study 1", otherStudyBaseline.getId(), 4.0, "in", 5.0)))
+                .isInstanceOf(RunException.class)
+                .satisfies(error -> assertThat(((RunException) error).status()).isEqualTo(HttpStatus.CONFLICT));
+        assertThatThrownBy(() -> runService.create(network.version().getId(),
+                flowlineDiameterRequest("Study 1", sameStudyBaseline.getId(), 4.0, "mm", 5.0)))
+                .isInstanceOf(RunException.class);
+    }
+
+    @Test
+    void networkConnectionRedirectRequiresExactFullBaselineTopologyAndStudy() throws Exception {
+        Seed network = seed("READY", "models/network/connection-variant.pips", "PIPESIM_NETWORK");
+        network.version().setInspectionJson("""
+                {"schemaVersion":"pipesim-network-inspection/5",
+                 "studies":[{"study":"Study 1","boundaries":[{"node":"Source-1","boundaryNodeType":"Source","isActive":true,"isSurfaceCondition":true,"flowRateType":"GasFlowRate","pressure":100,"temperature":80,"gasFlowRate":5,"liquidFlowRate":null,"massFlowRate":null}]}],
+                 "chokes":[],"packageFiles":[{"relativePath":"model.pips","sizeBytes":5,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],
+                 "wellContexts":[],"flowlineContexts":["Flowline-1"],"flowlines":[{"name":"Flowline-1","innerDiameter":4.0,"unit":"in"}]}
+                """);
+        versionMapper.updateById(network.version());
+
+        var baseline = successfulNetworkTopologyBaseline(network, "Study 1");
+        var accepted = runService.create(network.version().getId(), networkConnectionRequest(
+                "Study 1", baseline.getId(), "Junction-1", "Junction-2"));
+        assertThat(accepted.runType()).isEqualTo("network");
+        assertThat(runStore.find(accepted.id()).getParametersJson()).contains("pipesim-network-connection-parameters/1");
+
+        assertThatThrownBy(() -> runService.create(network.version().getId(), networkConnectionRequest(
+                "Study 1", baseline.getId(), "Missing-Junction", "Junction-2")))
+                .isInstanceOf(RunException.class)
+                .satisfies(error -> assertThat(((RunException) error).status()).isEqualTo(HttpStatus.CONFLICT));
+        assertThatThrownBy(() -> runService.create(network.version().getId(), networkConnectionRequest(
+                "Study 2", baseline.getId(), "Junction-1", "Junction-2")))
+                .isInstanceOf(RunException.class)
+                .satisfies(error -> assertThat(((RunException) error).status()).isEqualTo(HttpStatus.CONFLICT));
+    }
+
+    @Test
+    void networkDerivedScenariosCannotBypassBaselineBindingWhenInspectionIsMissing() throws Exception {
+        Seed network = seed("READY", "models/network/no-inspection.pips", "PIPESIM_NETWORK");
+        Seed other = seed("READY", "models/network/other-baseline.pips", "PIPESIM_NETWORK");
+        var sameVersionBaseline = successfulNetworkTopologyBaseline(network, "Study 1");
+        var otherVersionBaseline = successfulNetworkTopologyBaseline(other, "Study 1");
+        int queuedBefore = runStore.listByVersion(network.version().getId(), 50).size();
+        for (var invalid : List.of(
+                networkConnectionRequest("Study 1", Long.MAX_VALUE, "Junction-1", "Junction-2"),
+                networkConnectionRequest("Study 1", otherVersionBaseline.getId(), "Junction-1", "Junction-2"),
+                networkConnectionRequest("Study 2", sameVersionBaseline.getId(), "Junction-1", "Junction-2"),
+                networkConnectionRequest(null, sameVersionBaseline.getId(), "Junction-1", "Junction-2"))) {
+            assertThatThrownBy(() -> runService.create(network.version().getId(), invalid))
+                    .isInstanceOf(RunException.class)
+                    .satisfies(error -> assertThat(((RunException) error).status()).isEqualTo(HttpStatus.CONFLICT));
+        }
+        var choke = request("Study 1", "network");
+        choke.setParameters(Map.of("schemaVersion", "pipesim-network-choke-bean-size-parameters/1",
+                "baselineRunId", sameVersionBaseline.getId(), "choke", "Choke",
+                "originalBeanSize", 2, "targetBeanSize", 3));
+        assertThatThrownBy(() -> runService.create(network.version().getId(), choke))
+                .isInstanceOf(RunException.class)
+                .satisfies(error -> assertThat(((RunException) error).status()).isEqualTo(HttpStatus.CONFLICT));
+        assertThat(runStore.listByVersion(network.version().getId(), 50)).hasSize(queuedBefore);
+        var accepted = runService.create(network.version().getId(), networkConnectionRequest(
+                "Study 1", sameVersionBaseline.getId(), "Junction-1", "Junction-2"));
+        assertThat(accepted.status()).isEqualTo("QUEUED");
+    }
+
+    @Test
+    void reorderedAndRepeatedWorkerEventsDoNotRegressTheRunPhase() throws Exception {
+        Seed seed = seed("READY", "models/events/model.pips");
+        long runId = runService.create(seed.version().getId(), request("Study 1", "combined")).id();
+        var dispatcher = dispatcher();
+        dispatcher.dispatch();
+        var preparing = new WorkerRunEvent(1, "PREPARING", Instant.now(), "preparing");
+        var nodal = new WorkerRunEvent(2, "RUNNING_NODAL", Instant.now(), "nodal");
+        var profile = new WorkerRunEvent(3, "RUNNING_PROFILE", Instant.now(), "profile");
+        fakeWorker.snapshot = new WorkerRunSnapshot(runId, "RUNNING_PROFILE", 3, "worker-1", "generation-1",
+                List.of(profile, preparing, nodal), null, null, List.of(), null);
+        dispatcher.poll();
+        assertThat(runStore.find(runId).getStatus()).isEqualTo("RUNNING_PROFILE");
+        fakeWorker.snapshot = new WorkerRunSnapshot(runId, "RUNNING_PROFILE", 3, "worker-1", "generation-1",
+                List.of(preparing, nodal, profile), null, null, List.of(), null);
+        dispatcher.poll();
+        assertThat(runStore.find(runId).getStatus()).isEqualTo("RUNNING_PROFILE");
+        assertThat(runStore.events(runId).stream().filter(event -> event.getWorkerSequence() != null)).hasSize(3);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void tubingResultRequiresItsDeclaredDerivedModelArtifact(boolean includeModel) throws Exception {
+        Seed seed = seed("READY", "models/artifact-model/model.pips");
+        String parameters = """
+                {"schemaVersion":"pipesim-well-tubing-diameter-parameters/1","baselineRunId":74,"wellContext":"Well_1",
+                 "tubingContext":"Well_1:Tubing","originalInnerDiameter":2.441,"unit":"in","targetInnerDiameter":2.3}
+                """;
+        long runId = runStore.createQueued(seed.project().getId(), seed.model().getId(), seed.version().getId(),
+                "Study 1", "profile", 600, parameters).getId();
+        var dispatcher = dispatcher();
+        dispatcher.dispatch();
+        Path output = STORAGE_ROOT.resolve("jobs/" + runId + "/output");
+        Files.createDirectories(output);
+        var descriptors = new java.util.ArrayList<WorkerRunArtifact>();
+        ArrayNode files = objectMapper.createArrayNode();
+        if (includeModel) {
+            Path derived = output.resolve("pipesim-well-tubing-applied.pips");
+            Files.writeString(derived, "mock derived PIPESIM model");
+            String key = "jobs/" + runId + "/output/" + derived.getFileName();
+            descriptors.add(new WorkerRunArtifact(key, Files.size(derived), sha256(derived), "application/octet-stream"));
+            files.addObject().put("storageKey", key).put("size", Files.size(derived))
+                    .put("sha256", sha256(derived)).put("contentType", "application/octet-stream");
+        }
+        ObjectNode manifest = objectMapper.createObjectNode().put("schemaVersion", "grdp-worker-artifact-manifest/1")
+                .put("runId", runId).put("generatedAtUtc", Instant.now().toString());
+        manifest.set("files", files);
+        Path manifestFile = output.resolve("manifest.json");
+        Files.writeString(manifestFile, manifest.toString());
+        descriptors.add(new WorkerRunArtifact("jobs/" + runId + "/output/manifest.json",
+                Files.size(manifestFile), sha256(manifestFile), "application/json"));
+        ObjectNode result = (ObjectNode) partialResult();
+        result.put("schemaVersion", "pipesim-well-result/2").put("runTask", "profile").put("resultContract", "VALID_FULL");
+        result.putArray("ipr");
+        result.putArray("vlp");
+        result.putArray("profile").addObject().put("depth", 0).put("pressure", 1500).put("temperature", 80);
+        ObjectNode application = (ObjectNode) objectMapper.readTree(parameters);
+        application.remove("schemaVersion");
+        application.remove("baselineRunId");
+        application.put("applied", true).put("isolatedCopy", true).put("sourceModelUnchanged", true)
+                .put("artifactName", "pipesim-well-tubing-applied.pips").put("appliedInnerDiameter", 2.3);
+        result.set("application", application);
+        resultValidator.validate("profile", "Study 1", result, objectMapper.readTree(parameters));
+        fakeWorker.snapshot = new WorkerRunSnapshot(runId, "SUCCEEDED", 2, "worker-1", "generation-1",
+                List.of(new WorkerRunEvent(1, "PREPARING", Instant.now(), "preparing"),
+                        new WorkerRunEvent(2, "RUNNING_PROFILE", Instant.now(), "profile")),
+                result, null, descriptors, objectMapper.readTree("{\"processTreeExitConfirmed\":true}"));
+        dispatcher.poll();
+        assertThat(runStore.find(runId).getStatus()).isEqualTo(includeModel ? "SUCCEEDED" : "FAILED");
+        if (!includeModel) {
+            assertThat(runService.get(runId).error().path("code").asText()).isEqualTo("ARTIFACT_INVALID");
+            assertThat(runStore.artifacts(runId)).isEmpty();
+            assertThat(Files.exists(STORAGE_ROOT.resolve("artifacts/" + runId))).isFalse();
+        }
+    }
+
+    private SoftwareIntegrationRunEntity successfulNetworkTopologyBaseline(Seed network, String study) {
+        long runId = runService.create(network.version().getId(), request(study, "network")).id();
+        SoftwareIntegrationRunEntity baseline = runStore.find(runId);
+        baseline.setStatus("SUCCEEDED");
+        baseline.setResultContract("VALID_FULL");
+        baseline.setParametersJson("null");
+        baseline.setResultJson("""
+                {"schemaVersion":"pipesim-network-result/1","model_kind":"network","runTask":"network","resultContract":"VALID_FULL","study":"%s",
+                 "topology":{"nodes":[{"id":"Source-1","componentType":"Source"},{"id":"Flowline-1","componentType":"Flowline"},
+                   {"id":"Junction-1","componentType":"Junction"},{"id":"Junction-2","componentType":"Junction"},{"id":"Sink-1","componentType":"Sink"}],
+                   "edges":[{"source":"Source-1","sourcePort":"","destination":"Flowline-1"},
+                     {"source":"Flowline-1","sourcePort":"","destination":"Junction-1"},
+                     {"source":"Junction-1","sourcePort":"","destination":"Sink-1"},
+                     {"source":"Source-1","sourcePort":"","destination":"Junction-2"},
+                     {"source":"Junction-2","sourcePort":"","destination":"Sink-1"}]}}
+                """.formatted(study));
+        runMapper.updateById(baseline);
+        return runStore.find(runId);
+    }
+
+    private SoftwareIntegrationCreateRunRequest networkConnectionRequest(
+            String study, long baselineRunId, String originalDestination, String newDestination) {
+        SoftwareIntegrationCreateRunRequest request = request(study, "network");
+        request.setParameters(Map.of(
+                "schemaVersion", "pipesim-network-connection-parameters/1",
+                "baselineRunId", baselineRunId,
+                "source", "Flowline-1",
+                "sourcePort", "",
+                "originalDestination", originalDestination,
+                "newDestination", newDestination));
+        return request;
+    }
+
+    private SoftwareIntegrationRunEntity successfulNetworkBaseline(Seed network, String study) {
+        long runId = runService.create(network.version().getId(), request(study, "network")).id();
+        SoftwareIntegrationRunEntity baseline = runStore.find(runId);
+        baseline.setStatus("SUCCEEDED");
+        baseline.setResultContract("VALID_FULL");
+        baseline.setParametersJson("null");
+        runMapper.updateById(baseline);
+        return runStore.find(runId);
+    }
+
+    private SoftwareIntegrationCreateRunRequest flowlineDiameterRequest(
+            String study, long baselineRunId, double original, String unit, double target) {
+        SoftwareIntegrationCreateRunRequest request = request(study, "network");
+        request.setParameters(Map.of(
+                "schemaVersion", "pipesim-network-flowline-diameter-parameters/1",
+                "baselineRunId", baselineRunId,
+                "flowline", "FL-2",
+                "originalInnerDiameter", original,
+                "unit", unit,
+                "targetInnerDiameter", target));
+        return request;
     }
 
     @Test
@@ -1607,6 +2096,131 @@ class SoftwareIntegrationRunFlowTests {
         return new Seed(project, model, version);
     }
 
+    @Test
+    void verifiedRestartForecastRejectsStaleReportsAndChangedStateWithoutCreatingRuns() throws Exception {
+        Seed eclipse = seed("READY", "models/eclipse/restart/EX5.DATA", "ECLIPSE_100");
+        try (var input = getClass().getResourceAsStream("/eclipse-restart-inspection.json")) {
+            eclipse.version().setInspectionJson(objectMapper.writeValueAsString(objectMapper.readTree(input)));
+        }
+        versionMapper.updateById(eclipse.version());
+        var baselineId = runService.create(eclipse.version().getId(), request(null, "eclipse")).id();
+        var baseline = runStore.find(baselineId); baseline.setStatus("SUCCEEDED"); baseline.setResultContract("VALID_FULL"); baseline.setParametersJson("null"); runMapper.updateById(baseline);
+        ObjectNode source;
+        try (var input = getClass().getResourceAsStream("/eclipse-restart-source-catalog.json")) { source = (ObjectNode)objectMapper.readTree(input); }
+        // Small published-file fixture tests the HTTP/storage binding. Commercial state proof is separate.
+        Path statePath = normalizer.resolve("artifacts/" + baselineId + "/eclipse-output-EX5.FUNRST"); Files.createDirectories(statePath.getParent()); Files.writeString(statePath, "state");
+        var catalog = (ObjectNode)source.path("catalog"); var selected = ((ObjectNode)catalog.path("reports").get(80)).deepCopy();
+        selected.put("byteOffset", 0).put("sizeBytes", 5).put("sha256", sha256(statePath));
+        catalog.putArray("reports").add(selected); catalog.put("artifactSizeBytes", 5).put("artifactSha256", sha256(statePath));
+        Path catalogPath = statePath.resolveSibling("eclipse-restart-catalog.json"); Files.write(catalogPath, objectMapper.writeValueAsBytes(source));
+        for (var path : List.of(statePath, catalogPath)) {
+            var artifact = new SoftwareIntegrationArtifactEntity(); artifact.setRunId(baselineId); artifact.setArtifactName(path.getFileName().toString());
+            artifact.setArtifactType("output"); artifact.setContentType(path.equals(statePath) ? "application/octet-stream" : "application/json");
+            artifact.setStorageKey("artifacts/" + baselineId + "/" + path.getFileName()); artifact.setSizeBytes(Files.size(path)); artifact.setSha256(sha256(path));
+            artifact.setCreatedAt(LocalDateTime.now()); artifact.setExpiresAt(LocalDateTime.now().plusDays(30)); artifactMapper.insert(artifact);
+        }
+        var parameters = objectMapper.createObjectNode().put("schemaVersion", "eclipse-history-forecast-parameters/2").put("historyRunId", baselineId)
+                .put("forecastDataFile", "FOREA.DATA").put("restartArtifactName", "eclipse-output-EX5.FUNRST").put("restartArtifactSha256", sha256(statePath))
+                .put("restartReport", 80).put("restartTimeDays", 2190).put("restartDate", "1975-12-31").put("physicsSha256", source.path("physicsSha256").asText());
+        var valid = request(null, "eclipse"); valid.setParameters(parameters);
+        assertThat(runService.create(eclipse.version().getId(), valid).parameters().path("schemaVersion").asText()).isEqualTo("eclipse-history-forecast-parameters/2");
+        int before = runStore.listByVersion(eclipse.version().getId(), 100).size();
+        for (var fault : new String[] {"restartReport", "restartTimeDays", "restartDate", "physicsSha256", "forecastDataFile"}) {
+            var p = parameters.deepCopy(); switch (fault) { case "restartReport" -> p.put(fault, 79); case "restartTimeDays" -> p.put(fault, 2191);
+                case "restartDate" -> p.put(fault, "1975-12-30"); case "forecastDataFile" -> p.put(fault, "OTHER.DATA"); default -> p.put(fault, "b".repeat(64)); }
+            var bad = request(null, "eclipse"); bad.setParameters(p);
+            assertThatThrownBy(() -> runService.create(eclipse.version().getId(), bad)).isInstanceOf(RunException.class)
+                    .satisfies(e -> assertThat(((RunException)e).status()).isEqualTo(HttpStatus.BAD_REQUEST));
+            assertThat(runStore.listByVersion(eclipse.version().getId(), 100)).hasSize(before);
+        }
+        Files.writeString(statePath, "other");
+        assertThatThrownBy(() -> runService.create(eclipse.version().getId(), valid)).isInstanceOf(RunException.class)
+                .satisfies(e -> assertThat(((RunException)e).status()).isEqualTo(HttpStatus.CONFLICT));
+        assertThat(runStore.listByVersion(eclipse.version().getId(), 100)).hasSize(before);
+    }
+
+    private record BatchSeed(Seed seed,long baselineId,ObjectNode request) {}
+    private BatchSeed eclipseBatchSeed()throws Exception {
+        var seed=seed("READY","models/eclipse/batch/CASE.DATA","ECLIPSE_100");
+        var inspection=objectMapper.readTree(getClass().getResourceAsStream("/eclipse-pvdo-inspection.json"));
+        seed.version().setInspectionJson(objectMapper.writeValueAsString(inspection));versionMapper.updateById(seed.version());
+        long id=runService.create(seed.version().getId(),request(null,"eclipse")).id();var baseline=runStore.find(id);
+        baseline.setStatus("SUCCEEDED");baseline.setResultContract("VALID_FULL");baseline.setResultJson(objectMapper.writeValueAsString(eclipseResult(0,"a".repeat(64))));baseline.setResultExpiresAt(LocalDateTime.now().plusDays(1));runMapper.updateById(baseline);
+        var request=objectMapper.createObjectNode();request.put("requestKey",UUID.randomUUID().toString());request.put("name","油黏度批量方案");request.put("baselineRunId",id);var cases=request.putArray("cases");var c=inspection.path("oilPvtContext");
+        for(int m=2;m<=3;m++){var item=cases.addObject();item.put("name","油黏度×"+m);var p=item.putObject("parameters");p.put("schemaVersion","eclipse-pvdo-parameters/1");p.put("baselineRunId",id);p.put("sourceFile",c.path("sourceFile").asText());p.put("sourceSha256",inspection.path("packageFiles").path(0).path("sha256").asText());p.set("keywordLineNumber",c.path("keywordLineNumber").deepCopy());p.put("unit","cP");p.put("multiplier",m);p.set("rows",c.path("rows").deepCopy());}
+        return new BatchSeed(seed,id,request);
+    }
+    @Test void eclipseBatchPersistsEveryChildAndRepeatedSubmissionDoesNotDuplicateRuns()throws Exception {
+        var seed=eclipseBatchSeed();var batch=eclipseBatches.create(seed.seed().version().getId(),seed.request());
+        assertThat(batch.members()).hasSize(2);assertThat(batch.status()).isEqualTo("QUEUED");assertThat(runStore.listByVersion(seed.seed().version().getId(),100)).hasSize(3);
+        var replay=eclipseBatches.create(seed.seed().version().getId(),seed.request().deepCopy());assertThat(replay.id()).isEqualTo(batch.id());assertThat(replay.members().stream().map(m->m.run().id())).containsExactlyElementsOf(batch.members().stream().map(m->m.run().id()).toList());assertThat(runStore.listByVersion(seed.seed().version().getId(),100)).hasSize(3);
+        assertThat(eclipseBatches.list(seed.seed().version().getId())).hasSize(1);assertThat(eclipseBatches.list(seed.seed().version().getId()).get(0).caseCount()).isEqualTo(2);assertThat(eclipseBatches.list(seed.seed().version().getId()).get(0).status()).isEqualTo("QUEUED");assertThat(eclipseBatches.get(batch.id()).baselineRunId()).isEqualTo(seed.baselineId());
+        var conflicting=seed.request().deepCopy();conflicting.put("name","另一内容");assertThatThrownBy(()->eclipseBatches.create(seed.seed().version().getId(),conflicting)).isInstanceOf(RunException.class).satisfies(e->assertThat(((RunException)e).status()).isEqualTo(HttpStatus.CONFLICT));
+    }
+    @Test void eclipseBatchLaterSourceRejectionRollsBackEarlierQueuedChildAndCollection()throws Exception {
+        var seed=eclipseBatchSeed();((ObjectNode)seed.request().path("cases").path(1).path("parameters")).put("sourceSha256","0".repeat(64));
+        assertThatThrownBy(()->eclipseBatches.create(seed.seed().version().getId(),seed.request())).isInstanceOf(RunException.class).satisfies(e->assertThat(((RunException)e).status()).isEqualTo(HttpStatus.BAD_REQUEST));
+        assertThat(runStore.listByVersion(seed.seed().version().getId(),100)).hasSize(1);assertThat(eclipseBatches.list(seed.seed().version().getId())).isEmpty();
+    }
+    @Test void eclipseBatchFailedChildDoesNotBlockFollowingQueueOrCreateFakeResult()throws Exception {
+        var seed=eclipseBatchSeed();var batch=eclipseBatches.create(seed.seed().version().getId(),seed.request());long first=batch.members().get(0).run().id(),second=batch.members().get(1).run().id();
+        assertThat(runStore.claimOldest("batch-test").getId()).isEqualTo(first);assertThat(runStore.claimOldest("must-remain-serial")).isNull();
+        var cleanup=objectMapper.readTree("{\"inputDeleted\":true,\"workDirectoryDeleted\":true,\"processTreeExitConfirmed\":true}");
+        assertThat(runStore.complete(first,SoftwareIntegrationRunStatus.FAILED,null,null,runStore.error("ECLIPSE_SOURCE_REJECTED","source rejected"),cleanup,null)).isTrue();
+        runStore.recoverOnStartup();assertThat(runStore.find(second).getStatus()).isEqualTo("QUEUED");assertThat(runStore.claimOldest("next-after-failure").getId()).isEqualTo(second);
+        runStore.transition(second,SoftwareIntegrationRunStatus.PREPARING,null,"preparing actual child",null);
+        runStore.transition(second,SoftwareIntegrationRunStatus.COLLECTING,null,"collecting actual child",null);
+        assertThat(runStore.complete(second,SoftwareIntegrationRunStatus.SUCCEEDED,"VALID_FULL",eclipseResult(0,"a".repeat(64)),null,cleanup,null)).isTrue();
+        var current=eclipseBatches.get(batch.id());assertThat(current.status()).isEqualTo("PARTIAL_SUCCEEDED");assertThat(current.members().get(0).run().result().isNull()).isTrue();assertThat(current.members().get(0).run().error().path("code").asText()).isEqualTo("ECLIPSE_SOURCE_REJECTED");assertThat(current.members().get(1).run().result().isNull()).isFalse();
+    }
+    @Test void eclipseBatchRejectsE300BaselineWithoutCreatingChildren()throws Exception {
+        var seed=eclipseBatchSeed();var baseline=runStore.find(seed.baselineId());var result=(ObjectNode)objectMapper.readTree(baseline.getResultJson());result.put("modelKind","eclipse_300");baseline.setResultJson(objectMapper.writeValueAsString(result));runMapper.updateById(baseline);
+        assertThatThrownBy(()->eclipseBatches.create(seed.seed().version().getId(),seed.request())).isInstanceOf(RunException.class).satisfies(e->assertThat(((RunException)e).status()).isEqualTo(HttpStatus.CONFLICT));
+        assertThat(runStore.listByVersion(seed.seed().version().getId(),100)).hasSize(1);assertThat(eclipseBatches.list(seed.seed().version().getId())).isEmpty();
+    }
+    @Test void eclipseBatchCancelsOnlyOwnQueuedChildrenAndLeavesBaselineIntact()throws Exception {
+        var seed=eclipseBatchSeed();var batch=eclipseBatches.create(seed.seed().version().getId(),seed.request());var cancelled=eclipseBatches.cancel(batch.id());assertThat(cancelled.status()).isEqualTo("CANCELLED");assertThat(cancelled.members()).allSatisfy(m->assertThat(m.run().status()).isEqualTo("CANCELLED"));assertThat(runStore.find(seed.baselineId()).getStatus()).isEqualTo("SUCCEEDED");
+    }
+
+    private ObjectNode eclipseHistoryRequest(long baselineId,String csv){
+        var request=objectMapper.createObjectNode();request.put("name","观察验算样例");request.put("sourceFile","observations.csv");request.put("baselineRunId",baselineId);request.put("csv",csv);return request;
+    }
+    @Test void eclipseHistoryPreservesRawCsvHashAndReusesIdenticalImport()throws Exception {
+        var seed=eclipseBatchSeed();String csv="\uFEFFwell,keyword,unit,timeDays,value\r\n,FOPR,STB/DAY,0,2\r\n,FOPR,STB/DAY,1,1\r\n";
+        var request=eclipseHistoryRequest(seed.baselineId(),csv);var dataset=eclipseHistory.create(seed.seed().version().getId(),request);
+        assertThat(dataset.csv()).isEqualTo(csv);assertThat(dataset.metadata().sourceSha256()).isEqualTo(HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(csv.getBytes(StandardCharsets.UTF_8))));
+        assertThat(dataset.observations()).hasSize(2);assertThat(eclipseHistory.get(dataset.metadata().id())).isEqualTo(dataset);
+        assertThat(eclipseHistory.create(seed.seed().version().getId(),request.deepCopy()).metadata().id()).isEqualTo(dataset.metadata().id());assertThat(eclipseHistory.list(seed.seed().version().getId())).hasSize(1);
+        var comparison=eclipseHistory.compare(dataset.metadata().id(),seed.baselineId());assertThat(comparison.comparison().points()).hasSize(2);assertThat(comparison.comparison().metrics().getFirst().rmse()).isZero();
+        assertThat(runStore.listByVersion(seed.seed().version().getId(),100)).hasSize(1);
+    }
+    @Test void eclipseHistoryRejectsUnknownSourceUnitsColumnsAndParameterizedBaselineWithoutCreatingDataset()throws Exception {
+        var seed=eclipseBatchSeed();String csv="well,keyword,unit,timeDays,value\n,FOPR,STB/DAY,0,2";
+        for(int i=0;i<5;i++){
+            var bad=eclipseHistoryRequest(seed.baselineId(),csv);
+            switch(i){case 0->bad.put("extra",1);case 1->bad.put("sourceFile","../observations.csv");case 2->bad.put("csv",csv.replace("STB/DAY","SM3/DAY"));case 3->bad.put("csv",csv.replace("FOPR","FXXX"));default->bad.put("csv",csv+"\n,FOPR,STB/DAY,0.0,1");}
+            assertThatThrownBy(()->eclipseHistory.create(seed.seed().version().getId(),bad)).isInstanceOf(RunException.class).satisfies(e->assertThat(((RunException)e).status()).isEqualTo(HttpStatus.BAD_REQUEST));
+        }
+        var baseline=runStore.find(seed.baselineId());baseline.setParametersJson("{\"schemaVersion\":\"other\"}");runMapper.updateById(baseline);
+        assertThatThrownBy(()->eclipseHistory.create(seed.seed().version().getId(),eclipseHistoryRequest(seed.baselineId(),csv))).isInstanceOf(RunException.class).satisfies(e->assertThat(((RunException)e).status()).isEqualTo(HttpStatus.CONFLICT));
+        assertThat(eclipseHistory.list(seed.seed().version().getId())).isEmpty();
+    }
+    @Test void eclipseHistoryApiKeepsMissingPointAndMapeExplicitlyNull()throws Exception {
+        var seed=eclipseBatchSeed();var dataset=eclipseHistory.create(seed.seed().version().getId(),eclipseHistoryRequest(seed.baselineId(),"well,keyword,unit,timeDays,value\n,FOPR,STB/DAY,0,0\n,FOPR,STB/DAY,3,5"));
+        var json=objectMapper.readTree(objectMapper.writeValueAsString(eclipseHistory.compare(dataset.metadata().id(),seed.baselineId())));
+        var missing=json.path("comparison").path("points").path(1);assertThat(missing.has("simulated")).isTrue();assertThat(missing.path("simulated").isNull()).isTrue();assertThat(missing.has("difference")).isTrue();assertThat(missing.path("difference").isNull()).isTrue();
+        var metric=json.path("comparison").path("metrics").path(0);assertThat(metric.has("mape")).isTrue();assertThat(metric.path("mape").isNull()).isTrue();
+    }
+    @Test void eclipseHistoryFailedOrExpiredRunCannotFallbackToBaselineOrFakeFit()throws Exception {
+        var seed=eclipseBatchSeed();var dataset=eclipseHistory.create(seed.seed().version().getId(),eclipseHistoryRequest(seed.baselineId(),"well,keyword,unit,timeDays,value\n,FOPR,STB/DAY,0,2\n,FOPR,STB/DAY,3,5"));
+        var response=eclipseHistory.compare(dataset.metadata().id(),seed.baselineId());assertThat(response.comparison().metrics().getFirst().coverage()).isEqualTo(.5);assertThat(response.comparison().points().getLast().simulated()).isNull();
+        var baseline=runStore.find(seed.baselineId());baseline.setStatus("FAILED");runMapper.updateById(baseline);
+        assertThatThrownBy(()->eclipseHistory.compare(dataset.metadata().id(),seed.baselineId())).isInstanceOf(RunException.class).satisfies(e->assertThat(((RunException)e).status()).isEqualTo(HttpStatus.CONFLICT));
+        baseline.setStatus("SUCCEEDED");baseline.setResultExpiresAt(LocalDateTime.now().minusMinutes(1));runMapper.updateById(baseline);
+        assertThatThrownBy(()->eclipseHistory.compare(dataset.metadata().id(),seed.baselineId())).isInstanceOf(RunException.class).satisfies(e->assertThat(((RunException)e).status()).isEqualTo(HttpStatus.CONFLICT));
+        assertThat(eclipseHistory.get(dataset.metadata().id()).observations()).hasSize(2);assertThat(eclipseHistory.list(seed.seed().version().getId())).hasSize(1);
+    }
+
     private SoftwareIntegrationCreateRunRequest request(String study, String runType) {
         SoftwareIntegrationCreateRunRequest request = new SoftwareIntegrationCreateRunRequest();
         request.setStudy(study);
@@ -1620,6 +2234,19 @@ class SoftwareIntegrationRunFlowTests {
                 {"schemaVersion":"eclipse-data-inspection/1","caseName":"CASE.DATA","sections":[],
                  "unitSystem":null,"phases":[],"dimensions":null}
                 """;
+    }
+
+    private static String validMixedWellNetworkInspection() {
+        String manifest = "[{\"relativePath\":\"model.pips\",\"sizeBytes\":5,\"sha256\":\"" + "a".repeat(64) + "\"}]";
+        return """
+                {"schemaVersion":"pipesim-well-inspection/7","reservoirPressure":null,"packageFiles":%s,
+                 "well":"Well_1","espContexts":[],
+                 "wellContexts":[{"context":"Well_1","espContexts":[],"completionContexts":["Well_1:Completion"],"tubingContexts":["Well_1:Tubing"]}],
+                 "networkCapability":{"schemaVersion":"pipesim-network-capability/1","studies":["Study 1"],
+                   "networkInspection":{"schemaVersion":"pipesim-network-inspection/3",
+                     "studies":[{"study":"Study 1","boundaries":[{"node":"Source_1","boundaryNodeType":"Source","isActive":true,"isSurfaceCondition":true,"flowRateType":"GasFlowRate","pressure":120,"temperature":80,"gasFlowRate":5,"liquidFlowRate":null,"massFlowRate":null}]}],
+                     "chokes":[],"packageFiles":%s}}}
+                """.formatted(manifest, manifest);
     }
 
     private JsonNode partialResult() {
@@ -1746,6 +2373,7 @@ class SoftwareIntegrationRunFlowTests {
         WorkerRunSnapshot snapshot;
         WorkerRunExecuteRequest lastExecuteRequest;
         WorkerEclipseCapability eclipseCapability;
+        boolean compositionalAvailable;
         boolean workerIdle;
         WorkerClientException capabilityError;
 
@@ -1761,6 +2389,7 @@ class SoftwareIntegrationRunFlowTests {
             eclipseCapability = new WorkerEclipseCapability(
                     "2024.1", "AVAILABLE", null, List.of("eclipse"), 1800);
             workerIdle = true;
+            compositionalAvailable = false;
             capabilityError = null;
             snapshot = new WorkerRunSnapshot(-1, "PREPARING", 0, "worker-1", "generation-1",
                     List.of(), null, null, List.of(), null);
@@ -1777,14 +2406,15 @@ class SoftwareIntegrationRunFlowTests {
             observeTransaction();
             if (capabilityError != null) throw capabilityError;
             var well = new com.grdp.studio.softwareintegration.client.WorkerSimulatorCapability(
-                    "2022.1", "AVAILABLE", null, List.of("nodal", "profile", "combined", "sensitivity", "gas-lift-performance", "gas-lift-diagnostics", "vfp-tables", "esp-curves", "trajectory"), 600);
+                    "2022.1", "AVAILABLE", null, List.of("nodal", "profile", "combined", "sensitivity", "gas-lift-performance", "gas-lift-diagnostics", "vfp-tables", "esp-curves", "esp-parameter", "trajectory"), 600);
             var network = new com.grdp.studio.softwareintegration.client.WorkerSimulatorCapability(
-                    "2022.1", "AVAILABLE", null, List.of("network", "system-analysis", "network-optimizer"), 600);
+                    "2022.1", "AVAILABLE", null, List.of("network", "system-analysis", "network-optimizer", "network-well-performance-curves"), 600);
             var eclipse = new com.grdp.studio.softwareintegration.client.WorkerSimulatorCapability(
                     eclipseCapability.version(), eclipseCapability.status(), eclipseCapability.reasonCode(),
                     eclipseCapability.runTasks(), eclipseCapability.maxTimeoutSeconds());
             return new com.grdp.studio.softwareintegration.client.WorkerCapabilities(
-                    workerIdle, well, network, eclipse);
+                    workerIdle, well, network, eclipse, compositionalAvailable ?
+                    new com.grdp.studio.softwareintegration.client.WorkerSimulatorCapability("2024.1", "AVAILABLE", null, List.of("eclipse"), 1800) : null);
         }
 
         @Override
@@ -1801,7 +2431,6 @@ class SoftwareIntegrationRunFlowTests {
             if (executeHook != null) executeHook.accept(request.runId());
             if (executeError != null) throw executeError;
             assertThat(request.modelStorageKey()).doesNotMatch("^[A-Za-z]:.*");
-            if (request.parameters() != null) assertThat(request.runTask()).isEqualTo("nodal");
             assertThat(request.timeoutSeconds()).isIn(600, 1800);
             return new WorkerRunAccepted(request.runId(), "CLAIMED", "worker-1", "generation-1");
         }

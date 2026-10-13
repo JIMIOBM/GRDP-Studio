@@ -16,16 +16,20 @@ import com.grdp.studio.softwareintegration.support.SoftwareIntegrationStorageKey
 import com.grdp.studio.softwareintegration.support.SoftwareIntegrationProperties;
 import com.grdp.studio.softwareintegration.support.SoftwareIntegrationEclipseSanitizer;
 import com.grdp.studio.softwareintegration.support.EclipseHistoryForecastParameters;
+import com.grdp.studio.softwareintegration.support.EclipseRestartForecastParameters;
 import com.grdp.studio.softwareintegration.support.EclipseDataInspectionValidator;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
@@ -34,8 +38,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @Component
 @ConditionalOnProperty(prefix = "grdp.software-integration", name = "dispatcher-enabled", havingValue = "true", matchIfMissing = true)
 public class SoftwareIntegrationRunDispatcher {
+    private static final Logger log = LoggerFactory.getLogger(SoftwareIntegrationRunDispatcher.class);
     private static final Set<String> WORKER_STATES = Set.of(
-            "CLAIMED", "PREPARING", "READING_TRAJECTORY", "RUNNING_NODAL", "RUNNING_PROFILE", "RUNNING_NETWORK", "RUNNING_ECLIPSE",
+            "CLAIMED", "PREPARING", "READING_TRAJECTORY", "RUNNING_NODAL", "RUNNING_PROFILE", "APPLYING_TRAJECTORY", "RUNNING_NETWORK", "RUNNING_ECLIPSE",
             "COLLECTING", "SUCCEEDED", "PARTIAL_SUCCEEDED", "FAILED", "CANCEL_REQUESTED", "CANCELLED",
             "TIMED_OUT", "WORKER_LOST");
     private final String dispatcherId = UUID.randomUUID().toString();
@@ -363,8 +368,8 @@ public class SoftwareIntegrationRunDispatcher {
             if (snapshot.events() != null) {
                 for (var event : snapshot.events()) validateWorkerStateForRun(run, event.state());
             }
-            runStore.persistWorkerEvents(run.getId(), snapshot.events());
-            for (var event : snapshot.events()) applyWorkerPhase(run.getId(), event.state());
+            var acceptedEvents = runStore.persistWorkerEvents(run.getId(), snapshot.events());
+            for (var event : acceptedEvents) applyWorkerPhase(run.getId(), event.state());
             applySnapshot(runStore.find(run.getId()), snapshot);
         } catch (RuntimeException exception) {
             workerLost(run.getId(), "Worker 返回的运行状态或增量事件无效");
@@ -387,6 +392,7 @@ public class SoftwareIntegrationRunDispatcher {
             case "PREPARING" -> phase(run, SoftwareIntegrationRunStatus.PREPARING, "Worker 正在准备模型");
             case "RUNNING_NODAL" -> phase(run, SoftwareIntegrationRunStatus.RUNNING_NODAL, "Worker 正在执行节点分析");
             case "RUNNING_PROFILE" -> phase(run, SoftwareIntegrationRunStatus.RUNNING_PROFILE, "Worker 正在执行 PT 剖面");
+            case "APPLYING_TRAJECTORY" -> phase(run, SoftwareIntegrationRunStatus.APPLYING_TRAJECTORY, "Worker 正在保存隔离副本井轨迹");
             case "RUNNING_NETWORK" -> phase(run, SoftwareIntegrationRunStatus.RUNNING_NETWORK, "Worker 正在执行管网模拟");
             case "RUNNING_ECLIPSE" -> phase(run, SoftwareIntegrationRunStatus.RUNNING_ECLIPSE, "Worker 正在执行 ECLIPSE 计算");
             case "COLLECTING" -> phase(run, SoftwareIntegrationRunStatus.COLLECTING, "Worker 正在收集结果");
@@ -398,7 +404,7 @@ public class SoftwareIntegrationRunDispatcher {
         String state = workerState == null ? "" : workerState.toUpperCase(Locale.ROOT);
         if (!WORKER_STATES.contains(state)) throw new IllegalArgumentException("Unknown Worker state");
         if ("eclipse".equals(run.getRunType())
-                && ("RUNNING_NODAL".equals(state) || "RUNNING_PROFILE".equals(state) || "RUNNING_NETWORK".equals(state))) {
+                && ("RUNNING_NODAL".equals(state) || "RUNNING_PROFILE".equals(state) || "APPLYING_TRAJECTORY".equals(state) || "RUNNING_NETWORK".equals(state))) {
             throw new IllegalArgumentException("PIPESIM phase is invalid for ECLIPSE");
         }
         if (!"eclipse".equals(run.getRunType()) && "RUNNING_ECLIPSE".equals(state)) {
@@ -440,6 +446,7 @@ public class SoftwareIntegrationRunDispatcher {
             case "PREPARING" -> phase(run, SoftwareIntegrationRunStatus.PREPARING, "Worker 正在准备模型");
             case "RUNNING_NODAL" -> phase(run, SoftwareIntegrationRunStatus.RUNNING_NODAL, "Worker 正在执行节点分析");
             case "RUNNING_PROFILE" -> phase(run, SoftwareIntegrationRunStatus.RUNNING_PROFILE, "Worker 正在执行 PT 剖面");
+            case "APPLYING_TRAJECTORY" -> phase(run, SoftwareIntegrationRunStatus.APPLYING_TRAJECTORY, "Worker 正在保存隔离副本井轨迹");
             case "RUNNING_NETWORK" -> phase(run, SoftwareIntegrationRunStatus.RUNNING_NETWORK, "Worker 正在执行管网模拟");
             case "RUNNING_ECLIPSE" -> phase(run, SoftwareIntegrationRunStatus.RUNNING_ECLIPSE, "Worker 正在执行 ECLIPSE 计算");
             case "COLLECTING" -> phase(run, SoftwareIntegrationRunStatus.COLLECTING, "Worker 正在收集结果");
@@ -514,22 +521,31 @@ public class SoftwareIntegrationRunDispatcher {
                     expectedCaseName = inspection.path("caseName").asText();
                 }
                 JsonNode runParameters = objectMapper.readTree(run.getParametersJson());
-                if (EclipseHistoryForecastParameters.valid(runParameters)) {
+                if (EclipseHistoryForecastParameters.valid(runParameters) || EclipseRestartForecastParameters.valid(runParameters)) {
                     expectedCaseName = runParameters.path("forecastDataFile").asText();
                 }
-                EclipseSummaryResultValidator.ValidatedResult validated = eclipseResultValidator.validate(
-                        expectedCaseName, snapshot.result());
+                EclipseSummaryResultValidator.ValidatedResult validated = "eclipse_300".equals(version.getModelKind())
+                        ? ("eclipse-data-inspection/15".equals(inspection.path("schemaVersion").asText())
+                            ? eclipseResultValidator.validateThermal(expectedCaseName, snapshot.result(), inspection)
+                            : eclipseResultValidator.validateCompositional(expectedCaseName, snapshot.result(), inspection))
+                        : eclipseResultValidator.validate(expectedCaseName, snapshot.result());
                 terminalStatus = validated.terminalStatus();
                 contract = validated.contract();
                 result = validated.result();
             } else {
+                JsonNode runParameters;
+                try {
+                    runParameters = objectMapper.readTree(run.getParametersJson());
+                } catch (Exception exception) {
+                    throw new PipesimResultValidator.ResultValidationException("Persisted run parameters are invalid", exception, null);
+                }
                 PipesimResultValidator.ValidatedResult validated =
-                        resultValidator.validate(run.getRunType(), run.getStudyName(), snapshot.result());
+                        resultValidator.validate(run.getRunType(), run.getStudyName(), snapshot.result(), runParameters);
                 terminalStatus = validated.terminalStatus();
                 contract = validated.contract();
                 result = validated.result();
                 requireWorkerResultStatus(snapshot.state(), terminalStatus,
-                        Set.of("network", "system-analysis", "network-optimizer").contains(run.getRunType()));
+                        Set.of("network", "system-analysis", "network-optimizer", "network-well-performance-curves").contains(run.getRunType()));
             }
             SoftwareIntegrationRunStatus current = SoftwareIntegrationRunStatus.valueOf(run.getStatus());
             if (current != SoftwareIntegrationRunStatus.CANCEL_REQUESTED && current != SoftwareIntegrationRunStatus.COLLECTING) {
@@ -543,6 +559,7 @@ public class SoftwareIntegrationRunDispatcher {
                 throw new SoftwareIntegrationArtifactPublisher.ArtifactPublicationException(
                         "Successful run is missing manifest.json");
             }
+            requireDeclaredResultArtifacts(result, published);
             JsonNode error = sanitizeForRun(run, snapshot.error());
             if (terminalStatus == SoftwareIntegrationRunStatus.PARTIAL_SUCCEEDED) {
                 error = "network".equals(run.getRunType())
@@ -570,12 +587,15 @@ public class SoftwareIntegrationRunDispatcher {
                 case "network" -> "pipesim-network-result/1";
                 case "system-analysis" -> "pipesim-system-analysis-result/1";
                 case "network-optimizer" -> "pipesim-network-optimizer-result/1";
+                case "network-well-performance-curves" -> "pipesim-network-well-performance-result/1";
                 case "sensitivity" -> "pipesim-well-sensitivity-result/1";
                 case "gas-lift-performance" -> "pipesim-gas-lift-performance-result/1";
                 case "gas-lift-diagnostics" -> "pipesim-gas-lift-diagnostics-result/1";
-                case "vfp-tables" -> "pipesim-vfp-tables-result/1";
+                case "vfp-tables" -> "pipesim-vfp-tables-result/2";
                 case "esp-curves" -> "pipesim-esp-curves-result/1";
-                case "trajectory" -> "pipesim-well-trajectory-result/1";
+                case "esp-parameter" -> "pipesim-esp-parameter-result/1 or /2";
+                case "trajectory" -> "pipesim-well-trajectory-result/1 or /2";
+                case "profile" -> "pipesim-well-result/1 or /2 for a validated Tubing edit";
                 default -> "pipesim-well-result/1";
             };
             fail(run.getId(), "RESULT_CONTRACT_INVALID", "Worker 结果不符合 " + schema);
@@ -584,9 +604,21 @@ public class SoftwareIntegrationRunDispatcher {
             if (finishCancellationThatWonDuringPublication(run.getId(), snapshot)) return;
             fail(run.getId(), "ARTIFACT_INVALID", "Worker Artifact 未通过路径、大小或 SHA-256 校验");
         } catch (RuntimeException exception) {
+            log.warn("Result publication failed for run {}", run.getId(), exception);
             if (published != null) artifactPublisher.discard(published);
             if (finishCancellationThatWonDuringPublication(run.getId(), snapshot)) return;
             fail(run.getId(), "RESULT_PUBLICATION_FAILED", "结果或 Artifact 元数据发布失败");
+        }
+    }
+
+    private static void requireDeclaredResultArtifacts(JsonNode result, PublishedArtifacts published) {
+        for (JsonNode reference : List.of(result.path("application"), result.path("pwiArtifact"))) {
+            JsonNode name = reference.path("artifactName");
+            if (name.isTextual() && published.artifacts().stream().noneMatch(artifact ->
+                    name.asText().equals(artifact.name()) && artifact.sizeBytes() > 0)) {
+                throw new SoftwareIntegrationArtifactPublisher.ArtifactPublicationException(
+                        "A model or PWI Artifact declared by the result is missing or empty");
+            }
         }
     }
 

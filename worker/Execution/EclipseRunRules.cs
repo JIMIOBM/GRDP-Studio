@@ -11,6 +11,8 @@ public static partial class EclipseRunRules
     public static bool IsApprovedBinaryOutput(string path) => ApprovedBinaryOutput().IsMatch(Path.GetFileName(path));
     public static bool IsStepSummaryOutput(string path) => StepSummaryOutput().IsMatch(Path.GetFileName(path));
     public static bool IsFieldBinaryOutput(string path) => FieldBinaryOutput().IsMatch(Path.GetFileName(path));
+    public static bool IsFormattedSummaryOutput(string path) => FormattedSummaryOutput().IsMatch(Path.GetFileName(path));
+    public static bool IsFormattedGridOutput(string path) => Regex.IsMatch(Path.GetFileName(path),@"^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\.(FINIT|FEGRID)$",RegexOptions.IgnoreCase|RegexOptions.CultureInvariant);
     public static bool HasLicenseDiagnostic(string text) => License().IsMatch(text);
     public static bool HasFatalDiagnostic(string text) => Fatal().IsMatch(text);
     public static bool RequiresKill(AdapterStopReason reason) => reason == AdapterStopReason.Cancelled;
@@ -19,5 +21,6 @@ public static partial class EclipseRunRules
     [GeneratedRegex(@"\bFATAL\b|\bABORT(?:ED|ING)?\b|TERMINATING\s+WITH\s+ERROR", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)] private static partial Regex Fatal();
     [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\.(?:EGRID|INIT|UNRST|UNSMRY|SMSPEC|FUNRST|S\d{4,5})$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)] private static partial Regex ApprovedBinaryOutput();
     [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\.S\d{4,5}$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)] private static partial Regex StepSummaryOutput();
-    [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\.(?:EGRID|INIT|UNRST)$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)] private static partial Regex FieldBinaryOutput();
+    [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\.(?:EGRID|INIT|UNRST|FUNRST)$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)] private static partial Regex FieldBinaryOutput();
+    [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\.FUNSMRY$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)] private static partial Regex FormattedSummaryOutput();
 }

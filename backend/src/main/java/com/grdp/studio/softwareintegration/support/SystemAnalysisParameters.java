@@ -7,8 +7,13 @@ public final class SystemAnalysisParameters {
 
     public static boolean valid(JsonNode value) {
         if (value == null || !value.isObject() || value.size() != 6
-                || !"pipesim-system-analysis-parameters/1".equals(value.path("schemaVersion").asText())
-                || !"Well".equals(value.path("producer").asText())
+                || !("pipesim-system-analysis-parameters/1".equals(value.path("schemaVersion").asText())
+                     || "pipesim-system-analysis-parameters/2".equals(value.path("schemaVersion").asText()))
+                || ("pipesim-system-analysis-parameters/1".equals(value.path("schemaVersion").asText())
+                    && !"Well".equals(value.path("producer").asText()))
+                || ("pipesim-system-analysis-parameters/2".equals(value.path("schemaVersion").asText())
+                    && (!value.path("producer").isTextual() || !safeDynamicName(value.path("producer").asText())
+                        || !safeDynamicName(value.path("branchTerminator").asText())))
                 || !"liquidFlowRate".equals(value.path("scanVariable").asText())
                 || !value.path("branchTerminator").isTextual()
                 || !safeName(value.path("branchTerminator").asText())
@@ -34,5 +39,10 @@ public final class SystemAnalysisParameters {
         return value != null && !value.isBlank() && value.length() <= 255
                 && value.indexOf('\u0000') < 0 && value.indexOf('/') < 0
                 && value.indexOf('\\') < 0 && !value.contains("..");
+    }
+
+    private static boolean safeDynamicName(String value) {
+        return safeName(value) && value.equals(value.strip())
+                && value.chars().noneMatch(character -> character < 32 || character == 127);
     }
 }

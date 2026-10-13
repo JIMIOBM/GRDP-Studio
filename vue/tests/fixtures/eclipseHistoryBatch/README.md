@@ -1,0 +1,2 @@
+Actual 5173 GET responses for persisted commercial batches 1 (SWFN/SOF3 runs 594/595, baseline 570) and 2 (real stale INIT failure 596 / successful 597, baseline 436), using persisted algorithm observation CSV records 1/2. These are algorithm verification data, not field observations.
+The provenance records read-only requests and unchanged solver run counts. The browser helper changes only transport identities and artifact lists, checks CSV SHA256 and each actual comparison against native output, and never manufactures a solver result or fills a failed run.

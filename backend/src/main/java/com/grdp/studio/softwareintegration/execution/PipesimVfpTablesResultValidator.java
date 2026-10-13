@@ -3,6 +3,7 @@ package com.grdp.studio.softwareintegration.execution;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 
+import java.util.HashSet;
 import java.util.Set;
 
 @Component
@@ -16,11 +17,11 @@ public class PipesimVfpTablesResultValidator {
             "artificialLiftInjectionDpPsi");
     private static final Set<String> TABLE_FIELDS = Set.of("valueName", "unit", "rows");
     private static final Set<String> ROW_FIELDS = Set.of(
-            "liquidRateIndex", "waterCutIndex", "gorIndex", "artificialLiftIndex", "values");
+            "thpIndex", "waterCutIndex", "gorIndex", "artificialLiftIndex", "values");
 
     public PipesimWellResultValidator.ValidatedResult validate(JsonNode result) {
         requireObject(result, ROOT_FIELDS, "VFP tables result");
-        requireText(result, "schemaVersion", "pipesim-vfp-tables-result/1");
+        requireText(result, "schemaVersion", "pipesim-vfp-tables-result/2");
         requireText(result, "model_kind", "black_oil_liquid");
         requireText(result, "runTask", "vfp-tables");
         requireText(result, "resultContract", "VALID_FULL");
@@ -31,8 +32,10 @@ public class PipesimVfpTablesResultValidator {
         require(result.path("includeTemperature").isBoolean(), "Invalid includeTemperature");
         requireNumber(result.path("bottomHoleDatumDepth"), 0D, 100000D, "bottomHoleDatumDepth");
         validateAxes(result.path("axes"));
-        validateTable(result.path("table"), "BHP", "psia", result.path("axes"), false);
-        validateTable(result.path("temperatureTable"), "TEMP", "F", result.path("axes"), !result.path("includeTemperature").asBoolean());
+        Set<String> bhpRows = validateTable(result.path("table"), "BHP", "psia", result.path("axes"), false);
+        Set<String> temperatureRows = validateTable(result.path("temperatureTable"), "TEMP", "F", result.path("axes"), !result.path("includeTemperature").asBoolean());
+        require(!result.path("includeTemperature").asBoolean() || bhpRows.equals(temperatureRows),
+                "BHP and temperature VFP row grids do not match");
         requireSafeContent(result, "vfpTableContent");
         requireSafeContent(result, "vfpTableWithTemperatureContent");
         return new PipesimWellResultValidator.ValidatedResult(
@@ -48,23 +51,40 @@ public class PipesimVfpTablesResultValidator {
         requireArray(axes.path("artificialLiftInjectionDpPsi"), 1, 16, "artificialLiftInjectionDpPsi");
     }
 
-    private static void validateTable(JsonNode table, String valueName, String unit, JsonNode axes, boolean allowEmpty) {
+    private static Set<String> validateTable(JsonNode table, String valueName, String unit, JsonNode axes, boolean allowEmpty) {
         requireObject(table, TABLE_FIELDS, "VFP table");
         requireText(table, "valueName", valueName);
         requireText(table, "unit", unit);
         JsonNode rows = table.path("rows");
         require(rows.isArray() && rows.size() <= 65536 && (allowEmpty ? rows.size() == 0 : rows.size() >= 1), "VFP table rows have an invalid shape");
-        if (rows.isEmpty()) return;
-        int valueCount = axes.path("outletPressuresPsi").size();
+        if (rows.isEmpty()) return Set.of();
+        int liquidCount = axes.path("liquidRatesStbPerDay").size();
+        int thpCount = axes.path("outletPressuresPsi").size();
+        int waterCutCount = axes.path("waterCutFraction").size();
+        int gorCount = axes.path("gorMscfPerStb").size();
+        int artificialLiftCount = axes.path("artificialLiftInjectionDpPsi").size();
+        int expectedRows = thpCount * waterCutCount * gorCount * artificialLiftCount;
+        require(rows.size() == expectedRows, "VFP table does not cover the full THP/WFR/GFR/ALQ grid");
+        Set<String> rowKeys = new HashSet<>();
         for (JsonNode row : rows) {
             requireObject(row, ROW_FIELDS, "VFP table row");
-            for (String index : new String[]{"liquidRateIndex", "waterCutIndex", "gorIndex", "artificialLiftIndex"}) {
-                require(row.path(index).isIntegralNumber() && row.path(index).asInt() >= 1, "Invalid " + index);
-            }
+            int thpIndex = requireIndex(row.path("thpIndex"), thpCount, "thpIndex");
+            int waterCutIndex = requireIndex(row.path("waterCutIndex"), waterCutCount, "waterCutIndex");
+            int gorIndex = requireIndex(row.path("gorIndex"), gorCount, "gorIndex");
+            int artificialLiftIndex = requireIndex(row.path("artificialLiftIndex"), artificialLiftCount, "artificialLiftIndex");
+            require(rowKeys.add(thpIndex + ":" + waterCutIndex + ":" + gorIndex + ":" + artificialLiftIndex),
+                    "Duplicate VFP table index tuple");
             JsonNode values = row.path("values");
-            require(values.isArray() && values.size() == valueCount, "VFP table row values have an invalid shape");
+            require(values.isArray() && values.size() == liquidCount, "VFP table row must contain one value per liquid-rate axis point");
             for (JsonNode value : values) requireNumber(value, null, null, "VFP table value");
         }
+        require(rowKeys.size() == expectedRows, "VFP table row grid is incomplete");
+        return rowKeys;
+    }
+
+    private static int requireIndex(JsonNode value, int maximum, String name) {
+        require(value.isIntegralNumber() && value.asInt() >= 1 && value.asInt() <= maximum, "Invalid " + name);
+        return value.asInt();
     }
 
     private static void requireObject(JsonNode node, Set<String> fields, String name) {

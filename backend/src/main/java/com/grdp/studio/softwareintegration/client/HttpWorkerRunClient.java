@@ -50,7 +50,7 @@ public class HttpWorkerRunClient implements WorkerRunClient {
         }
         Boolean idle = body.get("idle").booleanValue();
         return new WorkerCapabilities(idle, capability(body.get("pipesimWell")),
-                capability(body.get("pipesimNetwork")), capability(body.get("eclipse100")));
+                capability(body.get("pipesimNetwork")), capability(body.get("eclipse100")), capability(body.get("eclipse300")));
     }
 
     @Override
