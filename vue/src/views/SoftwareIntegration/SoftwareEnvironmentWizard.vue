@@ -58,27 +58,25 @@ onMounted(() => inspect(true))
   </div>
   <el-dialog v-model="visible" title="软件集成 · 环境发现与配置" top="5vh" width="min(780px, 94vw)" :close-on-click-modal="false">
     <div class="environment-body">
-    <p>这里配置的是运行 Worker 的计算主机，不是访问网页的电脑。PIPESIM 单井与管网共用一套环境；两种软件可分别配置。</p>
     <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon />
     <el-alert v-if="snapshot?.configurationWarning" :title="snapshot.configurationWarning" type="warning" :closable="false" />
     <p v-if="!snapshot && !busy">请先启动计算服务，然后重新检测。不配置也可以浏览已有项目和结果。</p>
     <template v-if="snapshot">
-      <p>计算主机：{{ snapshot.host }} · {{ snapshot.configured ? '已有本机配置' : '首次使用，请确认并保存所需软件' }}</p>
+      <p>计算主机：{{ snapshot.host }} · {{ snapshot.configured ? '已有本机配置' : '首次使用，待保存' }}</p>
       <section v-for="simulator in ['pipesim', 'eclipse']" :key="simulator" class="environment-card" :aria-label="`${label(simulator)} 环境配置`">
         <h3>{{ label(simulator) }} <el-tag :type="snapshot[simulator].status === 'READY' ? 'success' : 'warning'">{{ statusText[snapshot[simulator].status] }}</el-tag></h3>
-        <p>{{ snapshot[simulator].message }}</p>
+        <p v-if="snapshot[simulator].status !== 'READY'">{{ snapshot[simulator].message }}</p>
         <p v-if="snapshot.configuredSimulators?.includes(simulator)">已保存本机配置</p>
         <el-form label-position="top">
           <el-form-item v-for="[key, title] in fields[simulator]" :key="key" :label="title">
-            <el-select v-model="form[key]" filterable allow-create default-first-option :aria-label="title" :disabled="busy" placeholder="选择检测结果，或输入计算主机上的完整路径" style="width: 100%">
+            <el-select v-model="form[key]" filterable allow-create default-first-option :aria-label="title" :disabled="busy" placeholder="选择或输入完整路径" style="width: 100%">
               <el-option v-for="path in snapshot.candidates?.[key] || []" :key="path" :label="path" :value="path" />
             </el-select>
           </el-form-item>
         </el-form>
         <el-button type="primary" :loading="busy" :disabled="busy || fields[simulator].some(([key]) => !form[key]?.trim())" @click="save(simulator)">验证并保存 {{ simulator === 'pipesim' ? 'PIPESIM' : 'ECLIPSE' }}</el-button>
       </section>
-      <p class="environment-note">{{ snapshot.licenseNotice }}</p>
-      <p class="environment-note">自动搜索常见安装目录及 PATH；未找到时可手动输入。保存成功后立即生效，并在本机保留，重启无需重复填写。运行计算期间不能修改配置。远程访问者请联系计算主机管理员配置。</p>
+      <p class="environment-note">检测通过不代表计算成功，仍需有效许可证。</p>
     </template>
     </div>
     <template #footer>

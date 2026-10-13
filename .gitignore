@@ -302,3 +302,16 @@ docs/
 /docs/software-integration/roadmap.md
 /docs/software-integration/eclipse-mvp-architecture.md
 /docs/software-integration/acceptance/L42-A.md
+
+# Additional machine-local planning and handover notes.
+/docs/software-integration/*-integrated-console-plan.md
+/docs/software-integration/*-coverage-and-delivery-plan.md
+/docs/software-integration/*-development-plan*.md
+/docs/software-integration/*.goal.md
+/docs/software-integration/next-development-plan.md
+/docs/software-integration/iam-coupling-roadmap.md
+/docs/software-integration/code-review-2026-10-06.md
+/docs/software-integration/acceptance/L25.md
+/docs/software-integration/execution/**/SOL-HANDOFF.md
+/docs/software-integration/execution/**/SOL-DEVELOPMENT-REMAINING.md
+/docs/software-integration/execution/**/PROGRESS.md
