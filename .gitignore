@@ -295,3 +295,10 @@ docs/
 /test-results/
 !/backend/src/test/java/com/grdp/studio/softwareintegration/SoftwareEnvironmentControllerTests.java
 !/vue/tests/e2e/software-environment.spec.js
+
+# Local development notes; retain on this machine, do not publish.
+/docs/software-integration/*-development-handoff.md
+/docs/software-integration/coupled-console-roadmap-2026-10-08.md
+/docs/software-integration/roadmap.md
+/docs/software-integration/eclipse-mvp-architecture.md
+/docs/software-integration/acceptance/L42-A.md
