@@ -4,6 +4,13 @@ import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
 import { analyticMethodApi } from '@/api/docker'
 import InventoryOperationPreview from './InventoryOperationPreview.vue'
+// 与注采拟合共用一份选项常量（平台产品口径，避免两页面不一致）。
+import {
+  MODIFICATION_METHODS,
+  DEVIATION_METHODS,
+  VISCOSITY_METHODS,
+  MATERIAL_BALANCE_METHODS
+} from '@/constants/analyticMethodOptions'
 
 const props = defineProps({
   node: Object,
@@ -13,11 +20,6 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['recalculate'])
-
-const MODIFICATION_METHODS = ['Wichert-Aziz 修正方法', 'Carr-Kobayashi-Burrous 修正方法']
-const DEVIATION_METHODS = ['Dranchuk-Abu-Kassem 方法', 'Dranchuk-Purvis-Robinson 方法', 'Hall-Yarborough 方法']
-const VISCOSITY_METHODS = ['Lee-Gonzalez-Eakin 方法', 'Carr-Kobayashi-Burrous 方法', 'Sutton 方法']
-const MATERIAL_BALANCE_METHODS = ['封闭气藏', '定容气藏', '页岩气藏']
 
 const loading = ref(false)
 const activeChartTab = ref('chart')

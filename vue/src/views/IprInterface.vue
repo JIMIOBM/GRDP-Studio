@@ -42,6 +42,7 @@ import NodalAnalysis from '@/views/ProductionAllocation/NodalAnalysis.vue'
 import MultiPeriodObjectiveFunction from '@/views/ProductionAllocation/MultiPeriodPrediction/ObjectiveFunction.vue'
 import MultiPeriodConstraintConditions from '@/views/ProductionAllocation/MultiPeriodPrediction/ConstraintConditions.vue'
 import MultiPeriodSolutionGeneration from '@/views/ProductionAllocation/MultiPeriodPrediction/SolutionGeneration.vue'
+import InjectionProductionFitting from '@/views/ProductionAllocation/InjectionProductionFitting.vue'
 import {
   resolveCalcContextFromConstraints,
   extractCurrentWellProfileFromResponses,
@@ -638,6 +639,28 @@ function ensureMultiPeriodNavigation(nodes, inheritedWell = '') {
     }
   }
 }
+
+const INJECTION_FITTING_NODE_TYPE = 'injection-production-fitting'
+
+// 在每口井的"配产配注"组下挂"注采拟合"入口（与"节点分析"同级，纯视图节点）。
+function ensureInjectionFittingNavigation(nodes, inheritedWell = '') {
+  for (const node of nodes || []) {
+    const wellName = node.wellName || inheritedWell
+    if (node.type === 'production-allocation') {
+      node.children ||= []
+      let page = node.children.find(child => child.type === INJECTION_FITTING_NODE_TYPE)
+      if (!page) {
+        page = { id: `${node.id}-injection-fitting`, type: INJECTION_FITTING_NODE_TYPE, label: '注采拟合', wellName, children: [] }
+        node.children.push(page)
+      }
+      if (page.wellName !== wellName) page.wellName = wellName
+      if (page.label !== '注采拟合') page.label = '注采拟合'
+    } else {
+      ensureInjectionFittingNavigation(node.children, wellName)
+    }
+  }
+}
+
 const softwareIntegrationWorkspace = ref(null)
 const softwareIntegrationImportInput = ref(null)
 let pendingSoftwareIntegrationImport = null
@@ -691,6 +714,7 @@ const wellKeyword = workspaceTreeKeyword
 const sideTreeCollapsed = workspaceTreeCollapsed
 const waterInvasionRunning = ref(false)  //用于判断水侵分析是否正在运行
 const analyticMethodRunning = ref(false)
+const injectionProductionFittingRunning = ref(false)  //注采拟合（采端）计算中
 const materialBalanceRunning = ref(false)
 const MATERIAL_BALANCE_NOTIFY_MODULE = 'projectanalysis.dynamicoriginalgasinplace'//物质平衡日志配置
 const MATERIAL_BALANCE_LOG_TIMEOUT = 120000
@@ -3360,6 +3384,128 @@ const runAnalyticMethodForSelectedWell = async (options = {}) => {
   }
 }
 
+// 配产配注-注采拟合（采端）：计算内核复用解析法接口（见 material/注采拟合.md）。
+// 与解析法的落地差异：不切"解析法"视图、不改左侧高亮（activeNode/activeNodeId 供目标井解析使用），
+// 仅在注采拟合视图内更新 resultId/fitRevision 供组件渲染。
+const resolveAnalyticResultIdForWell = async (wellName) => {
+  await refreshAnalyticMethodNodes()
+  const treeRaw = findAnalyticMethodNode(wellName)?.raw || {}
+  return treeRaw.resultId || treeRaw.analysisId || treeRaw.AnalysisMethodsId ||
+      treeRaw.analysisMethodsId || treeRaw.nodeId || null
+}
+
+// 打开注采拟合视图：先落视图，再回填该井已有解析法结果（历史结果与本次计算共用一个查看入口）。
+// fittingNode 为左侧目录节点（目录点击时传入；Ribbon 入口自行查找），用于保持高亮/展开状态一致。
+const showInjectionFittingForWell = async (wellName, fittingNode = null) => {
+  currentView.value = 'injection-production-fitting'
+  currentViewNode.value = {
+    ...(fittingNode || {}),
+    id: fittingNode?.id || `ip-fitting-${wellName}`,
+    type: INJECTION_FITTING_NODE_TYPE,
+    label: '注采拟合',
+    wellName,
+    resultId: fittingNode?.resultId || null,
+    fitRevision: fittingNode?.fitRevision || 0,
+    pendingResultLookup: true
+  }
+
+  const resultId = await resolveAnalyticResultIdForWell(wellName).catch(() => null)
+  // 竞态护栏：用户已切走视图或换井时不回填。
+  if (currentView.value !== 'injection-production-fitting' || currentViewNode.value?.wellName !== wellName) return
+  currentViewNode.value = { ...currentViewNode.value, resultId, pendingResultLookup: false }
+}
+
+// Ribbon"配产配注 → 注采拟合"入口：确保目录节点存在并高亮（与"节点分析"入口一致）。
+const openInjectionFittingForWell = async (wellName) => {
+  if (!wellName) {
+    ElMessage.warning('请先在左侧选择一口井')
+    return
+  }
+  const well = ensureWell(wellName)
+  if (!well) {
+    ElMessage.warning('当前井目录尚未加载，请稍后重试')
+    return
+  }
+  well.expanded = true
+  const groupNode = well.children?.find(child => child.type === 'production-allocation')
+  if (groupNode) groupNode.expanded = true
+  ensureInjectionFittingNavigation([well])
+  const fittingNode = groupNode?.children?.find(child => child.type === INJECTION_FITTING_NODE_TYPE)
+  if (fittingNode) activeNodeId.value = fittingNode.id
+  await showInjectionFittingForWell(wellName, fittingNode)
+}
+
+// 与 finalizeAnalyticMethodResult 相同的"刷树→取结果 ID"重试流程，但落到注采拟合视图。
+const finalizeInjectionFittingResult = async (wellName, logPayload, maxRetries = 8, intervalMs = 1000) => {
+  const logResultId = logPayload?.node ?? logPayload?.nodeId ?? logPayload?.resultId ?? logPayload?.analysisId
+  let lastError = null
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      if (attempt > 0) await new Promise(resolve => setTimeout(resolve, intervalMs))
+      await refreshAnalyticMethodNodes()
+      const treeNode = findAnalyticMethodNode(wellName)
+      const treeRaw = treeNode?.raw || {}
+      const resultId = treeRaw.resultId || treeRaw.analysisId || treeRaw.AnalysisMethodsId ||
+          treeRaw.analysisMethodsId || treeRaw.nodeId || logResultId
+      if (!resultId) {
+        lastError = new Error('没有找到该井的解析法结果 ID')
+        continue
+      }
+
+      // 先确认结果可读再落视图；组件随后自行 getResult 渲染。
+      await analyticMethodApi.getResult(PROJECT_ID, GAS_RESERVOIR_ID, resultId)
+      currentView.value = 'injection-production-fitting'
+      currentViewNode.value = {
+        ...(currentViewNode.value || {}),
+        wellName,
+        resultId,
+        fitRevision: (currentViewNode.value?.fitRevision || 0) + 1,
+        pendingResultLookup: false
+      }
+      ElMessage.success(`${wellName} 注采拟合计算完成`)
+      return resultId
+    } catch (error) {
+      lastError = error
+    }
+  }
+  throw lastError || new Error(`${wellName} 注采拟合结果已完成，但暂时没有读取到结果`)
+}
+
+const runInjectionProductionFitting = async (options = {}) => {
+  const wellName = options.wellName || currentViewNode.value?.wellName ||
+      resolveWorkspaceTargetWellName(activeNode.value?.wellName || selectedWellName.value)
+  if (!wellName) {
+    ElMessage.warning('请先在左侧选择一口井')
+    return
+  }
+  if (injectionProductionFittingRunning.value) return
+
+  injectionProductionFittingRunning.value = true
+  const waiter = createAnalyticMethodLogWaiter(wellName)
+  try {
+    ElMessage.info('注采拟合计算中，请稍候...')
+    void analyticMethodApi.historyFitting({
+      gasReservoirId: Number(GAS_RESERVOIR_ID),
+      projectId: Number(PROJECT_ID),
+      wellNames: [wellName],
+      dataSize: options.dataSize ?? 30,
+      minimumWaterGasRatio: options.minimumWaterGasRatio ?? -1
+    }).catch(error => {
+      console.warn('注采拟合启动接口异常，继续等待最终完成日志', error)
+    })
+
+    const logPayload = await waiter.promise
+    await finalizeInjectionFittingResult(wellName, logPayload)
+  } catch (error) {
+    waiter.cancel()
+    const msg = error.response?.data?.msg || error.response?.data?.message || ''
+    ElMessage.error(msg || error.message || '注采拟合计算失败')
+    console.error('注采拟合计算失败', error)
+  } finally {
+    injectionProductionFittingRunning.value = false
+  }
+}
+
 const normalizeMaterialBalanceReservoirType = (value) => {
   if (value === 'closed' || Number(value) === 2) return 2
   return 1
@@ -4918,6 +5064,11 @@ const handleSelect = async (node) => { // 点击左侧树节点
     return
   }
 
+  if (node.type === INJECTION_FITTING_NODE_TYPE) {
+    await showInjectionFittingForWell(nodeWellName, node)
+    return
+  }
+
   if (node.type === 'well-data-pvt') {
     try {
       if (!node.pvtId) throw new Error('该PVT节点缺少数据库ID，请刷新目录后重试')
@@ -5336,6 +5487,17 @@ const handleCommand = async ({ group, name, parent, commandId, wellName: command
         ElMessage.success(`[${group}] ${name}`)
       }
       break
+    case '注采拟合':
+      if (group === '配产配注') {
+        if (!targetWellName) {
+          ElMessage.warning('请先在左侧选择一口井')
+          return
+        }
+        void openInjectionFittingForWell(targetWellName)
+      } else {
+        ElMessage.success(`[${group}] ${name}`)
+      }
+      break
     default:
       ElMessage.success(`[${group}] ${name}`)
   }
@@ -5534,6 +5696,7 @@ onMounted(async () => {
 
 watch(() => workspaceTreeData.value, nodes => {
   ensureMultiPeriodNavigation(nodes)
+  ensureInjectionFittingNavigation(nodes)
 }, { deep: true, immediate: true })
 
 onBeforeUnmount(() => {
@@ -5632,6 +5795,12 @@ onBeforeUnmount(() => {
             @prediction-task-selected="handleMultiPeriodPredictionTaskSelected"
             :constraints-result="activeMultiPeriodConstraints"
             @solution-generated="handleMultiPeriodSolutionGenerated" />
+          <!-- 配产配注：注采拟合（采端） -->
+          <InjectionProductionFitting v-if="currentView === 'injection-production-fitting'"
+            :key="`ip-fitting-${currentViewNode?.wellName || 'well'}`" :node="currentViewNode"
+            :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID"
+            :recalculating="injectionProductionFittingRunning"
+            @recalculate="runInjectionProductionFitting" />
           <ErosionContent v-if="currentView === 'wellbore-erosion'" :key="currentViewNode?.id" :node="currentViewNode"
             :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
           <WellboreStructureContent v-if="currentView === 'wellbore-structure'" :key="currentViewNode?.id"
