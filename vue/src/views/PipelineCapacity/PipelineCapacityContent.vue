@@ -6,6 +6,7 @@ import PipelineBoundaryPage from './PipelineBoundaryPage.vue'
 import PipelineFlowPage from './PipelineFlowPage.vue'
 import PipelineComparisonPage from './PipelineComparisonPage.vue'
 import PipelineConstraintPage from './PipelineConstraintPage.vue'
+import PipelineErosionPage from './PipelineErosionPage.vue'
 import PipelineTopologyEditor from './PipelineTopologyEditor.vue'
 import PipelineTemperatureEditor from './PipelineTemperatureEditor.vue'
 import PipelineGasPropertyPage from './PipelineGasPropertyPage.vue'
@@ -18,8 +19,8 @@ const props = defineProps({
 const emit = defineEmits(['navigate'])
 const s = usePipelineWorkspace(props)
 const title = computed(() => pipelinePageTitles[s.activePage])
-const editable = computed(() => ['flow', 'boundary', 'hydrate'].includes(s.activePage))
-const hasResults = computed(() => ['flow', 'equipment', 'hydrate', 'comparison'].includes(s.activePage))
+const editable = computed(() => ['flow', 'boundary', 'hydrate', 'erosion'].includes(s.activePage))
+const hasResults = computed(() => ['flow', 'equipment', 'hydrate', 'erosion', 'comparison'].includes(s.activePage))
 const pageBusy = computed(() => hasResults.value ? !!(s.batchBusy || s.busy) : s.busy)
 const pageError = computed(() => hasResults.value ? s.batchError : s.error)
 const pageStale = computed(() => s.batchStale)
@@ -31,7 +32,7 @@ defineExpose({ dirty: computed(() => s.dirty), mayDiscard: s.mayDiscard })
   <div v-if="!wellName" class="pipeline-empty">请先在左侧选择一口井，再进入管束能力。</div>
   <PipelinePvtModelPage v-else-if="s.activePage === 'pvt'" :context="s.context" :command-key="commandKey" @saved="s.refreshGasProperties" />
   <PipelineGasPropertyPage v-else-if="['temperature-z', 'temperature-cp'].includes(s.activePage)" :context="s.context" :kind="s.activePage === 'temperature-z' ? 'z' : 'cp'" :command-key="commandKey" @saved="s.refreshGasProperties" />
-  <section v-else-if="['erosion', 'freeze'].includes(s.activePage)" class="pipeline-workspace" :aria-label="title">
+  <section v-else-if="s.activePage === 'freeze'" class="pipeline-workspace" :aria-label="title">
     <header class="model-strip"><strong>{{ title }}</strong><span class="well-context">{{ wellName }}</span></header>
     <PipelineConstraintPage :state="s" :kind="s.activePage" />
   </section>
@@ -50,10 +51,11 @@ defineExpose({ dirty: computed(() => s.dirty), mayDiscard: s.mayDiscard })
     </header>
     <div v-if="pageError" class="error-strip" role="alert">{{ pageError }}</div>
     <div v-if="hasResults && s.topologyError" class="topology-source invalid"><span>{{ s.topologyError }}</span><button v-if="s.activePage !== 'flow'" @click="navigate('topology')">前往管网拓扑结构</button></div>
-    <div v-if="hasResults && pageStale" class="stale-strip">{{ s.activePage === 'flow' ? '边界工况、PVT、温度模型、含水条件或拓扑等计算条件已变化，请重新计算全部工况。' : '边界、物性、含水条件或已保存拓扑等计算条件已变化，请重新计算全部工况后查看结果。' }}</div>
+    <div v-if="hasResults && pageStale" class="stale-strip">边界工况、PVT、温度模型、约束参数或拓扑等计算条件已变化，请重新计算全部工况。</div>
     <PipelineBoundaryPage v-if="s.activePage === 'boundary'" :state="s" @navigate="navigate" />
     <PipelineFlowPage v-else-if="s.activePage === 'flow'" :state="s" />
     <PipelineComparisonPage v-else-if="s.activePage === 'comparison'" :state="s" @navigate="navigate" />
+    <PipelineErosionPage v-else-if="s.activePage === 'erosion'" :state="s" />
     <PipelineConstraintPage v-else :key="s.activePage" :state="s" :kind="s.activePage" @navigate="navigate" />
     <footer class="status-bar" :class="{ 'storage-warning': s.storageError }">
       <span v-if="s.storageError">{{ s.storageError }}</span>

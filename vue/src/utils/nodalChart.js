@@ -1,6 +1,7 @@
 export const nodalStatus = code => ({ SUCCESS: '计算完成', INCOMPLETE_CONSTRAINTS: '约束未完成', PARTIAL_RESULT: '部分工况不可计算', SEARCH_LIMIT_REACHED: '搜索范围不足', NO_FEASIBLE_RANGE: '无可行区间', MULTIPLE_INTERSECTIONS: '多个边界交点' }[code] || code)
 const xy = p => [p.rate, p.pressure]
 export function nodalEnvelope(result) {
+  if(Array.isArray(result.feasibleRegions)) return result.feasibleRegions.map(region=>region.map(xy))
   const slices = [...(result.regionScenarios || [])].sort((a,b) => a.reservoirPressure-b.reservoirPressure), polygons = []
   const valid = s => s.status !== 'INCOMPLETE_CONSTRAINTS' && s.intervals?.length > 0
   const edge = (s,i) => [xy(i.from), ...s.formation.filter(p=>p.rate>i.from.rate && p.rate<i.to.rate).map(xy), xy(i.to)]
@@ -30,6 +31,20 @@ export function nodalConstraintBoundary(scenario, code) {
   }
   return points
 }
+export function nodalLegendGraphic(items) {
+  const rowHeight=25, width=250, height=items.length*rowHeight+16
+  const children=[{type:'rect',silent:false,cursor:'move',shape:{x:0,y:0,width,height,r:3},style:{fill:'rgba(255,255,255,.94)',stroke:'#d9dde3',lineWidth:1}}]
+  items.forEach((item,index)=>{
+    const y=14+index*rowHeight
+    children.push(item.symbol==='circle'
+      ? {type:'circle',silent:true,shape:{cx:22,cy:y,r:6},style:{fill:item.color}}
+      : {type:'line',silent:true,shape:{x1:8,y1:y,x2:38,y2:y},style:{stroke:item.color,lineWidth:2}})
+    children.push({type:'text',silent:true,style:{x:46,y,text:item.name,fill:'#5f6368',font:'13px sans-serif',verticalAlign:'middle'}})
+  })
+  // Use the children's real bounds for right alignment; raw group bounds are zero-sized
+  // and place most of the legend outside the canvas.
+  return {id:'nodal-draggable-legend',type:'group',right:12,top:22,z:100,draggable:true,cursor:'move',children}
+}
 export function nodalChartOption(result, operation) {
   const injection=operation==='injection', maximumName=`最大合理${injection?'注':'采'}气能力`
   const line=(name,data,color)=>({name,type:'line',showSymbol:false,smooth:false,connectNulls:false,data,lineStyle:{width:2,color},itemStyle:{color},z:3})
@@ -38,13 +53,21 @@ export function nodalChartOption(result, operation) {
     const colors=injection?['#e59138','#41a269','#36a9d2','#996dce']:['#31577a','#e59138','#41a269','#36a9d2']
     const name=`${injection?'地层流出':'地层流入'}曲线 Pr=${s.reservoirPressure} MPa`
     series.push(line(name,s.formation.map(xy),colors[i%colors.length]))
-    if(s.maximum) maximum.push({name,value:xy(s.maximum)})
+    if(s.maximum) maximum.push({name,value:xy(s.maximum),stabilityPending:s.status==='MULTIPLE_INTERSECTIONS'})
   })
-  const slices=[...(result.regionScenarios?.length?result.regionScenarios:result.scenarios)].sort((a,b)=>a.reservoirPressure-b.reservoirPressure)
-  for(const [code,name,color] of [['liquidLoading','临界携液流量','#4575b4'],['erosion','临界冲蚀流量','#ed4545']]) {
-    if(injection && code==='liquidLoading') continue
-    const data=slices.map(s=>{const edges=nodalConstraintBoundary(s,code);return edges.length===1?edges[0]:[null,null]})
-    if(data.some(p=>p[0]!=null)) series.push(line(name,data,color))
+  const constraintColors={liquidLoading:'#4575b4',erosion:'#ed4545'}
+  if(Array.isArray(result.constraintCurves)) {
+    for(const curve of result.constraintCurves) for(const segment of curve.segments||[]) {
+      if(segment.length) series.push(line(curve.name,segment.map(xy),constraintColors[curve.code]||'#777'))
+    }
+  } else {
+    // Old saved snapshots did not persist formal constraint curves.
+    const slices=[...(result.regionScenarios?.length?result.regionScenarios:result.scenarios)].sort((a,b)=>a.reservoirPressure-b.reservoirPressure)
+    for(const [code,name,color] of [['liquidLoading','临界携液流量','#4575b4'],['erosion','临界冲蚀流量','#ed4545']]) {
+      if(injection && code==='liquidLoading') continue
+      const data=slices.map(s=>{const edges=nodalConstraintBoundary(s,code);return edges.length===1?edges[0]:[null,null]})
+      if(data.some(p=>p[0]!=null)) series.push(line(name,data,color))
+    }
   }
   const polygons=nodalEnvelope(result)
   if(polygons.length) series.push({name:'合理能力范围',type:'custom',silent:true,z:1,data:polygons.map((_,i)=>[i]),
@@ -56,8 +79,11 @@ export function nodalChartOption(result, operation) {
       for(let y=top;y<=bottom;y+=12) children.push({type:'line',shape:{x1:left,y1:y,x2:right,y2:y},style:{stroke:'#656565',lineWidth:0.6}})
       return {type:'group',clipPath:{type:'polygon',shape:{points}},children}
     }})
-  if(maximum.length) series.push({name:maximumName,type:'scatter',symbol:'circle',symbolSize:12,data:maximum,z:5,itemStyle:{color:'#e32626'},tooltip:{trigger:'item',formatter:p=>`${p.name}<br/>${maximumName}<br/>气量：${Number(p.value[0]).toFixed(4)} ×10⁴ m³/d<br/>井底流压：${Number(p.value[1]).toFixed(4)} MPa`}})
-  return {animation:false,tooltip:{trigger:'axis'},legend:{type:'scroll',orient:'vertical',right:8,top:20,width:240,data:[...(maximum.length?[{name:maximumName,icon:'circle'}]:[]),...series.slice(1,1+result.scenarios.length).concat(series[0],series.filter(s=>s.name.startsWith('临界'))).map(s=>({name:s.name,icon:'path://M0,4 L30,4 L30,6 L0,6 Z'}))]},grid:{top:40,left:75,right:280,bottom:65},
+  if(maximum.length) series.push({name:maximumName,type:'scatter',symbol:'circle',symbolSize:12,data:maximum,z:5,itemStyle:{color:'#e32626'},tooltip:{trigger:'item',formatter:p=>`${p.name}<br/>${maximumName}${p.data.stabilityPending?'（多交点，稳定性待确认）':''}<br/>气量：${Number(p.value[0]).toFixed(4)} ×10⁴ m³/d<br/>井底流压：${Number(p.value[1]).toFixed(4)} MPa`}})
+  const legendSeries=[...series.slice(1,1+result.scenarios.length),series[0],...series.filter(s=>s.name.startsWith('临界'))]
+  const legendItems=[...(maximum.length?[{name:maximumName,color:'#e32626',symbol:'circle'}]:[]),
+    ...legendSeries.filter((s,i,a)=>a.findIndex(x=>x.name===s.name)===i).map(s=>({name:s.name,color:s.lineStyle.color,symbol:'line'}))]
+  return {animation:false,tooltip:{trigger:'axis'},legend:{show:false},graphic:[nodalLegendGraphic(legendItems)],grid:{top:40,left:75,right:280,bottom:65},
     xAxis:{type:'value',name:`${injection?'注气量':'采气量'} (10⁴ m³/d)`,nameLocation:'middle',nameGap:35,min:0,splitLine:{show:true,lineStyle:{color:'#dfe7f2',width:1}} ,axisLine:{show:true}},
     yAxis:{type:'value',name:'井底流压 (MPa)',splitLine:{show:true,lineStyle:{color:'#dfe7f2',width:1}} ,axisLine:{show:true}},series}
 }

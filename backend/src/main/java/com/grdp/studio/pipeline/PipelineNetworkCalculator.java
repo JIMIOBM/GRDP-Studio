@@ -3,6 +3,7 @@ package com.grdp.studio.pipeline;
 import com.grdp.studio.common.BusinessException;
 import org.springframework.stereotype.Service;
 import java.util.*;
+import java.util.function.BiFunction;
 import static com.grdp.studio.pipeline.PipelineDtos.*;
 import static com.grdp.studio.pipeline.PipelineTopology.*;
 import static com.grdp.studio.pipeline.PipelineTemperatureCalculator.Config;
@@ -19,7 +20,12 @@ public class PipelineNetworkCalculator {
             double maxPressureMpa,Double maxPowerKw,double pressureMarginMpa,Double powerMarginKw,String status) {}
     public record HydrateResult(String edgeId,String name,double distanceM,String pointLabel,double pressureMpa,
             double temperatureC,Double equilibriumC,Double marginC,String status,String reason,int sampledPoints,int evaluatedPoints) {}
-    public record NetworkResult(List<PipeResult> pipes,List<DeviceResult> equipment,List<HydrateResult> hydrate,List<String> notes) {}
+    public record NetworkResult(List<PipeResult> pipes,List<DeviceResult> equipment,List<HydrateResult> hydrate,
+            List<PipelineErosion.Result> erosion,List<String> notes) {
+        public NetworkResult(List<PipeResult> pipes,List<DeviceResult> equipment,List<HydrateResult> hydrate,List<String> notes) {
+            this(pipes,equipment,hydrate,List.of(),notes);
+        }
+    }
     private record Tree(Node root,Map<String,Node> nodes,Map<String,List<Edge>> outgoing,List<Edge> ordered) {}
     private record State(double pressure,double temperature) {}
     private record Solved(Input input,Result result) {}
@@ -35,6 +41,11 @@ public class PipelineNetworkCalculator {
 
     public NetworkResult calculate(Graph graph,Input base,PipelineTemperature.Snapshot thermalSnapshot,
             PipelineGasModel.Snapshot gasSnapshot,BoundaryCase condition,int topologyRevision) {
+        return calculate(graph,base,thermalSnapshot,gasSnapshot,condition,topologyRevision,null);
+    }
+    public NetworkResult calculate(Graph graph,Input base,PipelineTemperature.Snapshot thermalSnapshot,
+            PipelineGasModel.Snapshot gasSnapshot,BoundaryCase condition,int topologyRevision,
+            BiFunction<Double,Double,Double> liquidDensity) {
         require(base!=null,"请填写管流计算参数");
         require(Set.of("heat","isothermal").contains(String.valueOf(base.thermalMode())),"请选择有效的温度计算方式");
         require(gasSnapshot!=null,"请先在 PVT模型中保存完整组成和计算方法");
@@ -71,7 +82,7 @@ public class PipelineNetworkCalculator {
             notes.add("供气量和末端分输量均缺失，按两端压力反算串联管线流量。");
             var solved=solve(tree,tree.ordered(),base,thermalSnapshot,gasSnapshot,configurations,
                     "rate",source.pressureMpa(),terminalPressure,null,source.temperatureC());
-            return result(graph,tree.ordered(),solved,hydrate,waterState,notes);
+            return result(graph,tree.ordered(),solved,hydrate,waterState,notes,condition.id(),liquidDensity);
         }
         require(unknown.size()<=1,"边界条件不足：多个末端未填写分输量，不能由井口总量唯一确定各支路流量");
         if(unknown.size()==1) {
@@ -98,11 +109,12 @@ public class PipelineNetworkCalculator {
             notes.add("井口压力缺失，按末端压力和流量反算串联管线入口压力。");
             var solved=solve(tree,tree.ordered(),base,thermalSnapshot,gasSnapshot,configurations,
                     "inlet",null,terminalPressure,total,source.temperatureC());
-            return result(graph,tree.ordered(),solved,hydrate,waterState,notes);
+            return result(graph,tree.ordered(),solved,hydrate,waterState,notes,condition.id(),liquidDensity);
         }
         Map<String,State> states=new HashMap<>();states.put(tree.root().id(),new State(source.pressureMpa(),source.temperatureC()));
         Map<String,PipeResult> pipes=new HashMap<>();var devices=new ArrayList<DeviceResult>();
         Map<String,HydrateResult> hydrates=new HashMap<>();
+        Map<String,PipelineErosion.Result> erosions=new HashMap<>();
         for(Edge edge:tree.ordered()) {
             State inlet=states.get(edge.source());
             Solved solved;
@@ -112,12 +124,14 @@ public class PipelineNetworkCalculator {
             var pipe=pipe(edge,0,solved);pipes.put(edge.id(),pipe);
             devices.addAll(devices(edge,0,solved));
             hydrates.put(edge.id(),hydrate(edge,0,solved,hydrate,waterState));
+            erosions.put(edge.id(),erosion(edge,0,solved,condition.id(),liquidDensity));
             // The physical pipe outlet precedes all equipment at its target node.
             states.put(edge.target(),new State(solved.result().outletMpa(),solved.result().outletC()));
             addNotes(notes,solved.result());
         }
         return new NetworkResult(graph.edges().stream().map(e->pipes.get(e.id())).toList(),List.copyOf(devices),
-                graph.edges().stream().map(e->hydrates.get(e.id())).toList(),List.copyOf(notes));
+                graph.edges().stream().map(e->hydrates.get(e.id())).toList(),
+                graph.edges().stream().map(e->erosions.get(e.id())).toList(),List.copyOf(notes));
     }
 
     private Solved solve(Tree tree,List<Edge> edges,Input base,PipelineTemperature.Snapshot thermal,
@@ -194,17 +208,28 @@ public class PipelineNetworkCalculator {
                 first.temperatureC(),last.temperatureC(),solved.result().rate10k(),segment.ambientC(),segment.heatTransferWm2K());
     }
     private static NetworkResult result(Graph graph,List<Edge> ordered,Solved solved,PipelineHydrateModel.Prepared hydrate,
-            String waterState,LinkedHashSet<String> notes) {
+            String waterState,LinkedHashSet<String> notes,String caseId,BiFunction<Double,Double,Double> liquidDensity) {
         Map<String,PipeResult> pipes=new HashMap<>();var devices=new ArrayList<DeviceResult>();
         Map<String,HydrateResult> hydrates=new HashMap<>();
+        Map<String,PipelineErosion.Result> erosions=new HashMap<>();
         for(int i=0;i<ordered.size();i++) {
             pipes.put(ordered.get(i).id(),pipe(ordered.get(i),i,solved));
             devices.addAll(devices(ordered.get(i),i,solved));
             hydrates.put(ordered.get(i).id(),hydrate(ordered.get(i),i,solved,hydrate,waterState));
+            erosions.put(ordered.get(i).id(),erosion(ordered.get(i),i,solved,caseId,liquidDensity));
         }
         addNotes(notes,solved.result());
         return new NetworkResult(graph.edges().stream().map(e->pipes.get(e.id())).toList(),List.copyOf(devices),
-                graph.edges().stream().map(e->hydrates.get(e.id())).toList(),List.copyOf(notes));
+                graph.edges().stream().map(e->hydrates.get(e.id())).toList(),
+                graph.edges().stream().map(e->erosions.get(e.id())).toList(),List.copyOf(notes));
+    }
+    /** Equipment discharge samples belong to devices, not to the physical pipe's erosion assessment. */
+    private static PipelineErosion.Result erosion(Edge edge,int index,Solved solved,String caseId,
+            BiFunction<Double,Double,Double> liquidDensity) {
+        var points=physicalPoints(solved.result(),solved.input().equipment(),index);
+        var constraints=solved.input().constraints();
+        return PipelineErosion.screen(edge,caseId,points,solved.input().segments().get(index).diameterMm(),
+                solved.result().rate10k(),constraints==null?null:constraints.erosion(),liquidDensity);
     }
     private static List<DeviceResult> devices(Edge edge,int segmentIndex,Solved solved) {
         var configured=solved.input().equipment().stream().filter(e->e.afterSegment()==segmentIndex).toList();

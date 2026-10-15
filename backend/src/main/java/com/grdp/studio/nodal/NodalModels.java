@@ -31,12 +31,15 @@ public final class NodalModels {
     public record Interval(Point from, Point to) {}
     public record Scenario(double reservoirPressure, List<Point> formation, List<Point> intersections,
             List<Candidate> candidates, List<Interval> intervals, Point maximum, String controllingCondition, String status, List<String> notes) {}
+    /** A calculated constraint boundary. Separate segments prevent drawing across gaps or ambiguous branches. */
+    public record ConstraintCurve(String code, String name, List<List<Point>> segments) {}
     public record Result(String version, Object coefficientSnapshot, PressureCalculateRequest wellboreSnapshot,
             Object pressureSourceSnapshot, List<Point> wellboreCurve, List<Scenario> scenarios, List<Check> constraintStates, List<String> warnings,
-            List<Scenario> regionScenarios) {
+            List<Scenario> regionScenarios, List<ConstraintCurve> constraintCurves, List<List<Point>> feasibleRegions) {
         public Result(String version, Object coefficientSnapshot, PressureCalculateRequest wellboreSnapshot,
                 Object pressureSourceSnapshot, List<Point> wellboreCurve, List<Scenario> scenarios, List<Check> constraintStates, List<String> warnings) {
-            this(version, coefficientSnapshot, wellboreSnapshot, pressureSourceSnapshot, wellboreCurve, scenarios, constraintStates, warnings, List.of());
+            this(version, coefficientSnapshot, wellboreSnapshot, pressureSourceSnapshot, wellboreCurve, scenarios,
+                    constraintStates, warnings, List.of(), List.of(), List.of());
         }
     }
     public record Save(Long id, String name, Input input) {

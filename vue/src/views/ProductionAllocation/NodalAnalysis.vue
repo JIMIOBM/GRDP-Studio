@@ -21,7 +21,7 @@ const chartElement = ref(null), historyVisible = ref(false)
 const activeContentTab = ref('chart')
 const envelopeNote = computed(() => !result.value ? '' : !result.value.regionScenarios?.length
   ? '历史快照未包含范围校核数据，保留原结果；需要新版阴影时请手动重新计算。'
-  : nodalEnvelope(result.value).length ? '网格阴影为所选约束下的合理能力范围（场景插值）；红点为最大合理能力。'
+  : nodalEnvelope(result.value).length ? '网格阴影为四个地层压力之间、经井筒边界和所选约束共同校核的能力包络；红点为各场景最大合理能力。'
   : '当前未形成可确认的连续合理能力范围，请在数据列表查看区间与约束校核结果。')
 watch(activeContentTab, async () => { await nextTick(); chart?.resize() })
 const paramsCollapsed = ref(false), panelWidth = ref(286), panelElement = ref(null)
@@ -45,6 +45,15 @@ function resizePanel(event) {
 let chart, observer, disposed = false, revision = 0, sourceSequence = 0, historySequence = 0, operationSequence = 0, applying = false
 const injection = computed(() => form.operationMode === 'injection')
 const selectedSource = computed(() => sources.value.find(s => s.id === form.coefficientId))
+const coefficientCustomized = computed(() => {
+  const p = selectedSource.value?.parameters
+  if (!p) return false
+  const a = form.coefficientSet === 'corrected' ? p.correctedA : p.a
+  const b = form.coefficientSet === 'corrected' ? p.correctedB : p.b
+  const different = (actual, expected) => Number.isFinite(Number(actual)) && Number.isFinite(Number(expected))
+    && Math.abs(Number(actual)-Number(expected)) > 1e-12*Math.max(1,Math.abs(Number(expected)))
+  return different(form.coefficientA,a) || different(form.coefficientB,b)
+})
 const curveWarnings = computed(() => {
   if (!result.value) return []
   const failed = result.value.wellboreCurve.filter(p => p.rate > 0 && p.pressure == null)
@@ -64,7 +73,7 @@ function scenarioReason(s) {
   if (s.maximum) {
     const atMax = (s.candidates || []).find(p => Math.abs(p.rate - s.maximum.rate) < 1e-6)
     const extrapolated = atMax?.checks?.some(c => c.code === 'erosion' && c.reason?.includes('超出标定范围'))
-    return [s.status === 'PARTIAL_RESULT' ? '低气量局部缺口不影响已确认的最大值' : '已确认', extrapolated ? '冲蚀为标定范围外推结果' : ''].filter(Boolean).join('；')
+    return [s.status === 'MULTIPLE_INTERSECTIONS' ? '数值最大可行点；多交点稳定性待确认' : s.status === 'PARTIAL_RESULT' ? '低气量局部缺口不影响已确认的最大值' : '已确认', extrapolated ? '冲蚀为标定范围外推结果' : ''].filter(Boolean).join('；')
   }
   if (!s.intervals.length && s.status === 'NO_FEASIBLE_RANGE') return '井筒边界与所选约束无共同可行区间'
   return (s.notes || []).filter(n => !n.startsWith('零气量')).join('；') || nodalStatus(s.status)
@@ -182,7 +191,11 @@ async function importPressure() {
 function payload() {
   const input = clone(form)
   input.reservoirPressures = input.reservoirText.split(/[,，;；\s]+/).filter(Boolean).map(Number)
+  if (input.reservoirPressures.length !== 4 || new Set(input.reservoirPressures).size !== 4 || input.reservoirPressures.some(p => !Number.isFinite(p) || p <= 0))
+    throw new Error('请输入4个互不重复的正数地层压力')
   input.constraints.composition = input.constraints.hydrate ? JSON.parse(input.compositionText) : {}
+  input.constraints.surfaceTension = Number(input.constraints.surfaceTension)
+  if (input.constraints.liquidLoading && (!Number.isFinite(input.constraints.surfaceTension) || input.constraints.surfaceTension <= 0)) throw new Error('气液表面张力必须为正数')
   for (const key of ['coefficientA', 'coefficientB']) {
     if (input[key] == null || String(input[key]).trim() === '') throw new Error('请填写产能系数A和B')
     input[key] = Number(input[key])
@@ -283,7 +296,8 @@ onBeforeUnmount(() => { stopResize(); disposed = true; sourceSequence++; operati
       </div>
       <div v-show="!paramsCollapsed" class="panel-body">
     <div class="toolbar mode-selector">
-      <el-radio-group v-model="form.operationMode"><el-radio-button value="production">采气</el-radio-button><el-radio-button value="injection">注气</el-radio-button></el-radio-group>
+      <div class="mode-label">注采类型</div>
+      <el-radio-group v-model="form.operationMode"><el-radio value="production">采气</el-radio><el-radio value="injection">注气</el-radio></el-radio-group>
 <!--      <el-button @click="historyVisible = true; loadHistory()">历史方案</el-button>-->
     </div>
     <el-alert v-if="error" :title="error" type="warning" :closable="false" show-icon />
@@ -299,7 +313,8 @@ onBeforeUnmount(() => { stopResize(); disposed = true; sourceSequence++; operati
         <label>系数取值<el-select v-model="form.coefficientSet" @change="fillCoefficients"><el-option label="修正系数 A′、B′" value="corrected" /><el-option label="原始系数 A、B" value="original" /></el-select></label>
         <label>产能系数 A<el-input v-model="form.coefficientA" inputmode="decimal" placeholder="支持科学计数法" /></label>
         <label>产能系数 B<el-input v-model="form.coefficientB" inputmode="decimal" placeholder="支持科学计数法" /></label>
-        <label>地层压力 (MPa)<el-input v-model="form.reservoirText" placeholder="例如：30, 25, 20, 15" /></label>
+        <p v-if="coefficientCustomized" class="note">当前使用手动编辑的产能系数，请确认压力口径、PVT及气量标况与所选方案一致。</p>
+        <label>四个地层压力 (MPa)<el-input v-model="form.reservoirText" placeholder="例如：30, 25, 20, 15" /></label>
         <label>{{ injection ? '最高井底流压' : '最低井底流压' }} (MPa)<el-input-number size="small" v-if="injection" v-model="form.maximumPressure" :controls="false" /><el-input-number size="small" v-else v-model="form.minimumPressure" :controls="false" /></label>
       </div>
 <!--      <p v-if="selectedSource">压力口径：{{ selectedSource.pressureMethod }}；A={{ form.coefficientSet === 'corrected' ? selectedSource.parameters.correctedA : selectedSource.parameters.a }}，B={{ form.coefficientSet === 'corrected' ? selectedSource.parameters.correctedB : selectedSource.parameters.b }}</p>-->
@@ -319,7 +334,7 @@ onBeforeUnmount(() => { stopResize(); disposed = true; sourceSequence++; operati
         <el-checkbox v-model="form.constraints.erosion">冲蚀</el-checkbox>
 <!--        <el-checkbox v-model="form.constraints.sanding">出砂（暂未接入计算）</el-checkbox>-->
       </div>
-      <label v-if="form.constraints.liquidLoading">气液表面张力 (mN/m)<el-input-number size="small" v-model="form.constraints.surfaceTension" :min="0.01" /></label>
+      <label v-if="form.constraints.liquidLoading">气液表面张力 (mN/m)<el-input v-model="form.constraints.surfaceTension" inputmode="decimal" placeholder="请输入正数" /></label>
       <div v-if="form.constraints.erosion" class="parameter-grid">
         <p class="note">{{ erosionSourceNote || '冲蚀参数无历史记录，请手动填写' }}</p>
         <label v-for="[key, label] in erosionFields" :key="key">{{ label }}<el-input v-model="form.constraints[key]" inputmode="decimal" placeholder="请输入" /></label>
@@ -371,10 +386,14 @@ onBeforeUnmount(() => { stopResize(); disposed = true; sourceSequence++; operati
 .panel-toggle { width: 20px; height: 20px; padding: 0; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; cursor: pointer; }
 .panel-collapsed-tab { width: 22px; height: 76px; padding: 0; writing-mode: vertical-rl; border: 1px solid #e0e0e0; border-left: 0; background: #fff; color: #333; font: inherit; cursor: pointer; }
 .params-panel.collapsed { border-right: 0; }
-.params-panel .mode-selector { justify-content: center; padding: 4px 0 4px; }
-.mode-selector :deep(.el-radio-group) { display: flex; width: 100%; }
-.mode-selector :deep(.el-radio-button) { flex: 1; }
-.mode-selector :deep(.el-radio-button__inner) { width: 100%; padding: 8px 16px; font-size: 13px; font-weight: 600; }
+.params-panel .mode-selector { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 7px 4px 4px; }
+.mode-label { color: #333; font-size: 13px; line-height: 20px; }
+.mode-selector :deep(.el-radio-group) { display: flex; gap: 24px; }
+.mode-selector :deep(.el-radio) { height: 24px; margin-right: 0; }
+.mode-selector :deep(.el-radio__label) { padding-left: 5px; color: #333; font-size: 13px; }
+.mode-selector :deep(.el-radio__input.is-checked .el-radio__inner) { background: #777; border-color: #777; }
+.mode-selector :deep(.el-radio__input.is-checked + .el-radio__label) { color: #333; }
+.mode-selector :deep(.el-radio__inner:hover) { border-color: #777; }
 .panel-toggle:hover, .panel-collapsed-tab:hover { background: #fff8d8; }
 .parameter-section { margin: 0; padding: 0; border: 0; }
 .params-panel .section-title {
@@ -406,7 +425,6 @@ onBeforeUnmount(() => { stopResize(); disposed = true; sourceSequence++; operati
 .params-panel :deep(.el-input__inner) { text-align: left; font-size: 12px; }
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0 12px; }
 .params-panel :deep(.el-button) { font-size: 12px; padding: 5px 9px; }
-.mode-selector :deep(.el-radio-button__original-radio:checked + .el-radio-button__inner) { background: #f4d000; border-color: #d5b900; color: #202020; box-shadow: -1px 0 0 #d5b900; }
 .constraint-options { display: flex; flex-direction: column; align-items: flex-start; }
 .constraint-options :deep(.el-checkbox) { height: 26px; margin: 0; max-width: 100%; }
 .constraint-options :deep(.el-checkbox__label) { font-size: 12px; white-space: normal; }

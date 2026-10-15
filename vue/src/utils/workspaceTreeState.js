@@ -45,12 +45,32 @@ export const workspaceTreeHydrated = ref(false)
 // 菜单范围独立于右侧已打开的记录；切换井/库目录不能触发计算或销毁编辑内容。
 export const workspaceRibbonScope = ref('well')
 export const workspaceSelectedReservoir = ref(null)
+let storageListVersion = 0
+
+// 仅在服务端确认删除成功后调用；即时移除目录及选择，避免旧请求将库重新带回。
+export function removeWorkspaceStorage(target) {
+  const matches = node => node && ['storageId', 'projectId', 'gasReservoirId']
+    .every(key => Number(node[key]) === Number(target[key]))
+  const root = workspaceTreeData.value.find(node => node.id === 'g-reservoir')
+  const removed = root?.children.find(matches)
+  const containsActive = node => node && (String(node.id) === String(workspaceActiveNodeId.value)
+    || node.children?.some(containsActive))
+  if (containsActive(removed)) workspaceActiveNodeId.value = 'g-reservoir'
+  if (matches(workspaceSelectedReservoir.value)) workspaceSelectedReservoir.value = null
+  if (matches(workspacePendingNode.value?.reservoir || workspacePendingNode.value)) workspacePendingNode.value = null
+  if (removed) {
+    storageListVersion++
+    root.children = root.children.filter(node => !matches(node))
+    workspaceTreeData.value = [...workspaceTreeData.value]
+  }
+}
 
 // 这里只登记原系统项目范围，不再把 gasReservoirId 伪造成储气库ID。
 export function ensureWorkspaceReservoir({ projectId, gasReservoirId }) {
   const root = workspaceTreeData.value.find(node => node.id === 'g-reservoir')
   if (!root) return
   if (Number(root.projectId) !== Number(projectId) || Number(root.gasReservoirId) !== Number(gasReservoirId)) {
+    storageListVersion++
     root.children = []
     workspaceSelectedReservoir.value = null
   }
@@ -60,9 +80,10 @@ export async function refreshWorkspaceStorages() {
   const root = workspaceTreeData.value.find(node => node.id === 'g-reservoir')
   if (!root?.projectId || !root?.gasReservoirId) return
   const { projectId, gasReservoirId } = root
+  const version = ++storageListVersion
   const response = await storageCatalogApi.list(projectId, gasReservoirId)
   // 请求返回前若已切换项目范围，不用旧列表覆盖新范围的目录。
-  if (root.projectId !== projectId || root.gasReservoirId !== gasReservoirId) return
+  if (version !== storageListVersion || root.projectId !== projectId || root.gasReservoirId !== gasReservoirId) return
   const records = response?.data ?? response
   if (!Array.isArray(records)) throw new Error('储气库目录返回格式不正确')
   root.children = records.map(record => {

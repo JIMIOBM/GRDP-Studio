@@ -47,6 +47,16 @@ export function calculatePressureIntercept({
     : pressure - slope * coordinate
 }
 
+/** The pressure shown in the folding table and plotted for a completed row. */
+export function calculateGradientPressure({ p0, gradient, measuredCoordinate }) {
+  const intercept = finiteInput(p0)
+  const slope = finiteInput(gradient)
+  const coordinate = finiteInput(measuredCoordinate)
+  if ([intercept, slope, coordinate].some(value => value === null || value < 0)) return null
+  const pressure = intercept + slope * coordinate
+  return Number.isFinite(pressure) ? pressure : null
+}
+
 const dateFields = ['date', 'testDate', 'pressureDate', 'measuredDate', 'test_date', 'pressure_date', 'measured_date']
 const pressureFields = ['reserviorPressure', 'reservoirPressure', 'formationPressure', 'pressure', 'reservior_pressure', 'reservoir_pressure', 'formation_pressure']
 
@@ -94,6 +104,13 @@ export function isCalculablePressureRecord(row, referenceCoordinate, coordinateM
   return Number.isFinite(folded) && folded >= 0
 }
 
+function isValidDirectPressureRecord(row) {
+  if (!row || row.deleted === true || !String(row.wellName || '').trim()) return false
+  const date = pressureRecordDate({ date: row.date })
+  const pressure = finiteInput(row.measuredPressure)
+  return date !== '' && date === String(row.date) && pressure !== null && pressure >= 0
+}
+
 /** Build the exact values plotted by the well/date comparison, leaving absent pairs blank. */
 export function buildPressureGradientComparison({
   rows = [],
@@ -101,11 +118,14 @@ export function buildPressureGradientComparison({
   referenceCoordinate,
   coordinateMode = 'depth',
   dateRange = 'recent3',
-  chartAxis = 'well'
+  chartAxis = 'well',
+  directPressure = false
 }) {
   const selected = new Set(selectedWells.map(String))
   const validRows = rows.filter(row => selected.has(String(row.wellName))
-    && isCalculablePressureRecord(row, referenceCoordinate, coordinateMode))
+    && (directPressure
+      ? isValidDirectPressureRecord(row)
+      : isCalculablePressureRecord(row, referenceCoordinate, coordinateMode)))
   const allDates = [...new Set(validRows.map(row => row.date))].sort((a, b) => a.localeCompare(b))
   const dates = dateRange === 'all' ? allDates : allDates.slice(-3)
   const activeRows = validRows.filter(row => dates.includes(row.date))
@@ -116,13 +136,15 @@ export function buildPressureGradientComparison({
   activeRows.forEach(row => {
     const key = JSON.stringify([String(row.wellName), row.date])
     const sum = grouped.get(key) || { total: 0, count: 0 }
-    sum.total += calculateDatumPressure({
-      measuredPressure: row.measuredPressure,
-      measuredCoordinate: row.measuredCoordinate,
-      gradient: row.gradient,
-      referenceCoordinate,
-      coordinateMode
-    })
+    sum.total += directPressure
+      ? Number(row.measuredPressure)
+      : calculateDatumPressure({
+          measuredPressure: row.measuredPressure,
+          measuredCoordinate: row.measuredCoordinate,
+          gradient: row.gradient,
+          referenceCoordinate,
+          coordinateMode
+        })
     sum.count++
     grouped.set(key, sum)
   })
@@ -137,6 +159,15 @@ export function buildPressureGradientComparison({
   })
   const maxPressure = Math.max(0, ...series.flatMap(item => item.data.filter(Number.isFinite)))
   return { validRows, allDates, dates, categories, seriesKeys, series, maxPressure }
+}
+
+/** Plot exactly the table's P₀ + PGD × H, excluding rows awaiting parameters. */
+export function buildCalculatedGradientComparison({ rows = [], ...options }) {
+  const calculatedRows = rows.flatMap(row => {
+    const pressure = calculateGradientPressure(row)
+    return pressure === null ? [] : [{ ...row, measuredPressure: pressure }]
+  })
+  return buildPressureGradientComparison({ ...options, rows: calculatedRows, directPressure: true })
 }
 
 export function normalizePressureRecord(row, wellName, id) {

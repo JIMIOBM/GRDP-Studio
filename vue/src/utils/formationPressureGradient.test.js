@@ -1,8 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  buildCalculatedGradientComparison,
   buildPressureGradientComparison,
   calculateDatumPressure,
+  calculateGradientPressure,
   calculatePressureIntercept,
   isCalculablePressureRecord,
   normalizePressureRecord,
@@ -100,4 +102,43 @@ test('时间横轴时按井生成序列，并且全部日期选项保留完整�
   assert.deepEqual(result.categories, ['2024-01-01', '2024-02-01'])
   assert.deepEqual(result.seriesKeys, ['X-1'])
   assert.deepEqual(result.series[0].data, [10, 11])
+})
+
+test('压力梯度图按井显示直接折算压力 P，不再折算到另一个基准深度', () => {
+  const rows = [
+    { wellName: 'X-1', date: '2024-03-01', measuredPressure: '21', measuredCoordinate: '2000', gradient: '0.01' },
+    { wellName: 'X-2', date: '2024-03-01', measuredPressure: '23', measuredCoordinate: '2000', gradient: '0.01' }
+  ]
+  const result = buildPressureGradientComparison({
+    rows, selectedWells: ['X-1', 'X-2'], referenceCoordinate: '2500', dateRange: 'all', directPressure: true
+  })
+  assert.deepEqual(result.categories, ['X-1', 'X-2'])
+  assert.deepEqual(result.series.map(item => item.data), [[21, 23]])
+})
+
+test('直接压力图保留没有 PGD 和 H 的原始静压记录', () => {
+  const rows = [
+    { wellName: 'X-4', date: '2010-06-10', measuredPressure: '20.1', measuredCoordinate: '2000', gradient: '0.01' },
+    { wellName: 'X-5', date: '2010-06-10', measuredPressure: '19.65', measuredCoordinate: '', gradient: '' }
+  ]
+  const result = buildPressureGradientComparison({
+    rows, selectedWells: ['X-4', 'X-5'], dateRange: 'all', directPressure: true
+  })
+  assert.deepEqual(result.categories, ['X-4', 'X-5'])
+  assert.deepEqual(result.series[0].data, [20.1, 19.65])
+  assert.equal(result.validRows.length, 2)
+})
+
+test('压力梯度对比图与折算表使用同一公式，待补参数行不绘图', () => {
+  const rows = [
+    { wellName: 'X-1', date: '2024-03-01', p0: '10', gradient: '0.01', measuredCoordinate: '1000', measuredPressure: '999' },
+    { wellName: 'X-1', date: '2024-03-01', p0: '12', gradient: '0.01', measuredCoordinate: '1000', measuredPressure: '888' },
+    { wellName: 'X-2', date: '2024-03-01', p0: '', gradient: '', measuredCoordinate: '', measuredPressure: '19' },
+    { wellName: 'X-2', date: '2024-03-01', p0: '20', gradient: '0.01', measuredCoordinate: '1000', measuredPressure: '30', deleted: true }
+  ]
+  assert.equal(calculateGradientPressure(rows[0]), 20)
+  assert.equal(calculateGradientPressure(rows[2]), null)
+  const model = buildCalculatedGradientComparison({ rows, selectedWells: ['X-1', 'X-2'], dateRange: 'all' })
+  assert.deepEqual(model.series[0].data, [21, null])
+  assert.deepEqual(model.validRows.map(row => row.measuredPressure), [20, 22])
 })

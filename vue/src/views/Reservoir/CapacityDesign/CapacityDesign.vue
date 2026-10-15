@@ -268,10 +268,14 @@ onMounted(loadDesign)
       <div class="header-actions">
         <input ref="importInput" class="hidden-file" type="file" accept=".xlsx,.xls,.csv"
                @change="handleImportFile" />
-        <button class="secondary" type="button" :disabled="saving || !activeField" @click="openImport">导 入</button>
+        <button class="secondary" type="button" :disabled="saving || !activeField" @click="openImport">导入</button>
         <!-- 清空整条库容设计；没有已保存记录时无意义，按钮置灰。 -->
         <button class="secondary danger" type="button"
-                :disabled="saving || loading || !hasSavedDesign" @click="clearDesign">清 空</button>
+                :disabled="saving || loading || !hasSavedDesign" @click="clearDesign">清空</button>
+        <button class="primary" type="button"
+                :disabled="saving || loading || !(storageId > 0) || !activeField" @click="save">
+          {{ saving ? '保存中…' : '保存' }}
+        </button>
       </div>
     </header>
 
@@ -279,21 +283,16 @@ onMounted(loadDesign)
       <p v-if="!(storageId > 0)" class="empty-hint">请先在左侧选择一个储气库。</p>
       <p v-else-if="!activeField" class="empty-hint">请从顶部菜单选择要填写的参数。</p>
       <template v-else>
+        <div class="form-title">请输入{{ activeField.label }}</div>
         <!-- 只显示当前菜单项对应的一个参数。输入框直接带出该项已保存的值，可随时改写后保存；
              保存后以服务端返回的值回填，数字就留在输入框里。 -->
-        <label class="field" :for="`capacity-input-${activeField.key}`">
-          <span class="field-label">
-            {{ activeField.label }}（{{ activeField.unit }}）
-          </span>
-          <input :id="`capacity-input-${activeField.key}`" v-model="draft"
-                 :placeholder="activeFieldPlaceholder" inputmode="decimal" autocomplete="off"
-                 @keyup.enter="save" />
-        </label>
-
-        <div class="submit-row">
-          <button class="primary submit" type="button" :disabled="saving || loading" @click="save">
-            {{ saving ? '保存中…' : '保存' }}
-          </button>
+        <div class="parameter-grid direct-grid">
+          <label class="field" :for="`capacity-input-${activeField.key}`">
+            <span>{{ activeField.label }}（{{ activeField.unit }}）</span>
+            <input :id="`capacity-input-${activeField.key}`" v-model="draft"
+                   :placeholder="activeFieldPlaceholder" inputmode="decimal" autocomplete="off"
+                   @keyup.enter="save" />
+          </label>
         </div>
 
         <p v-if="volumeHint" class="volume-hint">{{ volumeHint }}</p>
@@ -303,27 +302,30 @@ onMounted(loadDesign)
 </template>
 
 <style scoped>
-/* 与库级损耗评价页面使用同一套视觉基线：34px 页签、同样的按钮与提示样式。 */
-.capacity-design { height: 100%; min-width: 520px; overflow: auto; background: #fff; color: #202020; font-family: Arial, sans-serif; font-size: 13px; }
-.result-tabs { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; height: 34px; padding: 0 8px 0 0; border-bottom: 1px solid #e4e7ed; background: #fafafa; box-sizing: border-box; }
-.result-tab { display: flex; align-self: stretch; align-items: center; justify-content: center; max-width: 430px; min-width: 190px; padding: 0 12px; overflow: hidden; border-right: 1px solid #e4e7ed; background: #f4d000; color: #202020; font: 600 13px Arial, sans-serif; text-align: center; text-overflow: ellipsis; white-space: nowrap; box-sizing: border-box; }
+/* 只对齐本页与损耗评价的直接输入布局，不修改公共样式或损耗评价页面。 */
+.capacity-design { height: 100%; min-width: 760px; overflow: auto; background: #fff; color: #202020; font-family: Arial, sans-serif; font-size: 13px; }
+.result-tabs { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; height: 34px; padding-right: 8px; border-bottom: 1px solid #e4e7ed; background: #fafafa; box-sizing: border-box; }
+.result-tab { display: flex; align-self: stretch; align-items: center; justify-content: center; min-width: 190px; padding: 0 12px; border-right: 1px solid #e4e7ed; background: #f4d000; font-weight: 600; box-sizing: border-box; }
+.result-tab { max-width: 430px; overflow: hidden; }
 .result-tab > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .header-actions { display: flex; align-items: center; gap: 10px; }
 .hidden-file { display: none; }
 button { height: 27px; padding: 0 16px; border: 1px solid #c9cdd3; border-radius: 4px; background: #fff; color: #292929; font: inherit; cursor: pointer; }
 button:hover { border-color: #b49a00; }
-button:disabled { cursor: wait; opacity: .65; }
+button:disabled { cursor: not-allowed; opacity: .45; }
 button.primary { min-width: 74px; border-color: #202020; background: #202020; color: #fff; }
 /* 危险操作配色沿用 PipelineCapacity 的既有约定（.danger{color:#bc504b}）。 */
 button.danger { color: #bc504b; }
 button.danger:hover:not(:disabled) { border-color: #bc504b; }
-.form-canvas { padding: 28px 18px 34px; max-width: 640px; }
-.field { display: grid; gap: 10px; min-width: 0; color: #333; }
-.field-label { font-size: 13px; font-weight: 600; }
+.form-canvas { padding: 20px 18px 34px; }
+.form-title { margin-bottom: 18px; font-weight: 600; }
+.parameter-grid { display: grid; grid-template-columns: repeat(4, minmax(170px, 1fr)); gap: 20px 24px; }
+.direct-grid { max-width: 430px; grid-template-columns: 1fr; }
+.field { display: grid; gap: 8px; min-width: 0; color: #333; }
 .field input { width: 100%; height: 34px; padding: 0 11px; border: 1px solid #d4d7dc; border-radius: 4px; background: #fff; box-sizing: border-box; color: #303133; font: inherit; outline: none; }
 .field input:focus { border-color: #b49a00; box-shadow: 0 0 0 2px rgba(244,208,0,.14); }
-.submit-row { margin-top: 22px; }
-button.submit { height: 32px; min-width: 84px; }
 .volume-hint { margin: 20px 0 0; padding: 8px 10px; border-left: 3px solid #f4d000; background: #f5f5f5; color: #333; font-size: 12px; }
 .empty-hint { margin: 0; color: #909399; font-size: 13px; }
+@media (max-width: 1250px) { .parameter-grid { grid-template-columns: repeat(3, minmax(170px, 1fr)); } }
+@media (max-width: 920px) { .parameter-grid { grid-template-columns: repeat(2, minmax(170px, 1fr)); } }
 </style>

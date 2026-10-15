@@ -24,8 +24,24 @@ function mergeDefaults(defaults, incoming) {
 export function normalizePipelineInput(input) {
   const normalized = mergeDefaults(createPipelineInput(), input)
   normalized.boundary = normalizeBoundary(normalized.boundary)
+  const erosion = normalized.constraints?.erosion
   normalized.constraints = { waterState: normalized.constraints?.waterState === 'available' ? 'available' : 'unknown' }
+  if (objectValue(erosion)) {
+    const parameters = row => ({ edgeId: row.edgeId,
+      liquidHoldupPercent: row.liquidHoldupPercent ?? null,
+      sandContentPercent: row.sandContentPercent ?? null, sandDensityKgM3: row.sandDensityKgM3 ?? null })
+    normalized.constraints.erosion = { liquidPvtId: erosion.liquidPvtId ?? null, liquidPvt: clone(erosion.liquidPvt ?? null),
+      segments: (Array.isArray(erosion.segments) ? erosion.segments : []).filter(objectValue).map(parameters),
+      cases: (Array.isArray(erosion.cases) ? erosion.cases : []).filter(objectValue).map(row => ({ caseId: row.caseId, ...parameters(row) })) }
+  }
   return normalized
+}
+
+/** A water-source revision cannot silently reuse results from a different liquid sample. */
+export function erosionLiquidSourceChanged(sources, snapshot) {
+  if (!snapshot?.pvtId) return false
+  const current = sources.find(source => Number(source.pvtId) === Number(snapshot.pvtId))
+  return !current || current.inputHash !== snapshot.inputHash || (current.issue || '') !== (snapshot.issue || '')
 }
 
 export function sectionInput(input, scope) {

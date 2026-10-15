@@ -4,7 +4,38 @@ import { createPipelineInput, fingerprint, inactiveConstraintKinds } from './pip
 import { activeBoundaryCase, hydrateBoundary, normalizeBoundary } from './pipelineBoundary.js'
 const boundarySnapshot = (topologyRevision, operatingAt, nodes) => ({ topologyRevision, activeCaseId: 'case-1', cases: [{ id: 'case-1', operatingAt, nodes }] })
 
-import { mergePipelineSection, normalizePipelineInput, pipelineSectionFields, reconcilePipelinePage, sectionInput } from './pipelinePageState.js'
+import { erosionLiquidSourceChanged, mergePipelineSection, normalizePipelineInput, pipelineSectionFields, reconcilePipelinePage, sectionInput } from './pipelinePageState.js'
+import { batchInputMark } from './pipelineBatch.js'
+
+test('erosion defaults and time overrides survive normalization and boundary-only saves', () => {
+  const erosion = { liquidPvtId: 3, liquidPvt: { pvtId: 3, inputHash: 'water-v1' },
+    segments: [{ edgeId: 'pipe', liquidHoldupPercent: 0.004, sandContentPercent: 0.001, sandDensityKgM3: 2650 }],
+    cases: [{ caseId: 'hour', edgeId: 'pipe', sandContentPercent: 0 }] }
+  const input = normalizePipelineInput({ constraints: { waterState: 'available', erosion } })
+  assert.equal(input.constraints.erosion.cases[0].sandContentPercent, 0)
+  assert.equal(input.constraints.erosion.cases[0].liquidHoldupPercent, null)
+  const savedBoundary = { boundary: boundarySnapshot(1, '2026-09-11T08:17', []) }
+  assert.deepEqual(mergePipelineSection(input, savedBoundary, 'boundary').constraints, input.constraints)
+  assert.deepEqual(normalizePipelineInput(JSON.parse(JSON.stringify(input))).constraints, input.constraints)
+  assert.equal(erosionLiquidSourceChanged([{ pvtId: 3, inputHash: 'water-v1' }], erosion.liquidPvt), false)
+  assert.equal(erosionLiquidSourceChanged([{ pvtId: 3, inputHash: 'water-v2' }], erosion.liquidPvt), true)
+  assert.equal(erosionLiquidSourceChanged([], erosion.liquidPvt), true)
+})
+
+test('batch identity tracks liquid selection and every erosion input but ignores server snapshot metadata', () => {
+  const blank = createPipelineInput()
+  const empty = structuredClone(blank)
+  empty.constraints.erosion = { liquidPvtId: null, segments: [], cases: [] }
+  assert.equal(batchInputMark(blank, 1), batchInputMark(empty, 1))
+  const configured = structuredClone(empty)
+  configured.constraints.erosion = { liquidPvtId: 3, segments: [{ edgeId: 'p', sandContentPercent: 0.001 }], cases: [] }
+  const mark = batchInputMark(configured, 1)
+  assert.notEqual(mark, batchInputMark(blank, 1))
+  configured.constraints.erosion.liquidPvt = { pvtId: 3, inputHash: 'water-v1' }
+  assert.equal(mark, batchInputMark(configured, 1))
+  configured.constraints.erosion.cases.push({ caseId: 'h', edgeId: 'p', sandContentPercent: 0 })
+  assert.notEqual(mark, batchInputMark(configured, 1), 'zero sand is an explicit override')
+})
 
 test('hydrate state defaults to unknown and discarded manual risk curves never survive normalization', () => {
   const legacy = { waterState: 'present', hydratePoints: [{ pressureMpa: 2, temperatureC: 5 }], hydrateSource: '旧曲线' }

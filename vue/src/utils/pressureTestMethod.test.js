@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import * as XLSX from 'xlsx'
-import { buildPressureTestComparison } from './pressureTestMethod.js'
+import { buildPressureTestComparison, mergePressureTestRows } from './pressureTestMethod.js'
 import { mergePressureTestImportRows, parsePressureTestRows, pressureTestImportColumns } from './pressureTestImport.js'
 
 test('test method chart uses actual pressures, averages duplicate same-day measurements and leaves gaps blank', () => {
@@ -18,6 +18,50 @@ test('test method chart uses actual pressures, averages duplicate same-day measu
   assert.deepEqual(model.categories, ['X-1', 'X-2'])
   assert.deepEqual(model.series.map(row => row.data), [[21, null], [null, 18]])
   assert.equal(model.maxPressure, 21)
+})
+
+test('test method chart defaults to all measurement dates while retaining the recent-three filter', () => {
+  const rows = ['2025-01-01', '2025-02-01', '2025-03-01', '2025-04-01']
+    .map((date, index) => ({ wellName: 'X-1', date, measuredPressure: String(20 + index) }))
+  const all = buildPressureTestComparison({ rows, selectedWells: ['X-1'] })
+  assert.deepEqual(all.dates, rows.map(row => row.date))
+  assert.deepEqual(all.series.map(series => series.data[0]), [20, 21, 22, 23])
+  const recent = buildPressureTestComparison({ rows, selectedWells: ['X-1'], dateRange: 'recent3' })
+  assert.deepEqual(recent.dates, ['2025-02-01', '2025-03-01', '2025-04-01'])
+})
+
+test('test method comparison only plots selected wells without changing source rows', () => {
+  const rows = [
+    { wellName: 'X-1', date: '2025-01-01', measuredPressure: '20' },
+    { wellName: 'X-2', date: '2025-01-01', measuredPressure: '22' }
+  ]
+  const selected = buildPressureTestComparison({ rows, selectedWells: ['X-2'] })
+  assert.deepEqual(selected.categories, ['X-2'])
+  assert.deepEqual(selected.series[0].data, [22])
+  const none = buildPressureTestComparison({ rows, selectedWells: [] })
+  assert.deepEqual(none.validRows, [])
+  assert.deepEqual(none.series, [])
+  assert.equal(rows.length, 2)
+})
+
+test('partial platform response keeps saved wells and overlays edits for matching measurements', () => {
+  const savedRows = [
+    { id: 'x1-old', sourceKey: 'legacy:X-1', wellName: 'X-1', date: '2010-06-10', measuredPressure: '18', manual: false },
+    { id: 'x2-old', sourceKey: 'legacy:X-2', wellName: 'X-2', date: '2010-06-10', measuredPressure: '18.5', manual: false },
+    { id: 'x5-edit', sourceKey: 'source:X-5:id:5', wellName: 'X-5', date: '2010-06-10', measuredPressure: '19.7', manual: false }
+  ]
+  const rows = mergePressureTestRows([
+    { item: { id: 5, date: '2010-06-10', reservior_pressure: 19.65 }, wellName: 'X-5', index: 0 }
+  ], savedRows)
+
+  assert.equal(rows.length, 3)
+  assert.deepEqual(rows.map(row => row.wellName), ['X-5', 'X-1', 'X-2'])
+  assert.equal(rows[0].measuredPressure, '19.7')
+  const model = buildPressureTestComparison({
+    rows, selectedWells: ['X-1', 'X-2', 'X-3', 'X-4', 'X-5'], dateRange: 'all'
+  })
+  assert.deepEqual(model.categories, ['X-1', 'X-2', 'X-3', 'X-4', 'X-5'])
+  assert.deepEqual(model.series[0].data, [18, 18.5, null, null, 19.7])
 })
 
 test('test method table import accepts only current member well pressure measurements', () => {

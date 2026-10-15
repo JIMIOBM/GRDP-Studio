@@ -808,10 +808,12 @@ async function selectRecord(id, version = contextVersion) {
 
 async function refreshRecords(version = contextVersion) {
   clearTimeout(recordsTimer)
+  recordsTimer = null
   const params = scope()
   try {
     const response = await waterInvasionApi.records(params)
     if (version !== contextVersion) return
+    loadError.value = ''
     const previousLatest = completedRecords.value[0]?.id
     records.value = response.data || []
     const latest = completedRecords.value[0]
@@ -819,11 +821,14 @@ async function refreshRecords(version = contextVersion) {
       await selectRecord(latest.id, version)
       if (version === contextVersion) emit('refresh-tree')
     }
-    if (version === contextVersion && hasRunningTask.value) recordsTimer = setTimeout(() => refreshRecords(version), 3000)
   } catch (error) {
     if (version === contextVersion) loadError.value = errorText(error)
   } finally {
-    if (version === contextVersion) loading.value = false
+    if (version === contextVersion) {
+      loading.value = false
+      // 一次状态读取失败不能终止轮询，否则旧的 RUNNING 文案会一直留在页面上。
+      if (hasRunningTask.value) recordsTimer = setTimeout(() => refreshRecords(version), 3000)
+    }
   }
 }
 

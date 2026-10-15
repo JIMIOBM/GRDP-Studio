@@ -10,7 +10,7 @@ export const createPipelineInput = () => ({ target: 'outlet', thermalMode: 'heat
   segments: [], equipment: [],
   constraints: { waterState: 'unknown' }, boundary: null, thermalModel: null
 })
-export const inactiveConstraintKinds = Object.freeze(['erosion', 'freeze'])
+export const inactiveConstraintKinds = Object.freeze(['freeze'])
 export const statusLabels = { inactive: '本期暂不启用', pass: '满足', fail: '不满足', not_evaluated: '未评价', not_applicable: '不适用', risk: '进入形成区', equilibrium: '平衡边界', conditional: '条件性判断' }
 export const fingerprint = input => JSON.stringify(input)
 // Preserve unsaved work when switching modules/wells; never report this session cache as a DB save.

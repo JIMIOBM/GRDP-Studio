@@ -16,6 +16,27 @@ class PipelineNetworkCalculatorTests {
     private final PipelineGasModel.Snapshot pvt=new PipelineGasModel.Snapshot(1,10,"test-full-composition","PR",List.of(
             new PipelineGasProperties.Fraction("CH4",.97),new PipelineGasProperties.Fraction("CO2",.02),new PipelineGasProperties.Fraction("N2",.01)));
 
+    @Test void erosionUsesPhysicalPipeStatesForEveryBranchAndExcludesNodeCompressorSamples() {
+        var graph=yGraph(true);
+        var config=new PipelineErosion.Configuration(12L,PipelineErosionTests.water(),graph.edges().stream()
+                .map(e->new PipelineErosion.SegmentInput(e.id(),.005,.01,2650.0)).toList(),List.of());
+        var in=base(false);
+        in=new Input(in.target(),in.thermalMode(),in.frictionMethod(),null,null,null,null,null,null,null,null,
+                in.jtKmpa(),in.standardPressurePa(),in.standardTemperatureK(),in.standardZ(),in.segments(),in.equipment(),
+                new Constraints("unknown",config));
+        var result=network.calculate(graph,in,null,pvt,condition(8.0,6.0,45,0.0,3.0,5.0),1,(p,t)->1000.0);
+        assertEquals(3,result.erosion().size());
+        for(var erosion:result.erosion()) {
+            assertEquals(41,erosion.sampledPoints());assertEquals(41,erosion.evaluatedPoints());
+            assertEquals(pipe(result,erosion.edgeId()).rate10k(),erosion.rate10k());
+            assertFalse(erosion.pointLabel().contains("压缩机"));assertNotNull(erosion.velocityRatio());
+        }
+        assertEquals(42,result.hydrate().stream().filter(h->h.edgeId().equals("trunk")).findFirst().orElseThrow().sampledPoints());
+        // The same hydraulic inputs still solve when the supplemental erosion source is absent.
+        var missing=network.calculate(graph,base(false),null,pvt,condition(8.0,6.0,45,0.0,3.0,5.0),1);
+        assertEquals(result.pipes(),missing.pipes());assertTrue(missing.erosion().stream().allMatch(e->"not_evaluated".equals(e.status())));
+    }
+
     @Test void yBranchUsesDownstreamWithdrawalsAndPropagatesActualJunctionState() {
         Graph graph=yGraph(false);
         var result=calculate(graph,false,condition(8.0,6.0,45,0.0,3.0,5.0));

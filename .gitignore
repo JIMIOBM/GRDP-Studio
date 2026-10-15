@@ -62,6 +62,7 @@ docs/
 !/backend/src/test/java/com/grdp/studio/nodal/
 !/backend/src/test/java/com/grdp/studio/storagenetwork/
 !/backend/src/test/java/com/grdp/studio/storagemainfactor/
+!/backend/src/test/java/com/grdp/studio/waterinvasion/
 !/vue/tests/storageMaterialBalance.test.js
 !/backend/sql/wellbore_erosion_sanding.sql
 !/backend/src/test/java/com/grdp/studio/wellbore/
@@ -82,3 +83,11 @@ docs/
 !/vue/tests/nodal.playwright.config.js
 !/vue/tests/e2e/nodal.spec.js
 !/vue/tests/fixtures/nodal.html
+
+# 删除库功能所需的安全标记迁移。
+!/backend/sql/storage_delete_guard.sql
+
+# 管束冲蚀交互回归
+!/vue/tests/e2e/pipeline-erosion.spec.js
+!/vue/tests/fixtures/pipeline-erosion.html
+!/vue/tests/fixtures/pipeline-erosion.js

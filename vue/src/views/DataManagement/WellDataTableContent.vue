@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { dataManagementApi } from '@/api/docker'
 import WellDataImportDialog from './WellDataImportDialog.vue'
@@ -450,6 +450,7 @@ const DATA_CONFIG = {
       }
     ],
     keys: [
+      'wellName',
       'date',
       'wellHeadTubingPressure',
       'wellHeadCasingPressure',
@@ -532,11 +533,12 @@ const FALLBACK_FIELDS = {
 const loading = ref(false)
 const importing = ref(false)
 const importDialogVisible = ref(false)
-const rows = ref([])
-const responseFields = ref([])
+// 注采数据可能包含大量测点，只替换数组，不对每个单元格创建深层响应式代理。
+const rows = shallowRef([])
+const responseFields = shallowRef([])
 let loadSequence = 0
 
-const paginationEnabled = computed(() => effectiveDataType.value === 'productiondata')
+const paginationEnabled = computed(() => !props.wellName || effectiveDataType.value === 'productiondata')
 const currentPage = ref(1)
 const pageSize = 200
 const pagedRows = computed(() => {
@@ -904,6 +906,7 @@ const importExcel = async ({ file, options }) => {
       parsed.mappings
     )
     ElMessage.success(`成功导入 ${parsed.rowCount} 条${importConfig.value.title}`)
+    if (effectiveDataType.value === 'productiondata') productionDataCache.clear()
     await loadData()
   } catch (error) {
     ElMessage.error(
@@ -927,9 +930,6 @@ const getItems = (response) => {
         ? payload
         : []
 
-  if (items.length > 0 && items[0]?.wellName) {
-  }
-
   return {
     items,
     fields: Array.isArray(payload.fields) ? payload.fields : []
@@ -939,18 +939,44 @@ const getItems = (response) => {
 const loadData = async () => {
   const sequence = ++loadSequence
   loading.value = true
+  // 先清掉上一类型的数据，避免从大量注采记录切换时将旧行按新类型全量渲染。
+  rows.value = []
+  responseFields.value = []
+  currentPage.value = 1
 
   try {
     let response
     const dataType = effectiveDataType.value
     if (dataType === 'wellhead') {
       response = await dataManagementApi.getWellHead(props.projectId, props.gasReservoirId)
-    } else if (dataType === 'deviation') {
-      response = await dataManagementApi.getWellDeviation(
-        props.projectId,
-        props.gasReservoirId,
-        props.wellName
+    } else if (dataType === 'deviation' || dataType === 'logging') {
+      const getWellData = dataType === 'deviation'
+        ? dataManagementApi.getWellDeviation
+        : dataManagementApi.getLogInterpretation
+      const targetWellNames = props.wellName ? [props.wellName] : props.wellNames
+      const responses = await Promise.allSettled(
+        targetWellNames.map(wellName =>
+          getWellData(props.projectId, props.gasReservoirId, wellName, { silentError: true })
+            .then(response => ({ response, wellName }))
+        )
       )
+      if (sequence !== loadSequence) return
+      const failures = responses.filter(result => result.status === 'rejected')
+      if (responses.length && failures.length === responses.length) throw failures[0].reason
+      failures.forEach(result => console.warn(`部分井的${config.value.title}加载失败`, result.reason))
+      const results = responses
+        .filter(result => result.status === 'fulfilled')
+        .map(result => {
+          const { response, wellName } = result.value
+          const parsed = getItems(response)
+          return {
+            ...parsed,
+            items: parsed.items.map(row => ({ ...row, wellName: row.wellName || wellName }))
+          }
+        })
+      rows.value = results.flatMap(result => result.items)
+      responseFields.value = results.find(result => result.fields.length)?.fields || []
+      return
     } else if (dataType === 'wellcompletion') {
       const targetWellNames = props.wellName ? [props.wellName] : props.wellNames
       const responses = await Promise.allSettled(
@@ -972,17 +998,15 @@ const loadData = async () => {
         console.warn('部分井的完井数据加载失败', result.reason)
       })
       const results = responses
-        .filter(result => result.status === 'fulfilled')
-        .map(result => getItems(result.value))
+        .map((result, index) => ({ result, wellName: targetWellNames[index] }))
+        .filter(({ result }) => result.status === 'fulfilled')
+        .map(({ result, wellName }) => {
+          const parsed = getItems(result.value)
+          return { ...parsed, items: parsed.items.map(row => ({ ...row, wellName: row.wellName || wellName })) }
+        })
       rows.value = results.flatMap(result => result.items)
       responseFields.value = results.find(result => result.fields.length)?.fields || []
       return
-    } else if (dataType === 'logging') {
-      response = await dataManagementApi.getLogInterpretation(
-        props.projectId,
-        props.gasReservoirId,
-        props.wellName
-      )
     } else if (dataType === 'otherdata') {
       response = await dataManagementApi.getOtherData(props.projectId, props.gasReservoirId)
     } else if (dataType === 'productiondata') {
@@ -1014,7 +1038,10 @@ const loadData = async () => {
       )
 
       if (sequence !== loadSequence) return
-      rows.value = results.flatMap(result => result.items)
+      rows.value = results.flatMap((result, index) => result.items.map(row => ({
+        ...row,
+        wellName: row.wellName || targetWellNames[index]
+      })))
       responseFields.value = results.find(result => result.fields.length)?.fields || []
       currentPage.value = 1
       return
@@ -1039,8 +1066,12 @@ const loadData = async () => {
         console.warn('部分井的产能测试数据加载失败', result.reason)
       })
       const results = responses
-        .filter(result => result.status === 'fulfilled')
-        .map(result => getItems(result.value))
+        .map((result, index) => ({ result, wellName: targetWellNames[index] }))
+        .filter(({ result }) => result.status === 'fulfilled')
+        .map(({ result, wellName }) => {
+          const parsed = getItems(result.value)
+          return { ...parsed, items: parsed.items.map(row => ({ ...row, wellName: row.wellName || wellName })) }
+        })
       rows.value = results.flatMap(result => result.items)
       responseFields.value = results.find(result => result.fields.length)?.fields || []
       return
@@ -1141,6 +1172,8 @@ watch(
   loadData,
   { immediate: true }
 )
+
+onBeforeUnmount(() => { loadSequence += 1 })
 </script>
 
 <template>

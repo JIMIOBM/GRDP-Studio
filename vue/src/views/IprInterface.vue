@@ -39,6 +39,16 @@ import LiquidLoadingContent from '@/views/WellboreCapacity/LiquidLoadingContent.
 import HydratePredictionContent from '@/views/WellboreCapacity/HydratePredictionContent.vue'
 import SandProductionContent from '@/views/WellboreCapacity/SandProductionContent.vue'
 import NodalAnalysis from '@/views/ProductionAllocation/NodalAnalysis.vue'
+import MultiPeriodObjectiveFunction from '@/views/ProductionAllocation/MultiPeriodPrediction/ObjectiveFunction.vue'
+import MultiPeriodConstraintConditions from '@/views/ProductionAllocation/MultiPeriodPrediction/ConstraintConditions.vue'
+import MultiPeriodSolutionGeneration from '@/views/ProductionAllocation/MultiPeriodPrediction/SolutionGeneration.vue'
+import {
+  resolveCalcContextFromConstraints,
+  extractCurrentWellProfileFromResponses,
+  loadVerifiedPredictionTasks,
+  selectPredictionTask
+} from '@/api/solutionGeneration'
+import { dynamicPredictionApi } from '@/api/solutionGeneration'
 import { ensureNodalNavigation, nodalCommandTarget, NODAL_TYPE, NODAL_RECORD, applyNodalRecords, upsertNodalRecord, loadNodalRecords, deleteNodalRecord } from '@/utils/nodalNavigation'
 import { nodalApi } from '@/api/nodal'
 import ErosionContent from '@/views/WellboreCapacity/ErosionContent.vue'
@@ -47,7 +57,7 @@ import PipelineCapacityContent from '@/views/PipelineCapacity/PipelineCapacityCo
 import { ensurePipelineNavigation, findPipelinePageNode, pipelinePageForCommand, resolvePipelinePage } from '@/utils/pipelineNavigation'
 import { createDefaultWellboreNodes, ensureWellboreNavigation, resolveErosionCommandTarget } from '@/utils/wellboreNavigation'
 import { NODETYPE } from '@/constants/nodeType'
-import { resolveWorkspaceContextId } from '@/constants/workspaceContext'
+import { resolveWorkspaceContextId, WORKSPACE_PROJECT_ID, WORKSPACE_GAS_RESERVOIR_ID } from '@/constants/workspaceContext'
 import { analyticMethodApi, dataManagementApi, dynamicBalanceApi, materialBalanceApi, nodeApi, notifyApi, parametersApi, projectApi, typicalCurveApi, wellApi } from '@/api/docker'
 import { waterInvasionApi } from '@/api/waterInvasion'
 import { pvtStorageApi } from '@/api/pvtStorage'
@@ -64,6 +74,7 @@ import { theoreticalProductivityApi } from '@/api/theoreticalProductivity'
 import { createPvtDraftRecord } from '@/utils/pvtRecords'
 import { acquireNotifySocket } from '@/utils/notifySocket'
 import { loadAllModifiedIsochronalTreeNodes, loadModifiedIsochronalTreeNodes } from '@/utils/modifiedIsochronalTree'
+import { PRODUCTIVITY_TEST_METHOD_NODE_TYPES } from '@/utils/productivityTestTree'
 import {
   loadAllOwnedProductivityTestTreeNodes,
   loadOwnedProductivityTestTreeNodes,
@@ -127,8 +138,10 @@ import {
 
 // 当前工作台所使用的项目和气藏。
 const route = useRoute()
-const PROJECT_ID = resolveWorkspaceContextId(route.query.projectId, import.meta.env.VITE_WORKSPACE_PROJECT_ID, 6)
-const GAS_RESERVOIR_ID = resolveWorkspaceContextId(route.query.gasReservoirId, import.meta.env.VITE_WORKSPACE_GAS_RESERVOIR_ID, 4)
+// Refreshing a deep link can temporarily omit the query. Use the same shared
+// workspace fallback as every other analysis page instead of a page-local ID.
+const PROJECT_ID = resolveWorkspaceContextId(route.query.projectId, WORKSPACE_PROJECT_ID)
+const GAS_RESERVOIR_ID = resolveWorkspaceContextId(route.query.gasReservoirId, WORKSPACE_GAS_RESERVOIR_ID)
 const SOFTWARE_INTEGRATION_WORKSPACE = 'software-integration'
 const SOFTWARE_INTEGRATION_IMPORT_INTENTS = {
   'software-integration.model.import.pipesim-well': 'import-pipesim-well',
@@ -191,6 +204,7 @@ const PVT_ENTRY_DATA_MANAGEMENT = 'data-management'
 const PVT_ENTRY_WELLBORE = 'wellbore-capacity'
 const DIAGNOSTIC_CURVE_GROUP_TYPE = 'well-data-diagnostic-curve-group'
 const DIAGNOSTIC_CURVE_RECORD_TYPE = 'well-data-diagnostic-curve'
+const MULTI_PERIOD_SOLUTION_NODE_TYPE = 'multi-period-solution'
 
 const NODE_GROUP_BY_TYPE = {
   [NODETYPE.NodeType_WaterInvasionAnalysis]: 'well-control-inventory',  //水侵分析节点，要放到井控库存下面
@@ -245,6 +259,385 @@ const activeNodeId = workspaceActiveNodeId  // 当前左侧树选中的节点 ID
 const activeNode = ref(null)  // 当前选中的完整节点对象
 const currentView = ref(null)  // currentView.value = 'water-invasion'，即确定右侧部分区域所显示的界面
 const currentViewNode = ref(null)  // 传给右侧内容组件的节点对象
+
+// 多周期预测：存储各口井本次计算的约束结果
+const multiPeriodConstraintsByWell = ref({})
+const multiPeriodPlatformContextByWell = ref({})
+const multiPeriodPlatformFetchStateByWell = ref({})
+const multiPeriodSelectedTaskIdByWell = ref({})
+// 同一口井的旧异步响应不能覆盖后发起的新加载。
+const multiPeriodLoadVersions = new Map()
+
+// 使用项目、气藏、井名生成唯一标识
+const multiPeriodScopeKey = well =>
+  [
+    String(PROJECT_ID),
+    String(GAS_RESERVOIR_ID),
+    String(well || '')
+  ].join(':')
+
+// 获取当前井的约束结果
+const activeMultiPeriodConstraints = computed(() =>
+  multiPeriodConstraintsByWell.value[
+  multiPeriodScopeKey(currentViewNode.value?.wellName)
+  ] || null
+)
+
+
+ // 优先从当前井约束输入组装 Calc；
+ // 缺失的任务信息和平台专用字段再读取当前井真实接口数据。
+ const activeMultiPeriodPlatformContext = computed(() => {
+   const key = multiPeriodScopeKey(currentViewNode.value?.wellName)
+   const context = multiPeriodPlatformContextByWell.value[key]
+
+   if (!context) return null
+
+   const id = multiPeriodSelectedTaskIdByWell.value[key]
+
+   const selectedTask = context.predictionTasks?.find(
+     task => String(task.dynamicPredictionId) === String(id)
+   )
+
+   const effectiveTask = selectedTask || null
+   return {
+     ...context,
+     selectedTask: effectiveTask,
+     // 根据所选任务匹配其原平台请求体，绝不沿用别的预测任务参数。
+     calcRequest: effectiveTask ?
+       (context.calcRequestsByTaskId?.[String(effectiveTask.dynamicPredictionId)] ?? null) : null
+   }
+ })
+
+ // 当前井选中的预测任务 ID
+ const activeMultiPeriodSelectedTaskId = computed(() => {
+   const snapshot = activeMultiPeriodConstraints.value || {}
+
+   return (
+     multiPeriodSelectedTaskIdByWell.value[
+       multiPeriodScopeKey(currentViewNode.value?.wellName)
+     ] ||
+     snapshot.predictionTask?.dynamicPredictionId ||
+     snapshot.task?.dynamicPredictionId ||
+     snapshot.dynamicPredictionId ||
+     ''
+   )
+ })
+
+ // 用户切换预测任务时调用
+ function handleMultiPeriodPredictionTaskSelected(taskId) {
+   const key = multiPeriodScopeKey(currentViewNode.value?.wellName)
+
+   const tasks =
+     multiPeriodPlatformContextByWell.value[key]?.predictionTasks || []
+
+   const picked = tasks.find(
+     task => String(task.dynamicPredictionId) === String(taskId)
+   )
+
+   if (!picked) return
+
+   const snapshot = activeMultiPeriodConstraints.value || {}
+
+   const boundId =
+     snapshot.predictionTask?.dynamicPredictionId ??
+     snapshot.task?.dynamicPredictionId ??
+     snapshot.dynamicPredictionId
+
+   const boundName =
+     snapshot.predictionTask?.chartWellName ??
+     snapshot.task?.chartWellName ??
+     snapshot.chartWellName
+
+   // 防止约束快照绑定的任务与当前选择的任务不一致
+   if (
+     (boundId != null && String(boundId) !== String(taskId)) ||
+     (
+       boundName &&
+       String(boundName).trim() !==
+         String(picked.chartWellName).trim()
+     )
+   ) {
+     ElMessage.warning(
+       '约束快照已绑定另一预测任务，不能只在方案页改任务编号。请从原平台当前任务重新同步。'
+     )
+     return
+   }
+
+   multiPeriodSelectedTaskIdByWell.value = {
+     ...multiPeriodSelectedTaskIdByWell.value,
+     [key]: taskId
+   }
+ }
+
+ // 当前井平台数据加载状态
+ const activeMultiPeriodPlatformFetchState = computed(() => {
+   return (
+     multiPeriodPlatformFetchStateByWell.value[
+       multiPeriodScopeKey(currentViewNode.value?.wellName)
+     ] || null
+   )
+ })
+
+ // 使用当前井约束参数和平台基础数据生成 Calc 请求
+ const multiPeriodCalcContext = computed(() =>
+   resolveCalcContextFromConstraints({
+     scope: {
+       projectId: PROJECT_ID,
+       gasReservoirId: GAS_RESERVOIR_ID,
+       wellName: currentViewNode.value?.wellName || ''
+     },
+
+     snapshot: activeMultiPeriodConstraints.value,
+
+     platformContext: activeMultiPeriodPlatformContext.value
+   })
+ )
+
+ // 提供给 SolutionGeneration.vue 的完整 Calc 请求
+ const dynamicPredictionTemplate = computed(
+   () => multiPeriodCalcContext.value.request
+ )
+
+ // 汇总当前井请求组装错误和平台加载警告
+ const multiPeriodCalcContextWarning = computed(() =>
+   [
+     ...(
+       activeMultiPeriodPlatformFetchState.value?.loading
+         ? ['正在读取当前井的预测任务和井基础数据…']
+         : []
+     ),
+
+     ...multiPeriodCalcContext.value.issues,
+
+     ...multiPeriodCalcContext.value.warnings,
+
+     ...(
+       activeMultiPeriodPlatformFetchState.value?.warnings || []
+     )
+   ].join(' ')
+ )
+
+// HAR 已确认：/node/{项目}/{气藏}/60 下 nodeType=80 为单井动态预测任务。
+// 严格通过 /dynamicprediction/{项目}/{气藏}/{id} 详情核实真实井名及任务ID；
+// 不把 AG 的 nodeId 或父分组 nodeId 当作预测任务。
+async function fetchOriginalDynamicPredictionTasks(scope) {
+  return loadVerifiedPredictionTasks(scope, dynamicPredictionApi)
+}
+
+// 如同 AG：先读取本井真实任务，再从服务端数据及约束输入组装 Calc，最后 GET /chart。
+async function loadMultiPeriodPlatformContextForWell(wellName) {
+  if (!wellName) return
+  const scope = { projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID, wellName }
+  const key = multiPeriodScopeKey(wellName)
+  const version = (multiPeriodLoadVersions.get(key) || 0) + 1
+  multiPeriodLoadVersions.set(key, version)
+  multiPeriodPlatformFetchStateByWell.value = {
+    ...multiPeriodPlatformFetchStateByWell.value,
+    [key]: { loading: true, warnings: [] }
+  }
+
+  // 前两项是项目当前已有的公开封装，仅作为候选来源；不能假定就是任务列表。
+  // 最后一项才是原平台真实任务列表的一次性接入点。
+  const [nodeResult, projectResult, otherResult, wellsResult, completionResult,
+    gasResult, taskListResult] = await Promise.allSettled([
+    nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, NODETYPE.NodeType_DynamicPrediction),
+    projectApi.getProject(PROJECT_ID),
+    dataManagementApi.getOtherData(PROJECT_ID, GAS_RESERVOIR_ID),
+    wellApi.getWells(PROJECT_ID, GAS_RESERVOIR_ID),
+    dataManagementApi.getWellCompletion(PROJECT_ID, GAS_RESERVOIR_ID, wellName),
+    dataManagementApi.getGasProperties(PROJECT_ID, GAS_RESERVOIR_ID),
+    fetchOriginalDynamicPredictionTasks(scope)
+  ])
+  if (multiPeriodLoadVersions.get(key) !== version) return
+
+  const warnings = []
+  const good = item => item.status === 'fulfilled' ? item.value : null
+  // 当前井任务只接受 nodeType=80 且已通过任务详情核验的清单。
+  const verified = good(taskListResult) || {}
+  const tasks = Array.isArray(verified.predictionTasks) ? verified.predictionTasks : []
+  const calcRequestsByTaskId = verified.calcRequestsByTaskId || {}
+  warnings.push(...(verified.warnings || []))
+
+  // 只使用属于当前井的资料；没有匹配的字段保持缺失，不复制 X-1 的值。
+  const profileSources = [good(otherResult), good(wellsResult), good(completionResult),
+    good(gasResult), good(projectResult), good(nodeResult)].filter(Boolean)
+  const wellProfile = extractCurrentWellProfileFromResponses(profileSources, scope)
+  const snapshot = multiPeriodConstraintsByWell.value[key] || null
+  const snapshotTaskId = snapshot?.predictionTask?.dynamicPredictionId ??
+    snapshot?.task?.dynamicPredictionId ?? snapshot?.dynamicPredictionId ?? ''
+  const previousTaskId = multiPeriodSelectedTaskIdByWell.value[key] ?? ''
+  const selection = selectPredictionTask(tasks, { selectedTaskId: previousTaskId, snapshotTaskId })
+  if (selection.warning && !selection.warning.includes('存在多个预测任务')) {
+    warnings.push(selection.warning)
+  }
+
+  const selectedTaskId = selection.task?.dynamicPredictionId ?? null
+  if (!tasks.length) {
+    warnings.push('当前井没有可复用的已验证预测任务；点击“生成方案”将按原平台流程自动创建任务，返回任务ID与名称后运行 Calc。')
+  }
+  if (nodeResult.status === 'rejected' && projectResult.status === 'rejected' && taskListResult.status === 'rejected') {
+    warnings.push('现有预测任务候选接口请求均失败，请检查登录状态和请求日志。')
+  }
+  if (otherResult.status === 'rejected' && wellsResult.status === 'rejected') {
+    warnings.push('井基础数据接口未成功返回，请检查项目和气藏参数。')
+  }
+
+  multiPeriodPlatformContextByWell.value = {
+    ...multiPeriodPlatformContextByWell.value,
+    [key]: {
+      ...scope,
+      predictionTasks: tasks,
+      selectedTask: selection.task,
+      wellProfile,
+      calcRequestsByTaskId
+    }
+  }
+  multiPeriodSelectedTaskIdByWell.value = {
+    ...multiPeriodSelectedTaskIdByWell.value,
+    [key]: selectedTaskId ?? ''
+  }
+  multiPeriodPlatformFetchStateByWell.value = {
+    ...multiPeriodPlatformFetchStateByWell.value,
+    [key]: { loading: false, warnings }
+  }
+}
+
+// 切换井时只恢复本项目、本气藏、同名井的会话快照。
+function restoreMultiPeriodConstraintsForWell(wellName) {
+  if (!wellName || typeof window === 'undefined') return
+  const key = multiPeriodScopeKey(wellName)
+  if (multiPeriodConstraintsByWell.value[key]) return
+  try {
+    const storageKey = `grdp:constraints:v1:${PROJECT_ID}:${GAS_RESERVOIR_ID}:${encodeURIComponent(wellName)}`
+    const saved = JSON.parse(window.sessionStorage.getItem(storageKey) || 'null')
+    if (!saved || String(saved.projectId) !== String(PROJECT_ID) ||
+      String(saved.gasReservoirId) !== String(GAS_RESERVOIR_ID) ||
+      String(saved.wellName) !== String(wellName)) return
+    multiPeriodConstraintsByWell.value = { ...multiPeriodConstraintsByWell.value, [key]: saved }
+  } catch (error) {
+    console.warn('恢复当前井约束输入失败', error)
+  }
+}
+
+// 约束条件计算完成后，接收本次计算结果
+function handleMultiPeriodConstraintsCalculated(payload) {
+  if (
+    !payload ||
+    String(payload.projectId) !== String(PROJECT_ID) ||
+    String(payload.gasReservoirId) !== String(GAS_RESERVOIR_ID) ||
+    !payload.wellName
+  ) {
+    return
+  }
+
+  multiPeriodConstraintsByWell.value = {
+    ...multiPeriodConstraintsByWell.value,
+    [multiPeriodScopeKey(payload.wellName)]: payload
+  }
+  try {
+    const storageKey = `grdp:constraints:v1:${PROJECT_ID}:${GAS_RESERVOIR_ID}:${encodeURIComponent(payload.wellName)}`
+    window.sessionStorage.setItem(storageKey, JSON.stringify(payload))
+  } catch (error) {
+    console.warn('保存当前井约束快照失败', error)
+  }
+}
+
+// 约束参数变化后删除本井过期快照；不再探测与 Calc 无关的旧结果编号。
+function handleMultiPeriodConstraintsInvalidated() {
+  const wellName = currentViewNode.value?.wellName
+  if (!wellName) return
+  const next = { ...multiPeriodConstraintsByWell.value }
+  delete next[multiPeriodScopeKey(wellName)]
+  multiPeriodConstraintsByWell.value = next
+  try {
+    const storageKey = `grdp:constraints:v1:${PROJECT_ID}:${GAS_RESERVOIR_ID}:${encodeURIComponent(wellName)}`
+    window.sessionStorage.removeItem(storageKey)
+  } catch (error) {
+    console.warn('删除过期约束快照失败', error)
+  }
+}
+
+// Calc 和 /chart 成功后，把本次平台任务写入当前井上下文。
+// 绝不将新任务 ID 写入 X-1/X-2 共享模板或覆盖其他井。
+function handleMultiPeriodSolutionGenerated(payload) {
+  if (!payload || String(payload.projectId) !== String(PROJECT_ID) ||
+      String(payload.gasReservoirId) !== String(GAS_RESERVOIR_ID) ||
+      !payload.wellName || !payload.dynamicPredictionId || !payload.chartWellName) return
+  const key = multiPeriodScopeKey(payload.wellName)
+  const task = {
+    projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID,
+    wellName: payload.wellName,
+    dynamicPredictionId: Number(payload.dynamicPredictionId),
+    chartWellName: String(payload.chartWellName)
+  }
+  const previous = multiPeriodPlatformContextByWell.value[key] || {}
+  const tasks = [...(previous.predictionTasks || [])]
+  const collision = tasks.find(t => String(t.dynamicPredictionId) === String(task.dynamicPredictionId))
+  if (collision && collision.chartWellName !== task.chartWellName) {
+    ElMessage.error('当前井预测任务ID与服务端名称发生冲突，未写入缓存')
+    return
+  }
+  if (!collision) tasks.push(task)
+  const request = payload.results?.sourceRequest
+  const calcRequestsByTaskId = { ...(previous.calcRequestsByTaskId || {}) }
+  if (request && String(request.wellName) === String(task.wellName) &&
+      String(request.dynamicPredictionId) === String(task.dynamicPredictionId)) {
+    calcRequestsByTaskId[String(task.dynamicPredictionId)] = request
+  }
+  multiPeriodPlatformContextByWell.value = {
+    ...multiPeriodPlatformContextByWell.value,
+    [key]: { ...previous, ...task, predictionTasks: tasks, calcRequestsByTaskId }
+  }
+  multiPeriodSelectedTaskIdByWell.value = {
+    ...multiPeriodSelectedTaskIdByWell.value, [key]: task.dynamicPredictionId
+  }
+}
+
+const MULTI_PERIOD_CHILDREN = [
+  { type: 'multi-period-objective', label: '目标函数', view: 'multi-period-objective-function' },
+  { type: 'multi-period-constraints', label: '约束条件', view: 'multi-period-constraint-conditions' },
+  { type: 'multi-period-generation', label: '方案生成', view: 'multi-period-solution-generation' }  
+]
+
+function ensureMultiPeriodNavigation(nodes, inheritedWell = '') {
+  for (const node of nodes || []) {
+    const wellName = node.wellName || inheritedWell
+    if (node.type === 'production-allocation') {
+      node.children ||= []
+      let page = node.children.find(child => child.type === MULTI_PERIOD_SOLUTION_NODE_TYPE)
+      if (!page) {
+        page = {
+          id: `${node.id}-multi-period`,
+          type: MULTI_PERIOD_SOLUTION_NODE_TYPE,
+          label: '多周期预测',
+          wellName,
+          children: MULTI_PERIOD_CHILDREN.map(child => ({
+            ...child,
+            id: `${node.id}-${child.type}`,
+            wellName,
+            children: []
+          }))
+        }
+        node.children.push(page)
+      }
+      if (page.wellName !== wellName) page.wellName = wellName
+      if (page.label !== '多周期预测') page.label = '多周期预测'
+      // 确保子节点不丢失
+      page.children ||= []
+      for (const child of MULTI_PERIOD_CHILDREN) {
+        const existed = page.children.find(c => c.type === child.type)
+        if (!existed) {
+          page.children.push({ ...child, id: `${page.id}-${child.type}`, wellName, children: [] })
+        } else {
+          if (existed.wellName !== wellName) existed.wellName = wellName
+          if (existed.label !== child.label) existed.label = child.label
+        }
+      }
+    } else {
+      ensureMultiPeriodNavigation(node.children, wellName)
+    }
+  }
+}
 const softwareIntegrationWorkspace = ref(null)
 const softwareIntegrationImportInput = ref(null)
 let pendingSoftwareIntegrationImport = null
@@ -576,7 +969,7 @@ const getVentLossApi = node => node.lossType === 'surface' ? surfaceLossApi : we
 const getVentLossLabel = node => node?.lossType === 'surface' ? '地面损耗' : '井筒损耗'
 const isTheoreticalRecord = node => [THEORETICAL_STABLE_RECORD_NODE_TYPE, THEORETICAL_UNSTABLE_RECORD_NODE_TYPE].includes(node?.type)
 const isDiagnosticRecord = item => item?.type === DIAGNOSTIC_CURVE_RECORD_TYPE
-const isTreeContextMenuNode = (item) => item?.type === NODAL_RECORD || isInventoryResultNode(item) || isTypicalCurveResultNode(item) || isLossRecord(item) || isTheoreticalRecord(item) || isPvtRecord(item) || isDiagnosticRecord(item) || isProductivityTestRecord(item)
+const isTreeContextMenuNode = (item) => item?.type === NODAL_RECORD 
 
 const treeContextMenuLabel = computed(() => {
   if (treeContextMenu.value.node?.type === NODAL_RECORD) return '删除节点分析方案'
@@ -1154,7 +1547,7 @@ const addBlasingameNode = (wellName, rawNode = {}) => {
 
   const parentId = `${wellItem.id}-diagnostic-curve`
   let diagnosticNode = inventoryGroup.children.find(item =>
-   item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve
+    item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve
   )
 
   if (!diagnosticNode) {
@@ -1202,7 +1595,7 @@ const addNpiNode = (wellName, rawNode = {}) => {
 
   const parentId = `${wellItem.id}-diagnostic-curve`
   let diagnosticNode = inventoryGroup.children.find(item =>
-   item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve
+    item.id === parentId || item.type === NODETYPE.NodeType_TypicalCurve
   )
   if (!diagnosticNode) {
     diagnosticNode = {
@@ -4289,6 +4682,7 @@ const handleDeleteContextNode = async () => {
     return
   }
 
+
   if (!isTypicalCurveResultNode(node)) {
     ElMessage.info(`${deleteLabel}：删除接口待确认`)
     return
@@ -4379,7 +4773,8 @@ const handleSelect = async (node) => { // 点击左侧树节点
     DYNAMIC_STABLE_METHOD_NODE_TYPE,
     DYNAMIC_UNSTABLE_METHOD_NODE_TYPE
   ].includes(node.type)
-  if (node.type === NODETYPE.NodeType_Well || isWellMenuGroup || isProductivityDirectory || node.type === 'pipeline-temperature-group') return
+  if (node.type === NODETYPE.NodeType_Well || isWellMenuGroup || isProductivityDirectory || node.type === 'pipeline-temperature-group'
+    || node.type === 'productivity-test' || PRODUCTIVITY_TEST_METHOD_NODE_TYPES.has(node.type)) return
 
   // 只有真正打开某条记录/功能节点时，才同步右侧使用的井名。
   if (nodeWellName) selectedWellName.value = nodeWellName
@@ -4499,6 +4894,27 @@ const handleSelect = async (node) => { // 点击左侧树节点
     } catch (error) {
       ElMessage.error(error?.msg || error?.response?.data?.msg || error.message || '诊断曲线加载失败')
     }
+    return
+  }
+
+  if (node.type === 'multi-period-objective') {
+    currentView.value = 'multi-period-objective-function'
+    currentViewNode.value = { ...node, wellName: nodeWellName }
+    return
+  }
+
+  if (node.type === 'multi-period-constraints') {
+    restoreMultiPeriodConstraintsForWell(nodeWellName)
+    currentView.value = 'multi-period-constraint-conditions'
+    currentViewNode.value = { ...node, wellName: nodeWellName }
+    return
+  }
+
+  if (node.type === 'multi-period-generation') {
+    restoreMultiPeriodConstraintsForWell(nodeWellName)
+    currentView.value = 'multi-period-solution-generation'
+    currentViewNode.value = { ...node, wellName: nodeWellName }
+    void loadMultiPeriodPlatformContextForWell(nodeWellName)
     return
   }
 
@@ -4726,17 +5142,10 @@ const handleCommand = async ({ group, name, parent, commandId, wellName: command
   const dataType = dataViewByName[name]
 
   if (dataType) {
-    const activeWellName = targetWellName
-    const supportsProjectScope = ['deliverability', 'staticPressure', 'wellcompletion', 'otherdata', 'productiondata'].includes(dataType)
-
-    if (!supportsProjectScope && !activeWellName) {
-      ElMessage.warning('请先在左侧选择一口井')
-      return
-    }
-
+    // 顶部数据管理始终展示气藏内所有井；左侧井目录仍由 handleSelect 传入井名进行筛选。
     currentView.value = 'well-data-table'
     currentViewNode.value = {
-      wellName: supportsProjectScope ? '' : activeWellName,
+      wellName: '',
       dataType
     }
     return
@@ -4880,6 +5289,52 @@ const handleCommand = async ({ group, name, parent, commandId, wellName: command
       break
     case '动态平衡':
       runDynamicBalanceForSelectedWell()
+      break
+    case '目标函数':
+      if (group === '配产配注' && parent === '多周期预测') {
+        if (!targetWellName) {
+          ElMessage.warning('请先在左侧选择一口井')
+          return
+        }
+        currentView.value = 'multi-period-objective-function'
+        currentViewNode.value = { wellName: targetWellName }
+      } else {
+        ElMessage.success(`[${group}] ${name}`)
+      }
+      break
+    case '约束条件':
+      if (group === '配产配注' && parent === '多周期预测') {
+        if (!targetWellName) {
+          ElMessage.warning('请先在左侧选择一口井')
+          return
+        }
+        restoreMultiPeriodConstraintsForWell(targetWellName)
+        currentView.value = 'multi-period-constraint-conditions'
+        currentViewNode.value = { wellName: targetWellName }
+      } else {
+        ElMessage.success(`[${group}] ${name}`)
+      }
+      break
+    case '方案生成':
+      if (group === '配产配注' && parent === '多周期预测') {
+        if (!targetWellName) {
+          ElMessage.warning('请先在左侧选择一口井')
+          return
+        }
+        restoreMultiPeriodConstraintsForWell(targetWellName)
+        currentView.value = 'multi-period-solution-generation'
+        currentViewNode.value = { wellName: targetWellName }
+        void loadMultiPeriodPlatformContextForWell(targetWellName)
+      } else {
+        ElMessage.success(`[${group}] ${name}`)
+      }
+      break
+    case '方案比选':
+      if (group === '配产配注' && parent === '多周期预测') {
+        ElMessage.info('方案比选功能开发中')
+      } else {
+        ElMessage.success(`[${group}] ${name}`)
+      }
       break
     default:
       ElMessage.success(`[${group}] ${name}`)
@@ -5077,6 +5532,10 @@ onMounted(async () => {
   }
 })
 
+watch(() => workspaceTreeData.value, nodes => {
+  ensureMultiPeriodNavigation(nodes)
+}, { deep: true, immediate: true })
+
 onBeforeUnmount(() => {
   window.removeEventListener('click', closeTreeContextMenu)
   window.removeEventListener('resize', closeTreeContextMenu)
@@ -5089,116 +5548,125 @@ onBeforeUnmount(() => {
     单井产能板块通过 handleCommand 跳转到独立页面；目录中的已保存等时试井在本页渲染。
   -->
   <div class="ipr-container">
-    <input
-      ref="softwareIntegrationImportInput"
-      class="software-integration-import-bridge"
-      type="file"
-      @change="handleSoftwareIntegrationImportFile"
-    />
+    <input ref="softwareIntegrationImportInput" class="software-integration-import-bridge" type="file"
+      @change="handleSoftwareIntegrationImportFile" />
     <!--    顶部菜单栏目-->
-    <RibbonMenu
-      :active-tab-name="activeRibbonTabName"
-      :scope="workspaceRibbonScope"
-      @command="handleCommand"
-      @tab-change="handleRibbonTabChange"
-      @scope-change="setWorkspaceRibbonScope"
-    />
+    <RibbonMenu :active-tab-name="activeRibbonTabName" :scope="workspaceRibbonScope" @command="handleCommand"
+      @tab-change="handleRibbonTabChange" @scope-change="setWorkspaceRibbonScope" />
 
 
     <div class="ipr-main">
       <SoftwareIntegrationWorkspace v-if="isSoftwareIntegration" ref="softwareIntegrationWorkspace" />
       <template v-else>
-      <!-- 公共左侧目录：与单井产能工作台共用 WorkspaceSidebar.vue。 -->
-      <WorkspaceSidebar
-        v-model:keyword="wellKeyword"
-        v-model:collapsed="sideTreeCollapsed"
-        :nodes="filteredTreeData"
-        :active-id="displayedActiveNodeId"
-        @select="handleSelect"
-        @expand="handleNodeExpand"
-        @node-contextmenu="handleNodeContextMenu"
-      />
+        <!-- 公共左侧目录：与单井产能工作台共用 WorkspaceSidebar.vue。 -->
+        <WorkspaceSidebar v-model:keyword="wellKeyword" v-model:collapsed="sideTreeCollapsed" :nodes="filteredTreeData"
+          :active-id="displayedActiveNodeId" @select="handleSelect" @expand="handleNodeExpand"
+          @node-contextmenu="handleNodeContextMenu" />
 
-      <!--     右侧的主要内容区域-->
-      <main class="content-area" :class="{
-        'well-control-theme': isWellControlView,
-        'pvt-yellow-theme': isPvtView
-      }">
-        <ReservoirWorkspaceContent v-if="currentView === 'reservoir-feature'" :reservoir="currentViewNode.reservoir"
-          :command="currentViewNode.command" />
-        <PipelineCapacityContent
-          v-if="currentView === 'pipeline-capacity'"
-          :key="`pipeline-${currentViewNode?.wellName || 'project'}`"
-          :well-name="currentViewNode?.wellName || ''"
-          :project-id="PROJECT_ID"
-          :gas-reservoir-id="GAS_RESERVOIR_ID"
-          :command-key="currentViewNode?.commandKey || 0"
-          :initial-section="currentViewNode?.pipelineSection || 'flow'"
-          @navigate="openPipelinePage"
-        />
-        <SingleWellProductivityInterface v-if="currentView === 'isochronal-test'"
-          :key="currentViewNode?.viewInstanceKey" embedded :embedded-node="currentViewNode"
-          :project-id="currentViewNode?.projectId ?? PROJECT_ID"
-          :gas-reservoir-id="currentViewNode?.gasReservoirId ?? GAS_RESERVOIR_ID" />
-        <PvtPropertiesContent v-if="currentView === 'pvt-properties'"
-          :key="currentViewNode?.viewInstanceKey || currentViewNode?.id || currentViewNode?.wellName"
-          :well-name="currentViewNode?.wellName" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID"
-          :pvt-index="currentViewNode?.pvtIndex" :initial-record="currentViewNode?.initialRecord"
-          :initial-property-tab="currentViewNode?.initialPropertyTab || lastPvtPropertyTab"
-          @property-tab-change="handlePvtPropertyTabChange" @saved="handlePvtSaved" />
-        <RelativePermeabilityContent v-if="currentView === 'relative-permeability'"
-          :key="currentViewNode?.viewInstanceKey || currentViewNode?.id || `${currentViewNode?.wellName}-${currentViewNode?.relativePermeabilityIndex}`"
-          :well-name="currentViewNode?.wellName" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID"
-          :relative-permeability-index="currentViewNode?.relativePermeabilityIndex"
-          @imported="handleRelativePermeabilityImported"
-        />
-        <WellDataTableContent v-if="currentView === 'well-data-table'"
-          :data-type="currentViewNode?.dataType" :well-name="currentViewNode?.wellName"
-          :well-names="projectWellNames" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
-        <TemperatureModelContent v-if="currentView === 'wellbore-temperature'"
-          :key="currentViewNode?.id" :node="currentViewNode" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
-        <PressureConversion v-if="currentView === 'wellbore-pressure'" :key="currentViewNode?.id" :node="currentViewNode" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
-        <BoundaryConditionsContent v-if="currentView === 'wellbore-boundary'" :key="currentViewNode?.id" :node="currentViewNode" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
-        <LiquidLoadingContent v-if="currentView === 'wellbore-liquid-loading'" :key="currentViewNode?.id" :node="currentViewNode" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
-        <HydratePredictionContent v-if="currentView === 'wellbore-hydrate'" :key="currentViewNode?.id" :node="currentViewNode" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
-        <SandProductionContent v-if="currentView === 'wellbore-sand'" :key="currentViewNode?.id" :node="currentViewNode" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
-        <NodalAnalysis v-if="currentView === 'allocation-nodal'" :key="`${PROJECT_ID}-${GAS_RESERVOIR_ID}-${currentViewNode?.wellName}-${currentViewNode?.nodalId || 'new'}-${currentViewNode?.draftId || 0}`" :node="currentViewNode" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" @saved="handleNodalRecord" @restored="handleNodalRecord" @history-updated="handleNodalHistory" />
-        <ErosionContent v-if="currentView === 'wellbore-erosion'" :key="currentViewNode?.id" :node="currentViewNode" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
-        <WellboreStructureContent v-if="currentView === 'wellbore-structure'"
-          :key="currentViewNode?.id" :well-name="currentViewNode?.wellName"
-          :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
-        <WaterInvasionContent v-if="currentView === 'water-invasion'" :node="currentViewNode" :project-id="PROJECT_ID"
-          :gas-reservoir-id="GAS_RESERVOIR_ID" @refresh-tree="handleRefreshTree"
-          @recalculate="runWaterInvasionForSelectedWell" />
-        <AnalyticMethodContent v-if="currentView === 'analytic-method'" :node="currentViewNode" :project-id="PROJECT_ID"
-          :gas-reservoir-id="GAS_RESERVOIR_ID" :recalculating="analyticMethodRunning"
-          @recalculate="runAnalyticMethodForSelectedWell" />
-        <MaterialBalanceContent v-if="currentView === 'material-balance'" :node="currentViewNode"
-          :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" :recalculating="materialBalanceRunning"
-          @refresh-tree="handleRefreshTree" @recalculate="runMaterialBalanceForSelectedWell" />
-        <FlowBalanceContent v-if="currentView === 'flow-balance'" :node="currentViewNode" :project-id="PROJECT_ID"
-          :gas-reservoir-id="GAS_RESERVOIR_ID" :recalculating="flowBalanceRunning"
-          @recalculate="handleFlowBalanceRecalculate" @refresh-tree="handleRefreshTree" />
-        <BlasingameContent v-if="currentView === 'blasingame'" :node="currentViewNode" :project-id="PROJECT_ID"
-          :gas-reservoir-id="GAS_RESERVOIR_ID" @recalculate="runBlasingameForSelectedWell" />
-        <NpiContent v-if="currentView === 'npi'" :node="currentViewNode" :project-id="PROJECT_ID"
-          :gas-reservoir-id="GAS_RESERVOIR_ID" :recalculating="typicalCurveRunning"
-          @recalculate="runNpiForSelectedWell" />
-        <TransientContent v-if="currentView === 'transient'" :node="currentViewNode" :project-id="PROJECT_ID"
-          :gas-reservoir-id="GAS_RESERVOIR_ID" :recalculating="typicalCurveRunning"
-          @recalculate="runTransientForSelectedWell" />
-        <WattenbargerContent v-if="currentView === 'wattenbarger'" :node="currentViewNode" :project-id="PROJECT_ID"
-          :gas-reservoir-id="GAS_RESERVOIR_ID" :recalculating="typicalCurveRunning"
-          @recalculate="runWattenbargerForSelectedWell" />
-        <DynamicBalanceContent v-if="currentView === 'dynamic-balance'" :node="currentViewNode" :project-id="PROJECT_ID"
-          :gas-reservoir-id="GAS_RESERVOIR_ID" :recalculating="dynamicBalanceRunning"
-          @recalculate="handleDynamicBalanceRecalculate" />
-        <AGContent v-if="currentView === 'Agarwal-Gardner'" :node="currentViewNode" :project-id="PROJECT_ID"
-          :gas-reservoir-id="GAS_RESERVOIR_ID" @recalculate="runAGForSelectedWell" />
-        <DiagnosticCurveContent v-if="currentView === 'diagnostic-curve'" :node="currentViewNode"
-          :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID"
-          @saved="handleDiagnosticSaved" />
-      </main>
+        <!--     右侧的主要内容区域-->
+        <main class="content-area" :class="{
+          'well-control-theme': isWellControlView,
+          'pvt-yellow-theme': isPvtView
+        }">
+          <ReservoirWorkspaceContent v-if="currentView === 'reservoir-feature'" :reservoir="currentViewNode.reservoir"
+            :command="currentViewNode.command" />
+          <PipelineCapacityContent v-if="currentView === 'pipeline-capacity'"
+            :key="`pipeline-${currentViewNode?.wellName || 'project'}`" :well-name="currentViewNode?.wellName || ''"
+            :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID"
+            :command-key="currentViewNode?.commandKey || 0"
+            :initial-section="currentViewNode?.pipelineSection || 'flow'" @navigate="openPipelinePage" />
+          <SingleWellProductivityInterface v-if="currentView === 'isochronal-test'"
+            :key="currentViewNode?.viewInstanceKey" embedded :embedded-node="currentViewNode"
+            :project-id="currentViewNode?.projectId ?? PROJECT_ID"
+            :gas-reservoir-id="currentViewNode?.gasReservoirId ?? GAS_RESERVOIR_ID" />
+          <PvtPropertiesContent v-if="currentView === 'pvt-properties'"
+            :key="currentViewNode?.viewInstanceKey || currentViewNode?.id || currentViewNode?.wellName"
+            :well-name="currentViewNode?.wellName" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID"
+            :pvt-index="currentViewNode?.pvtIndex" :initial-record="currentViewNode?.initialRecord"
+            :initial-property-tab="currentViewNode?.initialPropertyTab || lastPvtPropertyTab"
+            @property-tab-change="handlePvtPropertyTabChange" @saved="handlePvtSaved" />
+          <RelativePermeabilityContent v-if="currentView === 'relative-permeability'"
+            :key="currentViewNode?.viewInstanceKey || currentViewNode?.id || `${currentViewNode?.wellName}-${currentViewNode?.relativePermeabilityIndex}`"
+            :well-name="currentViewNode?.wellName" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID"
+            :relative-permeability-index="currentViewNode?.relativePermeabilityIndex"
+            @imported="handleRelativePermeabilityImported" />
+          <WellDataTableContent v-if="currentView === 'well-data-table'" :data-type="currentViewNode?.dataType"
+            :well-name="currentViewNode?.wellName" :well-names="projectWellNames" :project-id="PROJECT_ID"
+            :gas-reservoir-id="GAS_RESERVOIR_ID" />
+          <TemperatureModelContent v-if="currentView === 'wellbore-temperature'" :key="currentViewNode?.id"
+            :node="currentViewNode" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
+          <PressureConversion v-if="currentView === 'wellbore-pressure'" :key="currentViewNode?.id"
+            :node="currentViewNode" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
+          <BoundaryConditionsContent v-if="currentView === 'wellbore-boundary'" :key="currentViewNode?.id"
+            :node="currentViewNode" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
+          <LiquidLoadingContent v-if="currentView === 'wellbore-liquid-loading'" :key="currentViewNode?.id"
+            :node="currentViewNode" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
+          <HydratePredictionContent v-if="currentView === 'wellbore-hydrate'" :key="currentViewNode?.id"
+            :node="currentViewNode" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
+          <SandProductionContent v-if="currentView === 'wellbore-sand'" :key="currentViewNode?.id"
+            :node="currentViewNode" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
+          <NodalAnalysis v-if="currentView === 'allocation-nodal'"
+            :key="`${PROJECT_ID}-${GAS_RESERVOIR_ID}-${currentViewNode?.wellName}-${currentViewNode?.nodalId || 'new'}-${currentViewNode?.draftId || 0}`"
+            :node="currentViewNode" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID"
+            @saved="handleNodalRecord" @restored="handleNodalRecord" @history-updated="handleNodalHistory" />
+          <MultiPeriodObjectiveFunction v-if="currentView === 'multi-period-objective-function'"
+            :key="`multi-period-objective-${currentViewNode?.wellName || 'project'}`"
+            :well-name="currentViewNode?.wellName || ''" :project-id="PROJECT_ID"
+            :gas-reservoir-id="GAS_RESERVOIR_ID" />
+          <!-- 多周期预测：约束条件 -->
+          <MultiPeriodConstraintConditions v-if="currentView === 'multi-period-constraint-conditions'"
+            :key="`multi-period-constraint-${currentViewNode?.wellName || 'project'}`"
+            :well-name="currentViewNode?.wellName || ''" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID"
+            @constraints-calculated="handleMultiPeriodConstraintsCalculated"
+            @constraints-invalidated="handleMultiPeriodConstraintsInvalidated" />
+
+          <!-- 多周期预测：方案生成 -->
+          <MultiPeriodSolutionGeneration v-if="currentView === 'multi-period-solution-generation'"
+            :key="`multi-period-solution-${currentViewNode?.wellName || 'project'}`"
+            :well-name="currentViewNode?.wellName || ''" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID"
+            :dynamic-prediction-request="dynamicPredictionTemplate"
+            :prediction-context-warning="multiPeriodCalcContextWarning"
+            :prediction-context-loading="Boolean(activeMultiPeriodPlatformFetchState?.loading)"
+            :prediction-tasks="activeMultiPeriodPlatformContext?.predictionTasks || []"
+            :selected-prediction-task-id="activeMultiPeriodSelectedTaskId"
+            @prediction-task-selected="handleMultiPeriodPredictionTaskSelected"
+            :constraints-result="activeMultiPeriodConstraints"
+            @solution-generated="handleMultiPeriodSolutionGenerated" />
+          <ErosionContent v-if="currentView === 'wellbore-erosion'" :key="currentViewNode?.id" :node="currentViewNode"
+            :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
+          <WellboreStructureContent v-if="currentView === 'wellbore-structure'" :key="currentViewNode?.id"
+            :well-name="currentViewNode?.wellName" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />
+          <WaterInvasionContent v-if="currentView === 'water-invasion'" :node="currentViewNode" :project-id="PROJECT_ID"
+            :gas-reservoir-id="GAS_RESERVOIR_ID" @refresh-tree="handleRefreshTree"
+            @recalculate="runWaterInvasionForSelectedWell" />
+          <AnalyticMethodContent v-if="currentView === 'analytic-method'" :node="currentViewNode"
+            :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" :recalculating="analyticMethodRunning"
+            @recalculate="runAnalyticMethodForSelectedWell" />
+          <MaterialBalanceContent v-if="currentView === 'material-balance'" :node="currentViewNode"
+            :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" :recalculating="materialBalanceRunning"
+            @refresh-tree="handleRefreshTree" @recalculate="runMaterialBalanceForSelectedWell" />
+          <FlowBalanceContent v-if="currentView === 'flow-balance'" :node="currentViewNode" :project-id="PROJECT_ID"
+            :gas-reservoir-id="GAS_RESERVOIR_ID" :recalculating="flowBalanceRunning"
+            @recalculate="handleFlowBalanceRecalculate" @refresh-tree="handleRefreshTree" />
+          <BlasingameContent v-if="currentView === 'blasingame'" :node="currentViewNode" :project-id="PROJECT_ID"
+            :gas-reservoir-id="GAS_RESERVOIR_ID" @recalculate="runBlasingameForSelectedWell" />
+          <NpiContent v-if="currentView === 'npi'" :node="currentViewNode" :project-id="PROJECT_ID"
+            :gas-reservoir-id="GAS_RESERVOIR_ID" :recalculating="typicalCurveRunning"
+            @recalculate="runNpiForSelectedWell" />
+          <TransientContent v-if="currentView === 'transient'" :node="currentViewNode" :project-id="PROJECT_ID"
+            :gas-reservoir-id="GAS_RESERVOIR_ID" :recalculating="typicalCurveRunning"
+            @recalculate="runTransientForSelectedWell" />
+          <WattenbargerContent v-if="currentView === 'wattenbarger'" :node="currentViewNode" :project-id="PROJECT_ID"
+            :gas-reservoir-id="GAS_RESERVOIR_ID" :recalculating="typicalCurveRunning"
+            @recalculate="runWattenbargerForSelectedWell" />
+          <DynamicBalanceContent v-if="currentView === 'dynamic-balance'" :node="currentViewNode"
+            :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" :recalculating="dynamicBalanceRunning"
+            @recalculate="handleDynamicBalanceRecalculate" />
+          <AGContent v-if="currentView === 'Agarwal-Gardner'" :node="currentViewNode" :project-id="PROJECT_ID"
+            :gas-reservoir-id="GAS_RESERVOIR_ID" @recalculate="runAGForSelectedWell" />
+          <DiagnosticCurveContent v-if="currentView === 'diagnostic-curve'" :node="currentViewNode"
+            :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" @saved="handleDiagnosticSaved" />
+        </main>
       </template>
     </div>
 
@@ -5219,7 +5687,9 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.software-integration-import-bridge { display: none; }
+.software-integration-import-bridge {
+  display: none;
+}
 </style>
 
 <style lang="scss" scoped>

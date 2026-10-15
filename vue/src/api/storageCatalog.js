@@ -5,5 +5,8 @@ export const storageCatalogApi = {
   list: (projectId, gasReservoirId) => request.get('/reservoir-loss/storages', { params: { projectId, gasReservoirId } }),
   candidateWells: (projectId, gasReservoirId) => request.get('/reservoir-loss/storages/candidate-wells', { params: { projectId, gasReservoirId } }),
   wells: (storageId, projectId, gasReservoirId) => request.get(`/reservoir-loss/storages/${storageId}/wells`, { params: { projectId, gasReservoirId } }),
-  create: data => request.post('/reservoir-loss/storages', data)
+  create: data => request.post('/reservoir-loss/storages', data),
+  delete: (storageId, projectId, gasReservoirId) => request.delete(`/reservoir-loss/storages/${storageId}`, {
+    params: { projectId, gasReservoirId }, timeout: 60000
+  })
 }

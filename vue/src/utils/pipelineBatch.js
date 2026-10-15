@@ -1,7 +1,7 @@
 import { checkTopology, clone } from './pipelineTopology.js'
 import { normalizeOperatingTime, parseOperatingTime } from './pipelineTime.js'
 
-export const PIPELINE_BATCH_VERSION = 'network-batch-2.0'
+export const PIPELINE_BATCH_VERSION = 'network-batch-2.2'
 
 /** A single well may feed several outlets. Incoming branches and loops need a different solver. */
 export function networkOrder(graph) {
@@ -62,7 +62,15 @@ export function batchInputMark(input, topologyRevision) {
   const canonical = value => Array.isArray(value) ? value.map(canonical)
     : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort()
       .filter(key => value[key] != null).map(key => [key, canonical(value[key])])) : value
-  return JSON.stringify(canonical({ topologyRevision, boundary, waterState: input?.constraints?.waterState === 'available' ? 'available' : 'unknown', thermalMode: input?.thermalMode,
+  const source = input?.constraints?.erosion
+  const parameters = row => ({ edgeId: row.edgeId, liquidHoldupPercent: row.liquidHoldupPercent,
+    sandContentPercent: row.sandContentPercent, sandDensityKgM3: row.sandDensityKgM3 })
+  const hasParameters = row => ['liquidHoldupPercent', 'sandContentPercent', 'sandDensityKgM3'].some(key => row[key] != null)
+  const erosion = { liquidPvtId: source?.liquidPvtId ?? null,
+    segments: (source?.segments || []).filter(hasParameters).map(parameters).sort((a, b) => String(a.edgeId).localeCompare(String(b.edgeId))),
+    cases: (source?.cases || []).filter(hasParameters).map(row => ({ caseId: row.caseId, ...parameters(row) }))
+      .sort((a, b) => `${a.caseId}/${a.edgeId}`.localeCompare(`${b.caseId}/${b.edgeId}`)) }
+  return JSON.stringify(canonical({ topologyRevision, boundary, erosion, waterState: input?.constraints?.waterState === 'available' ? 'available' : 'unknown', thermalMode: input?.thermalMode,
     frictionMethod: input?.frictionMethod, jtKmpa: input?.thermalMode === 'heat' ? input?.jtKmpa ?? null : null,
     standardPressurePa: input?.standardPressurePa, standardTemperatureK: input?.standardTemperatureK }))
 }

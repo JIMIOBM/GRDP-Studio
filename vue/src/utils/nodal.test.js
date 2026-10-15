@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { ensureNodalNavigation, nodalCommandTarget, applyNodalRecords, upsertNodalRecord, loadNodalRecords, deleteNodalRecord, NODAL_RECORD } from './nodalNavigation.js'
-import { nodalChartOption, nodalEnvelope, nodalConstraintBoundary } from './nodalChart.js'
+import { nodalChartOption, nodalEnvelope, nodalConstraintBoundary, nodalLegendGraphic } from './nodalChart.js'
 test('nodal directory is lazy and does not create productivity or pressure submodules', () => {
   const nodes = [{ id: 'A-allocation', type: 'production-allocation', wellName: 'A', children: [] }]
   ensureNodalNavigation(nodes); ensureNodalNavigation(nodes)
@@ -64,6 +64,19 @@ test('flow roles reverse for injection and invalid wellbore points remain gaps',
   assert.match(inj.series[1].name,/地层流出/); assert.equal(inj.series[0].data[0][1],null)
   assert.equal(inj.series[0].connectNulls,false)
   assert.equal(inj.series.some(s => s.name.includes('最大可行点')),false)
+  assert.equal(prod.legend.show,false)
+  assert.equal(prod.graphic[0].draggable,true)
+})
+test('custom legend is draggable and keeps line and point symbols', () => {
+  const legend=nodalLegendGraphic([{name:'最大合理采气能力',color:'#e32626',symbol:'circle'},{name:'地层流入曲线',color:'#31577a',symbol:'line'}])
+  assert.equal(legend.draggable,true)
+  assert.equal(legend.cursor,'move')
+  assert.equal(legend.id,'nodal-draggable-legend')
+  assert.equal(Object.hasOwn(legend,'bounding'),false)
+  assert.equal(legend.children[0].silent,false)
+  assert.equal(legend.children[0].cursor,'move')
+  assert.equal(legend.children.some(item=>item.type==='circle'),true)
+  assert.equal(legend.children.some(item=>item.type==='line'),true)
 })
 test('envelope requires connected verified slices and critical curves interpolate signed margins', () => {
   const point = (rate, pressure) => ({ rate, pressure })
@@ -80,4 +93,14 @@ test('envelope requires connected verified slices and critical curves interpolat
     {rate:3,pressure:8,checks:[{code:'erosion',margin:-1,status:'FAIL'}]}]
   assert.deepEqual(nodalConstraintBoundary({candidates},'erosion'),[[2,9]])
   assert.deepEqual(nodalConstraintBoundary({candidates},'liquidLoading'),[])
+  assert.deepEqual(nodalEnvelope({feasibleRegions:[[{rate:1,pressure:8},{rate:2,pressure:7}]]}),[[[1,8],[2,7]]])
+})
+
+test('new snapshots draw backend constraint segments without deriving them from scenarios', () => {
+  const result={wellboreCurve:[],scenarios:[],feasibleRegions:[],constraintCurves:[
+    {code:'erosion',name:'临界冲蚀流量',segments:[[{rate:2,pressure:8},{rate:3,pressure:9}]]}
+  ]}
+  const option=nodalChartOption(result,'production')
+  const erosion=option.series.find(s=>s.name==='临界冲蚀流量')
+  assert.deepEqual(erosion.data,[[2,8],[3,9]])
 })

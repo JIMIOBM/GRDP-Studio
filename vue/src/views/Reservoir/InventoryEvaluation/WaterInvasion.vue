@@ -2,7 +2,7 @@
 /** 库水侵：选择已保存单井批次 → 日期并集逐日加权 → 旧算法 → 新库历史。与单井页面独立。 */
 import { computed, ref, watch, nextTick, onBeforeUnmount } from 'vue'
 import * as echarts from 'echarts'
-import { ElMessage, ElTable, ElTableColumn, ElPagination, ElInput } from 'element-plus'
+import { ElMessage, ElTable, ElTableColumn, ElPagination, ElInput, ElCheckbox } from 'element-plus'
 import request from '@/utils/request'
 
 const props = defineProps({ reservoir: { type: Object, default: null } })
@@ -17,6 +17,7 @@ const format = v => finite(v) ? Number(v).toLocaleString('zh-CN', { maximumFract
 const stamp = value => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '时间未知'
 const statusNames = { RUNNING: '计算中', SAVING: '保存中', COMPLETED: '已保存', FAILED: '失败', TIMED_OUT: '待检查' }
 const sources = ref([]), choices = ref({}), records = ref([]), selected = ref(null), detail = ref(null), preview = ref(null)
+const expandedWells = ref(new Set())
 const busy = ref(false), loading = ref(false), error = ref(''), limit = ref(-1), page = ref(1), view = ref('production'), category = ref(0)
 const chartEl = ref(null), chartHost = ref(null)
 const hiddenLegendNames = ref(new Set()), legendPosition = ref(null), draggingLegend = ref(false)
@@ -73,6 +74,12 @@ function contributors(row, field) {
   return Array.isArray(weights) ? weights.map(w => `${sourceNames.value[w.wellId] || '来源井'}：${(w.weight * 100).toFixed(2)}%`).join('；') : ''
 }
 function newRequest() { return { ...scope(), requestId: crypto.randomUUID(), sources: selectedSources.value, waterGasRatioLimit: Number(limit.value) } }
+function toggleWellBatch(wellId) {
+  const next = new Set(expandedWells.value)
+  if (next.has(wellId)) next.delete(wellId)
+  else next.add(wellId)
+  expandedWells.value = next
+}
 function invalidatePreview() { preview.value = null; generation++ }
 watch([choices, limit], invalidatePreview, { deep: true })
 watch([view, category, payload], () => { page.value = 1 })
@@ -233,20 +240,27 @@ reload()
     <div class="module-bar"><span>水侵动态分析 · 水侵分析</span></div>
     <div class="workspace">
       <aside class="parameters">
-        <div class="panel-head">参数设置</div>
-        <div class="parameter-scroll">
-          <label>所属储气库<input :value="reservoir?.label || '未选择库'" readonly /></label>
-          <div class="field-title">参与井及来源批次 <button :disabled="loading || busy || running" @click="reload">刷新</button></div>
+        <div class="params-head"><span>参数设置</span><button type="button" :disabled="loading || busy || running" @click="reload">重新读取</button></div>
+        <div class="params-body">
+          <label class="storage-field">所属储气库<input :value="reservoir?.label || '未选择库'" readonly /></label>
+          <div class="section-heading">参与井 <span>{{ selectedSources.length }} / {{ sources.length }}</span></div>
           <div v-if="loading" class="muted">正在读取单井历史…</div>
-          <div v-for="well in sources" :key="well.wellId" class="well-source">
-            <label class="check"><input v-model="choices[well.wellId].enabled" type="checkbox" :disabled="busy || !well.records.some(r => Number(r.dynamic_gas_volume) > 0)" />{{ well.wellName }}</label>
-            <select v-model="choices[well.wellId].recordId" :disabled="busy || !choices[well.wellId].enabled" :aria-label="`${well.wellName} 来源批次`">
-              <option v-if="!well.records.length" :value="null">无已保存的单井结果</option>
-              <option v-for="r in well.records" :key="r.id" :value="r.id" :disabled="!(Number(r.dynamic_gas_volume) > 0)">{{ stamp(r.saved_at || r.created_at) }} · 储量 {{ format(r.dynamic_gas_volume) }}</option>
-            </select>
+          <div v-if="sources.length" class="well-list">
+            <div v-for="well in sources" :key="well.wellId" class="well-source">
+              <div class="check">
+                <ElCheckbox v-model="choices[well.wellId].enabled" :disabled="busy || !well.records.some(r => Number(r.dynamic_gas_volume) > 0)">
+                  <span class="well-name">{{ well.wellName }}</span>
+                </ElCheckbox>
+                <button type="button" class="well-expand" :aria-expanded="expandedWells.has(well.wellId)" :aria-label="`${well.wellName} 来源批次`" @click="toggleWellBatch(well.wellId)">{{ well.records.length }} 个批次 <span aria-hidden="true">{{ expandedWells.has(well.wellId) ? '⌃' : '⌄' }}</span></button>
+              </div>
+              <select v-if="expandedWells.has(well.wellId)" v-model="choices[well.wellId].recordId" :disabled="busy || !choices[well.wellId].enabled" :aria-label="`${well.wellName} 来源批次`">
+                <option v-if="!well.records.length" :value="null">无已保存的单井结果</option>
+                <option v-for="r in well.records" :key="r.id" :value="r.id" :disabled="!(Number(r.dynamic_gas_volume) > 0)">{{ stamp(r.saved_at || r.created_at) }} · 储量 {{ format(r.dynamic_gas_volume) }}</option>
+              </select>
+            </div>
           </div>
           <div v-if="!loading && !sources.length" class="muted">当前库没有可读取的单井数据。</div>
-          <label>生产水气比上限（-1 表示不限）<input v-model="limit" type="number" step="any" :disabled="busy" /></label>
+          <label class="ratio-field">生产水气比上限（-1 表示不限）<input v-model="limit" type="number" step="any" :disabled="busy" /></label>
           <div class="buttons"><button :disabled="busy || !selectedSources.length" @click="previewInput">预览加权输入</button><button class="primary" :disabled="busy || !preview || blocked" @click="calculate">开始计算</button></div>
           <div v-if="busy" class="muted" role="status">正在处理请求，请稍候…</div>
           <div v-if="blocked" class="muted">有任务正在计算或尚未确认结束，请先检查历史任务。</div>
@@ -254,7 +268,7 @@ reload()
       </aside>
       <main class="results">
         <div class="dynamic-result-tabs"><button type="button" class="dynamic-result-tab active"><span class="dynamic-result-tab-text">水侵分析-{{ libraryName }}-分析结果</span></button></div>
-        <div class="water-record-toolbar"><label>历史记录 <select v-model="selected" :disabled="busy"><option :value="null">请选择历史批次</option><option v-for="r in records" :key="r.id" :value="r.id">{{ stamp(r.createdAt) }} · {{ statusNames[r.taskStatus] || r.taskStatus }}</option></select></label><button v-if="record?.carrierBlocked && !running" :disabled="busy" @click="reconcile">检查计算状态</button><span v-if="record" class="water-task-message">{{ statusNames[record.taskStatus] }} · 承载井 {{ record.carrierWellName }}</span><span v-if="preview && isInputView" class="water-task-message">输入预览</span></div>
+        <div class="water-record-toolbar"><label>历史记录 <select v-model="selected" :disabled="busy"><option :value="null">请选择历史批次</option><option v-for="r in records" :key="r.id" :value="r.id">{{ stamp(r.createdAt) }} · {{ statusNames[r.taskStatus] || r.taskStatus }}</option></select></label><button v-if="record?.carrierBlocked && !running" :disabled="busy" @click="reconcile">检查计算状态</button><span v-if="preview && isInputView" class="water-task-message">输入预览</span></div>
         <div v-if="error || record?.errorMessage" class="error" role="alert">{{ error || record.errorMessage }}</div>
         <nav v-if="!isInputView" class="chart-tabs"><button v-for="(name, index) in names" :key="name" class="chart-tab" :disabled="!available(index)" :title="available(index) ? name : '暂无分析结果'" :class="{ active: category === index }" @click="category = index; view = view === 'table' && index < 4 ? 'table' : 'chart'">{{ name }}</button></nav>
         <div v-if="!isInputView && category < 2 && summary.length" class="summaries"><div v-for="([key, label]) in summary" :key="key"><span>{{ label }}</span><strong>{{ key.endsWith('Desc') ? section.output[key] : format(section.output[key]) }}</strong></div></div>
@@ -310,15 +324,27 @@ reload()
 .storage-water{display:flex;flex:1;flex-direction:column;min-width:0;min-height:0;height:100%;background:#fff;color:#303133;font:12px Arial,"Microsoft YaHei",sans-serif}
 .module-bar{height:34px;flex-shrink:0;background:#fafafa;border-bottom:1px solid #e4e7ed;display:flex;align-items:stretch}
 .module-bar>span{background:#f4d000;padding:0 12px;line-height:34px;font-weight:600}
-.workspace{display:flex;flex:1;min-height:0;overflow:hidden}.parameters{width:258px;min-width:220px;max-width:380px;resize:horizontal;overflow:hidden;display:flex;flex-direction:column;border-right:1px solid #ddd}
-.panel-head{height:34px;line-height:34px;padding:0 12px;border-bottom:1px solid #eee}.parameter-scroll{overflow:auto;flex:1;padding:12px}
+.workspace{display:flex;flex:1;min-height:0;overflow:hidden}.parameters{width:258px;min-width:220px;max-width:360px;flex:0 0 258px;overflow:hidden;display:flex;flex-direction:column;min-height:0;border-right:1px solid #dcdfe6}
+.params-head{height:34px;flex:0 0 34px;display:flex;align-items:center;justify-content:space-between;padding:0 12px;border-bottom:1px solid #ebeef5;font-weight:600}.params-head button{border:0;background:none;color:#8a7000;cursor:pointer;font-size:12px;padding:0}.params-head button:disabled{background:none;color:#b4b8c0}
+.params-body{flex:1;min-height:0;overflow:auto;padding:12px}
 label{display:block;margin-bottom:12px;line-height:1.7}input:not([type=checkbox]),select{display:block;box-sizing:border-box;width:100%;min-width:0;height:26px;padding:2px 6px;border:1px solid #d9dfeb;border-radius:2px;background:#fff;color:#465366;font:12px Arial,"Microsoft YaHei",sans-serif}input[readonly]{background:#fafbfc}
-.check{display:flex;align-items:center;gap:5px;margin-bottom:4px}.check input{margin:0;accent-color:#505050}.well-source{padding:8px 0;border-bottom:1px solid #eee;margin-bottom:6px}.well-source select{font-size:11px}
-.field-title{margin:14px 0 8px;display:flex;justify-content:space-between;align-items:center;font-weight:600}
+.storage-field{display:flex;flex-direction:column;gap:6px;margin-bottom:14px;color:#606266;font-size:13px}.section-heading{display:flex;align-items:center;justify-content:space-between;margin:14px 0 8px;padding-bottom:8px;border-bottom:1px solid #ebeef5;color:#303133;font-weight:600}.section-heading span{color:#909399;font-size:12px;font-weight:400}
+.well-list{max-height:52vh;overflow:auto;border:1px solid #ebeef5;border-radius:3px}
+.well-source{padding:3px 9px;border-bottom:1px solid #ebeef5;background:#fff}
+.well-source:last-child{border-bottom:0}
+.check{display:flex;align-items:center;gap:7px;min-width:0;min-height:29px}
+.check :deep(.el-checkbox){display:inline-flex;flex:1;min-width:0;margin:0}.check :deep(.el-checkbox__label){min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+.well-list :deep(.el-checkbox__input.is-checked:not(.is-disabled) .el-checkbox__inner){background:#f4d000;border-color:#d6b500}
+.well-list :deep(.el-checkbox__input.is-checked:not(.is-disabled) .el-checkbox__inner::after){border-color:#222}
+.well-list :deep(.el-checkbox__input:not(.is-disabled) .el-checkbox__inner:hover){border-color:#b79b00}
+.well-name{color:#303133}.well-expand{flex-shrink:0;display:inline-flex;align-items:center;gap:5px;border:0;background:transparent;color:#909399;font-size:11px;padding:3px 0}.well-expand span{font-size:13px}.well-expand:hover:not(:disabled){border:0;color:#8a7000}
+.check :deep(.el-checkbox.is-disabled .well-name){color:#b4b8c0}
+.well-source select{font-size:11px;margin:3px 0 5px}
+.ratio-field{color:#606266}
 button{font:12px Arial,"Microsoft YaHei",sans-serif;background:#fff;color:#465366;border:1px solid #d9dfeb;border-radius:2px;padding:4px 9px;cursor:pointer}button:hover:not(:disabled){border-color:#b79b00}button:disabled{cursor:not-allowed;color:#b4b8c0;background:#fafafa}.primary{background:#f4d000;border-color:#e0be00;color:#222}.buttons{display:flex;gap:8px;margin:14px 0}
 .results{display:flex;flex:1;min-width:0;min-height:0;flex-direction:column;overflow:hidden;position:relative;--el-color-primary:#303133;--el-color-primary-light-3:#5d5e60;--el-color-primary-light-5:#858689;--el-color-primary-light-7:#b4b5b7;--el-color-primary-light-8:#d2d3d4;--el-color-primary-light-9:#eeeeef;--el-color-primary-dark-2:#111}
 .muted{color:#909399;line-height:1.7}.error{padding:6px 12px;color:#a43b32;font-size:12px}
-/* 与单井水侵结果区一致；仅作用于本页面，不修改公共样式或左侧参数栏。 */
+/* 与单井水侵结果区一致；仅作用于本页面，不修改公共样式。 */
 .dynamic-result-tabs{height:34px;flex-shrink:0;display:flex;align-items:center;border-bottom:1px solid #e4e7ed;background:#fafafa;overflow-x:auto;overflow-y:hidden}
 .dynamic-result-tab{height:34px;max-width:340px;border:0;border-right:1px solid #e4e7ed;border-bottom:2px solid transparent;border-radius:0;background:transparent;color:#409eff;font-size:14px;font-weight:600;display:flex;align-items:center;padding:0 12px;cursor:default;white-space:nowrap}
 .dynamic-result-tab.active{border-bottom-color:transparent;background:#f4d000;color:#202020}.dynamic-result-tab-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -338,5 +364,5 @@ button{font:12px Arial,"Microsoft YaHei",sans-serif;background:#fff;color:#46536
 .floating-chart-legend{position:absolute;z-index:5;display:flex;flex-direction:column;gap:5px;max-width:280px;padding:7px 10px;border:1px solid #eee;background:rgba(255,255,255,.9);color:#333;font-size:12px;line-height:1.2;cursor:move;user-select:none;box-shadow:0 1px 2px rgba(0,0,0,.04)}.floating-chart-legend.dragging{box-shadow:0 4px 12px rgba(0,0,0,.14)}
 .floating-legend-item{display:flex;align-items:center;gap:5px;white-space:nowrap;cursor:pointer;border:0;padding:0;background:transparent;line-height:1.2;color:#333}.floating-legend-item.hidden{color:#999;opacity:.55}.legend-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;border:1px solid transparent}
 .water-activity-panel{flex:1;min-height:0;overflow:auto;padding:14px 18px;background:#fff}.activity-form{display:grid;grid-template-columns:repeat(2,minmax(260px,1fr));column-gap:22px;row-gap:8px;margin-bottom:24px}.activity-field label{display:block;font-size:13px;color:#333;margin-bottom:4px}.activity-table-title{text-align:center;font-size:14px;color:#333;margin-bottom:8px}.activity-table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:13px;color:#333}.activity-table th,.activity-table td{border:1px solid #333;height:44px;text-align:center;font-weight:400}
-@media(max-width:1000px){.activity-form{grid-template-columns:minmax(0,1fr)}.water-record-toolbar select{max-width:40vw}}
+@media(max-width:1000px){.parameters{width:220px;flex-basis:220px}.activity-form{grid-template-columns:minmax(0,1fr)}.water-record-toolbar select{max-width:40vw}}
 </style>
