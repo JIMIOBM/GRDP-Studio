@@ -12,4 +12,4 @@ export const resolveWorkspaceContextId = (...candidates) => {
 
 // 本地数据库范围通过未入库的 .env.development.local 配置，不改共享默认编号。
 export const WORKSPACE_PROJECT_ID = resolveWorkspaceContextId(import.meta.env?.VITE_WORKSPACE_PROJECT_ID, 6)
-export const WORKSPACE_GAS_RESERVOIR_ID = resolveWorkspaceContextId(import.meta.env?.VITE_WORKSPACE_GAS_RESERVOIR_ID, 1)
+export const WORKSPACE_GAS_RESERVOIR_ID = resolveWorkspaceContextId(import.meta.env?.VITE_WORKSPACE_GAS_RESERVOIR_ID, 4  )

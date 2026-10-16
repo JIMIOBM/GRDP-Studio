@@ -83,7 +83,7 @@ public final class PipelineErosion {
         issues.add(ErosionCalculator.VELOCITY_REASON);issues.add("采用井筒现行 P110 研究公式；以单相气体沿程状态作冲蚀参考比较，不代替多相水力计算或其他材质的试验验证");
         return new Result(edge.id(),edge.name(),point.distanceM()-points.getFirst().distanceM(),point.location(),point.pressureMpa(),
                 point.temperatureC(),diameterMm,rate10k,point.densityKgM3(),worst.liquidDensity(),solid,hl,hs,worst.mixtureDensity(),
-                k,f,c,point.velocityMs(),worst.critical(),worst.ratio(),status,applicable,false,String.join("；",issues),
+                k,f,c,point.velocityMs(),worst.critical(),worst.ratio(),status,applicable,true,String.join("；",issues),
                 points.size(),evaluated,ErosionCalculator.VERSION);
     }
     private static Result unavailable(Edge edge,List<Point> points,double diameter,double rate,SegmentInput input,

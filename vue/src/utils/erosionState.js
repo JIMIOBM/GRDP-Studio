@@ -23,7 +23,7 @@ export function validateErosionInput(form, requireProperties = true) {
   if (Number(form.actualGasRate1e4M3d) < 0) return '日产气量不能小于0'
   if (Number(form.liquidHoldupPercent) < 0) return '持液率不能小于0'
   if (Number(form.temperatureC) <= -273.15) return '温度必须高于绝对零度'
-  if (Number(form.liquidHoldupPercent) + Number(form.sandContentPercent) >= 100) return '持液率与含砂率之和必须小于100%'
+  if (Number(form.liquidHoldupPercent) + Number(form.sandContentPercent) >= 1) return '持液率与含砂率的百分数数值之和必须小于1'
   return ''
 }
 export function erosionRangeHint(form) {

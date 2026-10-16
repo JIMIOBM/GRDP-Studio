@@ -91,3 +91,8 @@ docs/
 !/vue/tests/e2e/pipeline-erosion.spec.js
 !/vue/tests/fixtures/pipeline-erosion.html
 !/vue/tests/fixtures/pipeline-erosion.js
+
+# 约束条件PVT核验与保存回归
+!/vue/tests/constraints.playwright.config.js
+!/vue/tests/e2e/constraints.spec.js
+!/vue/tests/fixtures/constraints.html

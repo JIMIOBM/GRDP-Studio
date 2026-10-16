@@ -27,12 +27,12 @@ class PipelineErosionTests {
         assertEquals(20,result.actualVelocityMs());assertEquals(200,result.gasDensityKgM3());
         assertEquals(result.actualVelocityMs()/result.criticalVelocityMs(),result.velocityRatio(),1e-12);
         assertEquals(2,result.evaluatedPoints());assertTrue(result.applicable());
-        assertFalse(result.velocityDefinitionVerified());assertTrue(result.status().startsWith("reference_"));
-        assertTrue(result.reason().contains("完整定义尚未核实"));
+        assertTrue(result.velocityDefinitionVerified());assertTrue(result.status().startsWith("reference_"));
+        assertTrue(result.reason().contains("论文式(11)"));
     }
-    @Test void formulaUsesPercentNumeralWhileDensityUsesItsHundredthAndMatchesWellboreKernel() {
+    @Test void formulaAndDensityUsePaperPercentageNumeralsAndMatchWellboreKernel() {
         var result=screen(edge(),"one",List.of(point(0,20,50)),100,8,configuration(),(p,t)->1000.0);
-        assertEquals((1-.005/100-.01/100)*50+.005/100*1000+.01/100*2650,result.mixtureDensityKgM3(),1e-12);
+        assertEquals((1-.005-.01)*50+.005*1000+.01*2650,result.mixtureDensityKgM3(),1e-12);
         assertEquals(-13.5*Math.log(.01)+7.2138,result.sandFactor(),1e-12);
         var kernel=new ErosionCalculator();
         assertEquals(kernel.calculateCriticalVelocity(kernel.calculateCriticalCoefficient(kernel.calculateLiquidHoldupFactor(.005),
