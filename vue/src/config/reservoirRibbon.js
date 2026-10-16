@@ -57,6 +57,14 @@ export const reservoirRibbonGroups = [
 const itemLabel = item => typeof item === 'string' ? item : item.label
 const itemDisabled = item => typeof item === 'object' && item.disabled === true
 
+// 协同预测-一体化耦合优化的单目标/多目标：既是功能入口（点击打开页面），
+// 也是预测记录的父目录（展开后由 couplingOptimizationTree.js 懒加载子记录）。
+export const COUPLING_METHOD_NODE_TYPE = 'coupling-optimization-method'
+export const COUPLING_RECORD_NODE_TYPE = 'coupling-optimization-record'
+// 目录里固定在记录列表顶部的动作节点：点击即按平台顺延名称新建一条预测。
+export const COUPLING_NEW_NODE_TYPE = 'coupling-optimization-new'
+export const COUPLING_MODES = ['单目标', '多目标']
+
 const makeCommand = (group, name, parent = '') => ({
   group,
   name,
@@ -101,15 +109,20 @@ export function buildReservoirTreeNodes({ id, label, projectId, gasReservoirId, 
     const isGeologicalLossMethod = group === '损耗评价'
       && ((parent === '地质损耗' && ['微观损耗', '逸散性损耗'].includes(name))
         || (!parent && ['井筒损耗', '地面损耗'].includes(name)))
+    const isCouplingMethod = group === '协同预测' && parent === '一体化耦合优化'
+      && COUPLING_MODES.includes(name)
     return {
       ...metadata,
       id: nodeId(descriptor.path),
       label: name,
-      type: isGeologicalLossMethod ? 'reservoir-geological-loss-method' : 'reservoir-command',
-      lazy: isGeologicalLossMethod,
+      type: isGeologicalLossMethod ? 'reservoir-geological-loss-method'
+        : isCouplingMethod ? COUPLING_METHOD_NODE_TYPE
+          : 'reservoir-command',
+      lazy: isGeologicalLossMethod || isCouplingMethod,
       lossType: name === '微观损耗' ? 'microscopic'
         : name === '逸散性损耗' ? 'escape'
           : name === '井筒损耗' ? 'wellbore' : name === '地面损耗' ? 'surface' : undefined,
+      couplingMode: isCouplingMethod ? name : undefined,
       disabled,
       command: disabled ? null : resolveReservoirCommand(descriptor),
       children: []

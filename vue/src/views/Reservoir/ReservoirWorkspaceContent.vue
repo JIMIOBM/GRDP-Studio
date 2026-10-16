@@ -21,6 +21,7 @@ import PressureTestMethod from './InventoryEvaluation/PressureTestMethod.vue'
 import WaterInvasion from './InventoryEvaluation/WaterInvasion.vue'
 import MainFactorAnalysis from './InventoryEvaluation/MainFactorAnalysis.vue'
 import InterwellComparison from './WellboreConversion/InterwellComparison.vue'
+import CouplingOptimization from './CouplingOptimization/CouplingOptimization.vue'
 import GasReservoirDiagnosticCurveContent from './GasReservoirDiagnosticCurveContent.vue'
 import StorageNetworkTopology from './SurfaceNetwork/StorageNetworkTopology.vue'
 import StorageNetworkCorrelation from './SurfaceNetwork/StorageNetworkCorrelation.vue'
@@ -29,9 +30,11 @@ const lossPages = { '微观损耗': MicroscopicLoss, '逸散性损耗': EscapeLo
 const comparisonPages = { '多周期': MultiPeriodComparison, '多方法': MultiMethodComparison, '注采对比': InjectionProductionComparison }
 
 // reservoir 是当前储气库节点（包含项目范围和 storageId）；command 是菜单功能及其层级路径。
+// predictionId：从「一体化耦合优化-单目标/多目标」目录下的预测记录打开时携带的任务编号。
 const props = defineProps({
   reservoir: { type: Object, default: null },
-  command: { type: Object, default: null }
+  command: { type: Object, default: null },
+  predictionId: { type: [Number, String], default: null }
 })
 
 const reservoirLabel = computed(() => props.reservoir?.label || '未选择库')
@@ -81,6 +84,12 @@ const isStorageNetworkTopology = computed(() =>
 )
 const isStorageNetworkCorrelation = computed(() =>
   props.command?.group === '地面管网' && props.command?.name === '相关性分析'
+)
+// 协同预测：一体化耦合优化的单目标/多目标共用同一页面，仅参数面板与优化目标不同。
+const isCouplingOptimization = computed(() =>
+  props.command?.group === '协同预测'
+  && props.command?.parent === '一体化耦合优化'
+  && ['单目标', '多目标'].includes(props.command?.name)
 )
 const lossComponent = computed(() => props.command?.name ? lossPages[props.command.name] : null)
 const lossKey = computed(() => `${props.reservoir?.projectId}-${props.reservoir?.gasReservoirId}-${props.reservoir?.storageId}-${props.command?.name}`)
@@ -145,6 +154,18 @@ const lossKey = computed(() => `${props.reservoir?.projectId}-${props.reservoir?
   <CapacityDesign v-else-if="isCapacityDesign"
     :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}`"
     :reservoir="reservoir" :command="command" />
+  <!-- 协同预测-一体化耦合优化：单目标/多目标各有独立的任务与预测记录集合，
+       切换模式或从记录打开时重建组件，按目标模式重新准备。 -->
+  <section v-else-if="isCouplingOptimization" class="storage-comparison-page" :aria-label="`库协同预测-一体化耦合优化-${command.name}`">
+    <div class="comparison-module-tabs">
+      <div class="comparison-module-tab"><span>一体化耦合优化-{{ command.name }}</span></div>
+    </div>
+    <CouplingOptimization
+      :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-coupling-optimization-${command.name}-${predictionId ?? ''}`"
+      :project-id="reservoir?.projectId" :gas-reservoir-id="reservoir?.gasReservoirId"
+      :storage-id="reservoir?.storageId" :storage-name="reservoirLabel"
+      :mode="command.name" :prediction-id="predictionId" />
+  </section>
   <StorageNetworkTopology v-else-if="isStorageNetworkTopology"
     :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-surface-network-topology`"
     :reservoir="reservoir" />

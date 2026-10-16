@@ -129,13 +129,23 @@ import {
   selectWorkspaceNodeScope,
   getReservoirCommandLocation,
   resolveReservoirLocation,
-  activateReservoirCommand
+  activateReservoirCommand,
+  requestNewCouplingPrediction
 } from '@/utils/workspaceTreeState'
 import {
   RESERVOIR_LOSS_METHOD_NODE_TYPE,
   RESERVOIR_LOSS_RECORD_NODE_TYPE,
   loadReservoirLossTreeNodes
 } from '@/utils/reservoirGeologicalLossTree'
+import {
+  COUPLING_METHOD_NODE_TYPE,
+  COUPLING_NEW_NODE_TYPE,
+  COUPLING_RECORD_NODE_TYPE,
+  loadCouplingOptimizationTreeNodes,
+  removeCouplingRecordNode
+} from '@/utils/couplingOptimizationTree'
+import { wellGroupPredictionApi } from '@/api/wellGroupPrediction'
+import { predictionResultApi } from '@/api/predictionResult'
 
 // 当前工作台所使用的项目和气藏。
 const route = useRoute()
@@ -772,6 +782,34 @@ const displayedActiveNodeId = computed(
   () => isSoftwareIntegration.value ? softwareIntegrationActiveNodeId.value : activeNodeId.value
 )
 
+// 刷新或直达带 predictionId 的库地址时，记录目录可能尚未懒加载；
+// 先加载对应模式目录再定位高亮，保证选中的预测记录在目录中可见。
+const ensureCouplingRecordLoaded = async target => {
+  if (!target?.predictionId || target.command?.parent !== '一体化耦合优化') return
+  const findMethod = nodes => {
+    for (const node of nodes || []) {
+      if (node.type === COUPLING_METHOD_NODE_TYPE && node.couplingMode === target.command.name
+          && Number(node.projectId) === Number(target.reservoir?.projectId)
+          && Number(node.gasReservoirId) === Number(target.reservoir?.gasReservoirId)
+          && Number(node.storageId) === Number(target.reservoir?.storageId)) {
+        return node
+      }
+      const found = findMethod(node.children)
+      if (found) return found
+    }
+    return null
+  }
+  const method = findMethod(treeData.value)
+  if (!method || method.loaded) return
+  try {
+    await loadCouplingOptimizationTreeNodes({ treeData, node: method })
+  } catch (error) {
+    console.warn('一体化耦合优化预测记录加载失败', error)
+    return
+  }
+  activateReservoirCommand(target)
+}
+
 // 库功能用可刷新/可回退的完整地址定位；目录选择本身不改变右侧页面。
 watch([() => route.query, treeData], ([query]) => {
   const target = resolveReservoirLocation(query)
@@ -785,6 +823,7 @@ watch([() => route.query, treeData], ([query]) => {
   activateReservoirCommand(target)
   currentView.value = 'reservoir-feature'
   currentViewNode.value = target
+  void ensureCouplingRecordLoaded(target)
 }, { immediate: true })
 
 watch(currentView, view => {
@@ -1092,7 +1131,18 @@ const getVentLossApi = node => node.lossType === 'surface' ? surfaceLossApi : we
 const getVentLossLabel = node => node?.lossType === 'surface' ? '地面损耗' : '井筒损耗'
 const isTheoreticalRecord = node => [THEORETICAL_STABLE_RECORD_NODE_TYPE, THEORETICAL_UNSTABLE_RECORD_NODE_TYPE].includes(node?.type)
 const isDiagnosticRecord = item => item?.type === DIAGNOSTIC_CURVE_RECORD_TYPE
-const isTreeContextMenuNode = (item) => item?.type === NODAL_RECORD 
+// 右键菜单支持的节点类型：与 handleDeleteContextNode / treeContextMenuLabel 的类型分支保持同步。
+// 注意（历史回归）：新增类型时曾把本判定改写为"仅最新类型"，导致此前类型的右键删除不可达；
+// 之后新增类型必须在这里"追加"而不是替换。未列入的类型由删除流程的兜底提示处理。
+const isTreeContextMenuNode = (item) =>
+  item?.type === NODAL_RECORD ||
+  isProductivityTestRecord(item) ||
+  isPvtRecord(item) ||
+  isLossRecord(item) ||
+  isTheoreticalRecord(item) ||
+  isDiagnosticRecord(item) ||
+  isTypicalCurveResultNode(item) ||
+  item?.type === COUPLING_RECORD_NODE_TYPE
 
 const treeContextMenuLabel = computed(() => {
   if (treeContextMenu.value.node?.type === NODAL_RECORD) return '删除节点分析方案'
@@ -1101,6 +1151,7 @@ const treeContextMenuLabel = computed(() => {
   if (isPvtRecord(treeContextMenu.value.node)) return '删除PVT记录'
   if (isLossRecord(treeContextMenu.value.node)) return `删除${lossRecordLabel(treeContextMenu.value.node)}记录`
   if (isTheoreticalRecord(treeContextMenu.value.node)) return '删除记录'
+  if (treeContextMenu.value.node?.type === COUPLING_RECORD_NODE_TYPE) return '删除预测记录'
   const resultName = getTypicalCurveResultName(treeContextMenu.value.node) || getInventoryResultName(treeContextMenu.value.node)
   if (resultName) return `删除${resultName}结果`
   return '删除水侵动态分析结果'
@@ -4701,6 +4752,41 @@ const handleRenameVentLoss = async () => {
   }
 }
 
+// 删除预测记录：先删原平台任务（主数据，连带其输入与结果），再清理本项目留存并摘除目录节点。
+// 平台任务已不存在（404）时按已删除处理，继续清理本地，避免历史不一致卡住删除。
+const deleteCouplingPredictionRecord = async node => {
+  try {
+    await wellGroupPredictionApi.removeTask({
+      projectId: node.projectId,
+      gasReservoirId: node.gasReservoirId,
+      predictionId: node.predictionId
+    })
+  } catch (error) {
+    if (Number(error?.response?.status) !== 404) throw error
+  }
+  await predictionResultApi.remove(node.projectId, node.gasReservoirId, node.predictionId, node.storageId)
+  const parentId = removeCouplingRecordNode({
+    treeData,
+    projectId: node.projectId,
+    gasReservoirId: node.gasReservoirId,
+    storageId: node.storageId,
+    mode: node.couplingMode,
+    predictionId: node.predictionId
+  })
+  if (String(activeNodeId.value) === String(node.id)) {
+    activeNodeId.value = parentId || ''
+    activeNode.value = null
+  }
+  // 当前正在查看这条记录：去掉地址中的 predictionId，页面按"无该记录"重新准备。
+  if (Number(route.query.predictionId) === Number(node.predictionId)
+      && Number(route.query.projectId) === Number(node.projectId)
+      && Number(route.query.gasReservoirId) === Number(node.gasReservoirId)) {
+    const query = { ...route.query }
+    delete query.predictionId
+    await router.replace({ query })
+  }
+}
+
 const handleDeleteContextNode = async () => {
   const node = treeContextMenu.value.node
   const deleteLabel = treeContextMenuLabel.value
@@ -4778,6 +4864,21 @@ const handleDeleteContextNode = async () => {
       ElMessage.success(`${lossRecordLabel(node)}记录已删除`)
     } catch (error) {
       if (error !== 'cancel' && error !== 'close') ElMessage.error(error.response?.data?.msg || error.message || '删除损耗记录失败')
+    }
+    return
+  }
+
+  if (node.type === COUPLING_RECORD_NODE_TYPE) {
+    try {
+      await ElMessageBox.confirm(
+        `删除“${node.label}”？将同时删除平台上的该预测任务及其结果，并移除本项目的留存记录；此操作不可撤销。`,
+        '删除预测记录', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
+      await deleteCouplingPredictionRecord(node)
+      ElMessage.success(`预测记录「${node.label}」已删除`)
+    } catch (error) {
+      if (error !== 'cancel' && error !== 'close') {
+        ElMessage.error(error?.response?.data?.msg || error?.response?.data?.message || error?.message || '删除预测记录失败')
+      }
     }
     return
   }
@@ -4993,10 +5094,33 @@ const handleSelect = async (node) => { // 点击左侧树节点
     ].includes(node.type)
     if (isReservoirLossTreeNode && node.type !== RESERVOIR_LOSS_RECORD_NODE_TYPE) return
 
+    // 一体化耦合优化：「新建预测」动作节点——请求当前（或即将打开的）库页面按平台顺延名称新建。
+    if (node.type === COUPLING_NEW_NODE_TYPE) {
+      requestNewCouplingPrediction({
+        mode: node.couplingMode,
+        projectId: node.projectId,
+        gasReservoirId: node.gasReservoirId,
+        storageId: node.storageId
+      })
+      // 已经在该模式的库页面上时不重复导航，让页面组件原地消费请求。
+      const sameLocation = route.query.scope === 'reservoir'
+        && route.query.feature === node.command?.name
+        && Number(route.query.projectId) === Number(node.projectId)
+        && Number(route.query.gasReservoirId) === Number(node.gasReservoirId)
+        && Number(route.query.storageId) === Number(node.storageId)
+      const location = node.command ? getReservoirCommandLocation(node.command) : null
+      if (location && !sameLocation) await router.push(location)
+      return
+    }
+
     if (node.command) {
       const location = getReservoirCommandLocation(node.command)
       if (location && node.type === RESERVOIR_LOSS_RECORD_NODE_TYPE) {
         location.query.lossRecordId = node.lossRecordId
+      }
+      // 一体化耦合优化：从预测记录子节点打开时携带任务编号，页面直接载入该记录。
+      if (location && node.type === COUPLING_RECORD_NODE_TYPE) {
+        location.query.predictionId = node.predictionId
       }
       if (location) await router.push(location)
     }
@@ -5613,6 +5737,11 @@ const handleNodeExpand = async node => {
     await loadReservoirLossTreeNodes({ treeData, node })
     return
   }
+  // 一体化耦合优化的单目标/多目标目录：展开时加载该模式下的预测记录。
+  if (node?.type === COUPLING_METHOD_NODE_TYPE) {
+    await loadCouplingOptimizationTreeNodes({ treeData, node })
+    return
+  }
   const wellName = node?.wellName
   if (!wellName) return
 
@@ -5840,7 +5969,7 @@ onBeforeUnmount(() => {
           'pvt-yellow-theme': isPvtView
         }">
           <ReservoirWorkspaceContent v-if="currentView === 'reservoir-feature'" :reservoir="currentViewNode.reservoir"
-            :command="currentViewNode.command" />
+            :command="currentViewNode.command" :prediction-id="currentViewNode.predictionId" />
           <PipelineCapacityContent v-if="currentView === 'pipeline-capacity'"
             :key="`pipeline-${currentViewNode?.wellName || 'project'}`" :well-name="currentViewNode?.wellName || ''"
             :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID"

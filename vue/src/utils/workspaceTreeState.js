@@ -1,6 +1,11 @@
 import { ref } from 'vue'
 import { storageCatalogApi } from '../api/storageCatalog.js'
-import { buildReservoirTreeNodes, resolveReservoirCommand } from '../config/reservoirRibbon.js'
+import {
+  COUPLING_METHOD_NODE_TYPE,
+  COUPLING_RECORD_NODE_TYPE,
+  buildReservoirTreeNodes,
+  resolveReservoirCommand
+} from '../config/reservoirRibbon.js'
 
 // 两个解析融合工作台共用的目录数据与选择状态。
 // 路由切换不会销毁这些 ref，因此单井产能页面可以延续主工作台的完整目录。
@@ -37,6 +42,17 @@ export const workspaceTreeCollapsed = ref(false)
 export const workspacePendingCommand = ref(null)
 // 单井产能通过公共左侧目录跳回 IPR 时，携带本次点击的具体树节点。
 export const workspacePendingNode = ref(null)
+// 一体化耦合优化：「新建预测」动作节点的一次性意图，由对应库页面组件消费后清除。
+export const pendingCouplingNewPrediction = ref(null)
+export function requestNewCouplingPrediction(scope) {
+  pendingCouplingNewPrediction.value = {
+    mode: scope.mode,
+    projectId: scope.projectId,
+    gasReservoirId: scope.gasReservoirId,
+    storageId: scope.storageId,
+    tick: Date.now()
+  }
+}
 // 理论稳定流计算完成后保存压力、压力平方和拟压力结果，供独立单井产能页面切换绘图。
 export const workspaceTheoreticalStableResult = ref(null)
 // 仅真实的 IPR 项目树加载完成后置为 true；单井产能的临时井列表不算初始化完成。
@@ -141,16 +157,20 @@ export function resolveReservoirLocation(query) {
   const reservoir = workspaceTreeData.value.find(item => item.id === 'g-reservoir')?.children.find(item =>
     Number(item.projectId) === Number(query.projectId) && Number(item.gasReservoirId) === Number(query.gasReservoirId)
     && Number(item.storageId) === Number(query.storageId))
-  return command && reservoir ? { command, reservoir, lossRecordId: query.lossRecordId ?? null } : null
+  return command && reservoir
+    ? { command, reservoir, lossRecordId: query.lossRecordId ?? null, predictionId: query.predictionId ?? null }
+    : null
 }
 
-export function activateReservoirCommand({ command, reservoir, lossRecordId = null }) {
+export function activateReservoirCommand({ command, reservoir, lossRecordId = null, predictionId = null }) {
   workspaceSelectedReservoir.value = reservoir
   setWorkspaceRibbonScope('reservoir')
   const hasRecord = lossRecordId !== null && lossRecordId !== ''
+  const hasPrediction = predictionId !== null && predictionId !== ''
   const reveal = node => {
     if (node.command?.path.join('/') === command.path.join('/')
-        && node.type !== 'reservoir-geological-loss-record') {
+        && node.type !== 'reservoir-geological-loss-record'
+        && node.type !== COUPLING_RECORD_NODE_TYPE) {
       // 方法目录和记录共用功能路径；编辑已有记录时必须再按记录ID定位，
       // 否则路由同步会把刚点击的记录高亮覆盖成父目录。
       if (hasRecord && node.type === 'reservoir-geological-loss-method') {
@@ -161,6 +181,15 @@ export function activateReservoirCommand({ command, reservoir, lossRecordId = nu
         // 刷新后明细可能尚未懒加载。只预置稳定的选中ID，不伪造节点或额外调用接口；
         // 目录加载后新节点会自然匹配高亮，且不会抢走用户后续点击的其他节点。
         workspaceActiveNodeId.value = record?.id ?? `${node.id}/record:${lossRecordId}`
+        return true
+      }
+      if (hasPrediction && node.type === COUPLING_METHOD_NODE_TYPE) {
+        // 一体化耦合优化：按任务编号定位预测记录子节点（记录加载由 IprInterface 负责）。
+        node.expanded = true
+        const record = node.children?.find(child =>
+          child.type === COUPLING_RECORD_NODE_TYPE
+          && String(child.predictionId) === String(predictionId))
+        workspaceActiveNodeId.value = record?.id ?? `${node.id}/record:${predictionId}`
         return true
       }
       workspaceActiveNodeId.value = node.id

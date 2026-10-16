@@ -64,16 +64,20 @@ docs/
 !/backend/src/test/java/com/grdp/studio/storagemainfactor/
 !/backend/src/test/java/com/grdp/studio/waterinvasion/
 !/vue/tests/storageMaterialBalance.test.js
+!/vue/tests/wellGroupPrediction.test.js
+!/vue/tests/couplingOptimizationRecords.test.js
 !/backend/sql/wellbore_erosion_sanding.sql
 !/backend/src/test/java/com/grdp/studio/wellbore/
 /backend/src/test/java/com/grdp/studio/wellbore/*
 !/backend/src/test/java/com/grdp/studio/wellbore/calculation/
 !/backend/sql/wellbore_erosion.sql
+!/backend/sql/prediction_result.sql
 !/backend/src/test/java/com/grdp/studio/wellbore/pressure/
 !/backend/src/test/java/com/grdp/studio/wellbore/sand/
 !/vue/tests/e2e/
 /vue/tests/e2e/*
 !/vue/tests/e2e/pressure-injection.spec.js
+!/vue/tests/e2e/coupling-optimization.spec.js
 !/vue/tests/fixtures/
 /vue/tests/fixtures/*
 !/vue/tests/fixtures/pressure.html
@@ -96,3 +100,6 @@ docs/
 !/vue/tests/constraints.playwright.config.js
 !/vue/tests/e2e/constraints.spec.js
 !/vue/tests/fixtures/constraints.html
+
+# Playwright 运行残留
+test-results/
