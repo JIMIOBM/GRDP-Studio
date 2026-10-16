@@ -4,6 +4,7 @@ import { ElMessage } from 'element-plus'
 import * as echarts from 'echarts'
 import {
   cloneJson,
+  constraintRecordApi,
   createCalcRequest,
   createWellPredictionTask,
   dynamicPredictionApi,
@@ -44,6 +45,37 @@ const edited = reactive({ targetProduction: false, exportPressure: false })
 const selectedConstraintId = ref('')
 const userChoseConstraint = ref(false)
 const cachedConstraints = ref(null)
+const constraintRecords = ref([])
+let constraintRecordsVersion = 0
+async function loadConstraintRecords() {
+  const version = ++constraintRecordsVersion
+  const query = {
+    projectId: String(props.projectId),
+    gasReservoirId: String(props.gasReservoirId),
+    wellName: props.wellName
+  }
+  try {
+    const response = await constraintRecordApi.list(
+      query.projectId, query.gasReservoirId, query.wellName)
+    if (destroyed || version !== constraintRecordsVersion ||
+        String(props.projectId) !== query.projectId ||
+        String(props.gasReservoirId) !== query.gasReservoirId ||
+        props.wellName !== query.wellName) return
+    const all = Array.isArray(response?.data) ? response.data : []
+    constraintRecords.value = all.filter(record =>
+      String(record.projectId) === query.projectId &&
+      String(record.gasReservoirId) === query.gasReservoirId &&
+      record.wellName === query.wellName)
+  } catch (error) {
+    if (destroyed || version !== constraintRecordsVersion) return
+    console.warn('[方案生成] 加载约束记录失败', error)
+    constraintRecords.value = []
+  }
+}
+function onConstraintRecordsUpdated(event) {
+  if (event?.detail?.scopeKey && event.detail.scopeKey !== currentKey.value) return
+  void loadConstraintRecords()
+}
 const chartRef = ref(null)
 const result = ref(null)
 const busy = ref(false)
@@ -64,8 +96,30 @@ const snapshot = computed(() => {
   if (sameScope(props.constraintsResult, currentScope.value)) return props.constraintsResult
   return sameScope(cachedConstraints.value, currentScope.value) ? cachedConstraints.value : null
 })
+const dbConstraintOptions = computed(() => constraintRecords.value.map(r => {
+  const parse = (v) => {
+    if (v && typeof v === 'string') { try { return JSON.parse(v) } catch (e) { return v } }
+    return v
+  }
+  return {
+    constraintId: r.id, id: r.id, name: r.recordName,
+    projectId: r.projectId, gasReservoirId: r.gasReservoirId, wellName: r.wellName,
+    inputs: parse(r.inputsJson),
+    snapshot: {
+      projectId: r.projectId, gasReservoirId: r.gasReservoirId, wellName: r.wellName,
+      inputs: parse(r.inputsJson),
+      selectedConstraints: parse(r.selectedConstraintsJson),
+      constraintResults: parse(r.constraintResultsJson),
+      boundaryConditions: parse(r.boundaryConditionsJson),
+      calculationMeta: parse(r.calculationMetaJson),
+      lowerBound: r.lowerBound, upperBound: r.upperBound,
+      complete: r.complete, feasible: r.feasible, usableForPlan: r.usableForPlan
+    }
+  }
+}))
 const constraints = computed(() => listWellConstraintOptions(
-  currentScope.value, snapshot.value, props.constraintOptions
+  currentScope.value, snapshot.value,
+  [...(props.constraintOptions || []), ...dbConstraintOptions.value]
 ))
 const selectedRecord = computed(() =>
   constraints.value.find(option => option.id === selectedConstraintId.value) || null
@@ -121,7 +175,15 @@ const selectedBoundarySource = computed(() => {
 const activeBoundaries = computed(() => {
   if (!selectedRecord.value) return null
   const { record, body } = selectedBoundarySource.value || {}
+  const flags = record?.selectedConstraints ||
+    selectedRecord.value?.snapshot?.selectedConstraints ||
+    selectedRecord.value?.selectedConstraints || {}
   const read = key => {
+    // 保存在数据库中的实际生效标志优先于历史计算结果。
+    // 即使冲蚀算出了一个数，但本次未启用，也不得带入方案上限。
+    if (Object.prototype.hasOwnProperty.call(flags, key) && flags[key] === false) {
+      return null
+    }
     const item = body?.[key] ?? record?.boundaryConditions?.[key] ??
       record?.constraintResults?.[key] ??
       (key === 'wellheadExportPressure'
@@ -148,7 +210,7 @@ const activeBoundaries = computed(() => {
   // 上限：冲蚀和出砂都有的情况下取更严格值；冲蚀缺失时回退到仅用出砂
   const upper = hasErosion && sand !== null ? Math.min(erosion, sand)
     : sand !== null ? sand
-    : null
+      : null
   const feasible = upper !== null && liquid !== null && liquid <= upper
   return {
     erosion, sand, liquid, pressure, upper, lower: liquid,
@@ -298,6 +360,8 @@ watch(() => [props.projectId, props.gasReservoirId, props.wellName], () => {
   runVersion += 1
   pendingTask.value = null
   cachedConstraints.value = null
+  ++constraintRecordsVersion
+  constraintRecords.value = []
   selectedConstraintId.value = ''
   userChoseConstraint.value = false
   edited.targetProduction = false
@@ -307,6 +371,7 @@ watch(() => [props.projectId, props.gasReservoirId, props.wellName], () => {
   busy.value = false
   result.value = null
   loadSessionConstraint()
+  void loadConstraintRecords()
   chartInstance?.clear()
 })
 
@@ -460,6 +525,15 @@ async function generateSolution() {
   chartInstance?.clear()
   try {
     if (!String(props.wellName || '').trim()) throw new Error('请先选择一口井')
+    // 只对选中的约束记录检查结构，不能把未选择约束时的动态预测一并禁用。
+    const inputs = selectedInputs.value ? cloneJson(selectedInputs.value) : null
+    const selectedStructure = inputs?.pipeData?.wellboreStructure || ''
+    if (['情况5', '情况6', '情况7'].includes(selectedStructure)) {
+      throw new Error(`${selectedStructure}没有油管，无法计算约束条件`)
+    }
+    if (selectedStructure && !/^情况[1-4]$/.test(selectedStructure)) {
+      throw new Error('选中的约束条件井身结构无效')
+    }
     const boundary = selectedRecord.value ? activeBoundaries.value : null
     if (selectedRecord.value && !boundary?.usable) {
       throw new Error(boundaryError.value || '约束方案没有有效的四项边界数据')
@@ -475,17 +549,16 @@ async function generateSolution() {
     const target = numeric(params.targetProduction, '单井目标产量', { min: 0, allowZero: false })
     if (appliedBoundaries &&
       (target < appliedBoundaries.lower - tolerance(appliedBoundaries.lower) ||
-       target > appliedBoundaries.upper + tolerance(appliedBoundaries.upper))) {
+        target > appliedBoundaries.upper + tolerance(appliedBoundaries.upper))) {
       throw new Error(`单井目标产量 ${renderNumber(target)} 超出约束区间 ` +
         `[${renderNumber(appliedBoundaries.lower)}, ${renderNumber(appliedBoundaries.upper)}] 10⁴m³/d`)
     }
     const pressure = appliedBoundaries
       ? (edited.exportPressure ? numeric(params.exportPressure, '井口外输压力', { min: 0, allowZero: false }) : appliedBoundaries.pressure)
       : numeric(params.exportPressure, '井口外输压力', { min: 0, allowZero: false })
-          if (appliedBoundaries && edited.exportPressure) {
+    if (appliedBoundaries && edited.exportPressure) {
       appliedBoundaries.pressure = pressure
     }
-    const inputs = selectedInputs.value ? cloneJson(selectedInputs.value) : null
     const signature = JSON.stringify({
       well: currentKey.value, target, pressure, chosen: selectedConstraintId.value,
       appliedBoundaries, inputs
@@ -517,6 +590,13 @@ async function generateSolution() {
       exportPressure: pressure,
       preferFormInputs: true
     })
+    // 与约束页所选结构逐项核对，防止使用新建预测任务的旧井身结构。
+    if (selectedStructure) {
+      const expectedStructureCode = Number(selectedStructure.slice(2))
+      if (Number(request.wellFlowTubeInput?.wellStructure) !== expectedStructureCode) {
+        throw new Error(`所选${selectedStructure}与本次计算的井身结构不一致，已停止计算`)
+      }
+    }
     if (appliedBoundaries) {
       if (!request.reservoirInput || typeof request.reservoirInput !== 'object') {
         throw new Error('原平台 Calc 请求缺少 reservoirInput，无法应用边界条件')
@@ -664,12 +744,14 @@ async function generateSolution() {
 
 onMounted(() => {
   loadSessionConstraint()
+  loadConstraintRecords()
   if (props.savedResult?.sourceRequest?.wellName === props.wellName &&
     Array.isArray(props.savedResult?.points)) {
     result.value = props.savedResult
     nextTick().then(showChart)
   }
   window.addEventListener('grdp:constraints-updated', onConstraintUpdated)
+  window.addEventListener('grdp:constraints-saved', onConstraintRecordsUpdated)
   window.addEventListener('focus', loadSessionConstraint)
   window.addEventListener('resize', resizeChart)
 })
@@ -677,6 +759,8 @@ onBeforeUnmount(() => {
   destroyed = true
   runVersion += 1
   window.removeEventListener('grdp:constraints-updated', onConstraintUpdated)
+  ++constraintRecordsVersion
+  window.removeEventListener('grdp:constraints-saved', onConstraintRecordsUpdated)
   window.removeEventListener('focus', loadSessionConstraint)
   window.removeEventListener('resize', resizeChart)
   chartInstance?.dispose()
@@ -696,9 +780,7 @@ onBeforeUnmount(() => {
         </label>
         <label class="field">
           <span>井口外输压力 <small>(MPa)</small></span>
-          <input v-model="params.exportPressure" type="number" min="0" step="any"
-            placeholder="请输入外输压力"
-            :disabled="busy"
+          <input v-model="params.exportPressure" type="number" min="0" step="any" placeholder="请输入外输压力" :disabled="busy"
             @input="onEdit('exportPressure')">
         </label>
         <label class="field">
@@ -724,7 +806,8 @@ onBeforeUnmount(() => {
             <span>积液下限</span><strong>{{ renderNumber(activeBoundaries.liquid) }} <small>10⁴m³/d</small></strong>
           </div>
           <div class="sg-boundary-row">
-            <span>井口外输压力</span><strong>{{ renderNumber(edited.exportPressure && params.exportPressure !== '' ? Number(params.exportPressure) : activeBoundaries.pressure) }} <small>MPa</small></strong>
+            <span>井口外输压力</span><strong>{{ renderNumber(edited.exportPressure && params.exportPressure !== '' ?
+              Number(params.exportPressure) : activeBoundaries.pressure) }} <small>MPa</small></strong>
           </div>
           <p v-if="activeBoundaries.usable" class="sg-boundary-ok">
             允许目标产量：{{ renderNumber(activeBoundaries.lower) }} ~ {{ renderNumber(activeBoundaries.upper) }} 10⁴m³/d
@@ -908,6 +991,28 @@ onBeforeUnmount(() => {
   cursor: wait;
 }
 
+.save-button {
+  min-width: 110px;
+  height: 30px;
+  padding: 0 22px;
+  border: 1px solid #d5b900;
+  border-radius: 4px;
+  background: #f4d000;
+  color: #222;
+  font: inherit;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.save-button:hover:not(:disabled) {
+  background: #ffe033;
+}
+
+.save-button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
 .sg-error {
   margin: 10px 0 0;
   font-size: 11px;
@@ -960,9 +1065,20 @@ onBeforeUnmount(() => {
   line-height: 1.5;
 }
 
-.sg-boundary-ok { color: #20845d; }
-.sg-boundary-error { color: #d63f3f; }
-.sg-optional-tag { font-size: 11px; color: #e6a23c; font-weight: 400; margin-left: 8px; }
+.sg-boundary-ok {
+  color: #20845d;
+}
+
+.sg-boundary-error {
+  color: #d63f3f;
+}
+
+.sg-optional-tag {
+  font-size: 11px;
+  color: #e6a23c;
+  font-weight: 400;
+  margin-left: 8px;
+}
 
 .sg-status {
   margin-top: 8px;

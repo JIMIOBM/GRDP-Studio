@@ -4,7 +4,7 @@ function ensureApiPayload(response, operation) {
   const contentType = String(response?.headers?.['content-type'] || '').toLowerCase()
   const body = response?.data
   if (contentType.includes('text/html') ||
-      (typeof body === 'string' && /<\s*(?:!doctype\s+html|html\b)/i.test(body))) {
+    (typeof body === 'string' && /<\s*(?:!doctype\s+html|html\b)/i.test(body))) {
     throw new Error(`${operation} 返回的是HTML而不是JSON。请检查 docker.js 的 /docker-api 代理以及原平台会话。`)
   }
   if (isObject(body) && body.success === false) {
@@ -67,9 +67,9 @@ export const dynamicPredictionApi = {
         headers: { 'X-Project-Id': String(checkId(calcPayload.projectId, 'projectId')) }
       }
     ).then(response => ({
-    data: ensureApiPayload(response, 'Calc'),
-    headers: response.headers || {},
-    status: response.status
+      data: ensureApiPayload(response, 'Calc'),
+      headers: response.headers || {},
+      status: response.status
     }))
   },
 
@@ -169,10 +169,28 @@ const setNumber = (target, key, source, label, opts) => {
   if (source !== undefined && source !== null && source !== '') target[key] = numeric(source, label, opts)
 }
 
-function mapKnownMethod(choice, expected, oldValue, label) {
+const METHOD_ENCODINGS = {
+  correction: {
+    'Wichert-Aziz 修正方法': 0,
+    'Carr-Kobayashi-Burrous 修正方法': 1   
+  },
+  deviation: {
+    'Dranchuk-Abu-Kassem 方法': 0,
+    'Dranchuk-Purvis-Robinson 方法': 1,
+    'Hall-Yarborough 方法': 2              
+  },
+  viscosity: {
+    'Lee-Gonzalez-Eakin 方法': 0,
+    'Carr-Kobayashi-Burrous 方法': 1,     
+    'Lucas 方法': 2                        
+  }
+}
+
+function mapKnownMethod(choice, methodType, oldValue) {
   if (choice === undefined || choice === null || choice === '') return oldValue
-  if (choice === expected) return 0 // 抓包中这三个方法的编码均为 0
-  throw new Error(`${label}“${choice}”缺少原平台编码，不能沿用旧的编码`)
+  const encoding = METHOD_ENCODINGS[methodType]?.[choice]
+  if (encoding !== undefined) return encoding
+  throw new Error(`${methodType}"${choice}"缺少原平台编码`)
 }
 
 function mapConstraintInputs(request, inputs) {
@@ -190,12 +208,12 @@ function mapConstraintInputs(request, inputs) {
   setNumber(well, 'hydrogenSulfide', gas.h2sContent, 'H₂S含量', { min: 0 })
   setNumber(well, 'carbonDioxide', gas.co2Content, 'CO₂含量', { min: 0 })
   setNumber(well, 'nitrogen', gas.n2Content, 'N₂含量', { min: 0 })
-  well.modificationMethod = mapKnownMethod(methods.correctionMethod, 'Wichert-Aziz 修正方法', well.modificationMethod, '非烃气体修正')
-  well.deviationFactorMethod = mapKnownMethod(methods.deviationMethod, 'Dranchuk-Abu-Kassem 方法', well.deviationFactorMethod, '偏差系数计算')
-  well.viscosityMethod = mapKnownMethod(methods.viscosityMethod, 'Lee-Gonzalez-Eakin 方法', well.viscosityMethod, '粘度计算')
+ well.modificationMethod = mapKnownMethod(methods.correctionMethod, 'correction', well.modificationMethod)
+well.deviationFactorMethod = mapKnownMethod(methods.deviationMethod, 'deviation', well.deviationFactorMethod)
+well.viscosityMethod = mapKnownMethod(methods.viscosityMethod, 'viscosity', well.viscosityMethod)
 
   if (pipe.wellboreStructure) {
-    const matched = String(pipe.wellboreStructure).match(/^情况([1-4])$/)
+    const matched = String(pipe.wellboreStructure).match(/^情况([1-7])$/)
     if (!matched) throw new Error('井身结构与原平台编码不一致')
     tube.wellStructure = Number(matched[1])
   }
@@ -206,6 +224,23 @@ function mapConstraintInputs(request, inputs) {
   setNumber(tube, 'tubingBottomMD', pipe.tubingMdDepth, '油管下深MD', { min: 0 })
   setNumber(tube, 'tubingBottomTVD', pipe.tubingTvdDepth, '油管下深TVD', { min: 0 })
   setNumber(tube, 'tubingInnerDiameter', pipe.tubingInnerDiameter, '油管内径', { min: 0, allowZero: false })
+  // 套管下深（情况5-7需要）
+  setNumber(tube, 'casingBottomMD', pipe.casingMdDepth || pipe.mdDepth, '套管下深MD', { min: 0 })
+  setNumber(tube, 'casingBottomTVD', pipe.casingTvdDepth || pipe.tvdDepth, '套管下深TVD', { min: 0 })
+
+  // 节流器参数（情况1/3/5需要）
+  if (pipe.chokeMdDepth || pipe.chokeTvdDepth || pipe.chokeInnerDiameter) {
+    setNumber(tube, 'throttlerBottomMD', pipe.chokeMdDepth, '节流器下深MD', { min: 0 })
+    setNumber(tube, 'throttlerBottomTVD', pipe.chokeTvdDepth, '节流器下深TVD', { min: 0 })
+    setNumber(tube, 'throttlerInnerDiameter', pipe.chokeInnerDiameter, '节流器内径', { min: 0, allowZero: false })
+  }
+
+  // 速度管柱参数（情况7需要）
+  if (pipe.velocityPipeMdDepth || pipe.velocityPipeTvdDepth || pipe.velocityPipeInnerDiameter) {
+    setNumber(tube, 'velocityStringBottomMD', pipe.velocityPipeMdDepth, '速度管柱下深MD', { min: 0 })
+    setNumber(tube, 'velocityStringBottomTVD', pipe.velocityPipeTvdDepth, '速度管柱下深TVD', { min: 0 })
+    setNumber(tube, 'velocityStringInnerDiameter', pipe.velocityPipeInnerDiameter, '速度管柱内径', { min: 0, allowZero: false })
+  }
 
   setNumber(well, 'darcySeepageCoefficient', other.coefficientA, '产能系数A', { min: 0 })
   setNumber(well, 'nonDarcySeepageCoefficient', other.coefficientB, '产能系数B', { min: 0 })
@@ -254,8 +289,8 @@ export function extractTypedPredictionTaskNodes(response, scope) {
     visited.add(node)
     if (Array.isArray(node)) { node.forEach(visit); return }
     if (Number(node.nodeType) === 80 &&
-        Number.isSafeInteger(Number(node.nodeId)) && Number(node.nodeId) > 0 &&
-        typeof node.nodeTitle === 'string' && node.nodeTitle.startsWith(prefix)) {
+      Number.isSafeInteger(Number(node.nodeId)) && Number(node.nodeId) > 0 &&
+      typeof node.nodeTitle === 'string' && node.nodeTitle.startsWith(prefix)) {
       matches.push({
         projectId: scope.projectId, gasReservoirId: scope.gasReservoirId,
         wellName: String(scope.wellName), dynamicPredictionId: Number(node.nodeId),
@@ -455,8 +490,8 @@ export function extractPredictionTasksFromNodeResponse(response, scope) {
     const physicalWell = String(value.physicalWellName ??
       (typeof rawWell === 'string' && rawWell.includes('单井动态预测') ? inherited.wellName : rawWell ?? inherited.wellName) ?? '').trim()
     const candidateName = [value.chartWellName, value.predictionName,
-      value.dynamicPredictionName, value.taskName,
-      value.name, value.nodeTitle, value.wellName]
+    value.dynamicPredictionName, value.taskName,
+    value.name, value.nodeTitle, value.wellName]
       .find(name => typeof name === 'string' && name.trim() &&
         (['chartWellName', 'predictionName', 'dynamicPredictionName', 'taskName'].some(k => value[k] === name) ||
           name.trim().startsWith(`${targetWell}单井动态预测`)))
@@ -466,13 +501,15 @@ export function extractPredictionTasksFromNodeResponse(response, scope) {
     const ownerByTitle = name.startsWith(`${targetWell}${marker}`)
     const titleBelongsOtherWell = name.includes(marker) && !ownerByTitle
     if (taskId != null && name && !titleBelongsOtherWell &&
-        (physicalWell === targetWell || (!physicalWell && ownerByTitle)) &&
-        (projectId == null || String(projectId) === String(scope.projectId)) &&
-        (gasReservoirId == null || String(gasReservoirId) === String(scope.gasReservoirId))) {
+      (physicalWell === targetWell || (!physicalWell && ownerByTitle)) &&
+      (projectId == null || String(projectId) === String(scope.projectId)) &&
+      (gasReservoirId == null || String(gasReservoirId) === String(scope.gasReservoirId))) {
       const id = Number(taskId)
       if (Number.isSafeInteger(id) && id > 0) {
-        matches.push({ projectId: scope.projectId, gasReservoirId: scope.gasReservoirId,
-          wellName: targetWell, dynamicPredictionId: id, chartWellName: name })
+        matches.push({
+          projectId: scope.projectId, gasReservoirId: scope.gasReservoirId,
+          wellName: targetWell, dynamicPredictionId: id, chartWellName: name
+        })
       }
     }
     const next = { projectId, gasReservoirId, wellName: physicalWell || inherited.wellName }
@@ -604,7 +641,7 @@ export function resolveCalcContextFromConstraints({ scope, snapshot, platformCon
   const inputs = isObject(snapshot.inputs) ? snapshot.inputs : {}
   const external = isObject(platformContext) && sameScope(platformContext, scope) ? platformContext : null
   const snapshotTask = [snapshot.predictionTask, snapshot.task, snapshot.source?.predictionTask,
-    inputs.predictionTask].find(isObject) || {}
+  inputs.predictionTask].find(isObject) || {}
   const allTasks = Array.isArray(external?.predictionTasks)
     ? external.predictionTasks.filter(item => isObject(item) && sameScope(item, scope)) : []
   const snapshotId = snapshotTask.dynamicPredictionId ?? snapshot.dynamicPredictionId ??
@@ -623,13 +660,13 @@ export function resolveCalcContextFromConstraints({ scope, snapshot, platformCon
   }
   const task = matchedTasks.length === 1 ? matchedTasks[0] : snapshotTask
   if (allTasks.length > 1 && matchedTasks.length !== 1 &&
-      !snapshotId && !snapshotName) {
+    !snapshotId && !snapshotName) {
     issues.push(`当前井发现 ${allTasks.length} 个真实预测任务，请在原平台确定当前使用的任务；不自动猜测任务ID。`)
   }
   if (allTasks.length && (snapshotId != null || snapshotName != null) &&
-      matchedTasks.length === 0 &&
-      !(snapshotTask.dynamicPredictionId &&
-        (snapshotTask.chartWellName || snapshotTask.predictionName))) {
+    matchedTasks.length === 0 &&
+    !(snapshotTask.dynamicPredictionId &&
+      (snapshotTask.chartWellName || snapshotTask.predictionName))) {
     warnings.push('约束快照中的预测任务未在当前分析节点返回值中找到，不能据此推断任务名称。')
   }
   const requestCandidates = [
@@ -680,7 +717,7 @@ export function resolveCalcContextFromConstraints({ scope, snapshot, platformCon
   const chartWellName = names[0] ?? null
   if (!chartWellName) issues.push('缺少当前井的 chartWellName（原平台 /chart 的 wellName 查询值）。')
   if (chartWellName?.includes('单井动态预测') &&
-      !chartWellName.startsWith(String(scope.wellName) + '单井动态预测')) {
+    !chartWellName.startsWith(String(scope.wellName) + '单井动态预测')) {
     issues.push(`绘图任务“${chartWellName}”不属于当前井 ${scope.wellName}。`)
   }
 
@@ -700,7 +737,7 @@ export function resolveCalcContextFromConstraints({ scope, snapshot, platformCon
     ['gasReservoirId', scope.gasReservoirId]
   ]) {
     if (raw[key] !== undefined && raw[key] !== null &&
-        String(raw[key]) !== String(expected)) issues.push(`Calc 请求的 ${key} 属于其他井或项目。`)
+      String(raw[key]) !== String(expected)) issues.push(`Calc 请求的 ${key} 属于其他井或项目。`)
   }
   if (isObject(profile)) {
     for (const [key, expected] of [
@@ -721,8 +758,8 @@ export function resolveCalcContextFromConstraints({ scope, snapshot, platformCon
     }
   }
   if (!isObject(inputs.reservoirInput) && !isObject(inputs.wellInput) &&
-      !isObject(inputs.wellFlowTubeInput) && !candidate &&
-      !(inputs.gasProperties || inputs.pipeData || inputs.otherData)) {
+    !isObject(inputs.wellFlowTubeInput) && !candidate &&
+    !(inputs.gasProperties || inputs.pipeData || inputs.otherData)) {
     issues.push('约束快照没有气体、井筒、生产参数，也没有原平台 Calc 原生输入。')
   }
 
@@ -774,9 +811,9 @@ export function resolveCalcContextFromConstraints({ scope, snapshot, platformCon
 export function assertChartTaskMatchesSnapshot(snapshot, query) {
   if (!isObject(snapshot)) return
   const task = [snapshot.predictionTask, snapshot.task, snapshot.source?.predictionTask,
-    snapshot.inputs?.predictionTask].find(isObject) || {}
+  snapshot.inputs?.predictionTask].find(isObject) || {}
   const ids = [task.dynamicPredictionId, snapshot.dynamicPredictionId,
-    snapshot.source?.dynamicPredictionId, snapshot.inputs?.dynamicPredictionId]
+  snapshot.source?.dynamicPredictionId, snapshot.inputs?.dynamicPredictionId]
     .filter(value => value !== undefined && value !== null && String(value).trim() !== '')
   for (const id of ids) {
     if (positiveInteger(id, '快照预测任务ID') !== Number(query.dynamicPredictionId)) {
@@ -784,8 +821,8 @@ export function assertChartTaskMatchesSnapshot(snapshot, query) {
     }
   }
   const names = [task.chartWellName, task.predictionName, task.dynamicPredictionName,
-    task.taskName, snapshot.chartWellName, snapshot.predictionName,
-    snapshot.source?.chartWellName, snapshot.inputs?.chartWellName]
+  task.taskName, snapshot.chartWellName, snapshot.predictionName,
+  snapshot.source?.chartWellName, snapshot.inputs?.chartWellName]
     .filter(value => value !== undefined && value !== null && String(value).trim() !== '')
   for (const name of names) {
     if (String(name).trim() !== query.wellName) {
@@ -814,12 +851,12 @@ function preserveDetailPrecisionWhenInputsAreRounded(request, original, inputs) 
     for (const [field, proposed] of Object.entries(mapped)) {
       const fullKey = `${group}.${field}`
       if (forced.has(fullKey) ||
-          fullKey === 'reservoirInput.targetProduction' ||
-          fullKey === 'reservoirInput.externalWellheadPressure') continue
+        fullKey === 'reservoirInput.targetProduction' ||
+        fullKey === 'reservoirInput.externalWellheadPressure') continue
       const baseline = existing[field]
       if (typeof baseline !== 'number' || typeof proposed !== 'number' ||
-          !Number.isFinite(baseline) || !Number.isFinite(proposed) ||
-          baseline === proposed || baseline === 0 || proposed === 0) continue
+        !Number.isFinite(baseline) || !Number.isFinite(proposed) ||
+        baseline === proposed || baseline === 0 || proposed === 0) continue
       // 仅保护至少两位小数的显示舍入值；不把真正的整数/大幅变更吞掉。
       const s = String(proposed)
       const fraction = s.match(/\.(\d+)(?:e[+-]?\d+)?$/i)?.[1]
@@ -947,7 +984,7 @@ export function resolveChartQuery({ scope, request, chartWellName }) {
     throw new Error('绘图任务与当前气藏不一致')
   }
   const declaredNames = [request.chartWellName, request.predictionName,
-    request.dynamicPredictionName, request.taskName].filter(value =>
+  request.dynamicPredictionName, request.taskName].filter(value =>
     value !== null && value !== undefined && String(value).trim() !== '')
   if (chartWellName && declaredNames.length && declaredNames.some(value => String(value).trim() !== String(chartWellName).trim())) {
     throw new Error('父组件传入的绘图任务名称与当前井 Calc 请求声明的任务名称不一致')
@@ -1235,12 +1272,12 @@ export function extractCalcRequestFromNodeResponse(response, scope, expectedTask
     const taskId = value.dynamicPredictionId ?? value.DynamicPredictionId ?? context.dynamicPredictionId
     const taskName = value.chartWellName ?? value.predictionName ?? context.chartWellName
     if (isObject(value.reservoirInput) && isObject(value.wellInput) &&
-        isObject(value.wellFlowTubeInput) &&
-        physicalWell === targetWell &&
-        taskId != null &&
-        (expectedTaskId == null || String(taskId) === String(expectedTaskId)) &&
-        (projectId == null || String(projectId) === String(scope.projectId)) &&
-        (gasReservoirId == null || String(gasReservoirId) === String(scope.gasReservoirId))) {
+      isObject(value.wellFlowTubeInput) &&
+      physicalWell === targetWell &&
+      taskId != null &&
+      (expectedTaskId == null || String(taskId) === String(expectedTaskId)) &&
+      (projectId == null || String(projectId) === String(scope.projectId)) &&
+      (gasReservoirId == null || String(gasReservoirId) === String(scope.gasReservoirId))) {
       return {
         projectId: scope.projectId, gasReservoirId: scope.gasReservoirId,
         wellName: targetWell, dynamicPredictionId: taskId,
@@ -1250,8 +1287,10 @@ export function extractCalcRequestFromNodeResponse(response, scope, expectedTask
         wellFlowTubeInput: cloneJson(value.wellFlowTubeInput)
       }
     }
-    const next = { wellName: physicalWell, projectId, gasReservoirId,
-      dynamicPredictionId: taskId, chartWellName: taskName }
+    const next = {
+      wellName: physicalWell, projectId, gasReservoirId,
+      dynamicPredictionId: taskId, chartWellName: taskName
+    }
     for (const [field, child] of Object.entries(value)) {
       if (['config', 'headers', 'statusText'].includes(field)) continue
       if (child && typeof child === 'object') {
@@ -1263,4 +1302,64 @@ export function extractCalcRequestFromNodeResponse(response, scope, expectedTask
   }
   return visit(isObject(response) && Object.prototype.hasOwnProperty.call(response, 'data')
     ? response.data : response)
+}
+
+const CONSTRAINT_RECORDS_BASE = '/api/solution-generation/constraint-records'
+
+async function constraintBackendRequest(method, suffix = '', { body, params } = {}) {
+  const query = params ? `?${new URLSearchParams(
+    Object.entries(params).map(([key, value]) => [key, String(value ?? '')])
+  )}` : ''
+  const path = `${CONSTRAINT_RECORDS_BASE}${suffix}${query}`
+  let response
+  try {
+    response = await fetch(path, {
+      method,
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) })
+    })
+  } catch (error) {
+    throw new Error(`连接 Spring Boot 失败：${error?.message || '网络错误'}。请检查后端端口与 Vite 的 /spring-api 代理`)
+  }
+
+  const raw = await response.text()
+  let result = null
+  if (raw) {
+    try {
+      result = JSON.parse(raw)
+    } catch {
+      if (!response.ok) {
+        throw new Error(`Spring Boot ${method} ${path} 返回 HTTP ${response.status}；请检查代理路径和 Controller 映射`)
+      }
+      throw new Error(`Spring Boot ${method} ${path} 返回非 JSON 内容；请检查 Vite 代理是否转到了前端页面`)
+    }
+  }
+
+  if (!response.ok || result?.success === false ||
+      (typeof result?.code === 'number' && result.code >= 400)) {
+    const message = result?.message || result?.msg || result?.error ||
+      `HTTP ${response.status}（检查 Spring Boot 路由与代理配置）`
+    throw new Error(`Spring Boot ${method} ${path}：${message}`)
+  }
+
+  // 与现有 ConstraintConditions.vue / SolutionGeneration.vue 所用的
+  // Axios 响应格式保持一致：response.data 是 Controller 的 ApiResponse.data。
+  return { data: result && Object.prototype.hasOwnProperty.call(result, 'data')
+    ? result.data : result }
+}
+
+export const constraintRecordApi = {
+  save: payload => constraintBackendRequest('POST', '/save', { body: payload }),
+   update: (id, payload) =>
+    constraintBackendRequest('PUT', `/${encodeURIComponent(String(id))}`, { body: payload }),  list: (projectId, gasReservoirId, wellName) =>
+    constraintBackendRequest('GET', '', {
+      params: { projectId, gasReservoirId, wellName }
+    }),
+  detail: id =>
+    constraintBackendRequest('GET', `/${encodeURIComponent(String(id))}`),
+  delete: (id, projectId, gasReservoirId, wellName) =>
+    constraintBackendRequest('DELETE', `/${encodeURIComponent(String(id))}`, {
+      params: { projectId, gasReservoirId, wellName }
+    })
 }

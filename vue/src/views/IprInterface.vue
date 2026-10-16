@@ -49,7 +49,7 @@ import {
   loadVerifiedPredictionTasks,
   selectPredictionTask
 } from '@/api/solutionGeneration'
-import { dynamicPredictionApi } from '@/api/solutionGeneration'
+import { constraintRecordApi, dynamicPredictionApi } from '@/api/solutionGeneration'
 import { ensureNodalNavigation, nodalCommandTarget, NODAL_TYPE, NODAL_RECORD, applyNodalRecords, upsertNodalRecord, loadNodalRecords, deleteNodalRecord } from '@/utils/nodalNavigation'
 import { nodalApi } from '@/api/nodal'
 import ErosionContent from '@/views/WellboreCapacity/ErosionContent.vue'
@@ -558,8 +558,6 @@ function handleMultiPeriodConstraintsInvalidated() {
   }
 }
 
-// Calc 和 /chart 成功后，把本次平台任务写入当前井上下文。
-// 绝不将新任务 ID 写入 X-1/X-2 共享模板或覆盖其他井。
 function handleMultiPeriodSolutionGenerated(payload) {
   if (!payload || String(payload.projectId) !== String(PROJECT_ID) ||
       String(payload.gasReservoirId) !== String(GAS_RESERVOIR_ID) ||
@@ -591,6 +589,107 @@ function handleMultiPeriodSolutionGenerated(payload) {
   }
   multiPeriodSelectedTaskIdByWell.value = {
     ...multiPeriodSelectedTaskIdByWell.value, [key]: task.dynamicPredictionId
+  }
+}
+
+// ===== 约束条件保存后，左侧树"约束条件"下增加子节点 =====
+function findMultiPeriodConstraintsNode(wellName) {
+  const search = (node) => {
+    if (node.type === 'multi-period-constraints' && node.wellName === wellName) return node
+    for (const child of (node.children || [])) {
+      const found = search(child)
+      if (found) return found
+    }
+    return null
+  }
+  for (const node of treeData.value) {
+    const found = search(node)
+    if (found) return found
+  }
+  return null
+}
+
+function findProductionAllocationNode(wellName) {
+  const search = (node) => {
+    if (node.type === 'production-allocation' && node.wellName === wellName) return node
+    for (const child of (node.children || [])) {
+      const found = search(child)
+      if (found) return found
+    }
+    return null
+  }
+  for (const node of treeData.value) {
+    const found = search(node)
+    if (found) return found
+  }
+  return null
+}
+
+let constraintRecordOpenVersion = 0
+
+async function handleConstraintsSaved(event) {
+  const detail = event?.detail
+  if (!detail?.wellName || detail.id == null || String(detail.id).trim() === '') return
+  if (detail.projectId != null && String(detail.projectId) !== String(PROJECT_ID)) return
+  if (detail.gasReservoirId != null && String(detail.gasReservoirId) !== String(GAS_RESERVOIR_ID)) return
+  const { id: recordId, wellName, recordName, action } = detail
+  const constraintsNode = findMultiPeriodConstraintsNode(wellName)
+  if (!constraintsNode) return
+
+  constraintsNode.children ||= []
+  const existsAt = constraintsNode.children.findIndex(
+    child => String(child.recordId) === String(recordId)
+  )
+  if (action === 'deleted') {
+    if (existsAt >= 0) constraintsNode.children.splice(existsAt, 1)
+  } else {
+    const childNode = {
+      id: `constraint-record-${recordId}`,
+      type: 'multi-period-constraint-record',
+      label: recordName || `约束条件${recordId}`,
+      wellName,
+      recordId
+    }
+    if (existsAt >= 0) constraintsNode.children.splice(existsAt, 1, childNode)
+    else constraintsNode.children.push(childNode)
+  }
+  const paNode = findProductionAllocationNode(wellName)
+  if (paNode) paNode.expanded = true
+  const mpNode = paNode?.children?.find(c => c.type === MULTI_PERIOD_SOLUTION_NODE_TYPE)
+  if (mpNode) mpNode.expanded = true
+  constraintsNode.expanded = true
+  // 直接更新响应式树，不必按F5刷新整页。
+  treeData.value = [...treeData.value]
+}
+
+async function syncConstraintTreeNodes() {
+  for (const node of treeData.value) {
+    await syncConstraintTreeNodesRecursive(node)
+  }
+}
+
+async function syncConstraintTreeNodesRecursive(node) {
+  if (node.type === 'production-allocation' && node.wellName) {
+    const mpNode = node.children?.find(c => c.type === MULTI_PERIOD_SOLUTION_NODE_TYPE)
+    const constraintsNode = mpNode?.children?.find(c => c.type === 'multi-period-constraints')
+    if (constraintsNode && constraintsNode.wellName) {
+      try {
+        const rows = await constraintRecordApi.list(PROJECT_ID, GAS_RESERVOIR_ID, constraintsNode.wellName)
+        const records = Array.isArray(rows?.data) ? rows.data : (Array.isArray(rows) ? rows : [])
+        constraintsNode.children = records.map(r => ({
+          id: `constraint-record-${r.id}`,
+          type: 'multi-period-constraint-record',
+          label: r.recordName || `约束条件${r.id}`,
+          wellName: constraintsNode.wellName,
+          recordId: r.id
+        }))
+      } catch (e) {
+        console.warn('同步约束记录到树节点失败', e)
+      }
+    }
+  }
+  for (const child of (node.children || [])) {
+    await syncConstraintTreeNodesRecursive(child)
   }
 }
 
@@ -5064,8 +5163,14 @@ const handleSelect = async (node) => { // 点击左侧树节点
     return
   }
 
-  if (node.type === INJECTION_FITTING_NODE_TYPE) {
-    await showInjectionFittingForWell(nodeWellName, node)
+  if (node.type === 'multi-period-constraint-record') {
+    restoreMultiPeriodConstraintsForWell(node.wellName)
+    currentView.value = 'multi-period-constraint-conditions'
+    // 再次点击相同记录也重新从数据库载入。
+    currentViewNode.value = {
+      ...node, wellName: node.wellName,
+      constraintOpenVersion: ++constraintRecordOpenVersion
+    }
     return
   }
 
@@ -5650,6 +5755,7 @@ const handleRefreshTree = () => {
 onMounted(async () => {
   window.addEventListener('click', closeTreeContextMenu)
   window.addEventListener('resize', closeTreeContextMenu)
+    window.addEventListener('grdp:constraints-saved', handleConstraintsSaved)
 
   // 软件集成工作区拥有独立的项目树和数据接口；不能在挂载共享 Shell 时
   // 同时初始化解析融合目录，否则原平台未登录会把演示页重定向到登录页。
@@ -5657,6 +5763,7 @@ onMounted(async () => {
 
   try {
     await initTree()
+        await syncConstraintTreeNodes()
     await Promise.allSettled([
       loadAllModifiedIsochronalTreeNodes({
         treeData: treeData.value,
@@ -5702,6 +5809,7 @@ watch(() => workspaceTreeData.value, nodes => {
 onBeforeUnmount(() => {
   window.removeEventListener('click', closeTreeContextMenu)
   window.removeEventListener('resize', closeTreeContextMenu)
+    window.removeEventListener('grdp:constraints-saved', handleConstraintsSaved)
 })
 </script>
 
@@ -5778,8 +5886,10 @@ onBeforeUnmount(() => {
             :gas-reservoir-id="GAS_RESERVOIR_ID" />
           <!-- 多周期预测：约束条件 -->
           <MultiPeriodConstraintConditions v-if="currentView === 'multi-period-constraint-conditions'"
-            :key="`multi-period-constraint-${currentViewNode?.wellName || 'project'}`"
-            :well-name="currentViewNode?.wellName || ''" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID"
+            :key="`multi-period-constraint-${currentViewNode?.wellName || 'project'}-${currentViewNode?.recordId ?? 'new'}-${currentViewNode?.constraintOpenVersion ?? 0}`"
+            :well-name="currentViewNode?.wellName || ''"
+            :record-id="currentViewNode?.recordId ?? null"
+            :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID"
             @constraints-calculated="handleMultiPeriodConstraintsCalculated"
             @constraints-invalidated="handleMultiPeriodConstraintsInvalidated" />
 

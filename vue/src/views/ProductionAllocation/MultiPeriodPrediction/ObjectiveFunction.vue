@@ -1,6 +1,7 @@
 <!-- filepath: d:\shiyou\GRDP-Studio\vue\src\views\ProductionAllocation\MultiPeriodPrediction\ObjectiveFunction.vue -->
 <script setup>
 import { ref } from 'vue'
+import { ElMessage } from 'element-plus'
 
 const props = defineProps({
   wellName: { type: String, default: '' },
@@ -9,6 +10,28 @@ const props = defineProps({
 })
 
 const demandQ = ref('')
+const saving = ref(false)
+
+function handleSave() {
+  if (saving.value) return
+  saving.value = true
+  try {
+    const payload = {
+      projectId: props.projectId,
+      gasReservoirId: props.gasReservoirId,
+      wellName: props.wellName,
+      demandQ: demandQ.value,
+      savedAt: new Date().toISOString()
+    }
+    const key = `grdp:objective:v1:${props.projectId}:${props.gasReservoirId}:${encodeURIComponent(props.wellName || '')}`
+    window.sessionStorage.setItem(key, JSON.stringify(payload))
+    ElMessage.success('目标函数参数已保存')
+  } catch (e) {
+    ElMessage.error('保存失败：' + (e.message || '未知错误'))
+  } finally {
+    saving.value = false
+  }
+}
 </script>
 
 <template>
@@ -19,7 +42,7 @@ const demandQ = ref('')
         <fieldset class="field-section">
           <legend class="sec-label">需求参数</legend>
           <label class="field">
-            <span>需求气量 Q<sub>pj(h)</sub>（×10⁴m³）</span>
+            <span>需求气量 Q（×10⁴m³）</span>
             <input
               v-model="demandQ"
               type="number"
@@ -30,6 +53,16 @@ const demandQ = ref('')
             />
           </label>
         </fieldset>
+                <div class="panel-actions">
+          <button
+            type="button"
+            class="save-button"
+            :disabled="saving"
+            @click="handleSave"
+          >
+            {{ saving ? '保存中...' : '保存' }}
+          </button>
+        </div>
       </div>
     </aside>
 
@@ -250,6 +283,32 @@ const demandQ = ref('')
 .formula-condition {
   color: #303133;
   font-size: 14px;
+}
+
+.panel-actions {
+  margin-top: 16px;
+}
+
+.save-button {
+  width: 100%;
+  height: 30px;
+  padding: 0 22px;
+  border: 1px solid #d5b900;
+  border-radius: 4px;
+  background: #f4d000;
+  color: #222;
+  font: inherit;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.save-button:hover:not(:disabled) {
+  background: #ffe033;
+}
+
+.save-button:disabled {
+  opacity: 0.6;
+  cursor: wait;
 }
 
 @media (max-width: 700px) {
