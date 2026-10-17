@@ -25,6 +25,10 @@ import CouplingOptimization from './CouplingOptimization/CouplingOptimization.vu
 import GasReservoirDiagnosticCurveContent from './GasReservoirDiagnosticCurveContent.vue'
 import StorageNetworkTopology from './SurfaceNetwork/StorageNetworkTopology.vue'
 import StorageNetworkCorrelation from './SurfaceNetwork/StorageNetworkCorrelation.vue'
+import ReservoirMultiPeriodObjectiveFunction from './MultiPeriodPrediction/ObjectiveFunction.vue'
+import ReservoirMultiPeriodConstraintConditions from './MultiPeriodPrediction/ConstraintConditions.vue'
+import ReservoirMultiPeriodSolutionGeneration from './MultiPeriodPrediction/SolutionGeneration.vue'
+import ReservoirMultiPeriodComparison from './MultiPeriodPrediction/Comparison.vue'
 
 const lossPages = { '微观损耗': MicroscopicLoss, '逸散性损耗': EscapeLoss, '井筒损耗': WellboreLoss, '地面损耗': SurfaceLoss }
 const comparisonPages = { '多周期': MultiPeriodComparison, '多方法': MultiMethodComparison, '注采对比': InjectionProductionComparison }
@@ -85,12 +89,23 @@ const isStorageNetworkTopology = computed(() =>
 const isStorageNetworkCorrelation = computed(() =>
   props.command?.group === '地面管网' && props.command?.name === '相关性分析'
 )
+<<<<<<< Updated upstream
 // 协同预测：一体化耦合优化的单目标/多目标共用同一页面，仅参数面板与优化目标不同。
 const isCouplingOptimization = computed(() =>
   props.command?.group === '协同预测'
   && props.command?.parent === '一体化耦合优化'
   && ['单目标', '多目标'].includes(props.command?.name)
 )
+=======
+
+// 协同预测-多周期预测
+const isReservoirMultiPeriodPrediction = computed(() =>
+  props.command?.group === '协同预测'
+  && props.command?.parent === '多周期预测'
+  && ['目标函数', '约束条件', '方案生成', '方案比选'].includes(props.command?.name)
+)
+
+>>>>>>> Stashed changes
 const lossComponent = computed(() => props.command?.name ? lossPages[props.command.name] : null)
 const lossKey = computed(() => `${props.reservoir?.projectId}-${props.reservoir?.gasReservoirId}-${props.reservoir?.storageId}-${props.command?.name}`)
 
@@ -172,6 +187,55 @@ const lossKey = computed(() => `${props.reservoir?.projectId}-${props.reservoir?
   <StorageNetworkCorrelation v-else-if="isStorageNetworkCorrelation"
     :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-surface-network-correlation`"
     :reservoir="reservoir" />
+    <!-- 协同预测-多周期预测（4个子页面） -->
+  <section v-else-if="isReservoirMultiPeriodPrediction" class="storage-comparison-page" 
+           :aria-label="`库多周期预测-${command.name}`">
+    <div class="comparison-module-tabs">
+      <div class="comparison-module-tab">
+        <span>协同预测-多周期预测-{{ command.name }}</span>
+      </div>
+    </div>
+    
+    <!-- 目标函数 -->
+    <ReservoirMultiPeriodObjectiveFunction
+      v-if="command.name === '目标函数'"
+      :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-multi-period-objective`"
+      :project-id="reservoir?.projectId" 
+      :gas-reservoir-id="reservoir?.gasReservoirId"
+      :storage-id="reservoir?.storageId" 
+      :storage-name="reservoirLabel" 
+    />
+    
+    <!-- 约束条件 -->
+    <ReservoirMultiPeriodConstraintConditions
+      v-else-if="command.name === '约束条件'"
+      :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-multi-period-constraint`"
+      :project-id="reservoir?.projectId" 
+      :gas-reservoir-id="reservoir?.gasReservoirId"
+      :storage-id="reservoir?.storageId" 
+      :storage-name="reservoirLabel" 
+    />
+    
+    <!-- 方案生成 -->
+    <ReservoirMultiPeriodSolutionGeneration
+      v-else-if="command.name === '方案生成'"
+      :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-multi-period-solution`"
+      :project-id="reservoir?.projectId" 
+      :gas-reservoir-id="reservoir?.gasReservoirId"
+      :storage-id="reservoir?.storageId" 
+      :storage-name="reservoirLabel" 
+    />
+    
+    <!-- 方案比选 -->
+    <ReservoirMultiPeriodComparison
+      v-else-if="command.name === '方案比选'"
+      :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-multi-period-comparison`"
+      :project-id="reservoir?.projectId" 
+      :gas-reservoir-id="reservoir?.gasReservoirId"
+      :storage-id="reservoir?.storageId" 
+      :storage-name="reservoirLabel" 
+    />
+  </section>
   <!-- 其他尚未接入的库级功能仍保留占位入口。 -->
   <section v-else class="reservoir-workspace" :aria-label="title">
     <div class="workspace-tabs">

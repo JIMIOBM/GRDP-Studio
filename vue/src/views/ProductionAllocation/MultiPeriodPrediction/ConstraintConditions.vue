@@ -137,16 +137,17 @@ const selectedConstraints = reactive({
 })
 const selectedKeys = ['erosionLimit', 'sandProductionLimit', 'liquidLoadingLimit']
 const initialFormData = JSON.parse(JSON.stringify(formData))
+// 当前页面的天然气组分和物性方法作为方案输入保存。冲蚀、积液算法
+// 则各自使用其专业服务实际采用的 PVT；页面字段不会隐式覆盖该 PVT。
 const pvtInputSignature = () => JSON.stringify({ ...formData.gasProperties, ...formData.calcMethod })
 let calculationPvtBaseline = pvtInputSignature()
-const pvtInputChanged = () => pvtInputSignature() !== calculationPvtBaseline
 function acceptCurrentPvtAsBaseline() {
   calculationPvtBaseline = pvtInputSignature()
 }
+const pvtNeedsSync = computed(() => pvtInputSignature() !== calculationPvtBaseline)
 
-function acceptCurrentPvtInput() {
-}
 let requestVersion = 0
+let runningCalculationSignature = null
 let unmounted = false
 
 const scope = () => ({
@@ -203,7 +204,30 @@ const positive = value => {
   const n = optionalNumber(value)
   return n !== null && n > 0 ? n : null
 }
-const errorText = error => error?.msg || error?.message || '算法接口未返回有效结果'
+
+function syncTargetProductionFromObjective() {
+  try {
+    const key = `grdp:objective:v1:${props.projectId}:${props.gasReservoirId}:${encodeURIComponent(props.wellName || '')}`
+    const raw = window.sessionStorage.getItem(key)
+    if (!raw) return
+    const parsed = JSON.parse(raw)
+    if (parsed?.demandQ != null && parsed.demandQ !== '') {
+      formData.otherData.targetProduction = String(parsed.demandQ)
+    }
+  } catch { /* ignore */ }
+}
+function onObjectiveSaved(event) {
+  const { demandQ, wellName } = event.detail || {}
+  if (wellName === props.wellName && demandQ != null && demandQ !== '') {
+    formData.otherData.targetProduction = String(demandQ)
+  }
+}
+
+const errorText = error =>
+  error?.response?.data?.msg ||
+  error?.response?.data?.message ||
+  error?.msg || error?.message || '算法接口未返回有效结果'
+
 const clone = value => JSON.parse(JSON.stringify(value))
 function snapshotFormData() {
   // 取保存按钮点击时正在编辑的值，而不是计算前缓存或表单默认值。
@@ -235,6 +259,9 @@ function sameNumber(left, right) {
   return Number.isFinite(x) && Number.isFinite(y) &&
     Math.abs(x - y) <= 1e-9 * Math.max(1, Math.abs(x), Math.abs(y))
 }
+
+// 物性来源采用算法自身的 PVT 记录，不在本页将历史 PVT 组分与页面输入
+// 强行判定为一致。实际采用的气体比重等信息记录在结果对象中，以便追溯。
 function calculationMatchesForm() {
   const meta = calculationMeta.value
   const result = calculationResults.value
@@ -284,6 +311,7 @@ const saveBlockedReason = computed(() => {
   if (!result || !meta) {
     return '当前还没有可保存的计算结果；请先点击“计算约束条件”，修改过计算参数后也需重新计算'
   }
+  // 历史方案 PUT 与新建 POST 必须执行相同的输入一致性校验。
   if (!calculationMatchesForm()) {
     return '当前输入与上一次计算工况不一致；请重新点击“计算约束条件”后再保存'
   }
@@ -291,12 +319,18 @@ const saveBlockedReason = computed(() => {
     return '保存有效约束方案必须勾选出砂上限和积液下限'
   }
   for (const [key, label] of [
-    ['sandProductionLimit', '出砂气量上限'],
-    ['liquidLoadingLimit', '积液气量下限'],
+    ['sandProductionLimit', '出砂气量'],
+    ['liquidLoadingLimit', '积液气量'],
     ['wellheadExportPressure', '井口外输压力']
   ]) {
-    if (!result[key]?.available) return `${label}未取得有效计算结果，请重新计算`
-    if (!result[key]?.verified) return `${label}尚未核实，暂时不能保存`
+    if (result[key]?.available !== true) {
+      const reason = String(result[key]?.reason || '').trim()
+      return `${label}未取得有效计算结果。${reason || '请重新计算'}`
+    }
+    if (result[key]?.verified !== true) {
+      const reason = String(result[key]?.reason || '').trim()
+      return `${label}计算结果尚未验证。${reason || '请检查PVT及计算参数后重新计算'}`
+    }
   }
   // 冲蚀未算出不阻止保存，它会从实际生效的约束中排除。
   const range = productionRange.value
@@ -331,11 +365,19 @@ function invalidate(clearCurrentSnapshot = true) {
   calculationMeta.value = null
   actualAlgorithmRequests.value = null
   lastCalculatedSignature.value = null
+  runningCalculationSignature = null
   if (clearCurrentSnapshot) syncConstraintSnapshot(null)
   emit('constraints-invalidated')
 }
 watch(formData, () => {
   if (restoringRecord) return
+  // 计算请求进行中修改依赖参数时，立即废弃在途结果，防止用新表单为旧结果签名。
+  if (isCalculating.value && runningCalculationSignature !== null &&
+      runningCalculationSignature !== calculatedInputSignature()) {
+    invalidate(true)
+    ElMessage.warning('计算过程中约束参数发生改变，本次在途结果已作废；请重新点击“计算约束条件”')
+    return
+  }
   // 对影响约束计算的字段，禁止把旧计算结果随新输入保存。
   if (calculationResults.value && lastCalculatedSignature.value !== calculatedInputSignature()) {
     invalidate(true)
@@ -380,6 +422,8 @@ onMounted(() => {
   void loadHistory()
   if (props.recordId) void openRecord({ id: props.recordId })
   window.addEventListener('grdp:constraints-saved', onOtherConstraintSaved)
+  window.addEventListener('grdp:objective-saved', onObjectiveSaved)
+  syncTargetProductionFromObjective()
 })
 onBeforeUnmount(() => {
   unmounted = true
@@ -387,6 +431,7 @@ onBeforeUnmount(() => {
   ++recordLoadVersion
   ++historyRequestVersion
   window.removeEventListener('grdp:constraints-saved', onOtherConstraintSaved)
+  window.removeEventListener('grdp:objective-saved', onObjectiveSaved)
 })
 
 const productionRange = computed(() => {
@@ -394,12 +439,14 @@ const productionRange = computed(() => {
   if (!results) return null
   const applied = effectiveSelectedConstraints.value
   const selected = selectedKeys.filter(key => applied[key])
-  const missing = selected.filter(key => !results[key]?.available)
-  const unverified = selected.filter(key => results[key]?.available && results[key]?.verified === false)
-  const lower = applied.liquidLoadingLimit && results.liquidLoadingLimit?.available
+  const missing = selected.filter(key => results[key]?.available !== true)
+  const unverified = selected.filter(key => results[key]?.available === true && results[key]?.verified !== true)
+  const lower = applied.liquidLoadingLimit && results.liquidLoadingLimit?.available === true &&
+    results.liquidLoadingLimit?.verified === true
     ? results.liquidLoadingLimit.value : null
   const candidates = ['erosionLimit', 'sandProductionLimit']
-    .filter(key => applied[key] && results[key]?.available && results[key]?.verified)
+    .filter(key => applied[key] &&
+      results[key]?.available === true && results[key]?.verified === true)
     .map(key => optionalNumber(results[key].value))
     .filter(value => value !== null && value >= 0)
   const upper = candidates.length ? Math.min(...candidates) : null
@@ -407,7 +454,7 @@ const productionRange = computed(() => {
   return {
     lower, upper, feasible, missing, unverified,
     complete: applied.sandProductionLimit && applied.liquidLoadingLimit &&
-      missing.length === 0 && unverified.length === 0
+      missing.filter(k => k !== 'erosionLimit').length === 0 && unverified.filter(k => k !== 'erosionLimit').length === 0
   }
 })
 const formatBound = value => value == null || !Number.isFinite(Number(value))
@@ -417,15 +464,16 @@ function publishResults() {
   if (restoringRecord || !calculationResults.value || !calculationMeta.value) return
   const range = productionRange.value
   const cr = calculationResults.value
-  const pressureReady = cr.wellheadExportPressure?.available && cr.wellheadExportPressure?.verified
-  const requiredReady = range.complete && pressureReady
+  const pressureReady = cr.wellheadExportPressure?.available === true &&
+    cr.wellheadExportPressure?.verified === true
+  const requiredReady = calculationMatchesForm() && range.complete && pressureReady
   const applied = effectiveSelectedConstraints.value
   const payload = {
     ...scope(),
     inputs: snapshotFormData(),
     selectedConstraints: { ...applied },
     optionalConstraintsNotApplied: erosionNotApplied.value
-      ? [{ key: 'erosionLimit', label: '冲蚀气量上限',
+      ? [{ key: 'erosionLimit', label: '冲蚀气量',
         reason: calculationResults.value?.erosionLimit?.reason || '未取得已核实结果' }]
       : [],
     constraintResults: clone(cr),
@@ -435,18 +483,20 @@ function publishResults() {
     wellheadExportPressure: clone(cr.wellheadExportPressure),
     // 显式提供四个边界值：三项是计算气量阈值，一项是用户设定的井口压力边界。
     boundaryConditions: {
-      erosionLimit: applied.erosionLimit ? cr.erosionLimit.value : null,
-      sandProductionLimit: cr.sandProductionLimit.verified ? cr.sandProductionLimit.value : null,
-      liquidLoadingLimit: cr.liquidLoadingLimit.verified ? cr.liquidLoadingLimit.value : null,
-      wellheadExportPressure: pressureReady ? cr.wellheadExportPressure.value : null
+      erosionLimit: requiredReady && applied.erosionLimit &&
+        cr.erosionLimit?.available === true && cr.erosionLimit?.verified === true
+        ? cr.erosionLimit.value : null,
+      sandProductionLimit: requiredReady ? cr.sandProductionLimit.value : null,
+      liquidLoadingLimit: requiredReady ? cr.liquidLoadingLimit.value : null,
+      wellheadExportPressure: requiredReady ? cr.wellheadExportPressure.value : null
     },
-    lowerBound: range.lower,
-    upperBound: range.upper,
+    lowerBound: requiredReady ? range.lower : null,
+    upperBound: requiredReady ? range.upper : null,
     complete: Boolean(requiredReady),
     feasible: range.feasible,
     usableForPlan: Boolean(requiredReady && range.feasible),
     pending: [...range.missing, ...range.unverified, ...(pressureReady ? [] : ['wellheadExportPressure'])],
-    outletPressureMpa: cr.wellheadExportPressure.value,
+    outletPressureMpa: requiredReady ? cr.wellheadExportPressure.value : null,
     // 预测曲线只有地层压力，尚不能据此校验实际井口压力是否达到外输要求。
     pressureConstraintPendingCurve: true,
     source: clone(calculationMeta.value)
@@ -498,6 +548,8 @@ function currentInput() {
     rate: asNumber(formData.otherData.productionRate, '产气量', { zero: true }),
     diameterMm: asNumber(formData.pipeData.tubingInnerDiameter, '油管内径'),
     gasGravity: asNumber(formData.gasProperties.dless, '天然气比重'),
+    gasProperties: clone(formData.gasProperties),
+    calcMethod: clone(formData.calcMethod),
     pressureMpa: asNumber(formData.otherData.initialPressure, '原始地层压力'),
     temperatureC: asNumber(formData.otherData.reservoirTemperature, '地层温度', { temperature: true }),
     exportPressure: asNumber(formData.otherData.wellheadExportPressure, '井口外输压力')
@@ -547,13 +599,20 @@ async function calculateErosion(current, old, requests) {
   if (!result || typeof result !== 'object') {
     throw new Error('冲蚀calculate没有返回结果对象')
   }
+  if (result.success === false) throw new Error(result.reason || '冲蚀计算未成功')
   const limit = positive(result.criticalGasRate)
   if (limit === null) throw new Error('本次冲蚀calculate未返回 criticalGasRate')
-  return item('冲蚀气量上限', 'qₑ', limit, {
-    verified: !pvtInputChanged(),
-    source: '本次冲蚀calculate返回的 criticalGasRate',
-    reason: pvtInputChanged() ? '气体组成/物性方法已变更，但后端仍使用旧PVT方案；数值仅供参考，需先同步PVT' : ''
+  const bound = item('冲蚀气量', 'qₑ', limit, {
+    verified: (result.verified == null || result.verified === true) &&
+      (result.pvtVerified == null || result.pvtVerified === true),
+    reason: result.reason || (result.pvtVerified === false ? '冲蚀后端未通过PVT来源校验' : ''),
+    source: '本次冲蚀calculate返回的 criticalGasRate；气/液物性取冲蚀专业所选PVT，不用本页组分覆盖'
   })
+  const usedPvt = parseJson(request.pvtSnapshot)
+  bound.pvtIdUsed = Number(usedPvt?.pvtId ?? pvtId)
+  bound.gasSpecificGravityUsed = optionalNumber(usedPvt?.gasInput?.specificGravity)
+  bound.gasDensityKgM3Used = request.gasDensityKgM3
+  return bound
 }
 async function calculateSand(current, old, requests) {
   if (!old) throw new Error('出砂算法缺少历史支撑剂/裂缝专业参数')
@@ -573,15 +632,18 @@ async function calculateSand(current, old, requests) {
   const result = unwrap(await sandProductionApi.calculate(request))
   const limit = positive(result?.criticalRate1e4M3d)
   if (limit === null) throw new Error('本次出砂calculate未返回 criticalRate1e4M3d')
-  return item('出砂气量上限', 'qₛ', limit, {
-    source: '本次出砂calculate；裂缝和闭合压力取同井已保存专业输入',
-    reason: '原始地层压力不是出砂DTO中的闭合压力，二者不会被自动等同'
+  return item('出砂气量', 'qₛ', limit, {
+    source: '本次出砂calculate；裂缝和闭合压力取同井已保存专业输入'
   })
 }
 
 async function calculateLiquid(current, old, requests) {
-  if (!old) throw new Error('积液算法缺少历史界面张力/PVT专业参数')
+  if (!old) throw new Error('积液算法缺少已保存的日产水量/气液界面张力参数')
   const sigma = old.surfaceTensionMnM ?? old.sigma
+  // 本接口的现有 Java 调度器使用 pvt.first()：读取当前井首条已保存的PVT，
+  // 而不是使用传入的天然气比重或页面组分。pvtId/snapshot留空，
+  // 防止积液专业历史记录选的是第2条PVT时与first()冲突。
+  // 后端以自己读取的PVT执行密度、Z、Bg计算，本页绝不伪造来源快照。
   const request = {
     ...current.scope,
     qg: current.rate,
@@ -592,23 +654,56 @@ async function calculateLiquid(current, old, requests) {
     liquidDensityKgM3: null,
     surfaceTensionMnM: asNumber(sigma, '气液界面张力'),
     tubingIdMm: current.diameterMm,
-    pvtId: old.pvtId ?? null,
-    pvtSnapshot: parseJson(old.pvtSnapshot) ?? null
+    pvtId: null,
+    pvtSnapshot: null
   }
   requests.liquid = clone(request)
-  const result = unwrap(await liquidLoadingApi.calculate(request))
-  const limit = positive(result?.criticalRate1e4M3d ?? result?.qCritical)
-  if (limit === null) throw new Error('本次积液calculate未返回临界携液气量')
-  const historicalGravity = optionalNumber(old.gasSpecificGravity)
-  const pvtDiffers = historicalGravity !== null &&
-    Math.abs(historicalGravity - current.gasGravity) > 1e-5
-  return item('积液气量下限', 'qₘᵢₙ', limit, {
-    verified: !pvtDiffers && !pvtInputChanged(),
-    source: '本次积液calculate；当前P/T由后端更新PVT物性',
-    reason: pvtDiffers || pvtInputChanged()
-      ? '天然气比重、组成或物性方法与原PVT输入未同步；后端以既有PVT来源计算，本次数值仅供参考'
-      : ''
+  const response = unwrap(await liquidLoadingApi.calculate(request))
+  const result = response?.result ?? response
+  if (!result || typeof result !== 'object' || result.success === false) {
+    throw new Error(result?.reason || '积液calculate未返回有效结果')
+  }
+  // 只校验算法真正接收并使用的工况参数；不能要求后端PVT比重
+  // 与本页刚编辑的比重相等，因为其算法并不消费这个覆盖字段。
+  for (const [key, expected] of [
+    ['qg', request.qg],
+    ['pressureMpa', request.pressureMpa],
+    ['temperatureC', request.temperatureC],
+    ['tubingIdMm', request.tubingIdMm]
+  ]) {
+    if (!sameNumber(result[key], expected)) {
+      throw new Error(`积液算法返回的${key}与本次工况不一致，不能保存`)
+    }
+  }
+  const actualGasGravity = positive(result.gasSpecificGravity)
+  const gasDensity = positive(result.gasDensityKgM3)
+  const liquidDensity = positive(result.liquidDensityKgM3)
+  const zRaw = result.zFactor ?? result.gasDeviationFactor ?? result.z
+  const z = optionalNumber(zRaw)
+  if (actualGasGravity === null || gasDensity === null || liquidDensity === null ||
+      liquidDensity <= gasDensity || (zRaw != null && (z === null || z <= 0))) {
+    throw new Error('积液算法返回的PVT气体比重/气液密度/Z因子无效')
+  }
+  if (result.surfaceTensionMnM != null &&
+      !sameNumber(result.surfaceTensionMnM, request.surfaceTensionMnM)) {
+    throw new Error('积液算法返回的界面张力与本次请求不一致')
+  }
+  const limit = positive(result.criticalRate1e4M3d ?? result.qCritical)
+  if (limit === null) throw new Error('积液calculate未返回有效临界携液气量')
+  const differsFromPage = !sameNumber(actualGasGravity, current.gasGravity)
+  const bound = item('积液气量', 'qₘᵢₙ', limit, {
+    verified: (result.verified == null || result.verified === true) &&
+      (result.pvtVerified == null || result.pvtVerified === true),
+    reason: result.reason || (differsFromPage
+      ? `算法PVT比重为${actualGasGravity}，页面输入为${current.gasGravity}；实际按算法PVT计算` : ''),
+    source: '本次积液calculate；气/液密度、Z因子及Bg由后端积液算法自己的首条已保存PVT提供'
   })
+  bound.gasSpecificGravityUsed = actualGasGravity
+  bound.gasDensityKgM3Used = gasDensity
+  bound.liquidDensityKgM3Used = liquidDensity
+  bound.zFactorUsed = z
+  bound.pvtPolicy = 'wellbore-pvt-first-saved'
+  return bound
 }
 
 async function handleCalculateConstraints() {
@@ -618,12 +713,14 @@ async function handleCalculateConstraints() {
     ElMessage.warning(errorText(error)); return
   }
   const version = ++requestVersion
+  // 在发起异步请求之前固化输入，绝不能在API返回后重新给结果签署新输入的签名。
+  const calculationSignature = calculatedInputSignature()
+  runningCalculationSignature = calculationSignature
   isCalculating.value = true
   calculationResults.value = null
   calculationMeta.value = null
   actualAlgorithmRequests.value = null
   lastCalculatedSignature.value = null
-  acceptCurrentPvtAsBaseline()
   // 新一轮计算尚未成功时，禁止方案生成继续沿用旧的四项边界。
   syncConstraintSnapshot(null)
   emit('constraints-invalidated')
@@ -640,9 +737,10 @@ async function handleCalculateConstraints() {
       initial[2].status === 'fulfilled'
         ? calculateLiquid(current, initial[2].value, requests) : Promise.reject(initial[2].reason)
     ])
-    if (unmounted || version !== requestVersion) return
+    if (unmounted || version !== requestVersion ||
+        calculationSignature !== calculatedInputSignature()) return
     const boundNames = [
-      ['冲蚀气量上限', 'qₑ'], ['出砂气量上限', 'qₛ'], ['积液气量下限', 'qₘᵢₙ']
+      ['冲蚀气量', 'qₑ'], ['出砂气量', 'qₛ'], ['积液气量', 'qₘᵢₙ']
     ]
     const bounds = taskResults.map((r, i) => r.status === 'fulfilled'
       ? r.value : failed(...boundNames[i], r.reason))
@@ -665,23 +763,36 @@ async function handleCalculateConstraints() {
       tubingInnerDiameterMm: current.diameterMm,
       tubingBottomMD: current.tubingBottomMD,
       tubingBottomTVD: current.tubingBottomTVD,
-      warning: '气体组分、物性算法必须与同井PVT方案同步；井口外输压力在方案生成阶段校验。'
+      warning: '本次冲蚀/积液采用各自算法服务的PVT来源。本页面输入的组分与物性方法不会自动覆盖算法PVT；井口外输压力在方案生成阶段校验。',
+      liquidPvtPolicy: 'wellbore-pvt-first-saved',
+      erosionPvtPolicy: 'erosion-selected-record-pvt',
+      pageGasPropertiesOverrideAlgorithmPvt: false
     }
-    lastCalculatedSignature.value = calculatedInputSignature()
+    lastCalculatedSignature.value = calculationSignature
     publishResults()
-    acceptCurrentPvtInput()
     const range = productionRange.value
-    if (range.complete && range.feasible) {
-      if (erosionNotApplied.value) {
-        ElMessage.warning('冲蚀未取得有效结果；出砂、积液和外输压力边界已就绪，可以保存。冲蚀不参与气量上限计算。')
-      } else {
-        ElMessage.success('三项气量阈值及井口压力边界已同步到方案生成')
-      }
+    if (!range.complete) {
+      const invalid = [
+        ['出砂气量', bounds[1]],
+        ['积液气量', bounds[2]]
+      ].find(([, item]) => !item?.available || !item?.verified)
+      ElMessage.warning(invalid
+        ? `${invalid[0]}未通过核验：${invalid[1]?.reason || '计算无有效结果'}`
+        : '必需约束尚未完成核验，不能更新方案')
+    } else if (!range.feasible) {
+      ElMessage.warning('积液气量高于有效上限，当前工况不可行，不能保存')
+    } else if (erosionNotApplied.value) {
+      ElMessage.warning('冲蚀未取得有效结果；出砂、积液和外输压力边界已就绪，可以保存。冲蚀不参与气量上限计算。')
+    } else {
+      ElMessage.success('三项气量阈值及井口压力边界已同步到方案生成')
     }
   } catch (error) {
     if (!unmounted && version === requestVersion) ElMessage.error(errorText(error))
   } finally {
-    if (version === requestVersion) isCalculating.value = false
+    if (version === requestVersion) {
+      isCalculating.value = false
+      runningCalculationSignature = null
+    }
   }
 }
 
@@ -772,22 +883,19 @@ async function openRecord(row) {
       calculationResults.value = results ? clone(results) : null
       calculationMeta.value = meta ? clone(meta) : null
       actualAlgorithmRequests.value = requests ? clone(requests) : null
-      lastCalculatedSignature.value = results && meta ? calculatedInputSignature() : null
+      // 不能因为加载了带verified=true的历史JSON，就自动认定旧计算
+      // 对应当前PVT。显示历史数值供比对，但重算之前一律禁止更新。
+      lastCalculatedSignature.value = null
       currentRecordId.value = String(rec.id)
       currentRecordName.value = rec.recordName || row.recordName || `约束条件${rec.id}`
       acceptCurrentPvtAsBaseline()
     } finally {
       restoringRecord = false
     }
-    // 老历史方案如果计算时的参数与记录输入不相同，不能继续把旧值视为已计算。
-    if (calculationResults.value && !calculationMatchesForm()) {
-      invalidate(true)
-      ElMessage.warning('该历史记录中的输入与计算工况不一致，请重新计算后保存')
-    } else if (calculationResults.value) {
+    if (calculationResults.value) {
       publishResults()
-    }
-    historyVisible.value = false
-    ElMessage.success(`已加载方案：${currentRecordName.value}（记录 ${currentRecordId.value}）`)
+    }    historyVisible.value = false
+    ElMessage.success(`已加载方案：${currentRecordName.value}`)
   } catch (error) {
     if (!unmounted && version === recordLoadVersion) {
       ElMessage.error('加载历史记录失败：' + (error?.message || '未知错误'))
@@ -843,7 +951,10 @@ function buildSavePayload() {
   if (!hasTubing(formData.pipeData.wellboreStructure)) {
     throw new Error(`${formData.pipeData.wellboreStructure}没有油管，无法计算约束条件`)
   }
-  if (!calculationResults.value || !calculationMeta.value || !calculationMatchesForm()) {
+  if (!calculationResults.value || !calculationMeta.value) {
+    throw new Error('缺少计算结果，请重新计算约束条件后保存')
+  }
+  if (!calculationMatchesForm()) {
     throw new Error('当前输入已修改，原计算结果不再对应这些数据，请重新计算约束条件后保存')
   }
   if (!canSave.value && !saving.value) {
@@ -852,9 +963,13 @@ function buildSavePayload() {
   const range = productionRange.value
   const cr = calculationResults.value
   const cm = calculationMeta.value
-  if (!range?.feasible || !range.complete ||
-      !cr.sandProductionLimit?.verified || !cr.liquidLoadingLimit?.verified ||
-      !cr.wellheadExportPressure?.verified) {
+  if (!range?.feasible) {
+    throw new Error('约束上下界不可行，不能保存')
+  }
+  if (!range.complete ||
+      cr.sandProductionLimit?.available !== true || cr.sandProductionLimit?.verified !== true ||
+      cr.liquidLoadingLimit?.available !== true || cr.liquidLoadingLimit?.verified !== true ||
+      cr.wellheadExportPressure?.available !== true || cr.wellheadExportPressure?.verified !== true) {
     throw new Error('约束结果未验证或上下界不可行，不能保存')
   }
   const input = snapshotFormData()
@@ -912,6 +1027,61 @@ function buildSavePayload() {
   }
 }
 
+// 更新前重新调用专业算法核对临界值。PVT在计算和保存之间发生变化时，
+// 不能把旧的结果当成新的提交。核验仍以算法成功返回的实际物性为准。
+async function assertAlgorithmFreshBeforeSave(payload) {
+  const requests = payload.algorithmRequestsJson
+  const bounds = payload.constraintResultsJson
+  if (!requests?.sand || !requests?.liquid) {
+    throw new Error('缺少出砂或积液算法请求记录，请先重新计算约束')
+  }
+  const sandResponse = unwrap(await sandProductionApi.calculate(requests.sand))
+  const sand = sandResponse?.result ?? sandResponse
+  if (sand?.success === false || !sameNumber(sand?.criticalRate1e4M3d, bounds.sandProductionLimit?.value)) {
+    throw new Error('出砂算法的最新结果与当前约束不同，请重新计算约束后保存')
+  }
+  const liquidResponse = unwrap(await liquidLoadingApi.calculate(requests.liquid))
+  const liquid = liquidResponse?.result ?? liquidResponse
+  const liquidRate = liquid?.criticalRate1e4M3d ?? liquid?.qCritical
+  if (liquid?.success === false || liquid?.verified === false || liquid?.pvtVerified === false ||
+      !sameNumber(liquidRate, bounds.liquidLoadingLimit?.value) ||
+      !sameNumber(liquid?.gasSpecificGravity, bounds.liquidLoadingLimit?.gasSpecificGravityUsed) ||
+      !sameNumber(liquid?.gasDensityKgM3, bounds.liquidLoadingLimit?.gasDensityKgM3Used) ||
+      !sameNumber(liquid?.liquidDensityKgM3, bounds.liquidLoadingLimit?.liquidDensityKgM3Used) ||
+      (bounds.liquidLoadingLimit?.zFactorUsed != null &&
+        !sameNumber(liquid?.zFactor ?? liquid?.gasDeviationFactor ?? liquid?.z,
+          bounds.liquidLoadingLimit.zFactorUsed))) {
+    throw new Error('积液算法的最新PVT物性或临界气量已变化，请重新计算约束后保存')
+  }
+  if (payload.selectedConstraintsJson?.erosionLimit) {
+    const old = requests.erosion
+    if (!old?.pvtId) throw new Error('冲蚀算法请求缺少PVT来源，请重新计算')
+    const latestResponse = unwrap(await erosionApi.properties({
+      projectId: payload.projectId,
+      gasReservoirId: payload.gasReservoirId,
+      wellName: payload.wellName,
+      pvtId: old.pvtId,
+      pressureMpa: old.pressureMpa,
+      temperatureC: old.temperatureC
+    }))
+    const props = latestResponse?.properties ?? latestResponse
+    const before = parseJson(old.pvtSnapshot)
+    const after = parseJson(props?.pvtSnapshot)
+    if (!before?.inputHash || !after?.inputHash || before.inputHash !== after.inputHash ||
+        !sameNumber(props?.gasDensityKgM3, old.gasDensityKgM3) ||
+        !sameNumber(props?.liquidDensityKgM3, old.liquidDensityKgM3) ||
+        !sameNumber(props?.gasVolumeFactor, old.gasVolumeFactor)) {
+      throw new Error('冲蚀专业PVT物性已更新，请重新计算约束后保存')
+    }
+    const erosionResponse = unwrap(await erosionApi.calculate(old))
+    const erosion = erosionResponse?.result ?? erosionResponse
+    if (erosion?.success === false || erosion?.verified === false || erosion?.pvtVerified === false ||
+        !sameNumber(erosion?.criticalGasRate, bounds.erosionLimit?.value)) {
+      throw new Error('冲蚀算法的最新结果发生变化，请重新计算约束后保存')
+    }
+  }
+}
+
 async function handleSave() {
   if (saving.value) return
   saveFeedbackVisible.value = true
@@ -924,11 +1094,26 @@ async function handleSave() {
     ElMessage.warning(error?.message || '当前约束条件不能保存')
     return
   }
+  // 历史记录JSON可能将布尔值写成字符串/数字；后端严格使用Boolean.TRUE。
+  // PUT/POST前按与Java完全一致的类型要求再次校验，杜绝422才暴露问题。
+  for (const key of ['sandProductionLimit', 'liquidLoadingLimit', 'wellheadExportPressure']) {
+    const item = payload.constraintResultsJson?.[key]
+    if (item?.available !== true || item?.verified !== true) {
+      ElMessage.warning(`${key}的available/verified不是布尔true，请重新计算后更新方案`)
+      return
+    }
+  }
   const idToUpdate = currentRecordId.value
   const capturedScope = scopeKey(scope())
   const capturedSignature = JSON.stringify(payload.inputsJson)
   saving.value = true
   try {
+    await assertAlgorithmFreshBeforeSave(payload)
+    if (unmounted || scopeKey(scope()) !== capturedScope ||
+        !calculationMatchesForm() ||
+        JSON.stringify(payload.inputsJson) !== JSON.stringify(snapshotFormData())) {
+      throw new Error('算法校验期间方案输入已发生变化，请重新计算后更新')
+    }
     const response = idToUpdate
       ? await constraintRecordApi.update(idToUpdate, payload)
       : await constraintRecordApi.save(payload)
@@ -964,7 +1149,19 @@ async function handleSave() {
       ElMessage.success(`${idToUpdate ? '已更新原记录' : '已新建约束方案'}：${currentRecordName.value}${suffix}`)
     }
   } catch (error) {
-    if (!unmounted) ElMessage.error('保存失败：' + (error?.message || '未知错误'))
+    if (!unmounted) {
+      const reason = errorText(error)
+      if (String(reason).includes('liquidLoadingLimit') &&
+          String(reason).includes('尚未验证')) {
+        console.error('[约束条件] 后端拒绝积液验证标志，请核对请求与Java读取字段：', {
+          liquidLoadingLimit: payload.constraintResultsJson?.liquidLoadingLimit,
+          jsonType: typeof payload.constraintResultsJson?.liquidLoadingLimit?.verified,
+          expectedLimit: payload.liquidLoadingLimit,
+          recordId: idToUpdate
+        })
+      }
+      ElMessage.error('保存失败：' + reason)
+    }
   } finally {
     saving.value = false
   }
@@ -1688,5 +1885,24 @@ async function handleSave() {
   border-radius: 50%;
   font-size: 11px;
   font-weight: 700;
+}
+/* 将未经验证的结果直接呈现在计算卡片上，避免被误认作可保存结果。 */
+.pvt-sync-warning {
+  color: #a55312;
+  background: #fff8ed;
+  border-left: 3px solid #d89b42;
+  padding: 8px 12px;
+}
+.result-verification {
+  margin-top: 7px;
+  font-size: 12px;
+}
+.result-status-verified { color: #28724d; }
+.result-status-rejected { color: #bb4d29; }
+.result-verification-reason {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #a55312;
 }
 </style>

@@ -15,11 +15,14 @@ import {
   optionalNumber,
   resolveChartQuery,
   sameScope,
-  scopeKey
+  scopeKey,
+  solutionRecordApi
 } from '@/api/solutionGeneration'
 
 const props = defineProps({
   wellName: { type: String, default: '' },
+  // 点击左侧已保存方案节点时传入其数据库ID，父节点则传null。
+  recordId: { type: [Number, String], default: null },
   projectId: { type: [Number, String], required: true },
   gasReservoirId: { type: [Number, String], required: true },
   constraintsResult: { type: Object, default: null },
@@ -39,7 +42,7 @@ const props = defineProps({
   resultKind: { type: [Number, String], default: 0 }
 })
 
-const emit = defineEmits(['solution-generated'])
+const emit = defineEmits(['solution-generated', 'solution-saved'])
 const params = reactive({ targetProduction: '', exportPressure: '' })
 const edited = reactive({ targetProduction: false, exportPressure: false })
 const selectedConstraintId = ref('')
@@ -63,9 +66,9 @@ async function loadConstraintRecords() {
         props.wellName !== query.wellName) return
     const all = Array.isArray(response?.data) ? response.data : []
     constraintRecords.value = all.filter(record =>
-      String(record.projectId) === query.projectId &&
-      String(record.gasReservoirId) === query.gasReservoirId &&
-      record.wellName === query.wellName)
+      String(record.projectId ?? record.project_id) === query.projectId &&
+      String(record.gasReservoirId ?? record.gas_reservoir_id) === query.gasReservoirId &&
+      String(record.wellName ?? record.well_name) === query.wellName)
   } catch (error) {
     if (destroyed || version !== constraintRecordsVersion) return
     console.warn('[方案生成] 加载约束记录失败', error)
@@ -85,6 +88,14 @@ const pendingTask = ref(null)
 let chartInstance = null
 let runVersion = 0
 let destroyed = false
+const currentSolutionId = ref(null)
+const currentSolutionName = ref('')
+const saving = ref(false)
+const loadingSavedSolution = ref(false)
+const viewingSavedSolution = ref(false)
+const historicalBoundaries = ref(null)
+const historicalInputWarning = ref('')
+let savedDetailVersion = 0
 
 const currentScope = computed(() => ({
   projectId: props.projectId,
@@ -96,24 +107,34 @@ const snapshot = computed(() => {
   if (sameScope(props.constraintsResult, currentScope.value)) return props.constraintsResult
   return sameScope(cachedConstraints.value, currentScope.value) ? cachedConstraints.value : null
 })
+// JdbcTemplate 默认返回 snake_case 列名；同时兼容其他后端返回的 camelCase。
 const dbConstraintOptions = computed(() => constraintRecords.value.map(r => {
-  const parse = (v) => {
-    if (v && typeof v === 'string') { try { return JSON.parse(v) } catch (e) { return v } }
+  const read = (camel, snake) => r[camel] ?? r[snake]
+  const parse = v => {
+    if (typeof v === 'string') {
+      try { return JSON.parse(v) } catch { return null }
+    }
     return v
   }
+  const projectId = read('projectId', 'project_id')
+  const gasReservoirId = read('gasReservoirId', 'gas_reservoir_id')
+  const wellName = read('wellName', 'well_name')
+  const inputs = parse(read('inputsJson', 'inputs_json'))
   return {
-    constraintId: r.id, id: r.id, name: r.recordName,
-    projectId: r.projectId, gasReservoirId: r.gasReservoirId, wellName: r.wellName,
-    inputs: parse(r.inputsJson),
+    constraintId: r.id, id: r.id,
+    name: read('recordName', 'record_name') || `约束条件${r.id}`,
+    projectId, gasReservoirId, wellName, inputs,
     snapshot: {
-      projectId: r.projectId, gasReservoirId: r.gasReservoirId, wellName: r.wellName,
-      inputs: parse(r.inputsJson),
-      selectedConstraints: parse(r.selectedConstraintsJson),
-      constraintResults: parse(r.constraintResultsJson),
-      boundaryConditions: parse(r.boundaryConditionsJson),
-      calculationMeta: parse(r.calculationMetaJson),
-      lowerBound: r.lowerBound, upperBound: r.upperBound,
-      complete: r.complete, feasible: r.feasible, usableForPlan: r.usableForPlan
+      projectId, gasReservoirId, wellName, inputs,
+      selectedConstraints: parse(read('selectedConstraintsJson', 'selected_constraints_json')),
+      constraintResults: parse(read('constraintResultsJson', 'constraint_results_json')),
+      boundaryConditions: parse(read('boundaryConditionsJson', 'boundary_conditions_json')),
+      calculationMeta: parse(read('calculationMetaJson', 'calculation_meta_json')),
+      lowerBound: read('lowerBound', 'lower_bound'),
+      upperBound: read('upperBound', 'upper_bound'),
+      complete: read('complete', 'complete'),
+      feasible: read('feasible', 'feasible'),
+      usableForPlan: read('usableForPlan', 'usable_for_plan')
     }
   }
 }))
@@ -128,9 +149,9 @@ const selectedInputs = computed(() => selectedRecord.value?.inputs ?? null)
 
 // 四项约束必须来源于“当前选中”的方案，而不是其它方案的全局 props。
 const boundaryItems = [
-  { key: 'erosionLimit', label: '冲蚀气量上限' },
-  { key: 'sandProductionLimit', label: '出砂气量上限' },
-  { key: 'liquidLoadingLimit', label: '积液气量下限' },
+  { key: 'erosionLimit', label: '冲蚀气量' },
+  { key: 'sandProductionLimit', label: '出砂气量' },
+  { key: 'liquidLoadingLimit', label: '积液气量' },
   { key: 'wellheadExportPressure', label: '井口外输压力' }
 ]
 const hasBoundaryField = data => data && typeof data === 'object' &&
@@ -173,6 +194,8 @@ const selectedBoundarySource = computed(() => {
 })
 
 const activeBoundaries = computed(() => {
+  // 展示历史曲线时只使用保存当时的边界，不用当前约束覆盖历史结果。
+  if (viewingSavedSolution.value) return historicalBoundaries.value
   if (!selectedRecord.value) return null
   const { record, body } = selectedBoundarySource.value || {}
   const flags = record?.selectedConstraints ||
@@ -202,7 +225,7 @@ const activeBoundaries = computed(() => {
   const hasErosion = erosion !== null
   // 必填项：出砂、积液、压力；冲蚀为可选项
   const requiredKeys = ['sandProductionLimit', 'liquidLoadingLimit', 'wellheadExportPressure']
-  const requiredLabels = ['出砂气量上限', '积液气量下限', '井口外输压力']
+  const requiredLabels = ['出砂气量', '积液气量', '井口外输压力']
   const requiredValues = [sand, liquid, pressure]
   const missing = requiredValues
     .map((v, i) => v === null ? requiredLabels[i] : null)
@@ -302,15 +325,15 @@ function autofill() {
   }
 }
 function syncConstraintSelection() {
+  // 避免数据库的约束列表稍晚返回后，自动填表/重置将历史曲线清空。
+  if (viewingSavedSolution.value || loadingSavedSolution.value) return
   if (selectedConstraintId.value && !constraints.value.some(option => option.id === selectedConstraintId.value)) {
     selectedConstraintId.value = ''
     // 约束记录被删除或不再属于当前井时，不能擅自切换到另一条。
     userChoseConstraint.value = true
     resetOutput()
   }
-  if (!userChoseConstraint.value && !selectedConstraintId.value && constraints.value.length) {
-    selectedConstraintId.value = constraints.value[0].id
-  }
+  // 父节点不自动选择第一条记录，由用户明确选择用于本次生成的约束方案。
   autofill()
 }
 function loadSessionConstraint() {
@@ -327,9 +350,12 @@ function loadSessionConstraint() {
 function onConstraintUpdated(event) {
   if (event?.detail?.scopeKey && event.detail.scopeKey !== currentKey.value) return
   loadSessionConstraint()
-  resetOutput()
+  if (!viewingSavedSolution.value && !loadingSavedSolution.value) resetOutput()
 }
 function onConstraintChange() {
+  viewingSavedSolution.value = false
+  historicalBoundaries.value = null
+  historicalInputWarning.value = ''
   userChoseConstraint.value = true
   edited.targetProduction = false
   edited.exportPressure = false
@@ -337,16 +363,21 @@ function onConstraintChange() {
   resetOutput()
 }
 function onEdit(field) {
+  // 修改历史输入时清空旧曲线，防止把旧计算结果误认为新参数算出的结果。
+  viewingSavedSolution.value = false
+  historicalBoundaries.value = null
+  historicalInputWarning.value = ''
   edited[field] = true
   resetOutput()
 }
-
 watch(constraints, syncConstraintSelection, { immediate: true })
 watch(() => JSON.stringify(selectedInputs.value ?? null), () => {
+  if (viewingSavedSolution.value || loadingSavedSolution.value) return
   autofill()
   resetOutput()
 })
 watch(() => JSON.stringify(activeBoundaries.value ?? null), () => {
+  if (viewingSavedSolution.value || loadingSavedSolution.value) return
   autofill()
   // 后台计算期间若约束结果被更新，禁止把旧请求曲线误标为新边界结果。
   if (busy.value) {
@@ -357,6 +388,13 @@ watch(() => JSON.stringify(activeBoundaries.value ?? null), () => {
   resetOutput()
 })
 watch(() => [props.projectId, props.gasReservoirId, props.wellName], () => {
+  ++savedDetailVersion
+  loadingSavedSolution.value = false
+  viewingSavedSolution.value = false
+  historicalBoundaries.value = null
+  historicalInputWarning.value = ''
+  currentSolutionId.value = null
+  currentSolutionName.value = ''
   runVersion += 1
   pendingTask.value = null
   cachedConstraints.value = null
@@ -373,7 +411,30 @@ watch(() => [props.projectId, props.gasReservoirId, props.wellName], () => {
   loadSessionConstraint()
   void loadConstraintRecords()
   chartInstance?.clear()
+  if (props.recordId != null && String(props.recordId).trim() !== '') {
+    void openSavedSolution(props.recordId)
+  }
 })
+watch(() => props.recordId, id => {
+  if (id != null && String(id).trim() !== '') {
+    void openSavedSolution(id)
+  } else {
+    ++savedDetailVersion
+    loadingSavedSolution.value = false
+    viewingSavedSolution.value = false
+    historicalBoundaries.value = null
+    historicalInputWarning.value = ''
+    currentSolutionId.value = null
+    currentSolutionName.value = ''
+    result.value = null
+    chartInstance?.clear()
+  }
+})
+// 历史详情加载时，包含 v-if='result' 的图表DOM可能在异步挂载。
+// 等 chartRef 真正可用再绘图，避免按钮/表单恢复但曲线始终空白。
+watch(chartRef, node => {
+  if (node && result.value) void nextTick().then(showChart)
+}, { flush: 'post' })
 
 function resizeChart() { chartInstance?.resize() }
 function showChart() {
@@ -411,15 +472,22 @@ function showChart() {
     makeBoundaryLine(boundary.sand, '出砂上限', '#a26ad1', 'insideStartTop'),
     makeBoundaryLine(boundary.liquid, '积液下限', '#269c71', 'insideEndBottom')
   ] : []
-  // 压力在不同测点：井口外输压力只作参考线，绝不拿它截断地层压力。
   const pressureLines = boundary ? [
-    makeBoundaryLine(boundary.pressure, '井口外输压力(参考)', '#3c86d3', 'insideEndBottom')
+    makeBoundaryLine(boundary.pressure, '井口外输压力', '#3c86d3', 'insideEndBottom')
   ] : []
 
   const violatingPoints = boundary
     ? points.flatMap(point => {
       const problems = gasBoundaryProblems(point.gas, boundary)
       return problems.length ? [[point.date, Number(point.gas), problems.join('、')]] : []
+    })
+    : []
+      const pressureViolatingPoints = boundary
+    ? points.flatMap(point => {
+      if (point.formation !== null && point.formation < boundary.pressure) {
+        return [[point.date, Number(point.formation), '低于井口外输压力']]
+      }
+      return []
     })
     : []
   const gasData = points.map(point => [point.date, point.gas])
@@ -451,7 +519,12 @@ function showChart() {
       name: names[2], type: 'line', yAxisIndex: 1,
       showSymbol: false, connectNulls: false, animation: false,
       itemStyle: { color: colors[2] }, lineStyle: { color: colors[2], width: 2.3 },
-      data: points.map(point => [point.date, point.formation]),
+      data: points.map(point => {
+        if (boundary && point.formation !== null && point.formation < boundary.pressure) {
+          return [point.date, null]
+        }
+        return [point.date, point.formation]
+      }),
       ...(pressureLines.length ? {
         markLine: { silent: true, symbol: 'none', data: pressureLines }
       } : {})
@@ -465,7 +538,17 @@ function showChart() {
       data: violatingPoints
     })
   }
-  const legendNames = violatingPoints.length ? [...names, '气量越界点'] : names
+    if (pressureViolatingPoints.length) {
+    series.push({
+      name: '压力越界点', type: 'scatter', yAxisIndex: 1, z: 12,
+      symbolSize: 9, animation: false,
+      itemStyle: { color: '#d63f3f', borderColor: '#fff', borderWidth: 1 },
+      data: pressureViolatingPoints
+    })
+  }
+  let legendNames = [...names]
+  if (violatingPoints.length) legendNames.push('气量越界点')
+  if (pressureViolatingPoints.length) legendNames.push('压力越界点')
 
   chartInstance.setOption({
     title: {
@@ -480,8 +563,8 @@ function showChart() {
       formatter: items => {
         const date = escapeHtml(items?.[0]?.data?.[0] ?? '')
         return `<strong>${date}</strong>` + (items || []).map(item => {
-          if (item.seriesName === '气量越界点') {
-            return `<div style="color:#d63f3f">⚠ ${escapeHtml(item.data?.[2] || '气量越界')}</div>`
+          if (item.seriesName === '气量越界点' || item.seriesName === '压力越界点') {
+            return `<div style="color:#d63f3f">⚠ ${escapeHtml(item.data?.[2] || '越界')}</div>`
           }
           return `<div>${item.marker} ${escapeHtml(item.seriesName)}：` +
             `${renderNumber(item.data?.[1])} ${units[item.seriesName] || ''}</div>`
@@ -516,8 +599,19 @@ function showChart() {
 }
 
 async function generateSolution() {
-  if (busy.value) return
+  if (busy.value || saving.value || loadingSavedSolution.value) return
+  if (!selectedConstraintId.value) {
+    ElMessage.warning('请先选择约束条件，再点击“生成方案”')
+    return
+  }
+  if (!selectedRecord.value) {
+    ElMessage.warning('选中的约束条件未加载完成或已删除，请重新选择')
+    return
+  }
   const version = ++runVersion
+  viewingSavedSolution.value = false
+  historicalBoundaries.value = null
+  historicalInputWarning.value = ''
   busy.value = true
   result.value = null
   errorText.value = ''
@@ -525,6 +619,9 @@ async function generateSolution() {
   chartInstance?.clear()
   try {
     if (!String(props.wellName || '').trim()) throw new Error('请先选择一口井')
+    if (selectedConstraintId.value && !selectedRecord.value) {
+      throw new Error('选中的关联约束记录未加载或已删除，请重新选择约束条件')
+    }
     // 只对选中的约束记录检查结构，不能把未选择约束时的动态预测一并禁用。
     const inputs = selectedInputs.value ? cloneJson(selectedInputs.value) : null
     const selectedStructure = inputs?.pipeData?.wellboreStructure || ''
@@ -547,12 +644,12 @@ async function generateSolution() {
       upper: boundary.upper
     }) : null
     const target = numeric(params.targetProduction, '单井目标产量', { min: 0, allowZero: false })
-    if (appliedBoundaries &&
-      (target < appliedBoundaries.lower - tolerance(appliedBoundaries.lower) ||
-        target > appliedBoundaries.upper + tolerance(appliedBoundaries.upper))) {
-      throw new Error(`单井目标产量 ${renderNumber(target)} 超出约束区间 ` +
-        `[${renderNumber(appliedBoundaries.lower)}, ${renderNumber(appliedBoundaries.upper)}] 10⁴m³/d`)
-    }
+    // if (appliedBoundaries &&
+    //   (target < appliedBoundaries.lower - tolerance(appliedBoundaries.lower) ||
+    //     target > appliedBoundaries.upper + tolerance(appliedBoundaries.upper))) {
+    //   throw new Error(`单井目标产量 ${renderNumber(target)} 超出约束区间 ` +
+    //     `[${renderNumber(appliedBoundaries.lower)}, ${renderNumber(appliedBoundaries.upper)}] 10⁴m³/d`)
+    // }
     const pressure = appliedBoundaries
       ? (edited.exportPressure ? numeric(params.exportPressure, '井口外输压力', { min: 0, allowZero: false }) : appliedBoundaries.pressure)
       : numeric(params.exportPressure, '井口外输压力', { min: 0, allowZero: false })
@@ -742,14 +839,271 @@ async function generateSolution() {
   }
 }
 
+// ---------- 历史方案：复用本组件原有的参数栏和 ECharts 绘图区 ----------
+function solutionField(row, camel, snake) {
+  return row?.[camel] ?? row?.[snake] ?? null
+}
+function parseStoredJson(value, label, required = false) {
+  if (value == null || value === '') {
+    if (required) throw new Error(`数据库没有保存${label}`)
+    return null
+  }
+  let result = value
+  // 兼容 LONGTEXT/JSON、以及旧代码多包了一层JSON字符串的历史行。
+  for (let attempt = 0; attempt < 2 && typeof result === 'string'; attempt++) {
+    try { result = JSON.parse(result) }
+    catch { throw new Error(`${label}不是合法 JSON`) }
+  }
+  if (!result || typeof result !== 'object' || Array.isArray(result)) {
+    if (required) throw new Error(`${label}数据结构无效`)
+    return null
+  }
+  return result
+}
+function savedBoundarySnapshot(value) {
+  if (!value || typeof value !== 'object') return null
+  const number = key => optionalNumber(value[key])
+  const sand = number('sand')
+  const liquid = number('liquid')
+  const pressure = number('pressure')
+  const erosion = number('erosion')
+  const lower = number('lower') ?? liquid
+  const upper = number('upper') ??
+    (sand !== null ? (erosion === null ? sand : Math.min(sand, erosion)) : null)
+  if (sand === null || liquid === null || pressure === null ||
+      lower === null || upper === null) return null
+  return {
+    sand, liquid, pressure, erosion, lower, upper,
+    hasErosion: erosion !== null,
+    missing: [],
+    feasible: lower <= upper,
+    usable: lower <= upper
+  }
+}
+function storedNumber(value, name) {
+  const parsed = optionalNumber(value)
+  if (parsed === null) throw new Error(`历史方案没有保存有效的${name}`)
+  return parsed
+}
+async function openSavedSolution(recordId) {
+  const id = String(recordId ?? '').trim()
+  const version = ++savedDetailVersion
+  const expectedScope = currentKey.value
+  loadingSavedSolution.value = true
+  viewingSavedSolution.value = true
+  historicalBoundaries.value = null
+  historicalInputWarning.value = ''
+  errorText.value = ''
+  statusText.value = `正在读取数据库保存的方案 #${id}…`
+  currentSolutionId.value = null
+  currentSolutionName.value = ''
+  result.value = null
+  chartInstance?.clear()
+
+  try {
+    if (!/^[1-9]\d*$/.test(id)) throw new Error('历史方案记录ID无效')
+    const response = await solutionRecordApi.detail(id)
+    if (destroyed || version !== savedDetailVersion ||
+        expectedScope !== currentKey.value) return
+    const record = response?.data ?? response
+    if (!record || String(record.id) !== id) {
+      throw new Error('接口返回的数据库记录ID与当前选中的方案不一致')
+    }
+    const ownerProject = solutionField(record, 'projectId', 'project_id')
+    const ownerReservoir = solutionField(record, 'gasReservoirId', 'gas_reservoir_id')
+    const ownerWell = solutionField(record, 'wellName', 'well_name')
+    if (String(ownerProject) !== String(props.projectId) ||
+        String(ownerReservoir) !== String(props.gasReservoirId) ||
+        String(ownerWell).trim() !== String(props.wellName).trim()) {
+      throw new Error('该历史方案不属于当前项目、气藏或井，已拒绝读取')
+    }
+
+    // SQL 独立字段是保存时的输入，不能用当前页面默认输入或当前约束条件覆盖。
+    const target = storedNumber(
+      solutionField(record, 'targetProduction', 'target_production'), '目标产量')
+    const pressure = storedNumber(
+      solutionField(record, 'exportPressure', 'export_pressure'), '井口外输压力')
+    const linkedConstraint = solutionField(
+      record, 'constraintRecordId', 'constraint_record_id')
+    const request = parseStoredJson(
+      solutionField(record, 'sourceRequestJson', 'source_request_json'), 'Calc请求快照')
+    const chart = parseStoredJson(
+      solutionField(record, 'chartDataJson', 'chart_data_json'), '历史曲线数据', true)
+    const report = parseStoredJson(
+      solutionField(record, 'boundaryReportJson', 'boundary_report_json'),
+      '历史边界报告')
+    if (!Array.isArray(chart.points) || chart.points.length === 0) {
+      throw new Error('此方案的 chart_data_json.points 为空，数据库没有可展示的预测曲线')
+    }
+
+    // 仍在原来的“方案生成”组件内，填入同一次历史记录的全部保存值。
+    currentSolutionId.value = id
+    currentSolutionName.value = String(
+      solutionField(record, 'recordName', 'record_name') || `方案${id}`)
+    params.targetProduction = String(target)
+    params.exportPressure = String(pressure)
+    edited.targetProduction = true
+    edited.exportPressure = true
+    selectedConstraintId.value = linkedConstraint == null || linkedConstraint === ''
+      ? '' : `saved:${String(linkedConstraint)}`
+    userChoseConstraint.value = true
+    pendingTask.value = null
+
+    const boundaries = savedBoundarySnapshot(chart.appliedBoundaries)
+    historicalBoundaries.value = boundaries
+    const warnings = []
+    if (request) {
+      const requestedTarget = optionalNumber(request?.reservoirInput?.targetProduction)
+      const requestedPressure =
+        optionalNumber(request?.reservoirInput?.externalWellheadPressure)
+      if (requestedTarget !== null && Math.abs(requestedTarget - target) > tolerance(target)) {
+        warnings.push(`目标产量：数据库为 ${target}，当时的Calc请求为 ${requestedTarget}`)
+      }
+      if (requestedPressure !== null &&
+          Math.abs(requestedPressure - pressure) > tolerance(pressure)) {
+        warnings.push(`外输压力：数据库为 ${pressure}，当时的Calc请求为 ${requestedPressure}`)
+      }
+      if (request.wellName != null &&
+          String(request.wellName).trim() !== String(props.wellName).trim()) {
+        warnings.push('保存的Calc请求井名与数据库记录井名不一致，请核对原数据')
+      }
+    }
+    historicalInputWarning.value = warnings.join('；')
+    result.value = {
+      ...cloneJson(chart),
+      points: cloneJson(chart.points),
+      sourceRequest: request ? cloneJson(request) : null,
+      boundaryReport: report ? cloneJson(report) : null,
+      appliedBoundaries: boundaries ? cloneJson(boundaries) : null,
+      chartWellName: chart.chartWellName || request?.chartWellName || '',
+      constraintId: selectedConstraintId.value || null
+    }
+
+    statusText.value =
+      `已加载历史方案：${currentSolutionName.value}（数据库ID ${id}，${chart.points.length} 个预测时点）`
+    if (!boundaries) {
+      statusText.value += '；该历史记录未保存边界快照，图上不使用后来修改的约束值'
+    }
+    await nextTick()
+    if (destroyed || version !== savedDetailVersion ||
+        expectedScope !== currentKey.value) return
+    // 若DOM还未挂载，前面的 watch(chartRef) 会在出现时自动调用 showChart。
+    if (chartRef.value) showChart()
+    console.info('[方案生成] 已在原页面恢复数据库历史方案', {
+      id, wellName: props.wellName, points: chart.points.length
+    })
+  } catch (error) {
+    if (!destroyed && version === savedDetailVersion &&
+        expectedScope === currentKey.value) {
+      currentSolutionId.value = null
+      currentSolutionName.value = ''
+      result.value = null
+      chartInstance?.clear()
+      errorText.value = `读取已保存方案 #${id} 失败：${error?.message || '未知错误'}`
+      statusText.value = ''
+      console.warn('[方案生成] 数据库历史加载失败', error)
+      ElMessage.error(errorText.value)
+    }
+  } finally {
+    if (version === savedDetailVersion) loadingSavedSolution.value = false
+  }
+}
+
+async function saveSolution() {
+  if (saving.value || loadingSavedSolution.value || busy.value) return
+  if (!result.value || !Array.isArray(result.value.points) || !result.value.points.length) {
+    ElMessage.warning('请先选择约束条件并点击“生成方案”，得到预测结果后再保存')
+    return
+  }
+  const editingId = currentSolutionId.value
+  const savedScope = currentKey.value
+  saving.value = true
+  try {
+    const request = result.value.sourceRequest
+    if (!request || String(request.projectId) !== String(props.projectId) ||
+        String(request.gasReservoirId) !== String(props.gasReservoirId)) {
+      throw new Error('本次预测缺少对应项目/气藏的Calc计算请求，请重新生成方案后保存')
+    }
+    const chosen = String(selectedConstraintId.value || '')
+    const constraintRecordId = /^saved:[1-9]\d*$/.test(chosen)
+      ? Number(chosen.slice('saved:'.length)) : null
+    if (constraintRecordId !== null && !Number.isSafeInteger(constraintRecordId)) {
+      throw new Error('关联约束方案ID无效')
+    }
+    const payload = {
+      projectId: Number(props.projectId),
+      gasReservoirId: Number(props.gasReservoirId),
+      wellName: props.wellName,
+      recordName: currentSolutionName.value || null,
+      targetProduction: numeric(params.targetProduction, '目标产量', { min: 0, allowZero: true }),
+      exportPressure: numeric(params.exportPressure, '井口外输压力', { min: 0, allowZero: true }),
+      constraintRecordId,
+      sourceRequestJson: JSON.stringify(request),
+      chartDataJson: JSON.stringify({
+        points: result.value.points,
+        freshChartConfirmed: result.value.freshChartConfirmed,
+        calcReturnedError: result.value.calcReturnedError,
+        calcHttpStatus: result.value.calcHttpStatus,
+        // 历史方案必须固定使用当时计算的曲线和边界，不从最新表单重新计算。
+        appliedBoundaries: result.value.appliedBoundaries ?? null,
+        chartWellName: result.value.chartWellName || null,
+        dynamicPredictionId: request.dynamicPredictionId ?? null
+      }),
+      boundaryReportJson: JSON.stringify(result.value.boundaryReport ?? null)
+    }
+    const response = editingId
+      ? await solutionRecordApi.update(editingId, payload)
+      : await solutionRecordApi.save(payload)
+    const saved = response?.data ?? response
+    const id = String(saved?.id ?? '')
+    if (!/^[1-9]\d*$/.test(id) || (editingId && id !== String(editingId))) {
+      throw new Error('服务器未返回正确的数据库记录ID，不能确认保存结果')
+    }
+    const ownerWell = solutionField(saved, 'wellName', 'well_name')
+    const ownerProject = solutionField(saved, 'projectId', 'project_id')
+    const ownerReservoir = solutionField(saved, 'gasReservoirId', 'gas_reservoir_id')
+    if (String(ownerWell).trim() !== String(props.wellName).trim() ||
+        String(ownerProject) !== String(props.projectId) ||
+        String(ownerReservoir) !== String(props.gasReservoirId)) {
+      throw new Error('服务器返回的方案所属项目、气藏或井与页面不一致')
+    }
+    if (destroyed || savedScope !== currentKey.value) return
+
+    currentSolutionId.value = id
+    currentSolutionName.value = String(
+      solutionField(saved, 'recordName', 'record_name') ||
+      currentSolutionName.value || `方案${id}`)
+    const detail = {
+      scopeKey: savedScope,
+      projectId: Number(props.projectId),
+      gasReservoirId: Number(props.gasReservoirId),
+      wellName: props.wellName,
+      id,
+      recordName: currentSolutionName.value,
+      action: editingId ? 'updated' : 'created'
+    }
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('grdp:solution-saved', { detail }))
+    }
+    emit('solution-saved', { ...detail, result: result.value })
+    ElMessage.success(editingId
+      ? `已更新原方案：${currentSolutionName.value}`
+      : `已保存新方案：${currentSolutionName.value}（记录ID ${id}）`)
+  } catch (error) {
+    if (!destroyed) ElMessage.error('方案保存失败：' + (error?.message || '未知错误'))
+  } finally {
+    saving.value = false
+  }
+}
+
 onMounted(() => {
   loadSessionConstraint()
-  loadConstraintRecords()
-  if (props.savedResult?.sourceRequest?.wellName === props.wellName &&
-    Array.isArray(props.savedResult?.points)) {
-    result.value = props.savedResult
-    nextTick().then(showChart)
+  void loadConstraintRecords()
+  if (props.recordId != null && String(props.recordId).trim() !== '') {
+    // 仅点击左侧“方案1/方案2”才允许直接展示数据库历史曲线。
+    void openSavedSolution(props.recordId)
   }
+  // “方案生成”父节点不加载任何上次计算结果：须先选约束、再点击生成。
   window.addEventListener('grdp:constraints-updated', onConstraintUpdated)
   window.addEventListener('grdp:constraints-saved', onConstraintRecordsUpdated)
   window.addEventListener('focus', loadSessionConstraint)
@@ -757,6 +1111,7 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   destroyed = true
+  ++savedDetailVersion
   runVersion += 1
   window.removeEventListener('grdp:constraints-updated', onConstraintUpdated)
   ++constraintRecordsVersion
@@ -776,24 +1131,29 @@ onBeforeUnmount(() => {
         <label class="field">
           <span>单井目标产量 <small>(万m³/d)</small></span>
           <input v-model="params.targetProduction" type="number" min="0" step="any" placeholder="请输入目标产量"
-            :disabled="busy" @input="onEdit('targetProduction')">
+            :disabled="busy || loadingSavedSolution" @input="onEdit('targetProduction')">
         </label>
         <label class="field">
           <span>井口外输压力 <small>(MPa)</small></span>
-          <input v-model="params.exportPressure" type="number" min="0" step="any" placeholder="请输入外输压力" :disabled="busy"
-            @input="onEdit('exportPressure')">
+          <input v-model="params.exportPressure" type="number" min="0" step="any" placeholder="请输入外输压力"
+            :disabled="busy || loadingSavedSolution" @input="onEdit('exportPressure')">
         </label>
         <label class="field">
           <span>约束条件</span>
-          <select v-model="selectedConstraintId" :disabled="busy" @change="onConstraintChange">
-            <option value="">不选择（使用当前井原平台参数）</option>
+          <select v-model="selectedConstraintId" :disabled="busy || loadingSavedSolution" @change="onConstraintChange">
+            <option value="">请选择约束条件</option>
+            <option v-if="viewingSavedSolution && selectedConstraintId &&
+                !constraints.some(item => item.id === selectedConstraintId)"
+              :value="selectedConstraintId">
+              历史关联约束 {{ selectedConstraintId.replace('saved:', '#') }}（已删除或尚未加载）
+            </option>
             <option v-for="option in constraints" :key="option.id" :value="option.id">
               {{ option.label }}
             </option>
           </select>
         </label>
-        <p v-if="!constraints.length" class="sg-hint">暂无已保存的约束方案，可先填写两个参数直接生成。</p>
-        <div v-if="selectedRecord && activeBoundaries" class="sg-boundary-panel">
+        <p v-if="!constraints.length && !loadingSavedSolution" class="sg-hint">暂无已保存的约束方案，请先在“约束条件”页面计算并保存，再回来选择方案。</p>
+        <div v-if="(selectedRecord || viewingSavedSolution) && activeBoundaries" class="sg-boundary-panel">
           <div class="sg-boundary-title">本方案边界条件</div>
           <div class="sg-boundary-row">
             <span>冲蚀上限</span><strong>{{ renderNumber(activeBoundaries.erosion) }} <small>10⁴m³/d</small></strong>
@@ -815,12 +1175,31 @@ onBeforeUnmount(() => {
           <p v-else class="sg-boundary-error">{{ boundaryError }}</p>
         </div>
         <div class="form-actions">
-          <button class="calculate-button" type="button" :disabled="busy" @click="generateSolution">
-            {{ busy ? '正在生成…' : '生成方案' }}
+          <button class="calculate-button" type="button"
+            :disabled="busy || saving || loadingSavedSolution"
+            @click="generateSolution">
+            {{ busy ? '生成中…' : '生成方案' }}
+          </button>
+          <button class="calculate-button" type="button"
+            :disabled="busy || saving || loadingSavedSolution"
+            @click="saveSolution">
+            {{ saving ? '保存中…' : '保存' }}
           </button>
         </div>
+        <p v-if="loadingSavedSolution" class="sg-status" role="status">
+          正在加载已保存的方案和预测曲线…
+        </p>
+        <p v-if="currentSolutionId" class="sg-status sg-record-state">
+          {{ viewingSavedSolution ? '已加载' : '当前' }}：{{ currentSolutionName }}
+          （记录ID {{ currentSolutionId }}）
+        </p>
+        <p v-if="historicalInputWarning" class="sg-error" role="alert">
+          历史数据提醒：{{ historicalInputWarning }}
+        </p>
         <p v-if="errorText" class="sg-error" role="alert">{{ errorText }}</p>
-        <p v-if="statusText" class="sg-status">{{ statusText }}</p>
+        <p v-if="statusText && (!viewingSavedSolution || !currentSolutionId)" class="sg-status">
+          {{ statusText }}
+        </p>
       </div>
     </aside>
     <main class="sg-chart-area">
@@ -963,10 +1342,22 @@ onBeforeUnmount(() => {
 }
 
 .form-actions {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 10px;
   margin-top: 4px;
+  width: 100%;
+}
+.form-actions > button {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 0 6px;
+  white-space: nowrap;
+  text-align: center;
+}
+.sg-record-state {
+  overflow-wrap: anywhere;
 }
 
 .calculate-button {

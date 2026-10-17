@@ -42,6 +42,7 @@ import NodalAnalysis from '@/views/ProductionAllocation/NodalAnalysis.vue'
 import MultiPeriodObjectiveFunction from '@/views/ProductionAllocation/MultiPeriodPrediction/ObjectiveFunction.vue'
 import MultiPeriodConstraintConditions from '@/views/ProductionAllocation/MultiPeriodPrediction/ConstraintConditions.vue'
 import MultiPeriodSolutionGeneration from '@/views/ProductionAllocation/MultiPeriodPrediction/SolutionGeneration.vue'
+import MultiPeriodSolutionComparison from '@/views/ProductionAllocation/MultiPeriodPrediction/SolutionComparison.vue'
 import InjectionProductionFitting from '@/views/ProductionAllocation/InjectionProductionFitting.vue'
 import {
   resolveCalcContextFromConstraints,
@@ -49,7 +50,7 @@ import {
   loadVerifiedPredictionTasks,
   selectPredictionTask
 } from '@/api/solutionGeneration'
-import { constraintRecordApi, dynamicPredictionApi } from '@/api/solutionGeneration'
+import { constraintRecordApi, dynamicPredictionApi, solutionRecordApi } from '@/api/solutionGeneration'
 import { ensureNodalNavigation, nodalCommandTarget, NODAL_TYPE, NODAL_RECORD, applyNodalRecords, upsertNodalRecord, loadNodalRecords, deleteNodalRecord } from '@/utils/nodalNavigation'
 import { nodalApi } from '@/api/nodal'
 import ErosionContent from '@/views/WellboreCapacity/ErosionContent.vue'
@@ -672,6 +673,244 @@ async function handleConstraintsSaved(event) {
   treeData.value = [...treeData.value]
 }
 
+
+// ===== 方案生成保存后，左侧树"方案生成"下增加子节点 =====
+// JdbcTemplate 的 Map 默认使用下划线键名，因此同时识别驼峰和下划线。
+// 方案数据库ID不同于原平台 dynamicPredictionId，必须分开保存。
+let solutionRecordOpenVersion = 0
+let solutionTreeSyncVersion = 0
+let lastSolutionTreeSyncError = ''
+// 每次保存、项目树重建和数据库查询都会重新校验版本。
+// 防止刷新时较早的 GET 返回，覆盖较晚保存的子节点。
+const pendingSavedSolutionNodes = new Map()
+const pendingRemovedSolutionIds = new Map()
+
+function solutionWellMap(collection, wellName) {
+  const key = String(wellName || '').trim()
+  if (!collection.has(key)) collection.set(key, new Map())
+  return collection.get(key)
+}
+function pendingSolutionNodes(wellName) {
+  return solutionWellMap(pendingSavedSolutionNodes, wellName)
+}
+function pendingDeletedSolutionNodes(wellName) {
+  return solutionWellMap(pendingRemovedSolutionIds, wellName)
+}
+function solutionRecordField(record, camel, snake) {
+  return record?.[camel] ?? record?.[snake] ?? null
+}
+function normalizeSolutionTreeRecord(record, wellName) {
+  if (!record || typeof record !== 'object') return null
+  const recordId = String(record.id ?? record.recordId ?? '').trim()
+  if (!/^[1-9]\d*$/.test(recordId)) return null
+  const projectId = solutionRecordField(record, 'projectId', 'project_id')
+  const gasReservoirId = solutionRecordField(record, 'gasReservoirId', 'gas_reservoir_id')
+  const ownerWell = solutionRecordField(record, 'wellName', 'well_name')
+  if (projectId == null || gasReservoirId == null ||
+      String(projectId) !== String(PROJECT_ID) ||
+      String(gasReservoirId) !== String(GAS_RESERVOIR_ID)) return null
+  if (!ownerWell || String(ownerWell).trim() !== String(wellName || '').trim()) return null
+  const name = String(solutionRecordField(record, 'recordName', 'record_name') ||
+    `方案${recordId}`).trim()
+  return {
+    id: `solution-record-${recordId}`,
+    type: 'multi-period-solution-record',
+    label: name || `方案${recordId}`,
+    wellName: String(wellName).trim(),
+    recordId
+  }
+}
+
+// 树节点在重新登录/切换项目后会被重新构造，因此每次都必须从最新树里查找父节点。
+function findMultiPeriodGenerationPath(wellName) {
+  const target = String(wellName || '').trim()
+  if (!target) return []
+  function visit(node, inheritedWell = '', parents = []) {
+    if (!node) return null
+    const owner = String(node.wellName || inheritedWell || '').trim()
+    const path = [...parents, node]
+    if (node.type === 'multi-period-generation' && owner === target) return path
+    for (const child of node.children || []) {
+      const result = visit(child, owner, path)
+      if (result) return result
+    }
+    return null
+  }
+  for (const root of treeData.value || []) {
+    const path = visit(root)
+    if (path) return path
+  }
+  return []
+}
+function findMultiPeriodGenerationNode(wellName) {
+  return findMultiPeriodGenerationPath(wellName).at(-1) || null
+}
+function ensureMultiPeriodGenerationPath(wellName, allowSavedWell = false) {
+  const name = String(wellName || '').trim()
+  if (!name) return []
+  let path = findMultiPeriodGenerationPath(name)
+  if (path.length) return path
+  ensureMultiPeriodNavigation(treeData.value)
+  path = findMultiPeriodGenerationPath(name)
+  if (path.length) return path
+
+  const wellRoot = getWellGroup()
+  const knownWell = wellRoot?.children?.find(
+    node => String(node.wellName || node.label || '').trim() === name)
+  // 只有当前项目/气藏数据库真的返回该井的方案时，才允许恢复已不在项目树中的井。
+  // 不凭空创建任意井或把其他项目的方案放进本项目。
+  if (wellRoot && (knownWell || allowSavedWell)) {
+    ensureWell(name, knownWell?.id || `well-${name}`)
+    ensureMultiPeriodNavigation(treeData.value)
+    path = findMultiPeriodGenerationPath(name)
+  }
+  return path
+}
+function revealMultiPeriodGenerationPath(path) {
+  if (!Array.isArray(path) || !path.length) return
+  for (const ancestor of path) ancestor.expanded = true
+  treeData.value = [...treeData.value]
+}
+
+function handleSolutionSaved(event) {
+  const detail = event?.detail || event
+  if (!detail?.wellName || detail.id == null) {
+    console.warn('[方案生成树] 保存通知缺少 wellName 或 id', detail)
+    return
+  }
+  const wellName = String(detail.wellName).trim()
+  const record = normalizeSolutionTreeRecord(detail, wellName)
+  if (!record) {
+    console.warn('[方案生成树] 已拒绝项目/气藏/井不匹配的保存事件', detail)
+    return
+  }
+
+  // Ignore any GET started before this successfully persisted save/delete event.
+  ++solutionTreeSyncVersion
+  const isDelete = detail.action === 'deleted'
+  if (isDelete) {
+    pendingSolutionNodes(wellName).delete(record.recordId)
+    pendingDeletedSolutionNodes(wellName).set(record.recordId, true)
+  } else {
+    pendingDeletedSolutionNodes(wellName).delete(record.recordId)
+    pendingSolutionNodes(wellName).set(record.recordId, record)
+  }
+  const path = ensureMultiPeriodGenerationPath(wellName, true)
+  if (path.length) {
+    const branch = path[path.length - 1]
+    branch.children ||= []
+    const index = branch.children.findIndex(
+      item => item.type === 'multi-period-solution-record' &&
+        String(item.recordId) === record.recordId)
+    if (isDelete) {
+      if (index >= 0) branch.children.splice(index, 1)
+      if (String(currentViewNode.value?.solutionRecordId) === record.recordId) {
+        currentViewNode.value = {
+          ...currentViewNode.value, solutionRecordId: null,
+          solutionRecordOpenVersion: ++solutionRecordOpenVersion
+        }
+      }
+    } else if (index >= 0) {
+      branch.children.splice(index, 1, record)
+    } else {
+      branch.children.push(record)
+    }
+    revealMultiPeriodGenerationPath(path)
+    console.info('[方案生成树] 保存后即时更新', {
+      action: detail.action || 'created', wellName,
+      recordId: record.recordId, childrenCount: branch.children.length
+    })
+  } else {
+    console.warn(`[方案生成树] 保存成功但尚未找到井 ${wellName} 的父节点，稍后会根据数据库重建`)
+  }
+  // 触发响应式更新（与 handleConstraintsSaved 一致，不再调用全量重新同步）
+  treeData.value = [...treeData.value]
+}
+
+// Always rehydrate from the database when the generation node is expanded or the page reloads.
+async function refreshSolutionRecordsForWell(wellName) {
+  if (!String(wellName || '').trim()) return
+  await syncSolutionTreeNodes()
+}
+
+async function syncSolutionTreeNodes() {
+  const version = ++solutionTreeSyncVersion
+  let records
+  try {
+    // The controller supplies the project/reservoir-wide snapshot in one request.
+    // This also restores wells that are missing from the platform's current well tree.
+    const response = await solutionRecordApi.listByScope(PROJECT_ID, GAS_RESERVOIR_ID)
+    if (version !== solutionTreeSyncVersion) return
+    if (!Array.isArray(response?.data)) {
+      throw new Error('后端返回的方案列表不是数组')
+    }
+    records = response.data
+    lastSolutionTreeSyncError = ''
+  } catch (error) {
+    if (version !== solutionTreeSyncVersion) return
+    const message = error?.message || 'Unknown error'
+    console.error('[solution tree] Failed to restore persisted plans:', error)
+    if (lastSolutionTreeSyncError !== message) {
+      lastSolutionTreeSyncError = message
+      ElMessage.warning(`方案生成历史记录加载失败: ${message}`)
+    }
+    // Keep existing tree children when a query fails; a network error is not a deletion.
+    return
+  }
+
+  const recordsByWell = new Map()
+  for (const row of records) {
+    const wellName = String(solutionRecordField(row, 'wellName', 'well_name') || '').trim()
+    const child = normalizeSolutionTreeRecord(row, wellName)
+    if (!child) {
+      console.warn('[solution tree] Ignored invalid/out-of-scope record:', row?.id)
+      continue
+    }
+    if (!recordsByWell.has(wellName)) recordsByWell.set(wellName, [])
+    recordsByWell.get(wellName).push(child)
+  }
+
+  ensureMultiPeriodNavigation(treeData.value)
+  for (const wellName of recordsByWell.keys()) {
+    if (!ensureMultiPeriodGenerationPath(wellName, true).length) {
+      console.warn('[solution tree] No generation parent node for well:', wellName)
+    }
+  }
+
+  function apply(node, inheritedWell = '', ancestors = []) {
+    const wellName = String(node.wellName || inheritedWell || '').trim()
+    const path = [...ancestors, node]
+    if (node.type === 'multi-period-generation' && wellName) {
+      const deleted = pendingRemovedSolutionIds.get(wellName)
+      const childrenById = new Map()
+      // Database is authoritative; save/delete events protect against stale in-flight GETs.
+      for (const child of recordsByWell.get(wellName) || []) {
+        if (!deleted?.has(child.recordId)) childrenById.set(child.recordId, child)
+      }
+      for (const [id, child] of pendingSavedSolutionNodes.get(wellName) || []) {
+        if (!deleted?.has(id)) childrenById.set(id, child)
+      }
+      const children = [...childrenById.values()]
+      const nameCounts = new Map()
+      for (const child of children) {
+        nameCounts.set(child.label, (nameCounts.get(child.label) || 0) + 1)
+      }
+      node.children = children.map(child => ({
+        ...child,
+        label: nameCounts.get(child.label) > 1
+          ? `${child.label}（ID ${child.recordId}）` : child.label
+      }))
+      if (children.length) {
+        for (const ancestor of path) ancestor.expanded = true
+      }
+    }
+    for (const child of node.children || []) apply(child, wellName, path)
+  }
+
+  for (const root of treeData.value || []) apply(root)
+  treeData.value = [...treeData.value]
+}
+
 async function syncConstraintTreeNodes() {
   for (const node of treeData.value) {
     await syncConstraintTreeNodesRecursive(node)
@@ -706,7 +945,8 @@ async function syncConstraintTreeNodesRecursive(node) {
 const MULTI_PERIOD_CHILDREN = [
   { type: 'multi-period-objective', label: '目标函数', view: 'multi-period-objective-function' },
   { type: 'multi-period-constraints', label: '约束条件', view: 'multi-period-constraint-conditions' },
-  { type: 'multi-period-generation', label: '方案生成', view: 'multi-period-solution-generation' }  
+  { type: 'multi-period-generation', label: '方案生成', view: 'multi-period-solution-generation' },
+  { type: 'multi-period-comparison', label: '方案比选', view: 'multi-period-solution-comparison' }  
 ]
 
 function ensureMultiPeriodNavigation(nodes, inheritedWell = '') {
@@ -2311,6 +2551,12 @@ const refreshProjectTree = async () => { //加在项目树
     }
     rebuildProjectTree(normalizePayload(projectResult.value), names)
     await refreshOtherDataNodes()
+    // 项目树重建会清空原来的井子节点。必须重新生成多周期导航骨架并
+    // 读取已保存的方案，否则此前保存的“方案1/方案2”会在重建后消失。
+    ensureMultiPeriodNavigation(treeData.value)
+    // 这里必须等待“当前项目/气藏全部历史方案”完成，不再用 fire-and-forget
+    // 让首页的旧井树和数据库的保存方案发生竞态。
+    await syncSolutionTreeNodes()
     // 不在登录/刷新时遍历所有井请求 PVT；大量并发请求会让目录初始化变慢，
     // 也会在单个接口异常时制造整页“全部报错”的假象。
     return Boolean(getWellGroup()?.children?.length)
@@ -5282,8 +5528,39 @@ const handleSelect = async (node) => { // 点击左侧树节点
   if (node.type === 'multi-period-generation') {
     restoreMultiPeriodConstraintsForWell(nodeWellName)
     currentView.value = 'multi-period-solution-generation'
-    currentViewNode.value = { ...node, wellName: nodeWellName }
+    currentViewNode.value = {
+      ...node, wellName: nodeWellName, solutionRecordId: null,
+      solutionRecordOpenVersion: ++solutionRecordOpenVersion
+    }
     void loadMultiPeriodPlatformContextForWell(nodeWellName)
+    return
+  }
+
+  if (node.type === 'multi-period-comparison') {
+    currentView.value = 'multi-period-solution-comparison'
+    currentViewNode.value = { ...node, wellName: nodeWellName }
+    return
+  }
+
+  
+  if (node.type === 'multi-period-solution-record') {
+    const wellName = node.wellName || nodeWellName
+    const recordId = node.recordId ?? node.solutionRecordId
+    if (!recordId) {
+      ElMessage.error('历史方案节点缺少数据库记录ID，无法读取已保存结果')
+      return
+    }
+    // 父节点、子节点复用同一张 SolutionGeneration.vue 页面。
+    // 子节点通过 recordId 加载保存的目标产量、外输压力和曲线，无需重新Calc。
+    restoreMultiPeriodConstraintsForWell(wellName)
+    currentView.value = 'multi-period-solution-generation'
+    currentViewNode.value = {
+      ...node, wellName,
+      solutionRecordId: String(recordId),
+      solutionRecordOpenVersion: ++solutionRecordOpenVersion
+    }
+    // 同步原平台预测任务上下文，供用户以后主动点击“生成方案”使用。
+    void loadMultiPeriodPlatformContextForWell(wellName)
     return
   }
 
@@ -5711,7 +5988,12 @@ const handleCommand = async ({ group, name, parent, commandId, wellName: command
       break
     case '方案比选':
       if (group === '配产配注' && parent === '多周期预测') {
-        ElMessage.info('方案比选功能开发中')
+        if (!targetWellName) {
+          ElMessage.warning('请先在左侧选择一口井')
+          return
+        }
+        currentView.value = 'multi-period-solution-comparison'
+        currentViewNode.value = { wellName: targetWellName }
       } else {
         ElMessage.success(`[${group}] ${name}`)
       }
@@ -5744,6 +6026,10 @@ const handleNodeExpand = async node => {
   }
   const wellName = node?.wellName
   if (!wellName) return
+  if (node.type === 'multi-period-generation') {
+    await refreshSolutionRecordsForWell(wellName)
+    return
+  }
 
   try {
     if ([COEFFICIENT_GROUP, COEFFICIENT_METHOD].includes(node.type)) {
@@ -5884,15 +6170,17 @@ const handleRefreshTree = () => {
 onMounted(async () => {
   window.addEventListener('click', closeTreeContextMenu)
   window.addEventListener('resize', closeTreeContextMenu)
-    window.addEventListener('grdp:constraints-saved', handleConstraintsSaved)
-
+        window.addEventListener('grdp:constraints-saved', handleConstraintsSaved)
+    window.addEventListener('grdp:solution-saved', handleSolutionSaved)
   // 软件集成工作区拥有独立的项目树和数据接口；不能在挂载共享 Shell 时
   // 同时初始化解析融合目录，否则原平台未登录会把演示页重定向到登录页。
   if (isSoftwareIntegration.value) return
 
   try {
     await initTree()
-        await syncConstraintTreeNodes()
+    // 历史方案优先恢复，不被其他模块可能较慢的历史查询阻塞。
+    await syncSolutionTreeNodes()
+    await syncConstraintTreeNodes()
     await Promise.allSettled([
       loadAllModifiedIsochronalTreeNodes({
         treeData: treeData.value,
@@ -5913,6 +6201,8 @@ onMounted(async () => {
     // 产能试井加载器同样会修改“单井产能”分支，因此最后恢复稳定流记录。
     await loadAllStableProductivityTreeNodes()
     ensureCoefficientTree(treeData.value)
+    // 其他异步加载器可能改动子树，最后再将数据库全量历史方案复原一次。
+    await syncSolutionTreeNodes()
   } catch (error) {
     console.error('工作台目录初始化失败', error)
   }
@@ -5939,6 +6229,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('click', closeTreeContextMenu)
   window.removeEventListener('resize', closeTreeContextMenu)
     window.removeEventListener('grdp:constraints-saved', handleConstraintsSaved)
+    window.removeEventListener('grdp:solution-saved', handleSolutionSaved)
 })
 </script>
 
@@ -6022,10 +6313,12 @@ onBeforeUnmount(() => {
             @constraints-calculated="handleMultiPeriodConstraintsCalculated"
             @constraints-invalidated="handleMultiPeriodConstraintsInvalidated" />
 
-          <!-- 多周期预测：方案生成 -->
+          <!-- 父节点与历史子节点统一进入此方案生成组件；历史由recordId加载。 -->
+
           <MultiPeriodSolutionGeneration v-if="currentView === 'multi-period-solution-generation'"
-            :key="`multi-period-solution-${currentViewNode?.wellName || 'project'}`"
+            :key="`multi-period-solution-${currentViewNode?.wellName || 'project'}-${currentViewNode?.solutionRecordId ?? 'new'}-${currentViewNode?.solutionRecordOpenVersion ?? 0}`"
             :well-name="currentViewNode?.wellName || ''" :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID"
+            :record-id="currentViewNode?.solutionRecordId ?? null"
             :dynamic-prediction-request="dynamicPredictionTemplate"
             :prediction-context-warning="multiPeriodCalcContextWarning"
             :prediction-context-loading="Boolean(activeMultiPeriodPlatformFetchState?.loading)"
@@ -6034,6 +6327,11 @@ onBeforeUnmount(() => {
             @prediction-task-selected="handleMultiPeriodPredictionTaskSelected"
             :constraints-result="activeMultiPeriodConstraints"
             @solution-generated="handleMultiPeriodSolutionGenerated" />
+          <!-- 多周期预测：方案比选 -->
+          <MultiPeriodSolutionComparison v-if="currentView === 'multi-period-solution-comparison'"
+            :key="`multi-period-comparison-${currentViewNode?.wellName || 'project'}`"
+            :well-name="currentViewNode?.wellName || ''" :project-id="PROJECT_ID"
+            :gas-reservoir-id="GAS_RESERVOIR_ID" />
           <!-- 配产配注：注采拟合（采端） -->
           <InjectionProductionFitting v-if="currentView === 'injection-production-fitting'"
             :key="`ip-fitting-${currentViewNode?.wellName || 'well'}`" :node="currentViewNode"

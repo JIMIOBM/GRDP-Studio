@@ -25,6 +25,9 @@ function handleSave() {
     }
     const key = `grdp:objective:v1:${props.projectId}:${props.gasReservoirId}:${encodeURIComponent(props.wellName || '')}`
     window.sessionStorage.setItem(key, JSON.stringify(payload))
+    window.dispatchEvent(new CustomEvent('grdp:objective-saved', {
+      detail: { demandQ: demandQ.value, wellName: props.wellName }
+    }))
     ElMessage.success('目标函数参数已保存')
   } catch (e) {
     ElMessage.error('保存失败：' + (e.message || '未知错误'))

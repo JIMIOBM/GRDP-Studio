@@ -1305,17 +1305,20 @@ export function extractCalcRequestFromNodeResponse(response, scope, expectedTask
 }
 
 const CONSTRAINT_RECORDS_BASE = '/api/solution-generation/constraint-records'
+const SOLUTION_RECORDS_BASE = '/api/solution-generation/solution-records'
 
-async function constraintBackendRequest(method, suffix = '', { body, params } = {}) {
+async function backendRequest(baseUrl, method, suffix = '', { body, params } = {}) {
   const query = params ? `?${new URLSearchParams(
     Object.entries(params).map(([key, value]) => [key, String(value ?? '')])
   )}` : ''
-  const path = `${CONSTRAINT_RECORDS_BASE}${suffix}${query}`
+  const path = `${baseUrl}${suffix}${query}`
   let response
   try {
     response = await fetch(path, {
       method,
       credentials: 'same-origin',
+      // 历史方案目录刷新必须获取服务器最新记录，不读取浏览器可能缓存的旧GET。
+      cache: method === 'GET' ? 'no-store' : 'default',
       headers: { 'Content-Type': 'application/json' },
       ...(body === undefined ? {} : { body: JSON.stringify(body) })
     })
@@ -1350,16 +1353,39 @@ async function constraintBackendRequest(method, suffix = '', { body, params } = 
 }
 
 export const constraintRecordApi = {
-  save: payload => constraintBackendRequest('POST', '/save', { body: payload }),
-   update: (id, payload) =>
-    constraintBackendRequest('PUT', `/${encodeURIComponent(String(id))}`, { body: payload }),  list: (projectId, gasReservoirId, wellName) =>
-    constraintBackendRequest('GET', '', {
+  save: payload => backendRequest(CONSTRAINT_RECORDS_BASE, 'POST', '/save', { body: payload }),
+  update: (id, payload) =>
+    backendRequest(CONSTRAINT_RECORDS_BASE, 'PUT', `/${encodeURIComponent(String(id))}`, { body: payload }),
+  list: (projectId, gasReservoirId, wellName) =>
+    backendRequest(CONSTRAINT_RECORDS_BASE, 'GET', '', {
       params: { projectId, gasReservoirId, wellName }
     }),
   detail: id =>
-    constraintBackendRequest('GET', `/${encodeURIComponent(String(id))}`),
+    backendRequest(CONSTRAINT_RECORDS_BASE, 'GET', `/${encodeURIComponent(String(id))}`),
   delete: (id, projectId, gasReservoirId, wellName) =>
-    constraintBackendRequest('DELETE', `/${encodeURIComponent(String(id))}`, {
+    backendRequest(CONSTRAINT_RECORDS_BASE, 'DELETE', `/${encodeURIComponent(String(id))}`, {
+      params: { projectId, gasReservoirId, wellName }
+    })
+}
+
+
+export const solutionRecordApi = {
+  save: payload => backendRequest(SOLUTION_RECORDS_BASE, 'POST', '/save', { body: payload }),
+  update: (id, payload) =>
+    backendRequest(SOLUTION_RECORDS_BASE, 'PUT', `/${encodeURIComponent(String(id))}`, { body: payload }),
+  list: (projectId, gasReservoirId, wellName) =>
+    backendRequest(SOLUTION_RECORDS_BASE, 'GET', '', {
+      params: { projectId, gasReservoirId, wellName }
+    }),
+  // 新接口：查询当前项目/气藏下所有井的历史方案，供左侧树全量恢复。
+  listByScope: (projectId, gasReservoirId) =>
+    backendRequest(SOLUTION_RECORDS_BASE, 'GET', '/by-scope', {
+      params: { projectId, gasReservoirId }
+    }),
+  detail: id =>
+    backendRequest(SOLUTION_RECORDS_BASE, 'GET', `/${encodeURIComponent(String(id))}`),
+  delete: (id, projectId, gasReservoirId, wellName) =>
+    backendRequest(SOLUTION_RECORDS_BASE, 'DELETE', `/${encodeURIComponent(String(id))}`, {
       params: { projectId, gasReservoirId, wellName }
     })
 }

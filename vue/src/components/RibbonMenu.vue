@@ -78,7 +78,7 @@ const defaultTabs = [
         columns: [
           { type: 'checks', items: ['节点分析', '注采拟合', '图版法'] },
           { type: 'large', label: '一体化耦合优化', dropdown: true, dropdownItems: ['单目标', '多目标'] },
-          { type: 'large', label: '多周期预测', dropdown: true, dropdownItems: ['目标函数', '约束条件', '方案生成', '方案必选'] }
+          { type: 'large', label: '多周期预测', dropdown: true, dropdownItems: ['目标函数', '约束条件', '方案生成', '方案比选'] }
         ]
       }
     ]
