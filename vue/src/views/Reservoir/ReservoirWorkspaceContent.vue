@@ -38,7 +38,9 @@ const comparisonPages = { '多周期': MultiPeriodComparison, '多方法': Multi
 const props = defineProps({
   reservoir: { type: Object, default: null },
   command: { type: Object, default: null },
-  predictionId: { type: [Number, String], default: null }
+  predictionId: { type: [Number, String], default: null },
+  schemeId: { type: [Number, String], default: null },
+  constraintRecordId: { type: [Number, String], default: null }
 })
 
 const reservoirLabel = computed(() => props.reservoir?.label || '未选择库')
@@ -89,14 +91,12 @@ const isStorageNetworkTopology = computed(() =>
 const isStorageNetworkCorrelation = computed(() =>
   props.command?.group === '地面管网' && props.command?.name === '相关性分析'
 )
-<<<<<<< Updated upstream
 // 协同预测：一体化耦合优化的单目标/多目标共用同一页面，仅参数面板与优化目标不同。
 const isCouplingOptimization = computed(() =>
   props.command?.group === '协同预测'
   && props.command?.parent === '一体化耦合优化'
   && ['单目标', '多目标'].includes(props.command?.name)
 )
-=======
 
 // 协同预测-多周期预测
 const isReservoirMultiPeriodPrediction = computed(() =>
@@ -105,7 +105,6 @@ const isReservoirMultiPeriodPrediction = computed(() =>
   && ['目标函数', '约束条件', '方案生成', '方案比选'].includes(props.command?.name)
 )
 
->>>>>>> Stashed changes
 const lossComponent = computed(() => props.command?.name ? lossPages[props.command.name] : null)
 const lossKey = computed(() => `${props.reservoir?.projectId}-${props.reservoir?.gasReservoirId}-${props.reservoir?.storageId}-${props.command?.name}`)
 
@@ -114,18 +113,12 @@ const lossKey = computed(() => `${props.reservoir?.projectId}-${props.reservoir?
 </script>
 
 <template>
-  <GasReservoirDiagnosticCurveContent
-    v-if="isDiagnosticCurve"
+  <GasReservoirDiagnosticCurveContent v-if="isDiagnosticCurve"
     :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-grd-diag`"
-    :reservoir="reservoir"
-  />
+    :reservoir="reservoir" />
 
   <!-- 每个损耗功能都有独立页面；项目、库或功能变化时销毁旧页面状态。 -->
-  <component :is="lossComponent"
-    v-else-if="isGeologicalLoss || isVentLoss"
-    :key="lossKey"
-    :reservoir="reservoir"
-  />
+  <component :is="lossComponent" v-else-if="isGeologicalLoss || isVentLoss" :key="lossKey" :reservoir="reservoir" />
   <!-- 与单井页面一致：先显示模块页签，再显示参数栏和右侧分析结果页签。 -->
   <section v-else-if="isPeriodComparison" class="storage-comparison-page" :aria-label="`库产能对比-${command.name}`">
     <div class="comparison-module-tabs">
@@ -167,19 +160,20 @@ const lossKey = computed(() => `${props.reservoir?.projectId}-${props.reservoir?
        进入不同菜单项时由页面自身把对应字段滚动定位并高亮。
        「孔隙体积」不在本分支内，继续落到下方占位页面。 -->
   <CapacityDesign v-else-if="isCapacityDesign"
-    :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}`"
-    :reservoir="reservoir" :command="command" />
+    :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}`" :reservoir="reservoir"
+    :command="command" />
   <!-- 协同预测-一体化耦合优化：单目标/多目标各有独立的任务与预测记录集合，
        切换模式或从记录打开时重建组件，按目标模式重新准备。 -->
-  <section v-else-if="isCouplingOptimization" class="storage-comparison-page" :aria-label="`库协同预测-一体化耦合优化-${command.name}`">
+  <section v-else-if="isCouplingOptimization" class="storage-comparison-page"
+    :aria-label="`库协同预测-一体化耦合优化-${command.name}`">
     <div class="comparison-module-tabs">
       <div class="comparison-module-tab"><span>一体化耦合优化-{{ command.name }}</span></div>
     </div>
     <CouplingOptimization
       :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-coupling-optimization-${command.name}-${predictionId ?? ''}`"
       :project-id="reservoir?.projectId" :gas-reservoir-id="reservoir?.gasReservoirId"
-      :storage-id="reservoir?.storageId" :storage-name="reservoirLabel"
-      :mode="command.name" :prediction-id="predictionId" />
+      :storage-id="reservoir?.storageId" :storage-name="reservoirLabel" :mode="command.name"
+      :prediction-id="predictionId" />
   </section>
   <StorageNetworkTopology v-else-if="isStorageNetworkTopology"
     :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-surface-network-topology`"
@@ -187,54 +181,41 @@ const lossKey = computed(() => `${props.reservoir?.projectId}-${props.reservoir?
   <StorageNetworkCorrelation v-else-if="isStorageNetworkCorrelation"
     :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-surface-network-correlation`"
     :reservoir="reservoir" />
-    <!-- 协同预测-多周期预测（4个子页面） -->
-  <section v-else-if="isReservoirMultiPeriodPrediction" class="storage-comparison-page" 
-           :aria-label="`库多周期预测-${command.name}`">
+  <!-- 协同预测-多周期预测（4个子页面） -->
+  <section v-else-if="isReservoirMultiPeriodPrediction" class="storage-comparison-page"
+    :aria-label="`库多周期预测-${command.name}`">
     <div class="comparison-module-tabs">
       <div class="comparison-module-tab">
         <span>协同预测-多周期预测-{{ command.name }}</span>
       </div>
     </div>
-    
+
     <!-- 目标函数 -->
-    <ReservoirMultiPeriodObjectiveFunction
-      v-if="command.name === '目标函数'"
+    <ReservoirMultiPeriodObjectiveFunction v-if="command.name === '目标函数'"
       :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-multi-period-objective`"
-      :project-id="reservoir?.projectId" 
-      :gas-reservoir-id="reservoir?.gasReservoirId"
-      :storage-id="reservoir?.storageId" 
-      :storage-name="reservoirLabel" 
-    />
-    
+      :project-id="reservoir?.projectId" :gas-reservoir-id="reservoir?.gasReservoirId"
+      :storage-id="reservoir?.storageId" :storage-name="reservoirLabel" />
+
     <!-- 约束条件 -->
-    <ReservoirMultiPeriodConstraintConditions
-      v-else-if="command.name === '约束条件'"
-      :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-multi-period-constraint`"
-      :project-id="reservoir?.projectId" 
-      :gas-reservoir-id="reservoir?.gasReservoirId"
-      :storage-id="reservoir?.storageId" 
-      :storage-name="reservoirLabel" 
-    />
-    
+    <ReservoirMultiPeriodConstraintConditions v-else-if="command.name === '约束条件'"
+      :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-multi-period-constraint-${constraintRecordId ?? 'new'}`"
+      :project-id="reservoir?.projectId" :gas-reservoir-id="reservoir?.gasReservoirId"
+      :storage-id="reservoir?.storageId" :storage-name="reservoirLabel"
+      :constraint-record-id="constraintRecordId" />
+
     <!-- 方案生成 -->
-    <ReservoirMultiPeriodSolutionGeneration
-      v-else-if="command.name === '方案生成'"
+    <ReservoirMultiPeriodSolutionGeneration v-else-if="command.name === '方案生成'"
       :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-multi-period-solution`"
-      :project-id="reservoir?.projectId" 
-      :gas-reservoir-id="reservoir?.gasReservoirId"
-      :storage-id="reservoir?.storageId" 
-      :storage-name="reservoirLabel" 
-    />
-    
+      :project-id="reservoir?.projectId" :gas-reservoir-id="reservoir?.gasReservoirId"
+      :storage-id="reservoir?.storageId" :storage-name="reservoirLabel" :storage-reservoir="reservoir"
+      :storage-well-names="reservoir?.wellNames ?? reservoir?.wells ?? reservoir?.storageWellNames ?? reservoir?.storageWells ?? reservoir?.wellList ?? null"
+      :scheme-id="schemeId" />
+
     <!-- 方案比选 -->
-    <ReservoirMultiPeriodComparison
-      v-else-if="command.name === '方案比选'"
+    <ReservoirMultiPeriodComparison v-else-if="command.name === '方案比选'"
       :key="`${reservoir?.projectId}-${reservoir?.gasReservoirId}-${reservoir?.storageId}-multi-period-comparison`"
-      :project-id="reservoir?.projectId" 
-      :gas-reservoir-id="reservoir?.gasReservoirId"
-      :storage-id="reservoir?.storageId" 
-      :storage-name="reservoirLabel" 
-    />
+      :project-id="reservoir?.projectId" :gas-reservoir-id="reservoir?.gasReservoirId"
+      :storage-id="reservoir?.storageId" :storage-name="reservoirLabel" />
   </section>
   <!-- 其他尚未接入的库级功能仍保留占位入口。 -->
   <section v-else class="reservoir-workspace" :aria-label="title">
@@ -274,6 +255,7 @@ const lossKey = computed(() => `${props.reservoir?.projectId}-${props.reservoir?
   overflow: hidden;
   background: #fff;
 }
+
 .comparison-module-tabs {
   height: 34px;
   flex: 0 0 34px;
@@ -284,6 +266,7 @@ const lossKey = computed(() => `${props.reservoir?.projectId}-${props.reservoir?
   overflow-x: auto;
   overflow-y: hidden;
 }
+
 .comparison-module-tab {
   height: 34px;
   max-width: 340px;
@@ -298,7 +281,8 @@ const lossKey = computed(() => `${props.reservoir?.projectId}-${props.reservoir?
   border-bottom: 2px solid transparent;
   white-space: nowrap;
 }
-.comparison-module-tab > span {
+
+.comparison-module-tab>span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;

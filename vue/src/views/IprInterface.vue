@@ -51,6 +51,7 @@ import {
   selectPredictionTask
 } from '@/api/solutionGeneration'
 import { constraintRecordApi, dynamicPredictionApi, solutionRecordApi } from '@/api/solutionGeneration'
+import { reservoirConstraintRecordApi } from '@/api/reservoirConstraintRecordApi'
 import { ensureNodalNavigation, nodalCommandTarget, NODAL_TYPE, NODAL_RECORD, applyNodalRecords, upsertNodalRecord, loadNodalRecords, deleteNodalRecord } from '@/utils/nodalNavigation'
 import { nodalApi } from '@/api/nodal'
 import ErosionContent from '@/views/WellboreCapacity/ErosionContent.vue'
@@ -147,6 +148,15 @@ import {
 } from '@/utils/couplingOptimizationTree'
 import { wellGroupPredictionApi } from '@/api/wellGroupPrediction'
 import { predictionResultApi } from '@/api/predictionResult'
+import {
+  SOLUTION_METHOD_NODE_TYPE,
+  SOLUTION_RECORD_NODE_TYPE,
+  loadSolutionGenerationNodes
+} from '@/utils/solutionGenerationTree'
+import {
+  CONSTRAINT_METHOD_NODE_TYPE,
+  CONSTRAINT_RECORD_NODE_TYPE
+} from '@/config/reservoirRibbon'
 
 // 当前工作台所使用的项目和气藏。
 const route = useRoute()
@@ -296,138 +306,138 @@ const activeMultiPeriodConstraints = computed(() =>
 )
 
 
- // 优先从当前井约束输入组装 Calc；
- // 缺失的任务信息和平台专用字段再读取当前井真实接口数据。
- const activeMultiPeriodPlatformContext = computed(() => {
-   const key = multiPeriodScopeKey(currentViewNode.value?.wellName)
-   const context = multiPeriodPlatformContextByWell.value[key]
+// 优先从当前井约束输入组装 Calc；
+// 缺失的任务信息和平台专用字段再读取当前井真实接口数据。
+const activeMultiPeriodPlatformContext = computed(() => {
+  const key = multiPeriodScopeKey(currentViewNode.value?.wellName)
+  const context = multiPeriodPlatformContextByWell.value[key]
 
-   if (!context) return null
+  if (!context) return null
 
-   const id = multiPeriodSelectedTaskIdByWell.value[key]
+  const id = multiPeriodSelectedTaskIdByWell.value[key]
 
-   const selectedTask = context.predictionTasks?.find(
-     task => String(task.dynamicPredictionId) === String(id)
-   )
+  const selectedTask = context.predictionTasks?.find(
+    task => String(task.dynamicPredictionId) === String(id)
+  )
 
-   const effectiveTask = selectedTask || null
-   return {
-     ...context,
-     selectedTask: effectiveTask,
-     // 根据所选任务匹配其原平台请求体，绝不沿用别的预测任务参数。
-     calcRequest: effectiveTask ?
-       (context.calcRequestsByTaskId?.[String(effectiveTask.dynamicPredictionId)] ?? null) : null
-   }
- })
+  const effectiveTask = selectedTask || null
+  return {
+    ...context,
+    selectedTask: effectiveTask,
+    // 根据所选任务匹配其原平台请求体，绝不沿用别的预测任务参数。
+    calcRequest: effectiveTask ?
+      (context.calcRequestsByTaskId?.[String(effectiveTask.dynamicPredictionId)] ?? null) : null
+  }
+})
 
- // 当前井选中的预测任务 ID
- const activeMultiPeriodSelectedTaskId = computed(() => {
-   const snapshot = activeMultiPeriodConstraints.value || {}
+// 当前井选中的预测任务 ID
+const activeMultiPeriodSelectedTaskId = computed(() => {
+  const snapshot = activeMultiPeriodConstraints.value || {}
 
-   return (
-     multiPeriodSelectedTaskIdByWell.value[
-       multiPeriodScopeKey(currentViewNode.value?.wellName)
-     ] ||
-     snapshot.predictionTask?.dynamicPredictionId ||
-     snapshot.task?.dynamicPredictionId ||
-     snapshot.dynamicPredictionId ||
-     ''
-   )
- })
+  return (
+    multiPeriodSelectedTaskIdByWell.value[
+    multiPeriodScopeKey(currentViewNode.value?.wellName)
+    ] ||
+    snapshot.predictionTask?.dynamicPredictionId ||
+    snapshot.task?.dynamicPredictionId ||
+    snapshot.dynamicPredictionId ||
+    ''
+  )
+})
 
- // 用户切换预测任务时调用
- function handleMultiPeriodPredictionTaskSelected(taskId) {
-   const key = multiPeriodScopeKey(currentViewNode.value?.wellName)
+// 用户切换预测任务时调用
+function handleMultiPeriodPredictionTaskSelected(taskId) {
+  const key = multiPeriodScopeKey(currentViewNode.value?.wellName)
 
-   const tasks =
-     multiPeriodPlatformContextByWell.value[key]?.predictionTasks || []
+  const tasks =
+    multiPeriodPlatformContextByWell.value[key]?.predictionTasks || []
 
-   const picked = tasks.find(
-     task => String(task.dynamicPredictionId) === String(taskId)
-   )
+  const picked = tasks.find(
+    task => String(task.dynamicPredictionId) === String(taskId)
+  )
 
-   if (!picked) return
+  if (!picked) return
 
-   const snapshot = activeMultiPeriodConstraints.value || {}
+  const snapshot = activeMultiPeriodConstraints.value || {}
 
-   const boundId =
-     snapshot.predictionTask?.dynamicPredictionId ??
-     snapshot.task?.dynamicPredictionId ??
-     snapshot.dynamicPredictionId
+  const boundId =
+    snapshot.predictionTask?.dynamicPredictionId ??
+    snapshot.task?.dynamicPredictionId ??
+    snapshot.dynamicPredictionId
 
-   const boundName =
-     snapshot.predictionTask?.chartWellName ??
-     snapshot.task?.chartWellName ??
-     snapshot.chartWellName
+  const boundName =
+    snapshot.predictionTask?.chartWellName ??
+    snapshot.task?.chartWellName ??
+    snapshot.chartWellName
 
-   // 防止约束快照绑定的任务与当前选择的任务不一致
-   if (
-     (boundId != null && String(boundId) !== String(taskId)) ||
-     (
-       boundName &&
-       String(boundName).trim() !==
-         String(picked.chartWellName).trim()
-     )
-   ) {
-     ElMessage.warning(
-       '约束快照已绑定另一预测任务，不能只在方案页改任务编号。请从原平台当前任务重新同步。'
-     )
-     return
-   }
+  // 防止约束快照绑定的任务与当前选择的任务不一致
+  if (
+    (boundId != null && String(boundId) !== String(taskId)) ||
+    (
+      boundName &&
+      String(boundName).trim() !==
+      String(picked.chartWellName).trim()
+    )
+  ) {
+    ElMessage.warning(
+      '约束快照已绑定另一预测任务，不能只在方案页改任务编号。请从原平台当前任务重新同步。'
+    )
+    return
+  }
 
-   multiPeriodSelectedTaskIdByWell.value = {
-     ...multiPeriodSelectedTaskIdByWell.value,
-     [key]: taskId
-   }
- }
+  multiPeriodSelectedTaskIdByWell.value = {
+    ...multiPeriodSelectedTaskIdByWell.value,
+    [key]: taskId
+  }
+}
 
- // 当前井平台数据加载状态
- const activeMultiPeriodPlatformFetchState = computed(() => {
-   return (
-     multiPeriodPlatformFetchStateByWell.value[
-       multiPeriodScopeKey(currentViewNode.value?.wellName)
-     ] || null
-   )
- })
+// 当前井平台数据加载状态
+const activeMultiPeriodPlatformFetchState = computed(() => {
+  return (
+    multiPeriodPlatformFetchStateByWell.value[
+    multiPeriodScopeKey(currentViewNode.value?.wellName)
+    ] || null
+  )
+})
 
- // 使用当前井约束参数和平台基础数据生成 Calc 请求
- const multiPeriodCalcContext = computed(() =>
-   resolveCalcContextFromConstraints({
-     scope: {
-       projectId: PROJECT_ID,
-       gasReservoirId: GAS_RESERVOIR_ID,
-       wellName: currentViewNode.value?.wellName || ''
-     },
+// 使用当前井约束参数和平台基础数据生成 Calc 请求
+const multiPeriodCalcContext = computed(() =>
+  resolveCalcContextFromConstraints({
+    scope: {
+      projectId: PROJECT_ID,
+      gasReservoirId: GAS_RESERVOIR_ID,
+      wellName: currentViewNode.value?.wellName || ''
+    },
 
-     snapshot: activeMultiPeriodConstraints.value,
+    snapshot: activeMultiPeriodConstraints.value,
 
-     platformContext: activeMultiPeriodPlatformContext.value
-   })
- )
+    platformContext: activeMultiPeriodPlatformContext.value
+  })
+)
 
- // 提供给 SolutionGeneration.vue 的完整 Calc 请求
- const dynamicPredictionTemplate = computed(
-   () => multiPeriodCalcContext.value.request
- )
+// 提供给 SolutionGeneration.vue 的完整 Calc 请求
+const dynamicPredictionTemplate = computed(
+  () => multiPeriodCalcContext.value.request
+)
 
- // 汇总当前井请求组装错误和平台加载警告
- const multiPeriodCalcContextWarning = computed(() =>
-   [
-     ...(
-       activeMultiPeriodPlatformFetchState.value?.loading
-         ? ['正在读取当前井的预测任务和井基础数据…']
-         : []
-     ),
+// 汇总当前井请求组装错误和平台加载警告
+const multiPeriodCalcContextWarning = computed(() =>
+  [
+    ...(
+      activeMultiPeriodPlatformFetchState.value?.loading
+        ? ['正在读取当前井的预测任务和井基础数据…']
+        : []
+    ),
 
-     ...multiPeriodCalcContext.value.issues,
+    ...multiPeriodCalcContext.value.issues,
 
-     ...multiPeriodCalcContext.value.warnings,
+    ...multiPeriodCalcContext.value.warnings,
 
-     ...(
-       activeMultiPeriodPlatformFetchState.value?.warnings || []
-     )
-   ].join(' ')
- )
+    ...(
+      activeMultiPeriodPlatformFetchState.value?.warnings || []
+    )
+  ].join(' ')
+)
 
 // HAR 已确认：/node/{项目}/{气藏}/60 下 nodeType=80 为单井动态预测任务。
 // 严格通过 /dynamicprediction/{项目}/{气藏}/{id} 详情核实真实井名及任务ID；
@@ -452,14 +462,14 @@ async function loadMultiPeriodPlatformContextForWell(wellName) {
   // 最后一项才是原平台真实任务列表的一次性接入点。
   const [nodeResult, projectResult, otherResult, wellsResult, completionResult,
     gasResult, taskListResult] = await Promise.allSettled([
-    nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, NODETYPE.NodeType_DynamicPrediction),
-    projectApi.getProject(PROJECT_ID),
-    dataManagementApi.getOtherData(PROJECT_ID, GAS_RESERVOIR_ID),
-    wellApi.getWells(PROJECT_ID, GAS_RESERVOIR_ID),
-    dataManagementApi.getWellCompletion(PROJECT_ID, GAS_RESERVOIR_ID, wellName),
-    dataManagementApi.getGasProperties(PROJECT_ID, GAS_RESERVOIR_ID),
-    fetchOriginalDynamicPredictionTasks(scope)
-  ])
+      nodeApi.getNode(PROJECT_ID, GAS_RESERVOIR_ID, NODETYPE.NodeType_DynamicPrediction),
+      projectApi.getProject(PROJECT_ID),
+      dataManagementApi.getOtherData(PROJECT_ID, GAS_RESERVOIR_ID),
+      wellApi.getWells(PROJECT_ID, GAS_RESERVOIR_ID),
+      dataManagementApi.getWellCompletion(PROJECT_ID, GAS_RESERVOIR_ID, wellName),
+      dataManagementApi.getGasProperties(PROJECT_ID, GAS_RESERVOIR_ID),
+      fetchOriginalDynamicPredictionTasks(scope)
+    ])
   if (multiPeriodLoadVersions.get(key) !== version) return
 
   const warnings = []
@@ -472,7 +482,7 @@ async function loadMultiPeriodPlatformContextForWell(wellName) {
 
   // 只使用属于当前井的资料；没有匹配的字段保持缺失，不复制 X-1 的值。
   const profileSources = [good(otherResult), good(wellsResult), good(completionResult),
-    good(gasResult), good(projectResult), good(nodeResult)].filter(Boolean)
+  good(gasResult), good(projectResult), good(nodeResult)].filter(Boolean)
   const wellProfile = extractCurrentWellProfileFromResponses(profileSources, scope)
   const snapshot = multiPeriodConstraintsByWell.value[key] || null
   const snapshotTaskId = snapshot?.predictionTask?.dynamicPredictionId ??
@@ -571,8 +581,8 @@ function handleMultiPeriodConstraintsInvalidated() {
 
 function handleMultiPeriodSolutionGenerated(payload) {
   if (!payload || String(payload.projectId) !== String(PROJECT_ID) ||
-      String(payload.gasReservoirId) !== String(GAS_RESERVOIR_ID) ||
-      !payload.wellName || !payload.dynamicPredictionId || !payload.chartWellName) return
+    String(payload.gasReservoirId) !== String(GAS_RESERVOIR_ID) ||
+    !payload.wellName || !payload.dynamicPredictionId || !payload.chartWellName) return
   const key = multiPeriodScopeKey(payload.wellName)
   const task = {
     projectId: PROJECT_ID, gasReservoirId: GAS_RESERVOIR_ID,
@@ -591,7 +601,7 @@ function handleMultiPeriodSolutionGenerated(payload) {
   const request = payload.results?.sourceRequest
   const calcRequestsByTaskId = { ...(previous.calcRequestsByTaskId || {}) }
   if (request && String(request.wellName) === String(task.wellName) &&
-      String(request.dynamicPredictionId) === String(task.dynamicPredictionId)) {
+    String(request.dynamicPredictionId) === String(task.dynamicPredictionId)) {
     calcRequestsByTaskId[String(task.dynamicPredictionId)] = request
   }
   multiPeriodPlatformContextByWell.value = {
@@ -673,8 +683,233 @@ async function handleConstraintsSaved(event) {
   treeData.value = [...treeData.value]
 }
 
+// ===== 库级约束条件：保存后立即显示，刷新后从当前正在使用的记录 API 恢复 =====
+// 注意：该版本的 ConstraintConditions.vue 实际调用 reservoirConstraintRecordApi，
+// 不可换成早期版本的 storagePredictionRecordsApi（两者未证明指向同一数据库）。
+const STORAGE_CONSTRAINT_RECORD_TYPE = 'reservoir-multi-period-constraint-record'
+let reservoirConstraintRecordOpenVersion = 0
+const constraintTreeReadVersions = new Map()
+const constraintTreePending = new Map()
+const constraintTreeObservedBranches = new Map()
+
+function findReservoirStorageById(storageId) {
+  const root = treeData.value.find(node => node.id === 'g-reservoir')
+  return (root?.children || []).find(node =>
+    String(node.storageId ?? node.reservoir?.storageId ?? '') === String(storageId)) || null
+}
+
+function isStorageConstraintMethod(node) {
+  return Boolean(node && (
+    node.type === CONSTRAINT_METHOD_NODE_TYPE ||
+    node.type === 'reservoir-multi-period-constraints' ||
+    (node.type === 'reservoir-command' && node.label === '约束条件')
+  ))
+}
+
+function findReservoirMultiPeriodConstraintsNode(storageNode) {
+  const collaboration = storageNode?.children?.find(node => node.label === '协同预测')
+  const prediction = collaboration?.children?.find(node => node.label === '多周期预测')
+  return prediction?.children?.find(isStorageConstraintMethod) || null
+}
+
+function findReservoirConstraintOwner(methodNode) {
+  const root = treeData.value.find(node => node.id === 'g-reservoir')
+  return (root?.children || []).find(
+    storage => findReservoirMultiPeriodConstraintsNode(storage) === methodNode
+  ) || null
+}
+
+function reservoirConstraintScope(storageNode, methodNode) {
+  const projectId = Number(storageNode?.projectId ?? storageNode?.reservoir?.projectId ??
+    methodNode?.projectId ?? PROJECT_ID)
+  const gasReservoirId = Number(storageNode?.gasReservoirId ??
+    storageNode?.reservoir?.gasReservoirId ?? methodNode?.gasReservoirId ?? GAS_RESERVOIR_ID)
+  const storageId = Number(storageNode?.storageId ?? storageNode?.reservoir?.storageId ??
+    methodNode?.storageId)
+  if (![projectId, gasReservoirId, storageId].every(
+    value => Number.isSafeInteger(value) && value > 0)) {
+    throw new Error('库约束目录缺少有效的项目、气藏或库 ID')
+  }
+  return { projectId, gasReservoirId, storageId }
+}
+
+function constraintScopeKey(scope) {
+  return `${scope.projectId}:${scope.gasReservoirId}:${scope.storageId}`
+}
+
+function nextConstraintTreeReadVersion(key) {
+  const version = (constraintTreeReadVersions.get(key) || 0) + 1
+  constraintTreeReadVersions.set(key, version)
+  return version
+}
+
+function unwrapConstraintRecordList(response) {
+  // 兼容 Axios 的 {data:...} 及已有 API 直接返回数组的两种方式。
+  const choices = [
+    response, response?.data, response?.data?.data, response?.records,
+    response?.rows, response?.list, response?.data?.records,
+    response?.data?.rows, response?.data?.list
+  ]
+  const records = choices.find(Array.isArray)
+  // 错误响应不能按 [] 处理，否则网络故障会误删当前可见子节点。
+  if (!records) throw new Error('约束记录列表响应不是数组，请检查 reservoirConstraintRecordApi.list 返回结构')
+  return records
+}
+
+function createReservoirConstraintChild(record, scope, methodNode, storageNode) {
+  const id = Number(record?.id ?? record?.recordId ?? record?.record_id)
+  if (!Number.isSafeInteger(id) || id <= 0) return null
+  for (const [camel, snake, expected] of [
+    ['projectId', 'project_id', scope.projectId],
+    ['gasReservoirId', 'gas_reservoir_id', scope.gasReservoirId],
+    ['storageId', 'storage_id', scope.storageId]
+  ]) {
+    const actual = record?.[camel] ?? record?.[snake]
+    if (actual != null && Number(actual) !== expected) return null
+  }
+  const command = {
+    ...(methodNode.command || {}),
+    // 不能让目录自带的模糊 command 覆盖历史记录的实际入口。
+    group: '协同预测', parent: '多周期预测', name: '约束条件',
+    projectId: scope.projectId,
+    gasReservoirId: scope.gasReservoirId,
+    storageId: scope.storageId
+  }
+  return {
+    id: `reservoir-constraint-record-${id}`,
+    type: STORAGE_CONSTRAINT_RECORD_TYPE,
+    label: String(record?.name || record?.title || record?.recordName ||
+      record?.record_name || `约束条件${id}`),
+    recordId: String(id),
+    ...scope,
+    command,
+    reservoir: methodNode.reservoir ?? storageNode?.reservoir ?? storageNode
+  }
+}
+
+async function syncReservoirConstraintTreeNodesForStorage(methodNode, ownerNode = null, options = {}) {
+  if (!methodNode || !isStorageConstraintMethod(methodNode)) return
+  const storageNode = ownerNode || findReservoirConstraintOwner(methodNode)
+  if (!storageNode) return
+  let scope
+  try {
+    scope = reservoirConstraintScope(storageNode, methodNode)
+  } catch (error) {
+    console.warn('[库约束树] 无法确定所属库范围', error)
+    return
+  }
+  const key = constraintScopeKey(scope)
+  if (!options.force && methodNode.constraintRecordsLoaded) return
+  const existing = constraintTreePending.get(key)
+  if (existing && existing.method === methodNode && !options.force) return existing.promise
+  const version = nextConstraintTreeReadVersion(key)
+  const task = (async () => {
+    try {
+      const response = await reservoirConstraintRecordApi.list(
+        scope.projectId, scope.gasReservoirId, scope.storageId)
+      if (constraintTreeReadVersions.get(key) !== version) return
+      // 路由/目录异步重建期间，旧树节点不允许覆盖新树节点。
+      if (findReservoirStorageById(scope.storageId) !== storageNode ||
+          findReservoirMultiPeriodConstraintsNode(storageNode) !== methodNode) return
+      const rows = unwrapConstraintRecordList(response)
+      const children = new Map()
+      for (const row of rows) {
+        if (row?.deletedAt || row?.deleted_at) continue
+        const child = createReservoirConstraintChild(row, scope, methodNode, storageNode)
+        if (child) children.set(child.recordId, child)
+      }
+      const staticNodes = (methodNode.children || []).filter(node =>
+        node.type !== STORAGE_CONSTRAINT_RECORD_TYPE)
+      methodNode.children = [...staticNodes, ...children.values()]
+      methodNode.constraintRecordsLoaded = true
+      methodNode.loaded = true
+      treeData.value = [...treeData.value]
+    } catch (error) {
+      // 失败时保留当前已显示的数据；不要用空数组模拟查询结果。
+      console.warn(`[库约束树] 读取库 ${scope.storageId} 的已保存子节点失败`, error)
+    }
+  })()
+  constraintTreePending.set(key, { method: methodNode, promise: task })
+  try { await task } finally {
+    if (constraintTreePending.get(key)?.promise === task) constraintTreePending.delete(key)
+  }
+}
+
+async function syncReservoirConstraintTreeNodes({ force = false } = {}) {
+  const root = treeData.value.find(node => node.id === 'g-reservoir')
+  const jobs = (root?.children || []).map(storage => ({
+    storage,
+    method: findReservoirMultiPeriodConstraintsNode(storage)
+  })).filter(pair => pair.method)
+  // 每批最多 4 个库，避免一次刷新向后端发出太多请求。
+  for (let i = 0; i < jobs.length; i += 4) {
+    await Promise.all(jobs.slice(i, i + 4).map(({storage, method}) =>
+      syncReservoirConstraintTreeNodesForStorage(method, storage, {force})))
+  }
+}
+
+function handleReservoirConstraintsSaved(event) {
+  const detail = event?.detail || event
+  const recordId = Number(detail?.id ?? detail?.recordId)
+  const storageId = Number(detail?.storageId)
+  if (!Number.isSafeInteger(recordId) || recordId <= 0 ||
+      !Number.isSafeInteger(storageId) || storageId <= 0) return
+  if (detail?.projectId != null && Number(detail.projectId) !== Number(PROJECT_ID)) return
+  if (detail?.gasReservoirId != null && Number(detail.gasReservoirId) !== Number(GAS_RESERVOIR_ID)) return
+  const storageNode = findReservoirStorageById(storageId)
+  const method = findReservoirMultiPeriodConstraintsNode(storageNode)
+  if (!method) return
+  const scope = reservoirConstraintScope(storageNode, method)
+  nextConstraintTreeReadVersion(constraintScopeKey(scope))
+  method.children ||= []
+  const index = method.children.findIndex(node =>
+    node.type === STORAGE_CONSTRAINT_RECORD_TYPE &&
+    String(node.recordId) === String(recordId))
+  if (detail.action === 'deleted') {
+    if (index >= 0) method.children.splice(index, 1)
+  } else {
+    const child = createReservoirConstraintChild({
+      id: recordId, name: detail.recordName || detail.name || detail.title
+    }, scope, method, storageNode)
+    if (!child) return
+    if (index >= 0) method.children.splice(index, 1, child)
+    else method.children.push(child)
+  }
+  method.constraintRecordsLoaded = true
+  method.loaded = true
+  storageNode.expanded = true
+  const collaboration = storageNode.children?.find(node => node.label === '协同预测')
+  if (collaboration) {
+    collaboration.expanded = true
+    const prediction = collaboration.children?.find(node => node.label === '多周期预测')
+    if (prediction) prediction.expanded = true
+  }
+  method.expanded = true
+  treeData.value = [...treeData.value]
+}
+
+// 储气库列表有时在 IprInterface 挂载之后才由工作区异步补齐。
+// 只追踪“库/约束方法节点”的对象身份；子节点变化不触发重复 GET。
+watch(() => {
+  const root = treeData.value.find(node => node.id === 'g-reservoir')
+  return (root?.children || []).map(storage => ({
+    storage, method: findReservoirMultiPeriodConstraintsNode(storage)
+  })).filter(pair => pair.method)
+}, pairs => {
+  const current = new Map()
+  for (const {storage, method} of pairs) {
+    const key = String(storage.storageId ?? storage.reservoir?.storageId ?? '')
+    current.set(key, method)
+    if (constraintTreeObservedBranches.get(key) !== method) {
+      void syncReservoirConstraintTreeNodesForStorage(method, storage)
+    }
+  }
+  constraintTreeObservedBranches.clear()
+  for (const [key, method] of current) constraintTreeObservedBranches.set(key, method)
+}, { immediate: true })
 
 // ===== 方案生成保存后，左侧树"方案生成"下增加子节点 =====
+
 // JdbcTemplate 的 Map 默认使用下划线键名，因此同时识别驼峰和下划线。
 // 方案数据库ID不同于原平台 dynamicPredictionId，必须分开保存。
 let solutionRecordOpenVersion = 0
@@ -707,8 +942,8 @@ function normalizeSolutionTreeRecord(record, wellName) {
   const gasReservoirId = solutionRecordField(record, 'gasReservoirId', 'gas_reservoir_id')
   const ownerWell = solutionRecordField(record, 'wellName', 'well_name')
   if (projectId == null || gasReservoirId == null ||
-      String(projectId) !== String(PROJECT_ID) ||
-      String(gasReservoirId) !== String(GAS_RESERVOIR_ID)) return null
+    String(projectId) !== String(PROJECT_ID) ||
+    String(gasReservoirId) !== String(GAS_RESERVOIR_ID)) return null
   if (!ownerWell || String(ownerWell).trim() !== String(wellName || '').trim()) return null
   const name = String(solutionRecordField(record, 'recordName', 'record_name') ||
     `方案${recordId}`).trim()
@@ -824,6 +1059,69 @@ function handleSolutionSaved(event) {
     console.warn(`[方案生成树] 保存成功但尚未找到井 ${wellName} 的父节点，稍后会根据数据库重建`)
   }
   // 触发响应式更新（与 handleConstraintsSaved 一致，不再调用全量重新同步）
+  treeData.value = [...treeData.value]
+}
+
+// ===== 库侧方案生成保存后，左侧树"方案生成"下增加子节点 =====
+function handleReservoirSolutionSaved(event) {
+  const detail = event?.detail || event
+  if (!detail?.storageId || detail.id == null) {
+    console.warn('[库方案生成树] 保存通知缺少 storageId 或 id', detail)
+    return
+  }
+  if (detail.projectId != null && String(detail.projectId) !== String(PROJECT_ID)) return
+  if (detail.gasReservoirId != null && String(detail.gasReservoirId) !== String(GAS_RESERVOIR_ID)) return
+
+  const { id: recordId, storageId, recordName, action } = detail
+
+  const record = {
+    id: `reservoir-solution-record-${recordId}`,
+    type: 'solution-generation-record',
+    label: recordName || `方案${recordId}`,
+    schemeId: Number(recordId)
+  }
+
+  const reservoirRoot = treeData.value.find(node => node.id === 'g-reservoir')
+  if (!reservoirRoot) return
+
+  const storageNode = reservoirRoot.children?.find(
+    node => Number(node.storageId) === Number(storageId))
+  if (!storageNode) return
+
+  let solutionMethodNode = null
+  for (const group of (storageNode.children || [])) {
+    if (group.label === '协同预测') {
+      // 树结构: 协同预测 → 多周期预测 → 方案生成
+      const mpNode = group.children?.find(c => c.label === '多周期预测')
+      solutionMethodNode = mpNode?.children?.find(c => c.type === 'solution-generation-method') || null
+      break
+    }
+  }
+
+  if (!solutionMethodNode) return
+
+  solutionMethodNode.children ||= []
+  const index = solutionMethodNode.children.findIndex(
+    item => item.schemeId === record.schemeId)
+
+  const isDelete = action === 'deleted'
+  if (isDelete) {
+    if (index >= 0) solutionMethodNode.children.splice(index, 1)
+  } else if (index >= 0) {
+    solutionMethodNode.children.splice(index, 1, record)
+  } else {
+    solutionMethodNode.children.push(record)
+  }
+
+  storageNode.expanded = true
+  const mpGroup = storageNode.children?.find(g => g.label === '协同预测')
+  if (mpGroup) {
+    mpGroup.expanded = true
+    const mpPredictNode = mpGroup.children?.find(c => c.label === '多周期预测')
+    if (mpPredictNode) mpPredictNode.expanded = true
+  }
+  solutionMethodNode.expanded = true
+
   treeData.value = [...treeData.value]
 }
 
@@ -946,7 +1244,7 @@ const MULTI_PERIOD_CHILDREN = [
   { type: 'multi-period-objective', label: '目标函数', view: 'multi-period-objective-function' },
   { type: 'multi-period-constraints', label: '约束条件', view: 'multi-period-constraint-conditions' },
   { type: 'multi-period-generation', label: '方案生成', view: 'multi-period-solution-generation' },
-  { type: 'multi-period-comparison', label: '方案比选', view: 'multi-period-solution-comparison' }  
+  { type: 'multi-period-comparison', label: '方案比选', view: 'multi-period-solution-comparison' }
 ]
 
 function ensureMultiPeriodNavigation(nodes, inheritedWell = '') {
@@ -1029,9 +1327,9 @@ const ensureCouplingRecordLoaded = async target => {
   const findMethod = nodes => {
     for (const node of nodes || []) {
       if (node.type === COUPLING_METHOD_NODE_TYPE && node.couplingMode === target.command.name
-          && Number(node.projectId) === Number(target.reservoir?.projectId)
-          && Number(node.gasReservoirId) === Number(target.reservoir?.gasReservoirId)
-          && Number(node.storageId) === Number(target.reservoir?.storageId)) {
+        && Number(node.projectId) === Number(target.reservoir?.projectId)
+        && Number(node.gasReservoirId) === Number(target.reservoir?.gasReservoirId)
+        && Number(node.storageId) === Number(target.reservoir?.storageId)) {
         return node
       }
       const found = findMethod(node.children)
@@ -1050,9 +1348,123 @@ const ensureCouplingRecordLoaded = async target => {
   activateReservoirCommand(target)
 }
 
+// 刷新或直达已保存的库约束 URL：先找到该库的目录，再加载对应数据库记录。
+const ensureConstraintRecordLoaded = async target => {
+  if (!target?.constraintRecordId || target.command?.name !== '约束条件') return
+  const storageNode = findReservoirStorageById(target.reservoir?.storageId)
+  const method = findReservoirMultiPeriodConstraintsNode(storageNode)
+  if (!method || method.constraintRecordsLoaded) return
+  await syncReservoirConstraintTreeNodesForStorage(method, storageNode)
+  activateReservoirCommand(target)
+}
+
 // 库功能用可刷新/可回退的完整地址定位；目录选择本身不改变右侧页面。
+// 路由解析器可能只解析库、命令等通用字段。历史约束记录 ID 必须明确传给右侧组件。
+// 非「协同预测→多周期预测→约束条件」页面不能意外继承旧记录 ID。
+function withSavedConstraintRecordId(location, query) {
+  if (!location) return null
+  // 不依赖 workspaceTreeState 的 group/parent 文字格式：
+  // 只要是指向实际库的约束页面，就要保留 constraintRecordId。
+  if (location.command?.name !== '约束条件' ||
+      !Number.isSafeInteger(Number(location.reservoir?.storageId)) ||
+      Number(location.reservoir?.storageId) <= 0) return location
+  const rawId = Array.isArray(query?.constraintRecordId)
+    ? query.constraintRecordId[0] : query?.constraintRecordId
+  const id = rawId == null || String(rawId).trim() === '' ? null : Number(rawId)
+  const recordId = Number.isSafeInteger(id) && id > 0 ? id : null
+  return {
+    ...location,
+    // 由存储库历史记录打开时，统一使用库级多周期预测的正确命令层级。
+    // 路由解析器返回的其它 group/parent 文案不应导致页面落入占位分支。
+    command: recordId ? {
+      ...location.command,
+      group: '协同预测', parent: '多周期预测', name: '约束条件'
+    } : location.command,
+    constraintRecordId: recordId
+  }
+}
+
+// 左侧「已保存约束条件」是自定义子节点，可能不被 selectWorkspaceNodeScope
+// 识别为 reservoir；必须在通用节点类型判断之前优先处理，避免“点击没有反应”。
+let constraintRecordOpenSerial = 0
+async function openSavedReservoirConstraintRecord(node, requestedSerial) {
+  const recordId = Number(node.recordId ?? node.constraintRecordId)
+  if (!Number.isSafeInteger(recordId) || recordId <= 0) {
+    ElMessage.error('该约束子节点缺少有效的数据库记录 ID')
+    return
+  }
+  const storageId = Number(node.storageId ?? node.reservoir?.storageId)
+  const storageNode = findReservoirStorageById(storageId)
+  const method = findReservoirMultiPeriodConstraintsNode(storageNode)
+  if (!storageNode || !method) {
+    ElMessage.error('未找到该约束记录所属的储气库目录，请刷新工作台后重试')
+    return
+  }
+  let scope
+  try {
+    scope = reservoirConstraintScope(storageNode, method)
+    for (const key of ['projectId', 'gasReservoirId', 'storageId']) {
+      if (node[key] != null && Number(node[key]) !== scope[key]) {
+        throw new Error('历史约束子节点与当前库范围不匹配，已拒绝跨库读取')
+      }
+    }
+  } catch (error) {
+    ElMessage.error(error?.message || '库级约束的归属范围不合法')
+    return
+  }
+
+  const command = {
+    ...(method.command || {}),
+    group: '协同预测',
+    parent: '多周期预测',
+    name: '约束条件',
+    ...scope
+  }
+  const rawReservoir = method.reservoir ?? storageNode.reservoir ?? storageNode
+  const reservoir = {
+    ...rawReservoir,
+    ...scope,
+    label: rawReservoir?.label ?? storageNode.label ?? `储气库${scope.storageId}`
+  }
+  const sameRecord = currentView.value === 'reservoir-feature' &&
+    Number(currentViewNode.value?.constraintRecordId) === recordId &&
+    Number(currentViewNode.value?.reservoir?.storageId) === scope.storageId
+
+  // 导航用于浏览器刷新 / 回退；右侧的显示另行显式设置，避免解析器丢掉 ID。
+  const location = getReservoirCommandLocation(command)
+  if (location) {
+    try {
+      await router.push({
+        ...location,
+        query: { ...(location.query || {}), constraintRecordId: String(recordId) }
+      })
+    } catch (error) {
+      ElMessage.error(`打开约束记录 ${recordId} 的路由失败：${error?.message || '未知错误'}`)
+      return
+    }
+  } else {
+    console.warn('[库约束树] 未能生成库级路由，将直接打开已保存的约束记录')
+  }
+  await nextTick()
+  if (requestedSerial !== constraintRecordOpenSerial) return
+  // 直接保证右侧页面存在，并把记录 ID 作为 prop 传递；再次点击相同记录强制重新读取。
+  const target = {
+    reservoir,
+    command,
+    constraintRecordId: recordId,
+    recordOpenNonce: sameRecord
+      ? (Number(currentViewNode.value?.recordOpenNonce) || 0) + 1
+      : 0
+  }
+  activeNodeId.value = node.id
+  activeNode.value = node
+  activateReservoirCommand(target)
+  currentView.value = 'reservoir-feature'
+  currentViewNode.value = target
+}
+
 watch([() => route.query, treeData], ([query]) => {
-  const target = resolveReservoirLocation(query)
+  const target = withSavedConstraintRecordId(resolveReservoirLocation(query), query)
   if (!target) {
     if (currentView.value === 'reservoir-feature') {
       currentView.value = null
@@ -1062,8 +1474,26 @@ watch([() => route.query, treeData], ([query]) => {
   }
   activateReservoirCommand(target)
   currentView.value = 'reservoir-feature'
-  currentViewNode.value = target
+  // treeData 的异步更新会重跑此 watch；URL 指向同一历史记录时不要
+  // 重建组件，否则刚从数据库恢复的表单会被新组件重新初始化。
+  const current = currentViewNode.value
+  const keepOpenedRecord = target.command?.name === '约束条件' &&
+    target.constraintRecordId && current?.constraintRecordId &&
+    Number(target.constraintRecordId) === Number(current.constraintRecordId) &&
+    ['projectId', 'gasReservoirId', 'storageId'].every(key =>
+      Number(target.reservoir?.[key]) === Number(current.reservoir?.[key]))
+  currentViewNode.value = keepOpenedRecord
+    ? {
+        ...target,
+        // 仅目录树刷新不应该覆盖正在查看的历史记录页的规范化命令与库范围。
+        reservoir: current.reservoir,
+        command: current.command,
+        constraintRecordId: current.constraintRecordId,
+        recordOpenNonce: current.recordOpenNonce || 0
+      }
+    : target
   void ensureCouplingRecordLoaded(target)
+  void ensureConstraintRecordLoaded(target)
 }, { immediate: true })
 
 watch(currentView, view => {
@@ -2557,6 +2987,8 @@ const refreshProjectTree = async () => { //加在项目树
     // 这里必须等待“当前项目/气藏全部历史方案”完成，不再用 fire-and-forget
     // 让首页的旧井树和数据库的保存方案发生竞态。
     await syncSolutionTreeNodes()
+    // 即使库侧约束目录以前已经打开，也从真实保存接口恢复最新数据库记录。
+    await syncReservoirConstraintTreeNodes({ force: true })
     // 不在登录/刷新时遍历所有井请求 PVT；大量并发请求会让目录初始化变慢，
     // 也会在单个接口异常时制造整页“全部报错”的假象。
     return Boolean(getWellGroup()?.children?.length)
@@ -3787,7 +4219,7 @@ const resolveAnalyticResultIdForWell = async (wellName) => {
   await refreshAnalyticMethodNodes()
   const treeRaw = findAnalyticMethodNode(wellName)?.raw || {}
   return treeRaw.resultId || treeRaw.analysisId || treeRaw.AnalysisMethodsId ||
-      treeRaw.analysisMethodsId || treeRaw.nodeId || null
+    treeRaw.analysisMethodsId || treeRaw.nodeId || null
 }
 
 // 打开注采拟合视图：先落视图，再回填该井已有解析法结果（历史结果与本次计算共用一个查看入口）。
@@ -3842,7 +4274,7 @@ const finalizeInjectionFittingResult = async (wellName, logPayload, maxRetries =
       const treeNode = findAnalyticMethodNode(wellName)
       const treeRaw = treeNode?.raw || {}
       const resultId = treeRaw.resultId || treeRaw.analysisId || treeRaw.AnalysisMethodsId ||
-          treeRaw.analysisMethodsId || treeRaw.nodeId || logResultId
+        treeRaw.analysisMethodsId || treeRaw.nodeId || logResultId
       if (!resultId) {
         lastError = new Error('没有找到该井的解析法结果 ID')
         continue
@@ -3869,7 +4301,7 @@ const finalizeInjectionFittingResult = async (wellName, logPayload, maxRetries =
 
 const runInjectionProductionFitting = async (options = {}) => {
   const wellName = options.wellName || currentViewNode.value?.wellName ||
-      resolveWorkspaceTargetWellName(activeNode.value?.wellName || selectedWellName.value)
+    resolveWorkspaceTargetWellName(activeNode.value?.wellName || selectedWellName.value)
   if (!wellName) {
     ElMessage.warning('请先在左侧选择一口井')
     return
@@ -5025,8 +5457,8 @@ const deleteCouplingPredictionRecord = async node => {
   }
   // 当前正在查看这条记录：去掉地址中的 predictionId，页面按"无该记录"重新准备。
   if (Number(route.query.predictionId) === Number(node.predictionId)
-      && Number(route.query.projectId) === Number(node.projectId)
-      && Number(route.query.gasReservoirId) === Number(node.gasReservoirId)) {
+    && Number(route.query.projectId) === Number(node.projectId)
+    && Number(route.query.gasReservoirId) === Number(node.gasReservoirId)) {
     const query = { ...route.query }
     delete query.predictionId
     await router.replace({ query })
@@ -5310,6 +5742,11 @@ const handleNodalHistory = ({ scope, records }) => {
 const handleSelect = async (node) => { // 点击左侧树节点
   closeTreeContextMenu()
   if (!node || node.disabled) return
+  const openSerial = ++constraintRecordOpenSerial
+  if (node.type === STORAGE_CONSTRAINT_RECORD_TYPE) {
+    await openSavedReservoirConstraintRecord(node, openSerial)
+    return
+  }
   if (node.type === NODAL_TYPE) return
   if (node.type === NODAL_RECORD) {
     openedNodalRecord.value = node.id
@@ -5361,12 +5798,32 @@ const handleSelect = async (node) => { // 点击左侧树节点
 
     if (node.command) {
       const location = getReservoirCommandLocation(node.command)
-      if (location && node.type === RESERVOIR_LOSS_RECORD_NODE_TYPE) {
-        location.query.lossRecordId = node.lossRecordId
+      if (location && node.type === COUPLING_RECORD_NODE_TYPE) {
+        location.query.predictionId = node.predictionId
+      }
+      // 多周期预测-方案生成：从已保存方案节点打开时携带方案ID
+      if (location && node.type === SOLUTION_RECORD_NODE_TYPE) {
+        location.query.schemeId = node.schemeId
       }
       // 一体化耦合优化：从预测记录子节点打开时携带任务编号，页面直接载入该记录。
       if (location && node.type === COUPLING_RECORD_NODE_TYPE) {
         location.query.predictionId = node.predictionId
+      }
+      // 库侧多周期预测：从约束条件记录子节点打开时携带记录ID，页面直接载入该记录。
+      if (location && node.type === 'reservoir-multi-period-constraint-record') {
+        location.query.constraintRecordId = String(node.recordId)
+        // 点击同一节点时 vue-router 会忽略重复导航；主动重建该历史记录页面。
+        if (router.resolve(location).fullPath === route.fullPath) {
+          const restored = withSavedConstraintRecordId(resolveReservoirLocation(location.query), location.query)
+          if (restored) {
+            currentView.value = 'reservoir-feature'
+            currentViewNode.value = {
+              ...restored,
+              recordOpenNonce: (Number(currentViewNode.value?.recordOpenNonce) || 0) + 1
+            }
+          }
+          return
+        }
       }
       if (location) await router.push(location)
     }
@@ -5542,7 +5999,7 @@ const handleSelect = async (node) => { // 点击左侧树节点
     return
   }
 
-  
+
   if (node.type === 'multi-period-solution-record') {
     const wellName = node.wellName || nodeWellName
     const recordId = node.recordId ?? node.solutionRecordId
@@ -6024,6 +6481,19 @@ const handleNodeExpand = async node => {
     await loadCouplingOptimizationTreeNodes({ treeData, node })
     return
   }
+  // 库侧多周期预测-约束条件目录：展开时加载已保存的约束记录。
+  if (isStorageConstraintMethod(node)) {
+    const owner = findReservoirConstraintOwner(node)
+    if (owner) {
+      await syncReservoirConstraintTreeNodesForStorage(node, owner, { force: true })
+      return
+    }
+  }
+  if (node?.type === SOLUTION_METHOD_NODE_TYPE) {
+    await loadSolutionGenerationNodes({ treeData, node })
+    return
+  }
+
   const wellName = node?.wellName
   if (!wellName) return
   if (node.type === 'multi-period-generation') {
@@ -6170,8 +6640,10 @@ const handleRefreshTree = () => {
 onMounted(async () => {
   window.addEventListener('click', closeTreeContextMenu)
   window.addEventListener('resize', closeTreeContextMenu)
-        window.addEventListener('grdp:constraints-saved', handleConstraintsSaved)
-    window.addEventListener('grdp:solution-saved', handleSolutionSaved)
+  window.addEventListener('grdp:constraints-saved', handleConstraintsSaved)
+  window.addEventListener('grdp:solution-saved', handleSolutionSaved)
+  window.addEventListener('grdp:reservoir-solution-saved', handleReservoirSolutionSaved)
+    window.addEventListener('grdp:reservoir-constraints-saved', handleReservoirConstraintsSaved)
   // 软件集成工作区拥有独立的项目树和数据接口；不能在挂载共享 Shell 时
   // 同时初始化解析融合目录，否则原平台未登录会把演示页重定向到登录页。
   if (isSoftwareIntegration.value) return
@@ -6181,6 +6653,7 @@ onMounted(async () => {
     // 历史方案优先恢复，不被其他模块可能较慢的历史查询阻塞。
     await syncSolutionTreeNodes()
     await syncConstraintTreeNodes()
+    await syncReservoirConstraintTreeNodes()
     await Promise.allSettled([
       loadAllModifiedIsochronalTreeNodes({
         treeData: treeData.value,
@@ -6201,6 +6674,8 @@ onMounted(async () => {
     // 产能试井加载器同样会修改“单井产能”分支，因此最后恢复稳定流记录。
     await loadAllStableProductivityTreeNodes()
     ensureCoefficientTree(treeData.value)
+    // 其他异步目录加载器可能改动库分支，最后确保库级约束子节点仍已恢复。
+    await syncReservoirConstraintTreeNodes()
     // 其他异步加载器可能改动子树，最后再将数据库全量历史方案复原一次。
     await syncSolutionTreeNodes()
   } catch (error) {
@@ -6228,8 +6703,10 @@ watch(() => workspaceTreeData.value, nodes => {
 onBeforeUnmount(() => {
   window.removeEventListener('click', closeTreeContextMenu)
   window.removeEventListener('resize', closeTreeContextMenu)
-    window.removeEventListener('grdp:constraints-saved', handleConstraintsSaved)
-    window.removeEventListener('grdp:solution-saved', handleSolutionSaved)
+  window.removeEventListener('grdp:constraints-saved', handleConstraintsSaved)
+  window.removeEventListener('grdp:solution-saved', handleSolutionSaved)
+  window.removeEventListener('grdp:reservoir-solution-saved', handleReservoirSolutionSaved)
+    window.removeEventListener('grdp:reservoir-constraints-saved', handleReservoirConstraintsSaved)
 })
 </script>
 
@@ -6260,7 +6737,10 @@ onBeforeUnmount(() => {
           'pvt-yellow-theme': isPvtView
         }">
           <ReservoirWorkspaceContent v-if="currentView === 'reservoir-feature'" :reservoir="currentViewNode.reservoir"
-            :command="currentViewNode.command" :prediction-id="currentViewNode.predictionId" />
+            :command="currentViewNode.command" :prediction-id="currentViewNode.predictionId"
+            :scheme-id="currentViewNode.schemeId"
+            :constraint-record-id="currentViewNode.constraintRecordId"
+            :key="`reservoir-feature-${currentViewNode?.reservoir?.storageId || ''}-${currentViewNode?.command?.name === '约束条件' ? (currentViewNode?.constraintRecordId || 'new') : (currentViewNode?.schemeId || 'new')}-${currentViewNode?.recordOpenNonce || 0}`" />
           <PipelineCapacityContent v-if="currentView === 'pipeline-capacity'"
             :key="`pipeline-${currentViewNode?.wellName || 'project'}`" :well-name="currentViewNode?.wellName || ''"
             :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID"
@@ -6307,8 +6787,7 @@ onBeforeUnmount(() => {
           <!-- 多周期预测：约束条件 -->
           <MultiPeriodConstraintConditions v-if="currentView === 'multi-period-constraint-conditions'"
             :key="`multi-period-constraint-${currentViewNode?.wellName || 'project'}-${currentViewNode?.recordId ?? 'new'}-${currentViewNode?.constraintOpenVersion ?? 0}`"
-            :well-name="currentViewNode?.wellName || ''"
-            :record-id="currentViewNode?.recordId ?? null"
+            :well-name="currentViewNode?.wellName || ''" :record-id="currentViewNode?.recordId ?? null"
             :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID"
             @constraints-calculated="handleMultiPeriodConstraintsCalculated"
             @constraints-invalidated="handleMultiPeriodConstraintsInvalidated" />
@@ -6334,9 +6813,8 @@ onBeforeUnmount(() => {
             :gas-reservoir-id="GAS_RESERVOIR_ID" />
           <!-- 配产配注：注采拟合（采端） -->
           <InjectionProductionFitting v-if="currentView === 'injection-production-fitting'"
-            :key="`ip-fitting-${currentViewNode?.wellName || 'well'}`" :node="currentViewNode"
-            :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID"
-            :recalculating="injectionProductionFittingRunning"
+            :key="`ip-fitting-${currentViewNode?.wellName || 'well'}`" :node="currentViewNode" :project-id="PROJECT_ID"
+            :gas-reservoir-id="GAS_RESERVOIR_ID" :recalculating="injectionProductionFittingRunning"
             @recalculate="runInjectionProductionFitting" />
           <ErosionContent v-if="currentView === 'wellbore-erosion'" :key="currentViewNode?.id" :node="currentViewNode"
             :project-id="PROJECT_ID" :gas-reservoir-id="GAS_RESERVOIR_ID" />

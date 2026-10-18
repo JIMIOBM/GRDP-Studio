@@ -54,10 +54,6 @@ watch(
           <button type="button" class="save-button" @click="applyDemand">应用需求参数</button>
         </div>
         <p v-if="statusText" class="objective-note">{{ statusText }}</p>
-        <p class="objective-note">
-          目前 HAR 的动态预测 Calc 接口不含 Q 参数；此处仅用于前端需求记录和展示，
-          未实现目标函数最优化，也不会发出保存请求。
-        </p>
       </div>
     </aside>
 
@@ -253,72 +249,72 @@ watch(
 
 .content-area {
   flex: 1;
-  padding: 24px 32px;
+  min-height: 0;
+  padding: 24px;
   overflow: auto;
 }
 
 .formula-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(260px, 380px) minmax(180px, 1fr);
   align-items: center;
-  justify-content: space-between;
-  padding: 16px 0;
-  border-bottom: 1px dashed #e4e7ed;
-}
-
-.formula-row:last-child {
-  border-bottom: none;
+  gap: 20px;
+  min-height: 76px;
+  padding: 8px 12px;
+  border-bottom: 1px solid #e4e7ed;
 }
 
 .formula {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 18px;
-  font-family: "Times New Roman", serif;
+  justify-content: center;
+  gap: 12px;
+  min-height: 56px;
+  color: #303133;
+  font-family: "Cambria Math", "Times New Roman", serif;
+  font-size: 22px;
+  white-space: nowrap;
 }
 
 .operator {
-  font-weight: 600;
-  color: #333;
-}
-
-.sum {
-  position: relative;
-  display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-  margin: 0 4px;
-}
-
-.sum-symbol {
-  font-size: 24px;
-  line-height: 1;
-}
-
-.sum-upper {
-  font-size: 11px;
-  position: absolute;
-  top: -14px;
-}
-
-.sum-lower {
-  font-size: 11px;
-  position: absolute;
-  bottom: -14px;
+  font-size: 18px;
+  font-style: italic;
 }
 
 .variable {
   font-style: italic;
-  color: #303133;
+}
+
+.variable sub,
+.sum-upper sub {
+  font-size: 0.65em;
+  font-style: normal;
+}
+
+.sum {
+  display: grid;
+  grid-template-rows: 13px 30px 13px;
+  justify-items: center;
+  align-items: center;
+  min-width: 34px;
+}
+
+.sum-upper,
+.sum-lower {
+  font-size: 10px;
+  line-height: 13px;
+  white-space: nowrap;
+}
+
+.sum-symbol {
+  font-size: 34px;
+  line-height: 30px;
 }
 
 .formula-condition {
-  font-size: 13px;
-  color: #606266;
-  min-width: 200px;
-  text-align: right;
+  color: #303133;
+  font-size: 14px;
 }
-
 .objective-note {
   font-size: 12px; line-height: 1.6;
   color: #606266; margin: 10px 0;

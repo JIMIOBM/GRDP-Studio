@@ -65,6 +65,11 @@ export const COUPLING_RECORD_NODE_TYPE = 'coupling-optimization-record'
 export const COUPLING_NEW_NODE_TYPE = 'coupling-optimization-new'
 export const COUPLING_MODES = ['单目标', '多目标']
 
+export const SOLUTION_METHOD_NODE_TYPE = 'solution-generation-method'
+export const SOLUTION_RECORD_NODE_TYPE = 'solution-generation-record'
+export const CONSTRAINT_METHOD_NODE_TYPE = 'reservoir-multi-period-constraints'
+export const CONSTRAINT_RECORD_NODE_TYPE = 'reservoir-multi-period-constraint-record'
+
 const makeCommand = (group, name, parent = '') => ({
   group,
   name,
@@ -109,16 +114,22 @@ export function buildReservoirTreeNodes({ id, label, projectId, gasReservoirId, 
     const isGeologicalLossMethod = group === '损耗评价'
       && ((parent === '地质损耗' && ['微观损耗', '逸散性损耗'].includes(name))
         || (!parent && ['井筒损耗', '地面损耗'].includes(name)))
-    const isCouplingMethod = group === '协同预测' && parent === '一体化耦合优化'
+        const isCouplingMethod = group === '协同预测' && parent === '一体化耦合优化'
       && COUPLING_MODES.includes(name)
+    const isSolutionMethod = group === '协同预测' && parent === '多周期预测'
+      && name === '方案生成'
+    const isConstraintMethod = group === '协同预测' && parent === '多周期预测'
+      && name === '约束条件'
     return {
       ...metadata,
       id: nodeId(descriptor.path),
       label: name,
-      type: isGeologicalLossMethod ? 'reservoir-geological-loss-method'
+           type: isGeologicalLossMethod ? 'reservoir-geological-loss-method'
         : isCouplingMethod ? COUPLING_METHOD_NODE_TYPE
-          : 'reservoir-command',
-      lazy: isGeologicalLossMethod || isCouplingMethod,
+          : isSolutionMethod ? SOLUTION_METHOD_NODE_TYPE
+            : isConstraintMethod ? CONSTRAINT_METHOD_NODE_TYPE
+              : 'reservoir-command',
+      lazy: isGeologicalLossMethod || isCouplingMethod || isSolutionMethod || isConstraintMethod,
       lossType: name === '微观损耗' ? 'microscopic'
         : name === '逸散性损耗' ? 'escape'
           : name === '井筒损耗' ? 'wellbore' : name === '地面损耗' ? 'surface' : undefined,

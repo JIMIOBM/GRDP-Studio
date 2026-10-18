@@ -1,29 +1,41 @@
+// d:\shiyou\GRDP-Studio\vue\src\views\Reservoir\MultiPeriodPrediction\reservoirPredictionContext.js
+/**
+ * 库级多周期预测共享上下文 —— 不依赖 /docker-api 和原平台接口。
+ * 仅管理约束条件暂存、方案预览列表等前端状态。
+ */
 import { reactive } from 'vue'
 
-// 页面间共享未保存的参数和真实接口结果，刷新后清空；不创建数据库记录。
-const scopes = new Map()
+const contextMap = new Map()
 
-export function getReservoirPredictionContext(projectId, gasReservoirId, storageId) {
-  const key = [projectId, gasReservoirId, storageId].map(String).join(':')
-  if (!scopes.has(key)) {
-    scopes.set(key, reactive({
-      predictionId: null,
-      constraintDraft: null,
-      appliedAt: null,
-      objectiveQ: '',
-      liveSolutions: [],
-      nextSolutionNo: 1
-    }))
-  }
-  return scopes.get(key)
+function contextKey(projectId, gasReservoirId, storageId) {
+  return [projectId, gasReservoirId, storageId].map(String).join(':')
 }
 
-// 字段、选项和默认值与用户最初上传的库级 ConstraintConditions.vue 完全一致。
+export function getReservoirPredictionContext(projectId, gasReservoirId, storageId) {
+  const key = contextKey(projectId, gasReservoirId, storageId)
+  if (!contextMap.has(key)) {
+    contextMap.set(key, reactive({
+      constraintDraft: null,
+      appliedAt: null,
+      liveSolutions: [],
+      nextSolutionNo: 1,
+      predictionId: null,
+      constraintWellResults: null,
+      constraintBoundaries: null,
+      constraintRecordId: null
+    }))
+  }
+  return contextMap.get(key)
+}
+
 export function originalConstraintForm() {
   return {
     gasProperties: {
-      gasType: '干气', dless: '0.7336', h2sContent: '14.62',
-      co2Content: '8.96', n2Content: '0'
+      gasType: '干气',
+      dless: 0.7336,
+      h2sContent: 14.62,
+      co2Content: 8.96,
+      n2Content: 0
     },
     calcMethod: {
       correctionMethod: 'Wichert-Aziz 修正方法',
@@ -32,19 +44,28 @@ export function originalConstraintForm() {
     },
     otherData: {
       productionEquationType: '压力形式',
-      initialPressure: '55.634', reservoirTemperature: '120',
-      materialBalanceType: '定容气藏', targetProduction: '77.8337',
-      forecastStartDate: '2014-01-15', forecastTimeStep: '30',
-      forecastTotalDays: '240', wellheadExportPressure: '9',
-      abandonmentRate: '4'
+      initialPressure: 55.634,
+      reservoirTemperature: 120,
+      materialBalanceType: '定容气藏',
+      targetProduction: 61.5117,
+      forecastStartDate: '2014-01-15',
+      forecastTimeStep: 30,
+      forecastTotalDays: 240,
+      wellheadExportPressure: 9,
+      abandonmentRate: 4
     }
   }
 }
 
 export function copyConstraintForm(form) {
-  return {
-    gasProperties: { ...form.gasProperties },
-    calcMethod: { ...form.calcMethod },
-    otherData: { ...form.otherData }
+  // 始终只携带截图中的约束表单字段；旧草稿中的伪造井筒默认参数一律丢弃。
+  const clean = originalConstraintForm()
+  const source = form && typeof form === 'object' ? form : {}
+  for (const group of ['gasProperties', 'calcMethod', 'otherData']) {
+    for (const field of Object.keys(clean[group])) {
+      const value = source[group]?.[field]
+      if (value !== null && value !== undefined) clean[group][field] = value
+    }
   }
+  return clean
 }

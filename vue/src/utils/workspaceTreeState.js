@@ -6,6 +6,7 @@ import {
   buildReservoirTreeNodes,
   resolveReservoirCommand
 } from '../config/reservoirRibbon.js'
+import { SOLUTION_METHOD_NODE_TYPE, SOLUTION_RECORD_NODE_TYPE, CONSTRAINT_METHOD_NODE_TYPE, CONSTRAINT_RECORD_NODE_TYPE } from '../config/reservoirRibbon'
 
 // 两个解析融合工作台共用的目录数据与选择状态。
 // 路由切换不会销毁这些 ref，因此单井产能页面可以延续主工作台的完整目录。
@@ -157,16 +158,21 @@ export function resolveReservoirLocation(query) {
   const reservoir = workspaceTreeData.value.find(item => item.id === 'g-reservoir')?.children.find(item =>
     Number(item.projectId) === Number(query.projectId) && Number(item.gasReservoirId) === Number(query.gasReservoirId)
     && Number(item.storageId) === Number(query.storageId))
-  return command && reservoir
-    ? { command, reservoir, lossRecordId: query.lossRecordId ?? null, predictionId: query.predictionId ?? null }
+    return command && reservoir
+    ? { command, reservoir, lossRecordId: query.lossRecordId ?? null,
+        predictionId: query.predictionId ?? null,
+        schemeId: query.schemeId ?? null,
+        constraintRecordId: query.constraintRecordId ?? null }
     : null
 }
 
-export function activateReservoirCommand({ command, reservoir, lossRecordId = null, predictionId = null }) {
+export function activateReservoirCommand({ command, reservoir, lossRecordId = null, predictionId = null, schemeId = null, constraintRecordId = null }) {
   workspaceSelectedReservoir.value = reservoir
   setWorkspaceRibbonScope('reservoir')
   const hasRecord = lossRecordId !== null && lossRecordId !== ''
   const hasPrediction = predictionId !== null && predictionId !== ''
+  const hasScheme = schemeId !== null && schemeId !== ''
+  const hasConstraintRecord = constraintRecordId !== null && constraintRecordId !== ''
   const reveal = node => {
     if (node.command?.path.join('/') === command.path.join('/')
         && node.type !== 'reservoir-geological-loss-record'
@@ -190,6 +196,24 @@ export function activateReservoirCommand({ command, reservoir, lossRecordId = nu
           child.type === COUPLING_RECORD_NODE_TYPE
           && String(child.predictionId) === String(predictionId))
         workspaceActiveNodeId.value = record?.id ?? `${node.id}/record:${predictionId}`
+        return true
+      }
+            if (hasScheme && node.type === SOLUTION_METHOD_NODE_TYPE) {
+        // 多周期预测-方案生成：按方案ID定位记录子节点
+        node.expanded = true
+        const record = node.children?.find(child =>
+          child.type === SOLUTION_RECORD_NODE_TYPE
+          && String(child.schemeId) === String(schemeId))
+        workspaceActiveNodeId.value = record?.id ?? `${node.id}/record:${schemeId}`
+        return true
+      }
+      if (hasConstraintRecord && node.type === CONSTRAINT_METHOD_NODE_TYPE) {
+        // 多周期预测-约束条件：按记录ID定位约束记录子节点
+        node.expanded = true
+        const record = node.children?.find(child =>
+          child.type === CONSTRAINT_RECORD_NODE_TYPE
+          && String(child.recordId) === String(constraintRecordId))
+        workspaceActiveNodeId.value = record?.id ?? `${node.id}/record:${constraintRecordId}`
         return true
       }
       workspaceActiveNodeId.value = node.id
