@@ -1,0 +1,392 @@
+{
+  "schemaVersion": "eclipse-data-inspection/4",
+  "caseName": "ECLIPSE_PVTG_WET_GAS.DATA",
+  "sections": [
+    "RUNSPEC",
+    "GRID",
+    "PROPS",
+    "SOLUTION",
+    "SUMMARY",
+    "SCHEDULE"
+  ],
+  "unitSystem": "METRIC",
+  "phases": [
+    "OIL",
+    "WATER",
+    "GAS"
+  ],
+  "dimensions": {
+    "nx": 9,
+    "ny": 9,
+    "nz": 2
+  },
+  "wellNames": [
+    "PRODUCER"
+  ],
+  "scheduleTimeline": [],
+  "packageFiles": [
+    {
+      "relativePath": "ECLIPSE_PVTG_WET_GAS.DATA",
+      "sizeBytes": 6412,
+      "sha256": "a55d6d54cc752f928d793fa13601b444d23ba6a4118ab97f4641b2f757bf1215"
+    }
+  ],
+  "scheduleMetadata": {
+    "wells": [
+      {
+        "name": "PRODUCER",
+        "group": "G",
+        "sourceFile": "ECLIPSE_PVTG_WET_GAS.DATA",
+        "lineNumber": 254
+      }
+    ],
+    "groups": [],
+    "records": [
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "PRODUCER",
+          "5",
+          "5",
+          "1",
+          "1",
+          "OPEN",
+          "1",
+          "-1",
+          "0.5"
+        ],
+        "sourceFile": "ECLIPSE_PVTG_WET_GAS.DATA",
+        "lineNumber": 258
+      },
+      {
+        "keyword": "WCONPROD",
+        "values": [
+          "PRODUCER",
+          "OPEN",
+          "GRAT",
+          "2*",
+          "5.0E5"
+        ],
+        "sourceFile": "ECLIPSE_PVTG_WET_GAS.DATA",
+        "lineNumber": 267
+      }
+    ],
+    "completions": [
+      {
+        "keyword": "COMPDAT",
+        "well": "PRODUCER",
+        "i": "5",
+        "j": "5",
+        "k1": "1",
+        "k2": "1",
+        "status": "OPEN",
+        "sourceFile": "ECLIPSE_PVTG_WET_GAS.DATA",
+        "lineNumber": 258
+      }
+    ]
+  },
+  "wetGasPvtContext": {
+    "schemaVersion": "eclipse-wet-gas-pvt-context/1",
+    "sourceFile": "ECLIPSE_PVTG_WET_GAS.DATA",
+    "keywordLineNumber": 131,
+    "records": [
+      {
+        "rows": [
+          {
+            "lineNumber": 133,
+            "values": [
+              "30",
+              "0.000132",
+              "0.04234",
+              "0.01344"
+            ]
+          },
+          {
+            "lineNumber": 134,
+            "values": [
+              "0",
+              "0.04231",
+              "0.01389"
+            ]
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "lineNumber": 135,
+            "values": [
+              "60",
+              "0.000124",
+              "0.02046",
+              "0.01420"
+            ]
+          },
+          {
+            "lineNumber": 136,
+            "values": [
+              "0",
+              "0.02043",
+              "0.01450"
+            ]
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "lineNumber": 137,
+            "values": [
+              "90",
+              "0.000126",
+              "0.01328",
+              "0.01526"
+            ]
+          },
+          {
+            "lineNumber": 138,
+            "values": [
+              "0",
+              "0.01325",
+              "0.01532"
+            ]
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "lineNumber": 139,
+            "values": [
+              "120",
+              "0.000135",
+              "0.00977",
+              "0.01660"
+            ]
+          },
+          {
+            "lineNumber": 140,
+            "values": [
+              "0",
+              "0.00973",
+              "0.01634"
+            ]
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "lineNumber": 141,
+            "values": [
+              "150",
+              "0.000149",
+              "0.00773",
+              "0.01818"
+            ]
+          },
+          {
+            "lineNumber": 142,
+            "values": [
+              "0",
+              "0.00769",
+              "0.01752"
+            ]
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "lineNumber": 143,
+            "values": [
+              "180",
+              "0.000163",
+              "0.006426",
+              "0.01994"
+            ]
+          },
+          {
+            "lineNumber": 144,
+            "values": [
+              "0",
+              "0.006405",
+              "0.01883"
+            ]
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "lineNumber": 145,
+            "values": [
+              "210",
+              "0.000191",
+              "0.005541",
+              "0.02181"
+            ]
+          },
+          {
+            "lineNumber": 146,
+            "values": [
+              "0",
+              "0.005553",
+              "0.02021"
+            ]
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "lineNumber": 147,
+            "values": [
+              "240",
+              "0.000225",
+              "0.004919",
+              "0.02370"
+            ]
+          },
+          {
+            "lineNumber": 148,
+            "values": [
+              "0",
+              "0.004952",
+              "0.02163"
+            ]
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "lineNumber": 149,
+            "values": [
+              "270",
+              "0.000272",
+              "0.004471",
+              "0.02559"
+            ]
+          },
+          {
+            "lineNumber": 150,
+            "values": [
+              "0",
+              "0.004511",
+              "0.02305"
+            ]
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "lineNumber": 151,
+            "values": [
+              "295",
+              "0.000354",
+              "0.004194",
+              "0.02714"
+            ]
+          },
+          {
+            "lineNumber": 152,
+            "values": [
+              "0",
+              "0.004225",
+              "0.02423"
+            ]
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "lineNumber": 153,
+            "values": [
+              "310",
+              "0.000403",
+              "0.004031",
+              "0.02806"
+            ]
+          },
+          {
+            "lineNumber": 154,
+            "values": [
+              "0.000354",
+              "0.004059",
+              "0.02768"
+            ]
+          },
+          {
+            "lineNumber": 155,
+            "values": [
+              "0",
+              "0.004081",
+              "0.02492"
+            ]
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "lineNumber": 156,
+            "values": [
+              "330",
+              "0.000469",
+              "0.003878",
+              "0.02925"
+            ]
+          },
+          {
+            "lineNumber": 157,
+            "values": [
+              "0.000354",
+              "0.003910",
+              "0.02832"
+            ]
+          },
+          {
+            "lineNumber": 158,
+            "values": [
+              "0",
+              "0.003913",
+              "0.02583"
+            ]
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "lineNumber": 159,
+            "values": [
+              "530",
+              "0.000479",
+              "0.003868",
+              "0.02935"
+            ]
+          },
+          {
+            "lineNumber": 160,
+            "values": [
+              "0.000354",
+              "0.003900",
+              "0.02842"
+            ]
+          },
+          {
+            "lineNumber": 161,
+            "values": [
+              "0",
+              "0.003903",
+              "0.02593"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

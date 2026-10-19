@@ -1,0 +1,1799 @@
+{
+  "id": 1283,
+  "projectId": 239,
+  "modelId": 275,
+  "modelVersionId": 279,
+  "modelName": "ECLIPSE_MULTI_SAT_FAMILY_I_PVTO_LIVE_OIL",
+  "versionNo": 1,
+  "status": "SUCCEEDED",
+  "study": null,
+  "runType": "eclipse",
+  "parameters": null,
+  "createdAt": "2026-10-15T09:32:58.064",
+  "queuedAt": "2026-10-15T09:32:58.064",
+  "claimedAt": "2026-10-15T09:32:58.233",
+  "startedAt": "2026-10-15T09:32:58.756",
+  "deadlineAt": "2026-10-15T10:02:58.756",
+  "finishedAt": "2026-10-15T09:33:05.614",
+  "timeoutSeconds": 1800,
+  "elapsedMillis": 6858,
+  "cancellable": false,
+  "error": null,
+  "cleanup": {
+    "message": "ECLIPSE cleanup completed.",
+    "killUsed": false,
+    "inputDeleted": true,
+    "workDirectoryDeleted": true,
+    "processTreeExitConfirmed": true
+  },
+  "resultContract": "VALID_FULL",
+  "result": {
+    "schemaVersion": "eclipse-summary-result/1",
+    "modelKind": "eclipse_100",
+    "runTask": "eclipse",
+    "resultContract": "VALID_FULL",
+    "caseName": "ECLIPSE_MULTI_SAT_FAMILY_I_PVTO_LIVE_OIL.DATA",
+    "eclEnd": {
+      "comments": 0,
+      "warnings": 30,
+      "problems": 0,
+      "errors": 0,
+      "bugs": 0
+    },
+    "summary": {
+      "series": [
+        {
+          "keyword": "YEARS",
+          "objectName": null,
+          "unit": "YEARS",
+          "points": [
+            {
+              "timeDays": 0,
+              "value": 0
+            },
+            {
+              "timeDays": 1,
+              "value": 0.00273785088211298
+            },
+            {
+              "timeDays": 2.3601043224334717,
+              "value": 0.006461613345891237
+            },
+            {
+              "timeDays": 5.466647624969482,
+              "value": 0.014966866001486778
+            },
+            {
+              "timeDays": 9.52922534942627,
+              "value": 0.02608959749341011
+            },
+            {
+              "timeDays": 15.928231239318848,
+              "value": 0.043609119951725006
+            },
+            {
+              "timeDays": 26.969722747802734,
+              "value": 0.07383907586336136
+            },
+            {
+              "timeDays": 43.9512825012207,
+              "value": 0.12033204734325409
+            },
+            {
+              "timeDays": 68.39488983154297,
+              "value": 0.18725499510765076
+            },
+            {
+              "timeDays": 102.91168212890625,
+              "value": 0.28175684809684753
+            },
+            {
+              "timeDays": 153.5105438232422,
+              "value": 0.42028895020484924
+            },
+            {
+              "timeDays": 223.8893585205078,
+              "value": 0.6129756569862366
+            },
+            {
+              "timeDays": 294.4446716308594,
+              "value": 0.8061456084251404
+            },
+            {
+              "timeDays": 365,
+              "value": 0.9993155598640442
+            },
+            {
+              "timeDays": 484.89337158203125,
+              "value": 1.3275656700134277
+            },
+            {
+              "timeDays": 607.4467163085938,
+              "value": 1.6630984544754028
+            },
+            {
+              "timeDays": 730,
+              "value": 1.9986311197280884
+            },
+            {
+              "timeDays": 912.5,
+              "value": 2.498288869857788
+            },
+            {
+              "timeDays": 1000,
+              "value": 2.7378509044647217
+            },
+            {
+              "timeDays": 1100,
+              "value": 3.0116357803344727
+            },
+            {
+              "timeDays": 1200,
+              "value": 3.2854208946228027
+            }
+          ]
+        },
+        {
+          "keyword": "FOPR",
+          "objectName": null,
+          "unit": "STB/DAY",
+          "points": [
+            {
+              "timeDays": 0,
+              "value": 0
+            },
+            {
+              "timeDays": 1,
+              "value": 20000
+            },
+            {
+              "timeDays": 2.3601043224334717,
+              "value": 20000
+            },
+            {
+              "timeDays": 5.466647624969482,
+              "value": 20000
+            },
+            {
+              "timeDays": 9.52922534942627,
+              "value": 20000
+            },
+            {
+              "timeDays": 15.928231239318848,
+              "value": 20000
+            },
+            {
+              "timeDays": 26.969722747802734,
+              "value": 20000
+            },
+            {
+              "timeDays": 43.9512825012207,
+              "value": 20000
+            },
+            {
+              "timeDays": 68.39488983154297,
+              "value": 20000
+            },
+            {
+              "timeDays": 102.91168212890625,
+              "value": 20000
+            },
+            {
+              "timeDays": 153.5105438232422,
+              "value": 20000
+            },
+            {
+              "timeDays": 223.8893585205078,
+              "value": 20000
+            },
+            {
+              "timeDays": 294.4446716308594,
+              "value": 20000
+            },
+            {
+              "timeDays": 365,
+              "value": 20000
+            },
+            {
+              "timeDays": 484.89337158203125,
+              "value": 20000
+            },
+            {
+              "timeDays": 607.4467163085938,
+              "value": 20000
+            },
+            {
+              "timeDays": 730,
+              "value": 20000
+            },
+            {
+              "timeDays": 912.5,
+              "value": 20000
+            },
+            {
+              "timeDays": 1000,
+              "value": 20000
+            },
+            {
+              "timeDays": 1100,
+              "value": 18158.400390625
+            },
+            {
+              "timeDays": 1200,
+              "value": 16569.533203125
+            }
+          ]
+        },
+        {
+          "keyword": "WGOR",
+          "objectName": "PRODUCER",
+          "unit": "MSCF/STB",
+          "points": [
+            {
+              "timeDays": 0,
+              "value": 0
+            },
+            {
+              "timeDays": 1,
+              "value": 1.2699999809265137
+            },
+            {
+              "timeDays": 2.3601043224334717,
+              "value": 1.2699999809265137
+            },
+            {
+              "timeDays": 5.466647624969482,
+              "value": 1.2699999809265137
+            },
+            {
+              "timeDays": 9.52922534942627,
+              "value": 1.2699999809265137
+            },
+            {
+              "timeDays": 15.928231239318848,
+              "value": 1.2637499570846558
+            },
+            {
+              "timeDays": 26.969722747802734,
+              "value": 1.2413206100463867
+            },
+            {
+              "timeDays": 43.9512825012207,
+              "value": 1.2390943765640259
+            },
+            {
+              "timeDays": 68.39488983154297,
+              "value": 1.2486989498138428
+            },
+            {
+              "timeDays": 102.91168212890625,
+              "value": 1.2459310293197632
+            },
+            {
+              "timeDays": 153.5105438232422,
+              "value": 1.2435320615768433
+            },
+            {
+              "timeDays": 223.8893585205078,
+              "value": 1.2474406957626343
+            },
+            {
+              "timeDays": 294.4446716308594,
+              "value": 1.2542967796325684
+            },
+            {
+              "timeDays": 365,
+              "value": 1.2602747678756714
+            },
+            {
+              "timeDays": 484.89337158203125,
+              "value": 1.2656681537628174
+            },
+            {
+              "timeDays": 607.4467163085938,
+              "value": 1.4731649160385132
+            },
+            {
+              "timeDays": 730,
+              "value": 2.385012149810791
+            },
+            {
+              "timeDays": 912.5,
+              "value": 4.493320941925049
+            },
+            {
+              "timeDays": 1000,
+              "value": 5.585893154144287
+            },
+            {
+              "timeDays": 1100,
+              "value": 6.562972068786621
+            },
+            {
+              "timeDays": 1200,
+              "value": 7.299413681030273
+            }
+          ]
+        },
+        {
+          "keyword": "WBHP",
+          "objectName": "PRODUCER",
+          "unit": "PSIA",
+          "points": [
+            {
+              "timeDays": 0,
+              "value": 4800
+            },
+            {
+              "timeDays": 1,
+              "value": 2892.24560546875
+            },
+            {
+              "timeDays": 2.3601043224334717,
+              "value": 2743.020751953125
+            },
+            {
+              "timeDays": 5.466647624969482,
+              "value": 2578.31396484375
+            },
+            {
+              "timeDays": 9.52922534942627,
+              "value": 2459.7421875
+            },
+            {
+              "timeDays": 15.928231239318848,
+              "value": 2363.988037109375
+            },
+            {
+              "timeDays": 26.969722747802734,
+              "value": 2287.6767578125
+            },
+            {
+              "timeDays": 43.9512825012207,
+              "value": 2218.93212890625
+            },
+            {
+              "timeDays": 68.39488983154297,
+              "value": 2196.626953125
+            },
+            {
+              "timeDays": 102.91168212890625,
+              "value": 2248.008056640625
+            },
+            {
+              "timeDays": 153.5105438232422,
+              "value": 2367.818115234375
+            },
+            {
+              "timeDays": 223.8893585205078,
+              "value": 2540.56494140625
+            },
+            {
+              "timeDays": 294.4446716308594,
+              "value": 2704.667236328125
+            },
+            {
+              "timeDays": 365,
+              "value": 2859.193603515625
+            },
+            {
+              "timeDays": 484.89337158203125,
+              "value": 3109.62646484375
+            },
+            {
+              "timeDays": 607.4467163085938,
+              "value": 3279.117919921875
+            },
+            {
+              "timeDays": 730,
+              "value": 2801.501708984375
+            },
+            {
+              "timeDays": 912.5,
+              "value": 1679.943603515625
+            },
+            {
+              "timeDays": 1000,
+              "value": 1100.681884765625
+            },
+            {
+              "timeDays": 1100,
+              "value": 1000
+            },
+            {
+              "timeDays": 1200,
+              "value": 1000
+            }
+          ]
+        },
+        {
+          "keyword": "WOPR",
+          "objectName": "PRODUCER",
+          "unit": "STB/DAY",
+          "points": [
+            {
+              "timeDays": 0,
+              "value": 0
+            },
+            {
+              "timeDays": 1,
+              "value": 20000
+            },
+            {
+              "timeDays": 2.3601043224334717,
+              "value": 20000
+            },
+            {
+              "timeDays": 5.466647624969482,
+              "value": 20000
+            },
+            {
+              "timeDays": 9.52922534942627,
+              "value": 20000
+            },
+            {
+              "timeDays": 15.928231239318848,
+              "value": 20000
+            },
+            {
+              "timeDays": 26.969722747802734,
+              "value": 20000
+            },
+            {
+              "timeDays": 43.9512825012207,
+              "value": 20000
+            },
+            {
+              "timeDays": 68.39488983154297,
+              "value": 20000
+            },
+            {
+              "timeDays": 102.91168212890625,
+              "value": 20000
+            },
+            {
+              "timeDays": 153.5105438232422,
+              "value": 20000
+            },
+            {
+              "timeDays": 223.8893585205078,
+              "value": 20000
+            },
+            {
+              "timeDays": 294.4446716308594,
+              "value": 20000
+            },
+            {
+              "timeDays": 365,
+              "value": 20000
+            },
+            {
+              "timeDays": 484.89337158203125,
+              "value": 20000
+            },
+            {
+              "timeDays": 607.4467163085938,
+              "value": 20000
+            },
+            {
+              "timeDays": 730,
+              "value": 20000
+            },
+            {
+              "timeDays": 912.5,
+              "value": 20000
+            },
+            {
+              "timeDays": 1000,
+              "value": 20000
+            },
+            {
+              "timeDays": 1100,
+              "value": 18158.400390625
+            },
+            {
+              "timeDays": 1200,
+              "value": 16569.533203125
+            }
+          ]
+        },
+        {
+          "keyword": "WWPR",
+          "objectName": "PRODUCER",
+          "unit": "STB/DAY",
+          "points": [
+            {
+              "timeDays": 0,
+              "value": 0
+            },
+            {
+              "timeDays": 1,
+              "value": 0
+            },
+            {
+              "timeDays": 2.3601043224334717,
+              "value": 0
+            },
+            {
+              "timeDays": 5.466647624969482,
+              "value": 0
+            },
+            {
+              "timeDays": 9.52922534942627,
+              "value": 0
+            },
+            {
+              "timeDays": 15.928231239318848,
+              "value": 0
+            },
+            {
+              "timeDays": 26.969722747802734,
+              "value": 0
+            },
+            {
+              "timeDays": 43.9512825012207,
+              "value": 0
+            },
+            {
+              "timeDays": 68.39488983154297,
+              "value": 0
+            },
+            {
+              "timeDays": 102.91168212890625,
+              "value": 0
+            },
+            {
+              "timeDays": 153.5105438232422,
+              "value": 0
+            },
+            {
+              "timeDays": 223.8893585205078,
+              "value": 0
+            },
+            {
+              "timeDays": 294.4446716308594,
+              "value": 0
+            },
+            {
+              "timeDays": 365,
+              "value": 0
+            },
+            {
+              "timeDays": 484.89337158203125,
+              "value": 0
+            },
+            {
+              "timeDays": 607.4467163085938,
+              "value": 0
+            },
+            {
+              "timeDays": 730,
+              "value": 0
+            },
+            {
+              "timeDays": 912.5,
+              "value": 0
+            },
+            {
+              "timeDays": 1000,
+              "value": 0
+            },
+            {
+              "timeDays": 1100,
+              "value": 0
+            },
+            {
+              "timeDays": 1200,
+              "value": 0
+            }
+          ]
+        },
+        {
+          "keyword": "WGPR",
+          "objectName": "PRODUCER",
+          "unit": "MSCF/DAY",
+          "points": [
+            {
+              "timeDays": 0,
+              "value": 0
+            },
+            {
+              "timeDays": 1,
+              "value": 25400
+            },
+            {
+              "timeDays": 2.3601043224334717,
+              "value": 25400
+            },
+            {
+              "timeDays": 5.466647624969482,
+              "value": 25400
+            },
+            {
+              "timeDays": 9.52922534942627,
+              "value": 25400
+            },
+            {
+              "timeDays": 15.928231239318848,
+              "value": 25275
+            },
+            {
+              "timeDays": 26.969722747802734,
+              "value": 24826.412109375
+            },
+            {
+              "timeDays": 43.9512825012207,
+              "value": 24781.888671875
+            },
+            {
+              "timeDays": 68.39488983154297,
+              "value": 24973.978515625
+            },
+            {
+              "timeDays": 102.91168212890625,
+              "value": 24918.62109375
+            },
+            {
+              "timeDays": 153.5105438232422,
+              "value": 24870.642578125
+            },
+            {
+              "timeDays": 223.8893585205078,
+              "value": 24948.814453125
+            },
+            {
+              "timeDays": 294.4446716308594,
+              "value": 25085.935546875
+            },
+            {
+              "timeDays": 365,
+              "value": 25205.49609375
+            },
+            {
+              "timeDays": 484.89337158203125,
+              "value": 25313.36328125
+            },
+            {
+              "timeDays": 607.4467163085938,
+              "value": 29463.296875
+            },
+            {
+              "timeDays": 730,
+              "value": 47700.24609375
+            },
+            {
+              "timeDays": 912.5,
+              "value": 89866.4140625
+            },
+            {
+              "timeDays": 1000,
+              "value": 111717.8671875
+            },
+            {
+              "timeDays": 1100,
+              "value": 119173.0703125
+            },
+            {
+              "timeDays": 1200,
+              "value": 120947.8828125
+            }
+          ]
+        },
+        {
+          "keyword": "WLPR",
+          "objectName": "PRODUCER",
+          "unit": "STB/DAY",
+          "points": [
+            {
+              "timeDays": 0,
+              "value": 0
+            },
+            {
+              "timeDays": 1,
+              "value": 20000
+            },
+            {
+              "timeDays": 2.3601043224334717,
+              "value": 20000
+            },
+            {
+              "timeDays": 5.466647624969482,
+              "value": 20000
+            },
+            {
+              "timeDays": 9.52922534942627,
+              "value": 20000
+            },
+            {
+              "timeDays": 15.928231239318848,
+              "value": 20000
+            },
+            {
+              "timeDays": 26.969722747802734,
+              "value": 20000
+            },
+            {
+              "timeDays": 43.9512825012207,
+              "value": 20000
+            },
+            {
+              "timeDays": 68.39488983154297,
+              "value": 20000
+            },
+            {
+              "timeDays": 102.91168212890625,
+              "value": 20000
+            },
+            {
+              "timeDays": 153.5105438232422,
+              "value": 20000
+            },
+            {
+              "timeDays": 223.8893585205078,
+              "value": 20000
+            },
+            {
+              "timeDays": 294.4446716308594,
+              "value": 20000
+            },
+            {
+              "timeDays": 365,
+              "value": 20000
+            },
+            {
+              "timeDays": 484.89337158203125,
+              "value": 20000
+            },
+            {
+              "timeDays": 607.4467163085938,
+              "value": 20000
+            },
+            {
+              "timeDays": 730,
+              "value": 20000
+            },
+            {
+              "timeDays": 912.5,
+              "value": 20000
+            },
+            {
+              "timeDays": 1000,
+              "value": 20000
+            },
+            {
+              "timeDays": 1100,
+              "value": 18158.400390625
+            },
+            {
+              "timeDays": 1200,
+              "value": 16569.533203125
+            }
+          ]
+        },
+        {
+          "keyword": "WOPT",
+          "objectName": "PRODUCER",
+          "unit": "STB",
+          "points": [
+            {
+              "timeDays": 0,
+              "value": 0
+            },
+            {
+              "timeDays": 1,
+              "value": 20000
+            },
+            {
+              "timeDays": 2.3601043224334717,
+              "value": 47202.0859375
+            },
+            {
+              "timeDays": 5.466647624969482,
+              "value": 109332.953125
+            },
+            {
+              "timeDays": 9.52922534942627,
+              "value": 190584.515625
+            },
+            {
+              "timeDays": 15.928231239318848,
+              "value": 318564.625
+            },
+            {
+              "timeDays": 26.969722747802734,
+              "value": 539394.4375
+            },
+            {
+              "timeDays": 43.9512825012207,
+              "value": 879025.625
+            },
+            {
+              "timeDays": 68.39488983154297,
+              "value": 1367897.75
+            },
+            {
+              "timeDays": 102.91168212890625,
+              "value": 2058233.75
+            },
+            {
+              "timeDays": 153.5105438232422,
+              "value": 3070210.75
+            },
+            {
+              "timeDays": 223.8893585205078,
+              "value": 4477787
+            },
+            {
+              "timeDays": 294.4446716308594,
+              "value": 5888893.5
+            },
+            {
+              "timeDays": 365,
+              "value": 7300000
+            },
+            {
+              "timeDays": 484.89337158203125,
+              "value": 9697868
+            },
+            {
+              "timeDays": 607.4467163085938,
+              "value": 12148934
+            },
+            {
+              "timeDays": 730,
+              "value": 14600000
+            },
+            {
+              "timeDays": 912.5,
+              "value": 18250000
+            },
+            {
+              "timeDays": 1000,
+              "value": 20000000
+            },
+            {
+              "timeDays": 1100,
+              "value": 21815840
+            },
+            {
+              "timeDays": 1200,
+              "value": 23472794
+            }
+          ]
+        },
+        {
+          "keyword": "WWPT",
+          "objectName": "PRODUCER",
+          "unit": "STB",
+          "points": [
+            {
+              "timeDays": 0,
+              "value": 0
+            },
+            {
+              "timeDays": 1,
+              "value": 0
+            },
+            {
+              "timeDays": 2.3601043224334717,
+              "value": 0
+            },
+            {
+              "timeDays": 5.466647624969482,
+              "value": 0
+            },
+            {
+              "timeDays": 9.52922534942627,
+              "value": 0
+            },
+            {
+              "timeDays": 15.928231239318848,
+              "value": 0
+            },
+            {
+              "timeDays": 26.969722747802734,
+              "value": 0
+            },
+            {
+              "timeDays": 43.9512825012207,
+              "value": 0
+            },
+            {
+              "timeDays": 68.39488983154297,
+              "value": 0
+            },
+            {
+              "timeDays": 102.91168212890625,
+              "value": 0
+            },
+            {
+              "timeDays": 153.5105438232422,
+              "value": 0
+            },
+            {
+              "timeDays": 223.8893585205078,
+              "value": 0
+            },
+            {
+              "timeDays": 294.4446716308594,
+              "value": 0
+            },
+            {
+              "timeDays": 365,
+              "value": 0
+            },
+            {
+              "timeDays": 484.89337158203125,
+              "value": 0
+            },
+            {
+              "timeDays": 607.4467163085938,
+              "value": 0
+            },
+            {
+              "timeDays": 730,
+              "value": 0
+            },
+            {
+              "timeDays": 912.5,
+              "value": 0
+            },
+            {
+              "timeDays": 1000,
+              "value": 0
+            },
+            {
+              "timeDays": 1100,
+              "value": 0
+            },
+            {
+              "timeDays": 1200,
+              "value": 0
+            }
+          ]
+        },
+        {
+          "keyword": "WGPT",
+          "objectName": "PRODUCER",
+          "unit": "MSCF",
+          "points": [
+            {
+              "timeDays": 0,
+              "value": 0
+            },
+            {
+              "timeDays": 1,
+              "value": 25400
+            },
+            {
+              "timeDays": 2.3601043224334717,
+              "value": 59946.6484375
+            },
+            {
+              "timeDays": 5.466647624969482,
+              "value": 138852.859375
+            },
+            {
+              "timeDays": 9.52922534942627,
+              "value": 242042.328125
+            },
+            {
+              "timeDays": 15.928231239318848,
+              "value": 403777.21875
+            },
+            {
+              "timeDays": 26.969722747802734,
+              "value": 677897.8125
+            },
+            {
+              "timeDays": 43.9512825012207,
+              "value": 1098732.875
+            },
+            {
+              "timeDays": 68.39488983154297,
+              "value": 1709187.125
+            },
+            {
+              "timeDays": 102.91168212890625,
+              "value": 2569298
+            },
+            {
+              "timeDays": 153.5105438232422,
+              "value": 3827724
+            },
+            {
+              "timeDays": 223.8893585205078,
+              "value": 5583592
+            },
+            {
+              "timeDays": 294.4446716308594,
+              "value": 7353538
+            },
+            {
+              "timeDays": 365,
+              "value": 9131920
+            },
+            {
+              "timeDays": 484.89337158203125,
+              "value": 12166825
+            },
+            {
+              "timeDays": 607.4467163085938,
+              "value": 15777650
+            },
+            {
+              "timeDays": 730,
+              "value": 21623472
+            },
+            {
+              "timeDays": 912.5,
+              "value": 38024092
+            },
+            {
+              "timeDays": 1000,
+              "value": 47799408
+            },
+            {
+              "timeDays": 1100,
+              "value": 59716712
+            },
+            {
+              "timeDays": 1200,
+              "value": 71811504
+            }
+          ]
+        },
+        {
+          "keyword": "WBHP",
+          "objectName": "INJECTOR",
+          "unit": "PSIA",
+          "points": [
+            {
+              "timeDays": 0,
+              "value": 4783.10205078125
+            },
+            {
+              "timeDays": 1,
+              "value": 8276.6640625
+            },
+            {
+              "timeDays": 2.3601043224334717,
+              "value": 8343.384765625
+            },
+            {
+              "timeDays": 5.466647624969482,
+              "value": 7878.67822265625
+            },
+            {
+              "timeDays": 9.52922534942627,
+              "value": 7524.23583984375
+            },
+            {
+              "timeDays": 15.928231239318848,
+              "value": 7246.99609375
+            },
+            {
+              "timeDays": 26.969722747802734,
+              "value": 7062.5556640625
+            },
+            {
+              "timeDays": 43.9512825012207,
+              "value": 6862.619140625
+            },
+            {
+              "timeDays": 68.39488983154297,
+              "value": 6721.3037109375
+            },
+            {
+              "timeDays": 102.91168212890625,
+              "value": 6627.3876953125
+            },
+            {
+              "timeDays": 153.5105438232422,
+              "value": 6587.83447265625
+            },
+            {
+              "timeDays": 223.8893585205078,
+              "value": 6570.9052734375
+            },
+            {
+              "timeDays": 294.4446716308594,
+              "value": 6602.92919921875
+            },
+            {
+              "timeDays": 365,
+              "value": 6660.2255859375
+            },
+            {
+              "timeDays": 484.89337158203125,
+              "value": 6799.1337890625
+            },
+            {
+              "timeDays": 607.4467163085938,
+              "value": 6931.38134765625
+            },
+            {
+              "timeDays": 730,
+              "value": 6993.87060546875
+            },
+            {
+              "timeDays": 912.5,
+              "value": 6825.03564453125
+            },
+            {
+              "timeDays": 1000,
+              "value": 6680.8544921875
+            },
+            {
+              "timeDays": 1100,
+              "value": 6487.70703125
+            },
+            {
+              "timeDays": 1200,
+              "value": 6295.74609375
+            }
+          ]
+        },
+        {
+          "keyword": "WGIR",
+          "objectName": "INJECTOR",
+          "unit": "MSCF/DAY",
+          "points": [
+            {
+              "timeDays": 0,
+              "value": 0
+            },
+            {
+              "timeDays": 1,
+              "value": 100000
+            },
+            {
+              "timeDays": 2.3601043224334717,
+              "value": 100000
+            },
+            {
+              "timeDays": 5.466647624969482,
+              "value": 100000
+            },
+            {
+              "timeDays": 9.52922534942627,
+              "value": 100000
+            },
+            {
+              "timeDays": 15.928231239318848,
+              "value": 100000
+            },
+            {
+              "timeDays": 26.969722747802734,
+              "value": 100000
+            },
+            {
+              "timeDays": 43.9512825012207,
+              "value": 100000
+            },
+            {
+              "timeDays": 68.39488983154297,
+              "value": 100000
+            },
+            {
+              "timeDays": 102.91168212890625,
+              "value": 100000
+            },
+            {
+              "timeDays": 153.5105438232422,
+              "value": 100000
+            },
+            {
+              "timeDays": 223.8893585205078,
+              "value": 100000
+            },
+            {
+              "timeDays": 294.4446716308594,
+              "value": 100000
+            },
+            {
+              "timeDays": 365,
+              "value": 100000
+            },
+            {
+              "timeDays": 484.89337158203125,
+              "value": 100000
+            },
+            {
+              "timeDays": 607.4467163085938,
+              "value": 100000
+            },
+            {
+              "timeDays": 730,
+              "value": 100000
+            },
+            {
+              "timeDays": 912.5,
+              "value": 100000
+            },
+            {
+              "timeDays": 1000,
+              "value": 100000
+            },
+            {
+              "timeDays": 1100,
+              "value": 100000
+            },
+            {
+              "timeDays": 1200,
+              "value": 100000
+            }
+          ]
+        },
+        {
+          "keyword": "WGIT",
+          "objectName": "INJECTOR",
+          "unit": "MSCF",
+          "points": [
+            {
+              "timeDays": 0,
+              "value": 0
+            },
+            {
+              "timeDays": 1,
+              "value": 100000
+            },
+            {
+              "timeDays": 2.3601043224334717,
+              "value": 236010.421875
+            },
+            {
+              "timeDays": 5.466647624969482,
+              "value": 546664.75
+            },
+            {
+              "timeDays": 9.52922534942627,
+              "value": 952922.5625
+            },
+            {
+              "timeDays": 15.928231239318848,
+              "value": 1592823.125
+            },
+            {
+              "timeDays": 26.969722747802734,
+              "value": 2696972.25
+            },
+            {
+              "timeDays": 43.9512825012207,
+              "value": 4395128
+            },
+            {
+              "timeDays": 68.39488983154297,
+              "value": 6839489
+            },
+            {
+              "timeDays": 102.91168212890625,
+              "value": 10291169
+            },
+            {
+              "timeDays": 153.5105438232422,
+              "value": 15351054
+            },
+            {
+              "timeDays": 223.8893585205078,
+              "value": 22388936
+            },
+            {
+              "timeDays": 294.4446716308594,
+              "value": 29444468
+            },
+            {
+              "timeDays": 365,
+              "value": 36500000
+            },
+            {
+              "timeDays": 484.89337158203125,
+              "value": 48489340
+            },
+            {
+              "timeDays": 607.4467163085938,
+              "value": 60744668
+            },
+            {
+              "timeDays": 730,
+              "value": 73000000
+            },
+            {
+              "timeDays": 912.5,
+              "value": 91250000
+            },
+            {
+              "timeDays": 1000,
+              "value": 100000000
+            },
+            {
+              "timeDays": 1100,
+              "value": 110000000
+            },
+            {
+              "timeDays": 1200,
+              "value": 120000000
+            }
+          ]
+        }
+      ]
+    },
+    "grid": null,
+    "fieldIndex": null,
+    "outputFiles": [
+      {
+        "name": "ECLIPSE_MULTI_SAT_FAMILY_I_PVTO_LIVE_OIL.ECLEND",
+        "sizeBytes": 335,
+        "sha256": "37c392bda249a28e9202ccdbcd4b7760a93e0900b90c7dd12023afd31847d3a5"
+      },
+      {
+        "name": "ECLIPSE_MULTI_SAT_FAMILY_I_PVTO_LIVE_OIL.FEGRID",
+        "sizeBytes": 61211,
+        "sha256": "dd5aaf290bf9c4b5f3254de630f3b5b983c16ba0e1df0c1a66341d5ab0c58614"
+      },
+      {
+        "name": "ECLIPSE_MULTI_SAT_FAMILY_I_PVTO_LIVE_OIL.FINIT",
+        "sizeBytes": 187504,
+        "sha256": "85fec9f70d5880ee78ea918840b2d64e032a6348c1e5d255593e258efc2d9a4a"
+      },
+      {
+        "name": "ECLIPSE_MULTI_SAT_FAMILY_I_PVTO_LIVE_OIL.FSMSPEC",
+        "sizeBytes": 2743,
+        "sha256": "2eb1c8abbfb25ac8eba2561e0e719d0fbea0a57344ab303cb1319696445750c6"
+      },
+      {
+        "name": "ECLIPSE_MULTI_SAT_FAMILY_I_PVTO_LIVE_OIL.FUNRST",
+        "sizeBytes": 276633,
+        "sha256": "0d973850182299e1d45aee3984eb7be0584435a157a4ad50fc0008aea7ac83d3"
+      },
+      {
+        "name": "ECLIPSE_MULTI_SAT_FAMILY_I_PVTO_LIVE_OIL.FUNSMRY",
+        "sizeBytes": 7437,
+        "sha256": "f6281b52ccd77ac31512d2c839bbe40c71ec4e495c4b689998a6d2e7c49a9e69"
+      },
+      {
+        "name": "ECLIPSE_MULTI_SAT_FAMILY_I_PVTO_LIVE_OIL.MSG",
+        "sizeBytes": 17066,
+        "sha256": "4ca504d5e337696e2a7640ad952ce8a9e6929346210ca772894b6fd997bf88ce"
+      },
+      {
+        "name": "ECLIPSE_MULTI_SAT_FAMILY_I_PVTO_LIVE_OIL.PRT",
+        "sizeBytes": 309361,
+        "sha256": "1287555f5cc8dc3cc04b8da1773a5b6b7485d27b89796d587344abd5e23cd103"
+      },
+      {
+        "name": "ECLIPSE_MULTI_SAT_FAMILY_I_PVTO_LIVE_OIL.RSM",
+        "sizeBytes": 8240,
+        "sha256": "be377631eb8a8661fce44a243cfce9ba48707288604b3da67cae953c8e28274a"
+      }
+    ],
+    "messages": [
+      {
+        "category": "SOLVER",
+        "severity": "WARNING",
+        "code": "ECLIPSE_WARNING",
+        "message": "NEGATIVE COMPRESSIBILITY FOUND IN GAS PRESSURE TABLE 1 AND OIL PRESSURE TABLE 1 AT A SAMPLE PRESSURE VALUE 6531.94138 . ADJUST SATURATED FLUID PROPERTY VALUES AT THIS PRESSURE. NEGATIVE COMPRESSIBILITIES OCCUR FOR GAS SATURATIONS LESS THAN 0.01230",
+        "retryable": false
+      },
+      {
+        "category": "SOLVER",
+        "severity": "WARNING",
+        "code": "ECLIPSE_WARNING",
+        "message": "NEGATIVE COMPRESSIBILITY FOUND IN GAS PRESSURE TABLE 1 AND OIL PRESSURE TABLE 1 AT A SAMPLE PRESSURE VALUE 6842.28621 . ADJUST SATURATED FLUID PROPERTY VALUES AT THIS PRESSURE. NEGATIVE COMPRESSIBILITIES OCCUR FOR GAS SATURATIONS LESS THAN 0.07111",
+        "retryable": false
+      },
+      {
+        "category": "SOLVER",
+        "severity": "WARNING",
+        "code": "ECLIPSE_WARNING",
+        "message": "NEGATIVE COMPRESSIBILITY FOUND IN GAS PRESSURE TABLE 1 AND OIL PRESSURE TABLE 1 AT A SAMPLE PRESSURE VALUE 7152.63103 . ADJUST SATURATED FLUID PROPERTY VALUES AT THIS PRESSURE. NEGATIVE COMPRESSIBILITIES OCCUR FOR GAS SATURATIONS LESS THAN 0.12539",
+        "retryable": false
+      },
+      {
+        "category": "SOLVER",
+        "severity": "WARNING",
+        "code": "ECLIPSE_WARNING",
+        "message": "NEGATIVE COMPRESSIBILITY FOUND IN GAS PRESSURE TABLE 1 AND OIL PRESSURE TABLE 1 AT A SAMPLE PRESSURE VALUE 7462.97586 . ADJUST SATURATED FLUID PROPERTY VALUES AT THIS PRESSURE. NEGATIVE COMPRESSIBILITIES OCCUR FOR GAS SATURATIONS LESS THAN 0.17567",
+        "retryable": false
+      },
+      {
+        "category": "SOLVER",
+        "severity": "WARNING",
+        "code": "ECLIPSE_WARNING",
+        "message": "NEGATIVE COMPRESSIBILITY FOUND IN GAS PRESSURE TABLE 1 AND OIL PRESSURE TABLE 1 AT A SAMPLE PRESSURE VALUE 7773.32069 . ADJUST SATURATED FLUID PROPERTY VALUES AT THIS PRESSURE. NEGATIVE COMPRESSIBILITIES OCCUR FOR GAS SATURATIONS LESS THAN 0.22244",
+        "retryable": false
+      },
+      {
+        "category": "SOLVER",
+        "severity": "WARNING",
+        "code": "ECLIPSE_WARNING",
+        "message": "NEGATIVE COMPRESSIBILITY FOUND IN GAS PRESSURE TABLE 1 AND OIL PRESSURE TABLE 1 AT A SAMPLE PRESSURE VALUE 8083.66552 . ADJUST SATURATED FLUID PROPERTY VALUES AT THIS PRESSURE. NEGATIVE COMPRESSIBILITIES OCCUR FOR GAS SATURATIONS LESS THAN 0.26608",
+        "retryable": false
+      },
+      {
+        "category": "SOLVER",
+        "severity": "WARNING",
+        "code": "ECLIPSE_WARNING",
+        "message": "NEGATIVE COMPRESSIBILITY FOUND IN GAS PRESSURE TABLE 1 AND OIL PRESSURE TABLE 1 AT A SAMPLE PRESSURE VALUE 8394.01034 . ADJUST SATURATED FLUID PROPERTY VALUES AT THIS PRESSURE. NEGATIVE COMPRESSIBILITIES OCCUR FOR GAS SATURATIONS LESS THAN 0.30695",
+        "retryable": false
+      },
+      {
+        "category": "SOLVER",
+        "severity": "WARNING",
+        "code": "ECLIPSE_WARNING",
+        "message": "NEGATIVE COMPRESSIBILITY FOUND IN GAS PRESSURE TABLE 1 AND OIL PRESSURE TABLE 1 AT A SAMPLE PRESSURE VALUE 8704.35517 . ADJUST SATURATED FLUID PROPERTY VALUES AT THIS PRESSURE. NEGATIVE COMPRESSIBILITIES OCCUR FOR GAS SATURATIONS LESS THAN 0.34534",
+        "retryable": false
+      },
+      {
+        "category": "SOLVER",
+        "severity": "WARNING",
+        "code": "ECLIPSE_WARNING",
+        "message": "NEGATIVE COMPRESSIBILITY FOUND IN GAS PRESSURE TABLE 1 AND OIL PRESSURE TABLE 1 AT A SAMPLE PRESSURE VALUE 9014.70000 . ADJUST SATURATED FLUID PROPERTY VALUES AT THIS PRESSURE. NEGATIVE COMPRESSIBILITIES OCCUR FOR GAS SATURATIONS LESS THAN 0.38150",
+        "retryable": false
+      },
+      {
+        "category": "SOLVER",
+        "severity": "WARNING",
+        "code": "ECLIPSE_WARNING",
+        "message": "NEGATIVE COMPRESSIBILITY FOUND IN GAS PRESSURE TABLE 2 AND OIL PRESSURE TABLE 2 AT A SAMPLE PRESSURE VALUE 6531.94138 . ADJUST SATURATED FLUID PROPERTY VALUES AT THIS PRESSURE. NEGATIVE COMPRESSIBILITIES OCCUR FOR GAS SATURATIONS LESS THAN 0.01230",
+        "retryable": false
+      },
+      {
+        "category": "SOLVER",
+        "severity": "WARNING",
+        "code": "ECLIPSE_WARNING",
+        "message": "NEGATIVE COMPRESSIBILITY FOUND IN GAS PRESSURE TABLE 2 AND OIL PRESSURE TABLE 2 AT A SAMPLE PRESSURE VALUE 6842.28621 . ADJUST SATURATED FLUID PROPERTY VALUES AT THIS PRESSURE. NEGATIVE COMPRESSIBILITIES OCCUR FOR GAS SATURATIONS LESS THAN 0.07111",
+        "retryable": false
+      },
+      {
+        "category": "SOLVER",
+        "severity": "WARNING",
+        "code": "ECLIPSE_WARNING",
+        "message": "NEGATIVE COMPRESSIBILITY FOUND IN GAS PRESSURE TABLE 2 AND OIL PRESSURE TABLE 2 AT A SAMPLE PRESSURE VALUE 7152.63103 . ADJUST SATURATED FLUID PROPERTY VALUES AT THIS PRESSURE. NEGATIVE COMPRESSIBILITIES OCCUR FOR GAS SATURATIONS LESS THAN 0.12539",
+        "retryable": false
+      },
+      {
+        "category": "SOLVER",
+        "severity": "WARNING",
+        "code": "ECLIPSE_WARNING",
+        "message": "NEGATIVE COMPRESSIBILITY FOUND IN GAS PRESSURE TABLE 2 AND OIL PRESSURE TABLE 2 AT A SAMPLE PRESSURE VALUE 7462.97586 . ADJUST SATURATED FLUID PROPERTY VALUES AT THIS PRESSURE. NEGATIVE COMPRESSIBILITIES OCCUR FOR GAS SATURATIONS LESS THAN 0.17567",
+        "retryable": false
+      },
+      {
+        "category": "SOLVER",
+        "severity": "WARNING",
+        "code": "ECLIPSE_WARNING",
+        "message": "NEGATIVE COMPRESSIBILITY FOUND IN GAS PRESSURE TABLE 2 AND OIL PRESSURE TABLE 2 AT A SAMPLE PRESSURE VALUE 7773.32069 . ADJUST SATURATED FLUID PROPERTY VALUES AT THIS PRESSURE. NEGATIVE COMPRESSIBILITIES OCCUR FOR GAS SATURATIONS LESS THAN 0.22244",
+        "retryable": false
+      },
+      {
+        "category": "SOLVER",
+        "severity": "WARNING",
+        "code": "ECLIPSE_WARNING",
+        "message": "NEGATIVE COMPRESSIBILITY FOUND IN GAS PRESSURE TABLE 2 AND OIL PRESSURE TABLE 2 AT A SAMPLE PRESSURE VALUE 8083.66552 . ADJUST SATURATED FLUID PROPERTY VALUES AT THIS PRESSURE. NEGATIVE COMPRESSIBILITIES OCCUR FOR GAS SATURATIONS LESS THAN 0.26608",
+        "retryable": false
+      },
+      {
+        "category": "SOLVER",
+        "severity": "WARNING",
+        "code": "ECLIPSE_WARNING",
+        "message": "NEGATIVE COMPRESSIBILITY FOUND IN GAS PRESSURE TABLE 2 AND OIL PRESSURE TABLE 2 AT A SAMPLE PRESSURE VALUE 8394.01034 . ADJUST SATURATED FLUID PROPERTY VALUES AT THIS PRESSURE. NEGATIVE COMPRESSIBILITIES OCCUR FOR GAS SATURATIONS LESS THAN 0.30695",
+        "retryable": false
+      },
+      {
+        "category": "SOLVER",
+        "severity": "WARNING",
+        "code": "ECLIPSE_WARNING",
+        "message": "NEGATIVE COMPRESSIBILITY FOUND IN GAS PRESSURE TABLE 2 AND OIL PRESSURE TABLE 2 AT A SAMPLE PRESSURE VALUE 8704.35517 . ADJUST SATURATED FLUID PROPERTY VALUES AT THIS PRESSURE. NEGATIVE COMPRESSIBILITIES OCCUR FOR GAS SATURATIONS LESS THAN 0.34534",
+        "retryable": false
+      },
+      {
+        "category": "SOLVER",
+        "severity": "WARNING",
+        "code": "ECLIPSE_WARNING",
+        "message": "NEGATIVE COMPRESSIBILITY FOUND IN GAS PRESSURE TABLE 2 AND OIL PRESSURE TABLE 2 AT A SAMPLE PRESSURE VALUE 9014.70000 . ADJUST SATURATED FLUID PROPERTY VALUES AT THIS PRESSURE. NEGATIVE COMPRESSIBILITIES OCCUR FOR GAS SATURATIONS LESS THAN 0.38150",
+        "retryable": false
+      },
+      {
+        "category": "SOLVER",
+        "severity": "WARNING",
+        "code": "ECLIPSE_WARNING",
+        "message": "THERE IS A TRANSMISSIBILITY IN THE X DIRECTION BETWEEN CELLS 5,1,1 AND 6,1,1 THESE CELLS ARE IN DIFFERENT PVT REGIONS",
+        "retryable": false
+      },
+      {
+        "category": "SOLVER",
+        "severity": "WARNING",
+        "code": "ECLIPSE_WARNING",
+        "message": "THERE IS A TRANSMISSIBILITY IN THE X DIRECTION BETWEEN CELLS 5,2,1 AND 6,2,1 THESE CELLS ARE IN DIFFERENT PVT REGIONS",
+        "retryable": false
+      },
+      {
+        "category": "SOLVER",
+        "severity": "WARNING",
+        "code": "ECLIPSE_WARNING",
+        "message": "THERE IS A TRANSMISSIBILITY IN THE X DIRECTION BETWEEN CELLS 5,3,1 AND 6,3,1 THESE CELLS ARE IN DIFFERENT PVT REGIONS",
+        "retryable": false
+      },
+      {
+        "category": "SOLVER",
+        "severity": "WARNING",
+        "code": "ECLIPSE_WARNING",
+        "message": "THERE IS A TRANSMISSIBILITY IN THE X DIRECTION BETWEEN CELLS 5,4,1 AND 6,4,1 THESE CELLS ARE IN DIFFERENT PVT REGIONS",
+        "retryable": false
+      },
+      {
+        "category": "SOLVER",
+        "severity": "WARNING",
+        "code": "ECLIPSE_WARNING",
+        "message": "THERE IS A TRANSMISSIBILITY IN THE X DIRECTION BETWEEN CELLS 5,5,1 AND 6,5,1 THESE CELLS ARE IN DIFFERENT PVT REGIONS",
+        "retryable": false
+      },
+      {
+        "category": "SOLVER",
+        "severity": "WARNING",
+        "code": "ECLIPSE_WARNING",
+        "message": "THERE IS A TRANSMISSIBILITY IN THE X DIRECTION BETWEEN CELLS 5,6,1 AND 6,6,1 THESE CELLS ARE IN DIFFERENT PVT REGIONS",
+        "retryable": false
+      },
+      {
+        "category": "SOLVER",
+        "severity": "WARNING",
+        "code": "ECLIPSE_WARNING",
+        "message": "THERE IS A TRANSMISSIBILITY IN THE X DIRECTION BETWEEN CELLS 5,7,1 AND 6,7,1 THESE CELLS ARE IN DIFFERENT PVT REGIONS",
+        "retryable": false
+      },
+      {
+        "category": "SOLVER",
+        "severity": "WARNING",
+        "code": "ECLIPSE_WARNING",
+        "message": "THERE IS A TRANSMISSIBILITY IN THE X DIRECTION BETWEEN CELLS 5,8,1 AND 6,8,1 THESE CELLS ARE IN DIFFERENT PVT REGIONS",
+        "retryable": false
+      },
+      {
+        "category": "SOLVER",
+        "severity": "WARNING",
+        "code": "ECLIPSE_WARNING",
+        "message": "THERE IS A TRANSMISSIBILITY IN THE X DIRECTION BETWEEN CELLS 5,9,1 AND 6,9,1 THESE CELLS ARE IN DIFFERENT PVT REGIONS",
+        "retryable": false
+      },
+      {
+        "category": "SOLVER",
+        "severity": "WARNING",
+        "code": "ECLIPSE_WARNING",
+        "message": "THERE IS A TRANSMISSIBILITY IN THE X DIRECTION BETWEEN CELLS 5,10,1 AND 6,10,1 THESE CELLS ARE IN DIFFERENT PVT REGIONS",
+        "retryable": false
+      },
+      {
+        "category": "SOLVER",
+        "severity": "WARNING",
+        "code": "ECLIPSE_WARNING",
+        "message": "NO FURTHER MESSAGES ABOUT PVT REGION CONNECTION CONSISTENCY WILL BE EMITTED.",
+        "retryable": false
+      },
+      {
+        "category": "SOLVER",
+        "severity": "WARNING",
+        "code": "ECLIPSE_WARNING",
+        "message": "THE BOTTOM HOLE PRESSURE LIMIT FOR WELL INJECTOR HAS BEEN DEFAULTED. THE DEFAULT VALUE IS 100000. PSIA",
+        "retryable": false
+      }
+    ]
+  },
+  "events": [
+    {
+      "id": 40449,
+      "sequence": 1,
+      "workerSequence": null,
+      "type": "STATE",
+      "status": "CREATED",
+      "message": "运行已创建",
+      "error": null,
+      "occurredAt": "2026-10-15T09:32:58.064"
+    },
+    {
+      "id": 40450,
+      "sequence": 2,
+      "workerSequence": null,
+      "type": "STATE",
+      "status": "QUEUED",
+      "message": "运行已进入持久队列",
+      "error": null,
+      "occurredAt": "2026-10-15T09:32:58.064"
+    },
+    {
+      "id": 40451,
+      "sequence": 3,
+      "workerSequence": null,
+      "type": "STATE",
+      "status": "CLAIMED",
+      "message": "运行已由调度器认领",
+      "error": null,
+      "occurredAt": "2026-10-15T09:32:58.233"
+    },
+    {
+      "id": 40452,
+      "sequence": 4,
+      "workerSequence": null,
+      "type": "WORKER_ACCEPTED",
+      "status": "CLAIMED",
+      "message": "Worker 已接受运行",
+      "error": null,
+      "occurredAt": "2026-10-15T09:32:58.756"
+    },
+    {
+      "id": 40453,
+      "sequence": 5,
+      "workerSequence": 1,
+      "type": "STATE",
+      "status": "CLAIMED",
+      "message": "Run claimed by Worker generation.",
+      "error": null,
+      "occurredAt": "2026-10-15T01:32:58.75"
+    },
+    {
+      "id": 40454,
+      "sequence": 6,
+      "workerSequence": 2,
+      "type": "STATE",
+      "status": "PREPARING",
+      "message": "Preparing isolated ECLIPSE deck.",
+      "error": null,
+      "occurredAt": "2026-10-15T01:32:58.762"
+    },
+    {
+      "id": 40455,
+      "sequence": 7,
+      "workerSequence": null,
+      "type": "STATE",
+      "status": "PREPARING",
+      "message": "Worker 正在准备模型",
+      "error": null,
+      "occurredAt": "2026-10-15T09:32:58.812"
+    },
+    {
+      "id": 40456,
+      "sequence": 8,
+      "workerSequence": 3,
+      "type": "STATE",
+      "status": "RUNNING_ECLIPSE",
+      "message": "Running ECLIPSE 100.",
+      "error": null,
+      "occurredAt": "2026-10-15T01:32:58.802"
+    },
+    {
+      "id": 40457,
+      "sequence": 9,
+      "workerSequence": null,
+      "type": "STATE",
+      "status": "RUNNING_ECLIPSE",
+      "message": "Worker 正在执行 ECLIPSE 计算",
+      "error": null,
+      "occurredAt": "2026-10-15T09:32:59.362"
+    },
+    {
+      "id": 40458,
+      "sequence": 10,
+      "workerSequence": 4,
+      "type": "STATE",
+      "status": "COLLECTING",
+      "message": "Collecting fresh ECLIPSE output.",
+      "error": null,
+      "occurredAt": "2026-10-15T01:33:05.325"
+    },
+    {
+      "id": 40459,
+      "sequence": 11,
+      "workerSequence": 5,
+      "type": "STATE",
+      "status": "COLLECTING",
+      "message": "Restart source is outside the verified E100 formatted global-grid scope; no selectable restart catalog was published.",
+      "error": null,
+      "occurredAt": "2026-10-15T01:33:05.414"
+    },
+    {
+      "id": 40460,
+      "sequence": 12,
+      "workerSequence": 6,
+      "type": "STATE",
+      "status": "SUCCEEDED",
+      "message": "ECLIPSE 100 completed successfully.",
+      "error": null,
+      "occurredAt": "2026-10-15T01:33:05.443"
+    },
+    {
+      "id": 40461,
+      "sequence": 13,
+      "workerSequence": null,
+      "type": "STATE",
+      "status": "COLLECTING",
+      "message": "Worker 正在收集结果",
+      "error": null,
+      "occurredAt": "2026-10-15T09:33:05.562"
+    },
+    {
+      "id": 40462,
+      "sequence": 14,
+      "workerSequence": null,
+      "type": "STATE",
+      "status": "SUCCEEDED",
+      "message": "运行完成",
+      "error": null,
+      "occurredAt": "2026-10-15T09:33:05.614"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": 10129,
+      "name": "eclipse-output-ECLIPSE_MULTI_SAT_FAMILY_I_PVTO_LIVE_OIL.FUNRST",
+      "type": "output",
+      "contentType": "application/octet-stream",
+      "sizeBytes": 276633,
+      "sha256": "0d973850182299e1d45aee3984eb7be0584435a157a4ad50fc0008aea7ac83d3",
+      "createdAt": "2026-10-15T09:33:05.597",
+      "expiresAt": "2026-11-14T09:33:05.597"
+    },
+    {
+      "id": 10130,
+      "name": "eclipse-output-ECLIPSE_MULTI_SAT_FAMILY_I_PVTO_LIVE_OIL.FEGRID",
+      "type": "output",
+      "contentType": "application/octet-stream",
+      "sizeBytes": 61211,
+      "sha256": "dd5aaf290bf9c4b5f3254de630f3b5b983c16ba0e1df0c1a66341d5ab0c58614",
+      "createdAt": "2026-10-15T09:33:05.602",
+      "expiresAt": "2026-11-14T09:33:05.602"
+    },
+    {
+      "id": 10131,
+      "name": "eclipse-output-ECLIPSE_MULTI_SAT_FAMILY_I_PVTO_LIVE_OIL.FINIT",
+      "type": "output",
+      "contentType": "application/octet-stream",
+      "sizeBytes": 187504,
+      "sha256": "85fec9f70d5880ee78ea918840b2d64e032a6348c1e5d255593e258efc2d9a4a",
+      "createdAt": "2026-10-15T09:33:05.603",
+      "expiresAt": "2026-11-14T09:33:05.603"
+    },
+    {
+      "id": 10132,
+      "name": "eclipse-output-ECLIPSE_MULTI_SAT_FAMILY_I_PVTO_LIVE_OIL.FUNSMRY",
+      "type": "output",
+      "contentType": "application/octet-stream",
+      "sizeBytes": 7437,
+      "sha256": "f6281b52ccd77ac31512d2c839bbe40c71ec4e495c4b689998a6d2e7c49a9e69",
+      "createdAt": "2026-10-15T09:33:05.605",
+      "expiresAt": "2026-11-14T09:33:05.605"
+    },
+    {
+      "id": 10133,
+      "name": "normalized-result.json",
+      "type": "normalized-result",
+      "contentType": "application/json",
+      "sizeBytes": 43363,
+      "sha256": "451849f78096bf90c5664a82c8ad0e2b67a81118f7094cc8c37131d6d9249e57",
+      "createdAt": "2026-10-15T09:33:05.606",
+      "expiresAt": "2026-11-14T09:33:05.606"
+    },
+    {
+      "id": 10134,
+      "name": "run.log",
+      "type": "log",
+      "contentType": "text/plain",
+      "sizeBytes": 20,
+      "sha256": "49a9a2378ce2aa9174c8c9da7faa3f814612d01699e43a52b84d2fe7b63e06aa",
+      "createdAt": "2026-10-15T09:33:05.608",
+      "expiresAt": "2026-11-14T09:33:05.608"
+    },
+    {
+      "id": 10135,
+      "name": "manifest.json",
+      "type": "manifest",
+      "contentType": "application/json",
+      "sizeBytes": 1689,
+      "sha256": "cd5abc9fc360756cac170f5455224577f0fecbec84bfcecaafac85da1f680199",
+      "createdAt": "2026-10-15T09:33:05.609",
+      "expiresAt": "2026-11-14T09:33:05.609"
+    }
+  ],
+  "resultExpiresAt": "2026-11-14T09:33:05.614",
+  "resultExpired": false
+}

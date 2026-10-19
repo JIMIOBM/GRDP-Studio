@@ -6,11 +6,12 @@ namespace Grdp.SoftwareIntegration.Worker.Execution;
 internal sealed record EclipseRelpermParameters(long BaselineRunId,string SourceFile,string SourceSha256,string Keyword,int KeywordLineNumber,string Unit,double Multiplier,EclipseRelpermRow[] Rows)
 {
     internal const string Schema="eclipse-relperm-parameters/1";
+    internal const string GasSchema="eclipse-relperm-parameters/2";
     internal static bool TryParse(JsonElement value,out EclipseRelpermParameters? result){
         result=null;string[] names=["schemaVersion","baselineRunId","sourceFile","sourceSha256","keyword","keywordLineNumber","unit","multiplier","rows"];
         if(value.ValueKind!=JsonValueKind.Object||value.EnumerateObject().Count()!=names.Length||!value.EnumerateObject().Select(p=>p.Name).ToHashSet(StringComparer.Ordinal).SetEquals(names))return false;
         string Text(string key)=>value.GetProperty(key).ValueKind==JsonValueKind.String?value.GetProperty(key).GetString()!:"";
-        if(Text("schemaVersion")!=Schema||Text("keyword") is not("SWFN" or "SOF3")||Text("unit")!="1"||!Regex.IsMatch(Text("sourceFile"),@"^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\.DATA$",RegexOptions.IgnoreCase|RegexOptions.CultureInvariant)||!Regex.IsMatch(Text("sourceSha256"),"^[a-f0-9]{64}$",RegexOptions.CultureInvariant)
+        if(!(Text("schemaVersion")==Schema&&Text("keyword") is ("SWFN" or "SOF3")||Text("schemaVersion")==GasSchema&&Text("keyword")=="SGFN")||Text("unit")!="1"||!Regex.IsMatch(Text("sourceFile"),@"^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\.DATA$",RegexOptions.IgnoreCase|RegexOptions.CultureInvariant)||!Regex.IsMatch(Text("sourceSha256"),"^[a-f0-9]{64}$",RegexOptions.CultureInvariant)
             ||value.GetProperty("baselineRunId").ValueKind!=JsonValueKind.Number||!value.GetProperty("baselineRunId").TryGetInt64(out var baseline)||baseline<=0
             ||value.GetProperty("keywordLineNumber").ValueKind!=JsonValueKind.Number||!value.GetProperty("keywordLineNumber").TryGetInt32(out var keywordLine)||keywordLine<=0||keywordLine>2000000
             ||value.GetProperty("multiplier").ValueKind!=JsonValueKind.Number||!value.GetProperty("multiplier").TryGetDouble(out var multiplier)||!double.IsFinite(multiplier)||multiplier<.000001||multiplier>100||multiplier==1)return false;
@@ -24,7 +25,7 @@ internal sealed record EclipseRelpermParameters(long BaselineRunId,string Source
         }
         if(!EclipseRelpermReader.ValidRows(Text("keyword"),rows))return false;
         bool changed=false;
-        foreach(var row in rows)foreach(var column in Text("keyword")=="SWFN"?new[]{1}:new[]{1,2}){
+        foreach(var row in rows)foreach(var column in Text("keyword")=="SOF3"?new[]{1,2}:new[]{1}){
             EclipsePvtwReader.Number(row.Values[column],out var kr);if(!double.IsFinite(kr*multiplier)||kr*multiplier<0||kr*multiplier>1)return false;changed|=kr*multiplier!=kr;
         }
         if(!changed)return false;

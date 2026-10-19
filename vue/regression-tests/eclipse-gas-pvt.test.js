@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFileSync } from 'node:fs'
 import { buildGasPvt, validGasPvt, gasPvtRecord, gasPvtResponse, gasVolumeUnit, gasPressureUnit } from '../src/views/SoftwareIntegration/eclipseGasPvt.js'
+import { batchChoices, buildBatchCase, buildBatchRequest } from '../src/views/SoftwareIntegration/eclipseBatch.js'
 const root = new URL('../tests/fixtures/eclipseGasPvt/', import.meta.url)
 const load = name => JSON.parse(readFileSync(new URL(name + '.json', root), 'utf8'))
 const inspection = load('inspection'), native = load('native-acceptance')
@@ -39,4 +40,21 @@ test('mismatched or empty physical units reject gas response instead of fabricat
   const gas = current.series.find(s => s.keyword === 'WGIT')
   gas.unit = 'SM3'; assert.equal(gasPvtResponse(current, baseline).available, false)
   gas.unit = ''; assert.equal(gasPvtResponse(current, baseline).available, false)
+})
+test('dry gas volume factors retain zero reference pressure and use Bg units distinct from oil',()=>{
+ const p=buildGasPvt({run,inspection,multiplier:1.02,field:'FORMATION_VOLUME_FACTOR'});assert.ok(validGasPvt(p));assert.equal(p.schemaVersion,'eclipse-pvdg-parameters/2');assert.equal(p.unit,'rb/Mscf');assert.deepEqual(p.rows,inspection.gasPvtContext.rows)
+ for(const system of ['METRIC','LAB','PVT-M'])assert.equal(buildGasPvt({run,inspection:{...inspection,unitSystem:system},multiplier:1.02,field:'FORMATION_VOLUME_FACTOR'}).unit,gasVolumeUnit(system))
+ for(const change of [{field:'PRESSURE'},{field:2},{unit:'rb/stb'},{unit:'cP'},{multiplier:101},{schemaVersion:'eclipse-pvdg-parameters/1'},{extra:1}])assert.equal(validGasPvt({...p,...change}),false)
+ const above=structuredClone(p);above.rows[0].values[1]='100000';assert.equal(validGasPvt(above),false);delete p.field;assert.equal(validGasPvt(p),false);assert.throws(()=>buildGasPvt({run,inspection,multiplier:1.02,field:'PRESSURE'}))
+})
+test('dry gas volume and viscosity form independently sourced cases under one native baseline',()=>{
+ const baseline=load('baseline');assert.ok(batchChoices(inspection).some(c=>c.kind==='PVDG_BG'))
+ const cases=['PVDG_BG','PVDG'].map(kind=>buildBatchCase({run:baseline,inspection,kind,value:kind==='PVDG_BG'?1.02:2,name:kind}))
+ const p=buildBatchRequest({run:baseline,name:'气物性',cases,requestKey:'12345678-1234-1234-1234-123456789abc'});assert.equal(p.cases[0].parameters.field,'FORMATION_VOLUME_FACTOR');assert.equal(p.cases[0].parameters.unit,'rb/Mscf');assert.equal(p.cases[1].parameters.schemaVersion,'eclipse-pvdg-parameters/1');assert.equal(p.cases[1].parameters.unit,'cP')
+})
+test('native Bg response preserves changed internal reports and the actual injection controls',()=>{
+ const volume=load('volume/native-acceptance');assert.ok(volume.nativeVerified&&volume.onlyGasVolumeColumnChanged)
+ const diff=gasPvtResponse({series:volume.target.series},{series:volume.baseline.series});assert.equal(diff.available,true);assert.equal(diff.rows.length,928);assert.equal(diff.unmatchedCount,880);assert.equal(diff.changedCount,15)
+ const last=diff.rows.filter(r=>r.timeDays===6000);assert.equal(last.find(r=>r.keyword==='WBHP'&&r.well==='I').current,4138.6943359375);assert.equal(last.find(r=>r.keyword==='WGIT').current,600000);assert.equal(last.find(r=>r.keyword==='WWPT').current,1188125.625)
+ for(const row of diff.rows.filter(r=>r.current==null||r.baseline==null))assert.equal(row.difference,null);assert.deepEqual(volume.target.arrays,volume.baseline.arrays)
 })

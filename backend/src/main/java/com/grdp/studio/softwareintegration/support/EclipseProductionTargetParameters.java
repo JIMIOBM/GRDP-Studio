@@ -12,6 +12,7 @@ public final class EclipseProductionTargetParameters {
     private static final Pattern FILE = Pattern.compile("^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\\.[Dd][Aa][Tt][Aa]$");
     private EclipseProductionTargetParameters() {}
     public static boolean valid(JsonNode value) {
+        if (EclipsePackageProductionTargetParameters.valid(value)) return true;
         if (value == null || !value.isObject() || value.size() != FIELDS.size()) return false;
         var names = new java.util.HashSet<String>();
         value.properties().forEach(p -> names.add(p.getKey()));
@@ -28,6 +29,7 @@ public final class EclipseProductionTargetParameters {
         return value.isNumber() && Double.isFinite(value.asDouble()) && value.asDouble() > 0 && value.asDouble() <= 100_000_000;
     }
     public static boolean matchesInspection(JsonNode value, JsonNode inspection) {
+        if (EclipsePackageProductionTargetParameters.valid(value)) return EclipsePackageProductionTargetParameters.matchesInspection(value, inspection);
         if (!valid(value) || inspection == null || !Set.of("eclipse-data-inspection/4", "eclipse-data-inspection/5").contains(inspection.path("schemaVersion").asText())
             || !"FIELD".equals(inspection.path("unitSystem").asText()) || inspection.path("packageFiles").size() != 1) return false;
         String source = value.path("sourceFile").asText(), well = value.path("well").asText();

@@ -6,6 +6,7 @@ import com.grdp.studio.softwareintegration.entity.EclipseBatchEntity;
 import com.grdp.studio.softwareintegration.execution.SoftwareIntegrationRunStatus;
 import com.grdp.studio.softwareintegration.mapper.EclipseBatchMapper;
 import com.grdp.studio.softwareintegration.support.EclipseBatchParameters;
+import com.grdp.studio.softwareintegration.support.EclipseCompositionalFluidPropertyParameters;
 import com.grdp.studio.softwareintegration.support.SoftwareIntegrationRunExceptionHandler.RunException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -25,7 +26,8 @@ public class EclipseBatchService {
         var prior=batches.selectOne(new LambdaQueryWrapper<EclipseBatchEntity>().eq(EclipseBatchEntity::getModelVersionId,versionId).eq(EclipseBatchEntity::getRequestKey,request.path("requestKey").asText()));
         if(prior!=null){if(!EclipseBatchParameters.sameContent(mapper.readTree(prior.getRequestJson()),request))throw error(HttpStatus.CONFLICT,"同一提交标识已用于不同批量方案");return detail(prior);}
         var baseline=runs.get(request.path("baselineRunId").asLong());
-        if(baseline.modelVersionId()!=versionId||!"eclipse".equals(baseline.runType())||!"SUCCEEDED".equals(baseline.status())||!"VALID_FULL".equals(baseline.resultContract())||baseline.parameters()!=null&&!baseline.parameters().isNull()||baseline.result()==null||baseline.result().isNull()||baseline.resultExpired()||!"eclipse_100".equals(baseline.result().path("modelKind").asText()))throw error(HttpStatus.CONFLICT,"请选择同版本、结果未过期的完整无参数E100基线");
+        if(baseline.modelVersionId()!=versionId||!"eclipse".equals(baseline.runType())||!"SUCCEEDED".equals(baseline.status())||!"VALID_FULL".equals(baseline.resultContract())||baseline.parameters()!=null&&!baseline.parameters().isNull()||baseline.result()==null||baseline.result().isNull()||baseline.resultExpired()||!("eclipse_100".equals(baseline.result().path("modelKind").asText())||"eclipse_300".equals(baseline.result().path("modelKind").asText())&&"eclipse-summary-result/2".equals(baseline.result().path("schemaVersion").asText())&&"COMPOSITIONAL".equals(baseline.result().path("simulation").path("modelType").asText())))throw error(HttpStatus.CONFLICT,"请选择同版本、结果未过期的完整无参数E100或组分E300基线");
+        if(EclipseCompositionalFluidPropertyParameters.valid(request.path("cases").get(0).path("parameters"))!="eclipse_300".equals(baseline.result().path("modelKind").asText()))throw error(HttpStatus.CONFLICT,"批量方案类型与所选基线求解器不一致");
         var members=mapper.createArrayNode();
         // Existing createQueued joins this transaction. A rejected later case rolls back every child and the collection.
         for(var item:request.path("cases")){

@@ -4,11 +4,14 @@ import tools.jackson.databind.JsonNode;
 import java.util.HashSet;
 import java.util.Set;
 
-/** Single explicit dry-gas PVDG table. Source pressure and Bg columns are immutable. */
+/** Single explicit dry-gas PVDG table; only the selected property column may change. */
 public final class EclipseGasPvtParameters {
     public static final String SCHEMA="eclipse-pvdg-parameters/1";
+    public static final String FIELD_SCHEMA="eclipse-pvdg-parameters/2";
     private static final Set<String> FIELDS=Set.of("schemaVersion","baselineRunId","sourceFile","sourceSha256","keywordLineNumber","unit","multiplier","rows");
     private EclipseGasPvtParameters() {}
+    private static String field(JsonNode v){return SCHEMA.equals(v.path("schemaVersion").asText())?"VISCOSITY":v.path("field").asText();}
+    private static String volumeUnit(String system){return switch(system){case "FIELD"->"rb/Mscf";case "LAB"->"rcc/scc";case "METRIC","PVT-M"->"rm3/sm3";default->"";};}
     private static boolean fields(JsonNode v,Set<String> expected) {
         if(v==null||!v.isObject())return false;
         var names=new HashSet<String>();v.properties().forEach(p->names.add(p.getKey()));return names.equals(expected);
@@ -32,8 +35,12 @@ public final class EclipseGasPvtParameters {
         return true;
     }
     public static boolean valid(JsonNode v) {
-        if(!fields(v,FIELDS)||!v.path("schemaVersion").isString()||!SCHEMA.equals(v.path("schemaVersion").asText())
-            ||!v.path("unit").isString()||!"cP".equals(v.path("unit").asText())
+        if(v==null||!v.isObject())return false;
+        boolean legacy=SCHEMA.equals(v.path("schemaVersion").asText());var expected=new HashSet<>(FIELDS);if(!legacy)expected.add("field");
+        String field=field(v);
+        if(!fields(v,expected)||!v.path("schemaVersion").isString()||!Set.of(SCHEMA,FIELD_SCHEMA).contains(v.path("schemaVersion").asText())
+            ||!legacy&&!v.path("field").isString()||!Set.of("VISCOSITY","FORMATION_VOLUME_FACTOR").contains(field)
+            ||!v.path("unit").isString()||!("VISCOSITY".equals(field)?"cP".equals(v.path("unit").asText()):Set.of("rb/Mscf","rm3/sm3","rcc/scc").contains(v.path("unit").asText()))
             ||!v.path("sourceFile").isString()||!v.path("sourceFile").asText().matches("(?i)^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\\.DATA$")
             ||!v.path("sourceSha256").isString()||!v.path("sourceSha256").asText().matches("^[a-f0-9]{64}$")
             ||!v.path("baselineRunId").isIntegralNumber()||!v.path("baselineRunId").canConvertToLong()||v.path("baselineRunId").asLong()<=0
@@ -41,12 +48,14 @@ public final class EclipseGasPvtParameters {
             ||!v.path("multiplier").isNumber())return false;
         double multiplier=v.path("multiplier").asDouble();
         if(!Double.isFinite(multiplier)||multiplier<.000001||multiplier>100||multiplier==1||!validRows(v.path("rows"),v.path("keywordLineNumber").asInt()))return false;
-        for(var row:v.path("rows")){double target=number(row.path("values").path(2).asText())*multiplier;if(!Double.isFinite(target)||target<=0||target>1000)return false;}
+        int column="FORMATION_VOLUME_FACTOR".equals(field)?1:2;double maximum=column==1?100000:1000,priorTarget=Double.POSITIVE_INFINITY;
+        for(var row:v.path("rows")){double target=number(row.path("values").path(column).asText())*multiplier;if(!Double.isFinite(target)||target<=0||target>maximum||column==1&&target>=priorTarget)return false;priorTarget=target;}
         return true;
     }
     public static boolean matchesInspection(JsonNode v,JsonNode inspection) {
         if(!valid(v)||inspection==null||!"eclipse-data-inspection/4".equals(inspection.path("schemaVersion").asText())
-            ||!Set.of("METRIC","FIELD","LAB","PVT-M").contains(inspection.path("unitSystem").asText())||inspection.path("packageFiles").size()!=1)return false;
+            ||!Set.of("METRIC","FIELD","LAB","PVT-M").contains(inspection.path("unitSystem").asText())||inspection.path("packageFiles").size()!=1
+            ||!v.path("unit").asText().equals("VISCOSITY".equals(field(v))?"cP":volumeUnit(inspection.path("unitSystem").asText())))return false;
         boolean oil=false;for(var phase:inspection.path("phases"))oil|="GAS".equals(phase.asText());if(!oil)return false;
         var file=inspection.path("packageFiles").path(0);var c=inspection.path("gasPvtContext");
         return "eclipse-gas-pvt-context/1".equals(c.path("schemaVersion").asText())&&v.path("sourceFile").equals(file.path("relativePath"))

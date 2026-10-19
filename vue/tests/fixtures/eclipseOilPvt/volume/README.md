@@ -1,0 +1,1 @@
+Actual unified 5173 E100 PVDO volume-factor runs 614/615 (version 186) and independent ECLIPSE 2024.1 source/Bo x1.02 output. The browser helper changes only transport identities and artifact lists; native curves, table rows, source SHA and original pressure/viscosity are retained. These are simulator verification data, not field observations.

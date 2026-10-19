@@ -1,0 +1,463 @@
+------------------------------------------------------------------------
+--                                                                    --
+-- SPE Steam Injection Problem 3A                                     --
+-- SPE 13510                                                                    --
+-- 'Fourth SPE Comparative Solution Project:                          --
+-- Comparison of Steam Injection Simulators'                          --
+-- K.Aziz, A.B.Ramesh, P.T.Woo                                        --
+-- Journal of Petroleum Technology, December 1987                     --
+--                                                                    --
+-- 1/8th of inverted 9-spot                                           --
+-- 4 component problem, 3 component oil (2 live, 1 dead), water       --                                                                            --
+--                                                                    --
+--                                                                    --
+-- Last modified April 2003                                           --
+--                                                                    --
+------------------------------------------------------------------------
+
+------------------------------------------------------------------------
+-- Modification date: 	January 2007
+-- Changes:			TSCRIT out
+-- Result:			Speed-up ~3.1
+------------------------------------------------------------------------
+
+RUNSPEC   ========================================
+
+FIELD
+
+DIMENS
+ 9 5 4 /
+
+WATER
+OIL
+GAS
+
+COMPS
+3     /
+
+THERMAL
+
+UNIFOUT
+
+NINEPOINT
+
+ROCKDIMS
+1 1* 20/
+
+-- Use single segment MSW to get 'better' answer
+OPTIONS3
+61* 1 /
+
+GRID      ========================================
+
+INIT
+
+TOPS
+45*1500.0  /
+
+DXV
+14.585 7*29.17 14.585 /
+
+DYV
+14.585 3*29.17 14.585 /
+
+DZV
+10.0  20.0  25.0  25.0 /
+
+PERMX
+ 45*2000.0  45*500.0  45*1000.0  45*2000.0  /
+PERMY
+ 45*2000.0  45*500.0  45*1000.0  45*2000.0  /
+PERMZ
+ 45*1000.0  45*250.0  45*500.0   45*1000.0  /
+
+PORO
+ 45*0.3 45*0.3 45*0.3 45*0.3  /
+
+THCONR
+ 180*24.0  /
+
+HEATCR
+ 180*35.0  /
+
+EQUALS
+     'PORO'  0.0  1 1 2 2 1 4 /
+     'PORO'  0.0  1 2 3 3 1 4 /
+     'PORO'  0.0  1 3 4 4 1 4 /
+     'PORO'  0.0  1 4 5 5 1 4 /
+     'PERMX'  0.0  1 1 2 2 1 4 /
+     'PERMX'  0.0  1 2 3 3 1 4 /
+     'PERMX'  0.0  1 3 4 4 1 4 /
+     'PERMX'  0.0  1 4 5 5 1 4 /
+     'PERMY'  0.0  1 1 2 2 1 4 /
+     'PERMY'  0.0  1 2 3 3 1 4 /
+     'PERMY'  0.0  1 3 4 4 1 4 /
+     'PERMY'  0.0  1 4 5 5 1 4 /
+     'PERMZ'  0.0  1 1 2 2 1 4 /
+     'PERMZ'  0.0  1 2 3 3 1 4 /
+     'PERMZ'  0.0  1 3 4 4 1 4 /
+     'PERMZ'  0.0  1 4 5 5 1 4 /
+     'THCONR'  0.0  1 1 2 2 1 4 /
+     'THCONR'  0.0  1 2 3 3 1 4 /
+     'THCONR'  0.0  1 3 4 4 1 4 /
+     'THCONR'  0.0  1 4 5 5 1 4 /
+     'PORO'  0.0  9 9 2 2 1 4 /
+     'PORO'  0.0  8 9 3 3 1 4 /
+     'PORO'  0.0  7 9 4 4 1 4 /
+     'PORO'  0.0  6 9 5 5 1 4 /
+     'PERMX'  0.0  9 9 2 2 1 4 /
+     'PERMX'  0.0  8 9 3 3 1 4 /
+     'PERMX'  0.0  7 9 4 4 1 4 /
+     'PERMX'  0.0  6 9 5 5 1 4 /
+     'PERMY'  0.0  9 9 2 2 1 4 /
+     'PERMY'  0.0  8 9 3 3 1 4 /
+     'PERMY'  0.0  7 9 4 4 1 4 /
+     'PERMY'  0.0  6 9 5 5 1 4 /
+     'PERMZ'  0.0  9 9 2 2 1 4 /
+     'PERMZ'  0.0  8 9 3 3 1 4 /
+     'PERMZ'  0.0  7 9 4 4 1 4 /
+     'PERMZ'  0.0  6 9 5 5 1 4 /
+     'THCONR'  0.0  9 9 2 2 1 4 /
+     'THCONR'  0.0  8 9 3 3 1 4 /
+     'THCONR'  0.0  7 9 4 4 1 4 /
+     'THCONR'  0.0  6 9 5 5 1 4 /
+/
+ACTNUM
+   1 1 1 1 1 1 1 1 1
+   0 1 1 1 1 1 1 1 0
+   0 0 1 1 1 1 1 0 0
+   0 0 0 1 1 1 0 0 0
+   0 0 0 0 1 0 0 0 0
+   1 1 1 1 1 1 1 1 1
+   0 1 1 1 1 1 1 1 0
+   0 0 1 1 1 1 1 0 0
+   0 0 0 1 1 1 0 0 0
+   0 0 0 0 1 0 0 0 0
+   1 1 1 1 1 1 1 1 1
+   0 1 1 1 1 1 1 1 0
+   0 0 1 1 1 1 1 0 0
+   0 0 0 1 1 1 0 0 0
+   0 0 0 0 1 0 0 0 0
+   1 1 1 1 1 1 1 1 1
+   0 1 1 1 1 1 1 1 0
+   0 0 1 1 1 1 1 0 0
+   0 0 0 1 1 1 0 0 0
+   0 0 0 0 1 0 0 0 0
+/
+
+ROCKPROP
+  1  125  24  35  /
+/
+
+ROCKCON
+  1  1  9  1  5  1  1  'K-'       /  top
+  1  1  1  1  1  1  1  'K-'  0.5  /  top
+  1  9  9  1  1  1  1  'K-'  0.5  /  top
+  1  2  2  2  2  1  1  'K-'  0.5  /  top
+  1  8  8  2  2  1  1  'K-'  0.5  /  top
+  1  3  3  3  3  1  1  'K-'  0.5  /  top
+  1  7  7  3  3  1  1  'K-'  0.5  /  top
+  1  4  4  4  4  1  1  'K-'  0.5  /  top
+  1  6  6  4  4  1  1  'K-'  0.5  /  top
+  1  5  5  5  5  1  1  'K-'  0.5  /  top
+--
+  1  1  9  1  5  4  4  'K+'       /  bottom
+  1  1  1  1  1  4  4  'K+'  0.5  /  bottom
+  1  9  9  1  1  4  4  'K+'  0.5  /  bottom
+  1  2  2  2  2  4  4  'K+'  0.5  /  bottom
+  1  8  8  2  2  4  4  'K+'  0.5  /  bottom
+  1  3  3  3  3  4  4  'K+'  0.5  /  bottom
+  1  7  7  3  3  4  4  'K+'  0.5  /  bottom
+  1  4  4  4  4  4  4  'K+'  0.5  /  bottom
+  1  6  6  4  4  4  4  'K+'  0.5  /  bottom
+  1  5  5  5  5  4  4  'K+'  0.5  /  bottom
+/
+
+EDIT      ========================================
+
+MULTIPLY
+     'PORV'  0.5  1 1 1 1 1 4 /
+     'PORV'  0.5  2 2 2 2 1 4 /
+     'PORV'  0.5  3 3 3 3 1 4 /
+     'PORV'  0.5  4 4 4 4 1 4 /
+     'PORV'  0.5  5 5 5 5 1 4 /
+     'PORV'  0.5  6 6 4 4 1 4 /
+     'PORV'  0.5  7 7 3 3 1 4 /
+     'PORV'  0.5  8 8 2 2 1 4 /
+     'PORV'  0.5  9 9 1 1 1 4 /
+--
+     'ROCKV' 0.5  1 1 1 1 1 4 /
+     'ROCKV' 0.5  2 2 2 2 1 4 /
+     'ROCKV' 0.5  3 3 3 3 1 4 /
+     'ROCKV' 0.5  4 4 4 4 1 4 /
+     'ROCKV' 0.5  5 5 5 5 1 4 /
+     'ROCKV' 0.5  6 6 4 4 1 4 /
+     'ROCKV' 0.5  7 7 3 3 1 4 /
+     'ROCKV' 0.5  8 8 2 2 1 4 /
+     'ROCKV' 0.5  9 9 1 1 1 4 /
+     'TRANZ' 0.5  1 1 1 1 1 4 /
+     'TRANZ' 0.5  2 2 2 2 1 4 /
+     'TRANZ' 0.5  3 3 3 3 1 4 /
+     'TRANZ' 0.5  4 4 4 4 1 4 /
+     'TRANZ' 0.5  5 5 5 5 1 4 /
+     'TRANZ' 0.5  6 6 4 4 1 4 /
+     'TRANZ' 0.5  7 7 3 3 1 4 /
+     'TRANZ' 0.5  8 8 2 2 1 4 /
+     'TRANZ' 0.5  9 9 1 1 1 4 /
+     'HEATTZ' 0.5  1 1 1 1 1 4 /
+     'HEATTZ' 0.5  2 2 2 2 1 4 /
+     'HEATTZ' 0.5  3 3 3 3 1 4 /
+     'HEATTZ' 0.5  4 4 4 4 1 4 /
+     'HEATTZ' 0.5  5 5 5 5 1 4 /
+     'HEATTZ' 0.5  6 6 4 4 1 4 /
+     'HEATTZ' 0.5  7 7 3 3 1 4 /
+     'HEATTZ' 0.5  8 8 2 2 1 4 /
+     'HEATTZ' 0.5  9 9 1 1 1 4 /
+/
+
+PROPS     ========================================
+
+CNAMES
+C1 C2 HEAVY /
+
+--Oil component K-value correlation
+KVCR
+--   C1     C2    HEAVY
+  1.23E6  212      1*
+  833.4E6 155.4E3  1*
+  0       0        1*
+  16000   4000     1*
+  0       480      1*
+--0       460      1*
+/
+
+TCRIT
+ 1259.67 1409.67 10000 /
+
+PCRIT
+ 225. 140. 100.0 /
+
+MW
+250  450 600 /
+
+CREF
+.00005 .00005 .00005 /
+
+DREF
+52.3 57.64 61.2  /
+
+--thermal expansion coefficient
+THERMEX1
+.00036 .00037 .00038 /
+
+ZFACTOR
+0.96  0.97 0.99  /
+
+--use analytic water and steam densities
+THANALB
+
+--oil component specific heat
+SPECHA
+.53 .55 0.6 /
+
+-- heat of vaporization
+HEATVAP
+ 230.0 100.0 /
+-- 23000.0 100.0 /
+
+TEMPVD
+--Depth  Temperature
+  1300.0  125.0
+  1700.0  125.0  /
+
+STCOND
+--Temp   Pressure
+  60     14.7 /
+
+SWFN
+-- SWAT     KRW    PCW
+   .4500   .0000   0.0
+   .4900   .0003   0.0
+   .5300   .0018   0.0
+   .5700   .0049   0.0
+   .6100   .0101   0.0
+   .6500   .0177   0.0
+   .6900   .0279   0.0
+   .7300   .0410   0.0
+   .7700   .0572   0.0
+   .8100   .0768   0.0
+   .8500   .1000   0.0
+  1.0000   .1000   0.0
+ /
+
+SGFN
+-- SGAS     KRG    PCG
+   .0000   .0000   0.0
+   .0600   .0000   0.0
+   .1090   .0063   0.0
+   .1580   .0179   0.0
+   .2070   .0329   0.0
+   .2560   .0506   0.0
+   .3050   .0707   0.0
+   .3540   .0930   0.0
+   .4030   .1171   0.0
+   .4520   .1431   0.0
+   .5010   .1708   0.0
+   .5500   .2000   0.0
+  1.0000   .2000   0.0
+ /
+
+SOF3
+-- SOIL     KROW    KROG
+   .0000   .0000   .0000
+   .1000   .0000   .0000
+   .1500   .0000   .0049
+   .1900   .0040   .0160
+   .2300   .0160   .0334
+   .2700   .0360   .0571
+   .3100   .0640   .0871
+   .3500   .1000   .1235
+   .3900   .1440   .1661
+   .4300   .1960   .2151
+   .4700   .2560   .2704
+   .5100   .3240   .3320
+   .5500   .4000   .4000
+  1.0000   .4000   .4000
+ /
+
+GASVISCT
+-- Temp  Viscosities
+   75   0.0143    0.0285  1.0
+  100   0.0149    0.0297  1.0
+  150   0.0161    0.0321  1.0
+  200   0.0172    0.0345  1.0
+  250   0.0184    0.0368  1.0
+  300   0.0196    0.0391  1.0
+  350   0.0207    0.0414  1.0
+  500   0.0241    0.0483  1.0
+15000   0.2946    0.5892  1.0
+/
+
+OILVISCT
+-- Temp  Viscosities
+   75    2.3 10.6  5780
+  100    2.0  9.1  1380
+  150    1.5  6.8   187
+  200    1.1  5.2    47
+  250    0.9  4.1    17.4
+  300    0.7  3.2     8.5
+  350    0.6  2.6     5.2
+  500    0.3  1.4     2.5
+15000    0.1  0.1     2.4999
+/
+
+PVTW
+--  Pref       Bw        Cw          Vw        Cvw
+--  PSIA       RB/STB    1/PSI       CPOISE    1/PSI
+    75.000     1.0       3.E-06      .3        7.E-09
+ /
+
+ROCK
+75.0  5.0E-04  /
+
+ZMFVD
+ 1500.0  0.5030  0.1614 0.3356  /
+
+SOLUTION  ========================================
+
+EQUIL
+--  Ddat    Pdat     Dwoc    Pcog    Dgoc    Pgoc  It1  It2  Iac Iin
+1505.0      75.0     1600.0  0.0     1500.0  0.0   1     1    0   1  /
+
+RPTRST
+PRES TEMP ENERGY SOIL SWAT SGAS/
+
+RPTSOL
+PRES TEMP ENERGY SOIL SWAT SGAS/
+
+SUMMARY   ========================================
+
+ALL
+
+BTEMP
+ 1 1 1 /
+ 9 1 4 /
+/
+
+WTEMP
+ I PNEAR PFAR /
+
+WSTPR
+ PNEAR PFAR /
+
+WSTPT
+ PNEAR PFAR /
+
+FOSRC
+
+FHLR
+
+FHLT
+
+-- Performance data
+
+PERFORMANCE
+
+-- Run summary file
+
+RUNSUM
+
+SCHEDULE  ========================================
+
+RPTPRINT
+-- s F R G S W C s nl
+   1 1 0 0 0 1 0 1 0 /
+
+RPTSCHED
+PRES TEMP ENERGY SOIL SWAT SGAS  /
+
+WELSPECS
+I     FIELD  1 1 1* WATER /
+PNEAR FIELD  5 5 1* OIL   /
+PFAR  FIELD  9 1 1* OIL   /
+/
+
+COMPDAT
+I      1 1 4 4  OPEN 1   14.97 /
+PNEAR  5 5 1 1  OPEN 1   11.97 /
+PNEAR  5 5 2 2  OPEN 1    5.99 /
+PNEAR  5 5 3 3  OPEN 1   14.97 /
+PNEAR  5 5 4 4  OPEN 1   29.94 /
+PFAR   9 1 1 1  OPEN 1    5.99 /
+PFAR   9 1 2 2  OPEN 1    2.99 /
+PFAR   9 1 3 3  OPEN 1    7.48 /
+PFAR   9 1 4 4  OPEN 1   14.97 /
+/
+
+WCONINJE
+--Well Type  ...  Init Rate Res BHP
+  I    WATER OPEN RATE 37.5 1*  700.0 /
+/
+WINJTEMP
+--Well SQ   Temp
+  I    0.70 450   /
+/
+
+-- Production targets
+
+WCONPROD
+--Well  ...  Init Oil Wat Gas Liq Res BHP ... Steam
+PNEAR   OPEN BHP  3*          250 1*  17  5*  2.50 /
+PFAR    OPEN BHP  3*          125 1*  17  5*  1.25 /
+/
+
+--TSCRIT
+--initT minT maxT maxInc/Dec targTTE maxTTE TTPT MTPT TSCT MxWT
+--    5   .01 365.  1*   1*      1*     1*     1*  1*   2.5 365
+--maxPT maxSC ATPT SACT maxSA TEMT maxTEM
+--  1*    1*    1*   1    1*    180  500 /
+
+TSTEP
+ 10*365 /
+
+END

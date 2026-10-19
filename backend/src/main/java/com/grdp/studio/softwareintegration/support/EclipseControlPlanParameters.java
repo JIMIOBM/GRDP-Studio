@@ -17,6 +17,8 @@ public final class EclipseControlPlanParameters {
     private static boolean integer(JsonNode n,int min){return n.isIntegralNumber() && n.canConvertToInt() && n.asInt()>=min;}
     private static LocalDate date(JsonNode n){try{return n.isTextual() && n.asText().matches("[0-9]{4}-[0-9]{2}-[0-9]{2}")?LocalDate.parse(n.asText()):null;}catch(Exception e){return null;}}
     public static boolean valid(JsonNode p) {
+        if (p != null && EclipseWaterInjectionPlanParameters.SCHEMA.equals(p.path("schemaVersion").asText())) return EclipseWaterInjectionPlanParameters.valid(p);
+        if (p != null && EclipsePackageControlPlanParameters.SCHEMA.equals(p.path("schemaVersion").asText())) return EclipsePackageControlPlanParameters.valid(p);
         if(!shape(p,Set.of("schemaVersion","baselineRunId","edits")) || !"eclipse-control-plan-parameters/1".equals(p.path("schemaVersion").asText())
             || !p.path("baselineRunId").isIntegralNumber() || !p.path("baselineRunId").canConvertToLong() || p.path("baselineRunId").asLong()<=0
             || !p.path("edits").isArray() || p.path("edits").isEmpty() || p.path("edits").size()>24)return false;
@@ -31,6 +33,8 @@ public final class EclipseControlPlanParameters {
         return true;
     }
     public static boolean matchesInspection(JsonNode p,JsonNode i) {
+        if (p != null && EclipseWaterInjectionPlanParameters.SCHEMA.equals(p.path("schemaVersion").asText())) return EclipseWaterInjectionPlanParameters.matchesInspection(p, i);
+        if (p != null && EclipsePackageControlPlanParameters.SCHEMA.equals(p.path("schemaVersion").asText())) return EclipsePackageControlPlanParameters.matchesInspection(p, i);
         if(!valid(p) || !validPlan(i))return false;
         for(var e:p.path("edits")){
             int found=0;

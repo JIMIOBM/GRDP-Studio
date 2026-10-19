@@ -1,9 +1,11 @@
 <script setup>
+import EclipseForecastDashboard from './EclipseForecastDashboard.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { softwareIntegrationApi } from '@/api/softwareIntegration'
 import EclipseSummaryExplorer from './EclipseSummaryExplorer.vue'
 import { validRestartSource, validRestartForecast, compareRestartForecasts, restartForecastMatchesSource, restartForecastSeries } from './eclipseRestartForecast'
 
+const emit = defineEmits(['select-run'])
 const props = defineProps({ run: { type: Object, default: null }, history: { type: Array, default: () => [] }, inspection: { type: Object, default: null } })
 const source = ref(null), historical = ref(null), other = ref(null), otherId = ref(null), loading = ref(false), error = ref('')
 const otherError = ref(''), otherLoading = ref(false)
@@ -69,6 +71,7 @@ const number = value => Number(value).toLocaleString('zh-CN', { maximumFractionD
     </label>
     <el-alert v-if="otherError" type="warning" :closable="false" :title="otherError" />
     <el-alert v-if="comparison" :type="comparison.valid ? 'success' : 'warning'" :closable="false" :title="comparison.reason" />
+    <EclipseForecastDashboard v-if="source" kind="e100" :source="source" :history="historical" :run="run" :other="other" :inspection="inspection" @select-run="emit('select-run', $event)"/>
     <el-table v-if="comparison?.valid" :data="comparison.rows" border size="small" max-height="360" aria-label="ECLIPSE 未来累计产油与新增产油">
       <el-table-column prop="keyword" label="指标" width="90" /><el-table-column prop="objectName" label="对象" width="100" /><el-table-column prop="date" label="实际日期" width="125" />
       <el-table-column prop="unit" label="单位" width="90" />

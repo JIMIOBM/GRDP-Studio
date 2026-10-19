@@ -21,14 +21,16 @@ public sealed record EclipsePortableRestartBinding(string SchemaVersion, string 
             binding = JsonSerializer.Deserialize<EclipsePortableRestartBinding>(text, Options) ?? throw new JsonException();
         }
         catch (JsonException e) { throw new InvalidDataException("Invalid portable restart binding.", e); }
-        var source = EclipseForecastSourceReader.Read(package, true);
-        if (binding.SchemaVersion != "eclipse-portable-restart/1" || binding.Catalog is null || binding.Catalog.Reports is null
+        var source = EclipseForecastSourceReader.Read(package, true, EclipseRestartReader.IsBinary(binding.Catalog));
+        var binary = EclipseRestartReader.IsBinary(binding.Catalog);
+        if (binding.SchemaVersion != (binary ? "eclipse-portable-restart/2" : "eclipse-portable-restart/1")
+            || (source.RestartFormat == "BINARY") != binary || binding.Catalog is null || binding.Catalog.Reports is null
             || binding.Catalog.Reports.Count != 1 || binding.Catalog.Reports[0] is null || source.PhysicsSha256 != binding.PhysicsSha256 || source.StartDate != binding.Catalog.StartDate
             || source.RestartCase != binding.Catalog.CaseName || source.RestartReport != binding.Catalog.Reports[0].ReportNumber
             || source.FutureDates.Any(date => string.CompareOrdinal(date, binding.Catalog.Reports[0].Date) <= 0))
             throw new InvalidDataException("Portable forecast source does not match its selected historical state.");
-        var restart = Path.Combine(package.Root, source.RestartCase + ".FUNRST");
-        _ = EclipseFormattedRestartReader.Select(restart, binding.Catalog, source.RestartReport);
+        var restart = Path.Combine(package.Root, source.RestartCase + (binary ? ".UNRST" : ".FUNRST"));
+        _ = EclipseRestartReader.Select(restart, binding.Catalog, source.RestartReport);
         return restart;
     }
     private static void NoDuplicateFields(JsonElement value)

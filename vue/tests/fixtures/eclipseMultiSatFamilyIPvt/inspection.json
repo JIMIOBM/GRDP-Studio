@@ -1,0 +1,954 @@
+{
+  "schemaVersion": "eclipse-data-inspection/4",
+  "caseName": "ECLIPSE_MULTI_SAT_FAMILY_I_PVT_OIL_GAS.DATA",
+  "sections": [
+    "RUNSPEC",
+    "GRID",
+    "PROPS",
+    "REGIONS",
+    "SOLUTION",
+    "SUMMARY",
+    "SCHEDULE"
+  ],
+  "unitSystem": "FIELD",
+  "phases": [
+    "OIL",
+    "WATER",
+    "GAS"
+  ],
+  "dimensions": {
+    "nx": 13,
+    "ny": 1,
+    "nz": 1
+  },
+  "wellNames": [
+    "P1",
+    "I1"
+  ],
+  "scheduleTimeline": [
+    {
+      "kind": "TSTEP",
+      "steps": [
+        "5",
+        "5",
+        "5",
+        "5",
+        "5",
+        "5",
+        "5",
+        "5",
+        "5",
+        "5"
+      ],
+      "sourceFile": "ECLIPSE_MULTI_SAT_FAMILY_I_PVT_OIL_GAS.DATA",
+      "lineNumber": 352
+    },
+    {
+      "kind": "TSTEP",
+      "steps": [
+        "5",
+        "5",
+        "5",
+        "5",
+        "5",
+        "5",
+        "5",
+        "5",
+        "5",
+        "5"
+      ],
+      "sourceFile": "ECLIPSE_MULTI_SAT_FAMILY_I_PVT_OIL_GAS.DATA",
+      "lineNumber": 356
+    }
+  ],
+  "packageFiles": [
+    {
+      "relativePath": "ECLIPSE_MULTI_SAT_FAMILY_I_PVT_OIL_GAS.DATA",
+      "sizeBytes": 5136,
+      "sha256": "517700c242c2d0375d46407c941f277199f9af724dd32298b28034abcccf2217"
+    }
+  ],
+  "scheduleMetadata": {
+    "wells": [
+      {
+        "name": "P1",
+        "group": "G",
+        "sourceFile": "ECLIPSE_MULTI_SAT_FAMILY_I_PVT_OIL_GAS.DATA",
+        "lineNumber": 334
+      },
+      {
+        "name": "I1",
+        "group": "G",
+        "sourceFile": "ECLIPSE_MULTI_SAT_FAMILY_I_PVT_OIL_GAS.DATA",
+        "lineNumber": 335
+      }
+    ],
+    "groups": [],
+    "records": [
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "P1",
+          "7",
+          "1",
+          "1",
+          "1",
+          "OPEN",
+          "2*",
+          "0.583"
+        ],
+        "sourceFile": "ECLIPSE_MULTI_SAT_FAMILY_I_PVT_OIL_GAS.DATA",
+        "lineNumber": 339
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "I1",
+          "9",
+          "1",
+          "1",
+          "1",
+          "OPEN",
+          "2*",
+          "0.583"
+        ],
+        "sourceFile": "ECLIPSE_MULTI_SAT_FAMILY_I_PVT_OIL_GAS.DATA",
+        "lineNumber": 340
+      },
+      {
+        "keyword": "WCONPROD",
+        "values": [
+          "P1",
+          "OPEN",
+          "LRAT",
+          "3*",
+          "5000",
+          "1*",
+          "3000"
+        ],
+        "sourceFile": "ECLIPSE_MULTI_SAT_FAMILY_I_PVT_OIL_GAS.DATA",
+        "lineNumber": 344
+      },
+      {
+        "keyword": "WCONINJE",
+        "values": [
+          "I1",
+          "GAS",
+          "OPEN",
+          "RESV",
+          "1*",
+          "1000",
+          "6000"
+        ],
+        "sourceFile": "ECLIPSE_MULTI_SAT_FAMILY_I_PVT_OIL_GAS.DATA",
+        "lineNumber": 348
+      }
+    ],
+    "completions": [
+      {
+        "keyword": "COMPDAT",
+        "well": "P1",
+        "i": "7",
+        "j": "1",
+        "k1": "1",
+        "k2": "1",
+        "status": "OPEN",
+        "sourceFile": "ECLIPSE_MULTI_SAT_FAMILY_I_PVT_OIL_GAS.DATA",
+        "lineNumber": 339
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "I1",
+        "i": "9",
+        "j": "1",
+        "k1": "1",
+        "k2": "1",
+        "status": "OPEN",
+        "sourceFile": "ECLIPSE_MULTI_SAT_FAMILY_I_PVT_OIL_GAS.DATA",
+        "lineNumber": 340
+      }
+    ]
+  },
+  "multiPvtContext": {
+    "schemaVersion": "eclipse-multi-pvt-context/1",
+    "sourceFile": "ECLIPSE_MULTI_SAT_FAMILY_I_PVT_OIL_GAS.DATA",
+    "regionCount": 2,
+    "regions": [
+      {
+        "number": 1,
+        "cellCount": 6,
+        "tables": [
+          {
+            "keyword": "PVDO",
+            "keywordLineNumber": 183,
+            "rows": [
+              {
+                "lineNumber": 185,
+                "values": [
+                  "2500",
+                  "1.26",
+                  "0.5"
+                ]
+              },
+              {
+                "lineNumber": 186,
+                "values": [
+                  "3000",
+                  "1.256",
+                  "0.5"
+                ]
+              },
+              {
+                "lineNumber": 187,
+                "values": [
+                  "3500",
+                  "1.252",
+                  "0.5"
+                ]
+              },
+              {
+                "lineNumber": 188,
+                "values": [
+                  "4000",
+                  "1.248",
+                  "0.5"
+                ]
+              },
+              {
+                "lineNumber": 189,
+                "values": [
+                  "4500",
+                  "1.245",
+                  "0.5"
+                ]
+              },
+              {
+                "lineNumber": 190,
+                "values": [
+                  "5000",
+                  "1.243",
+                  "0.5"
+                ]
+              }
+            ]
+          },
+          {
+            "keyword": "PVDG",
+            "keywordLineNumber": 202,
+            "rows": [
+              {
+                "lineNumber": 204,
+                "values": [
+                  "2500",
+                  "0.98",
+                  "0.1550"
+                ]
+              },
+              {
+                "lineNumber": 205,
+                "values": [
+                  "3000",
+                  "0.74",
+                  "0.1650"
+                ]
+              },
+              {
+                "lineNumber": 206,
+                "values": [
+                  "3500",
+                  "0.65",
+                  "0.170"
+                ]
+              },
+              {
+                "lineNumber": 207,
+                "values": [
+                  "4000",
+                  "0.59",
+                  "0.175"
+                ]
+              },
+              {
+                "lineNumber": 208,
+                "values": [
+                  "4500",
+                  "0.54",
+                  "0.180"
+                ]
+              },
+              {
+                "lineNumber": 209,
+                "values": [
+                  "5000",
+                  "0.45",
+                  "0.19"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "number": 2,
+        "cellCount": 7,
+        "tables": [
+          {
+            "keyword": "PVDO",
+            "keywordLineNumber": 183,
+            "rows": [
+              {
+                "lineNumber": 195,
+                "values": [
+                  "2500",
+                  "1.26",
+                  "0.5"
+                ]
+              },
+              {
+                "lineNumber": 196,
+                "values": [
+                  "3000",
+                  "1.256",
+                  "0.5"
+                ]
+              },
+              {
+                "lineNumber": 197,
+                "values": [
+                  "3500",
+                  "1.252",
+                  "0.5"
+                ]
+              },
+              {
+                "lineNumber": 198,
+                "values": [
+                  "4000",
+                  "1.248",
+                  "0.5"
+                ]
+              },
+              {
+                "lineNumber": 199,
+                "values": [
+                  "4500",
+                  "1.245",
+                  "0.5"
+                ]
+              },
+              {
+                "lineNumber": 200,
+                "values": [
+                  "5000",
+                  "1.243",
+                  "0.5"
+                ]
+              }
+            ]
+          },
+          {
+            "keyword": "PVDG",
+            "keywordLineNumber": 202,
+            "rows": [
+              {
+                "lineNumber": 214,
+                "values": [
+                  "2500",
+                  "0.98",
+                  "0.1550"
+                ]
+              },
+              {
+                "lineNumber": 215,
+                "values": [
+                  "3000",
+                  "0.74",
+                  "0.1650"
+                ]
+              },
+              {
+                "lineNumber": 216,
+                "values": [
+                  "3500",
+                  "0.65",
+                  "0.170"
+                ]
+              },
+              {
+                "lineNumber": 217,
+                "values": [
+                  "4000",
+                  "0.59",
+                  "0.175"
+                ]
+              },
+              {
+                "lineNumber": 218,
+                "values": [
+                  "4500",
+                  "0.54",
+                  "0.180"
+                ]
+              },
+              {
+                "lineNumber": 219,
+                "values": [
+                  "5000",
+                  "0.45",
+                  "0.19"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "multiSatRelpermContext": {
+    "schemaVersion": "eclipse-multi-sat-relperm-context/1",
+    "sourceFile": "ECLIPSE_MULTI_SAT_FAMILY_I_PVT_OIL_GAS.DATA",
+    "regionCount": 2,
+    "regions": [
+      {
+        "number": 1,
+        "cellCount": 5,
+        "tables": [
+          {
+            "keyword": "SWOF",
+            "keywordLineNumber": 117,
+            "rows": [
+              {
+                "lineNumber": 118,
+                "values": [
+                  "0.2",
+                  "0",
+                  "0.9",
+                  "6"
+                ]
+              },
+              {
+                "lineNumber": 119,
+                "values": [
+                  "0.25",
+                  "0.005",
+                  "0.8",
+                  "5"
+                ]
+              },
+              {
+                "lineNumber": 120,
+                "values": [
+                  "0.3",
+                  "0.01",
+                  "0.7",
+                  "4"
+                ]
+              },
+              {
+                "lineNumber": 121,
+                "values": [
+                  "0.35",
+                  "0.02",
+                  "0.6",
+                  "3"
+                ]
+              },
+              {
+                "lineNumber": 122,
+                "values": [
+                  "0.4",
+                  "0.03",
+                  "0.5",
+                  "2.4"
+                ]
+              },
+              {
+                "lineNumber": 123,
+                "values": [
+                  "0.45",
+                  "0.04",
+                  "0.4",
+                  "1.9"
+                ]
+              },
+              {
+                "lineNumber": 124,
+                "values": [
+                  "0.5",
+                  "0.055",
+                  "0.32",
+                  "1.4"
+                ]
+              },
+              {
+                "lineNumber": 125,
+                "values": [
+                  "0.55",
+                  "0.08",
+                  "0.25",
+                  "1"
+                ]
+              },
+              {
+                "lineNumber": 126,
+                "values": [
+                  "0.6",
+                  "0.11",
+                  "0.2",
+                  "0.7"
+                ]
+              },
+              {
+                "lineNumber": 127,
+                "values": [
+                  "0.65",
+                  "0.17",
+                  "0.15",
+                  "0.4"
+                ]
+              },
+              {
+                "lineNumber": 128,
+                "values": [
+                  "0.7",
+                  "0.23",
+                  "0.11",
+                  "0.25"
+                ]
+              },
+              {
+                "lineNumber": 129,
+                "values": [
+                  "0.75",
+                  "0.32",
+                  "0.08",
+                  "0.1"
+                ]
+              },
+              {
+                "lineNumber": 130,
+                "values": [
+                  "0.8",
+                  "0.456",
+                  "0.05",
+                  "0.08"
+                ]
+              },
+              {
+                "lineNumber": 131,
+                "values": [
+                  "0.9",
+                  "0.728",
+                  "0.02",
+                  "0.04"
+                ]
+              },
+              {
+                "lineNumber": 132,
+                "values": [
+                  "1",
+                  "1",
+                  "0",
+                  "0"
+                ]
+              }
+            ]
+          },
+          {
+            "keyword": "SGOF",
+            "keywordLineNumber": 152,
+            "rows": [
+              {
+                "lineNumber": 153,
+                "values": [
+                  "0",
+                  "0",
+                  "0.9",
+                  "0"
+                ]
+              },
+              {
+                "lineNumber": 154,
+                "values": [
+                  "0.05",
+                  "0",
+                  "0.72",
+                  "0.09"
+                ]
+              },
+              {
+                "lineNumber": 155,
+                "values": [
+                  "0.1",
+                  "0.022",
+                  "0.575",
+                  "0.2"
+                ]
+              },
+              {
+                "lineNumber": 156,
+                "values": [
+                  "0.15",
+                  "0.06",
+                  "0.434",
+                  "0.38"
+                ]
+              },
+              {
+                "lineNumber": 157,
+                "values": [
+                  "0.2",
+                  "0.1",
+                  "0.33",
+                  "0.57"
+                ]
+              },
+              {
+                "lineNumber": 158,
+                "values": [
+                  "0.25",
+                  "0.14",
+                  "0.225",
+                  "0.83"
+                ]
+              },
+              {
+                "lineNumber": 159,
+                "values": [
+                  "0.3",
+                  "0.188",
+                  "0.14",
+                  "1.08"
+                ]
+              },
+              {
+                "lineNumber": 160,
+                "values": [
+                  "0.35",
+                  "0.24",
+                  "0.08",
+                  "1.37"
+                ]
+              },
+              {
+                "lineNumber": 161,
+                "values": [
+                  "0.4",
+                  "0.3",
+                  "0.04",
+                  "1.69"
+                ]
+              },
+              {
+                "lineNumber": 162,
+                "values": [
+                  "0.45",
+                  "0.364",
+                  "0.03",
+                  "2"
+                ]
+              },
+              {
+                "lineNumber": 163,
+                "values": [
+                  "0.5",
+                  "0.458",
+                  "0.02",
+                  "2.36"
+                ]
+              },
+              {
+                "lineNumber": 164,
+                "values": [
+                  "0.55",
+                  "0.6",
+                  "0.01",
+                  "2.7"
+                ]
+              },
+              {
+                "lineNumber": 165,
+                "values": [
+                  "0.6",
+                  "0.75",
+                  "0",
+                  "3"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "number": 2,
+        "cellCount": 8,
+        "tables": [
+          {
+            "keyword": "SWOF",
+            "keywordLineNumber": 117,
+            "rows": [
+              {
+                "lineNumber": 135,
+                "values": [
+                  "0.2",
+                  "0",
+                  "0.9",
+                  "6"
+                ]
+              },
+              {
+                "lineNumber": 136,
+                "values": [
+                  "0.25",
+                  "0.005",
+                  "0.8",
+                  "5"
+                ]
+              },
+              {
+                "lineNumber": 137,
+                "values": [
+                  "0.3",
+                  "0.01",
+                  "0.7",
+                  "4"
+                ]
+              },
+              {
+                "lineNumber": 138,
+                "values": [
+                  "0.35",
+                  "0.02",
+                  "0.6",
+                  "3"
+                ]
+              },
+              {
+                "lineNumber": 139,
+                "values": [
+                  "0.4",
+                  "0.03",
+                  "0.5",
+                  "2.4"
+                ]
+              },
+              {
+                "lineNumber": 140,
+                "values": [
+                  "0.45",
+                  "0.04",
+                  "0.4",
+                  "1.9"
+                ]
+              },
+              {
+                "lineNumber": 141,
+                "values": [
+                  "0.5",
+                  "0.055",
+                  "0.32",
+                  "1.4"
+                ]
+              },
+              {
+                "lineNumber": 142,
+                "values": [
+                  "0.55",
+                  "0.08",
+                  "0.25",
+                  "1"
+                ]
+              },
+              {
+                "lineNumber": 143,
+                "values": [
+                  "0.6",
+                  "0.11",
+                  "0.2",
+                  "0.7"
+                ]
+              },
+              {
+                "lineNumber": 144,
+                "values": [
+                  "0.65",
+                  "0.17",
+                  "0.15",
+                  "0.4"
+                ]
+              },
+              {
+                "lineNumber": 145,
+                "values": [
+                  "0.7",
+                  "0.23",
+                  "0.11",
+                  "0.25"
+                ]
+              },
+              {
+                "lineNumber": 146,
+                "values": [
+                  "0.75",
+                  "0.32",
+                  "0.08",
+                  "0.1"
+                ]
+              },
+              {
+                "lineNumber": 147,
+                "values": [
+                  "0.8",
+                  "0.456",
+                  "0.05",
+                  "0.08"
+                ]
+              },
+              {
+                "lineNumber": 148,
+                "values": [
+                  "0.9",
+                  "0.728",
+                  "0.02",
+                  "0.04"
+                ]
+              },
+              {
+                "lineNumber": 149,
+                "values": [
+                  "1",
+                  "1",
+                  "0",
+                  "0"
+                ]
+              }
+            ]
+          },
+          {
+            "keyword": "SGOF",
+            "keywordLineNumber": 152,
+            "rows": [
+              {
+                "lineNumber": 168,
+                "values": [
+                  "0",
+                  "0",
+                  "0.9",
+                  "0"
+                ]
+              },
+              {
+                "lineNumber": 169,
+                "values": [
+                  "0.05",
+                  "0",
+                  "0.72",
+                  "0.09"
+                ]
+              },
+              {
+                "lineNumber": 170,
+                "values": [
+                  "0.1",
+                  "0.022",
+                  "0.575",
+                  "0.2"
+                ]
+              },
+              {
+                "lineNumber": 171,
+                "values": [
+                  "0.15",
+                  "0.06",
+                  "0.434",
+                  "0.38"
+                ]
+              },
+              {
+                "lineNumber": 172,
+                "values": [
+                  "0.2",
+                  "0.1",
+                  "0.33",
+                  "0.57"
+                ]
+              },
+              {
+                "lineNumber": 173,
+                "values": [
+                  "0.25",
+                  "0.14",
+                  "0.225",
+                  "0.83"
+                ]
+              },
+              {
+                "lineNumber": 174,
+                "values": [
+                  "0.3",
+                  "0.188",
+                  "0.14",
+                  "1.08"
+                ]
+              },
+              {
+                "lineNumber": 175,
+                "values": [
+                  "0.35",
+                  "0.24",
+                  "0.08",
+                  "1.37"
+                ]
+              },
+              {
+                "lineNumber": 176,
+                "values": [
+                  "0.4",
+                  "0.3",
+                  "0.04",
+                  "1.69"
+                ]
+              },
+              {
+                "lineNumber": 177,
+                "values": [
+                  "0.45",
+                  "0.364",
+                  "0.03",
+                  "2"
+                ]
+              },
+              {
+                "lineNumber": 178,
+                "values": [
+                  "0.5",
+                  "0.458",
+                  "0.02",
+                  "2.36"
+                ]
+              },
+              {
+                "lineNumber": 179,
+                "values": [
+                  "0.55",
+                  "0.6",
+                  "0.01",
+                  "2.7"
+                ]
+              },
+              {
+                "lineNumber": 180,
+                "values": [
+                  "0.6",
+                  "0.75",
+                  "0",
+                  "3"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

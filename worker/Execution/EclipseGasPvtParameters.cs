@@ -3,15 +3,23 @@ using System.Text.RegularExpressions;
 using Grdp.SoftwareIntegration.Worker.Contracts;
 using Grdp.SoftwareIntegration.Worker.Inspection;
 namespace Grdp.SoftwareIntegration.Worker.Execution;
-internal sealed record EclipseGasPvtParameters(long BaselineRunId,string SourceFile,string SourceSha256,int KeywordLineNumber,string Unit,double Multiplier,EclipseGasPvtRow[] Rows)
+internal sealed record EclipseGasPvtParameters(long BaselineRunId,string SourceFile,string SourceSha256,int KeywordLineNumber,string Unit,double Multiplier,EclipseGasPvtRow[] Rows,string Field="VISCOSITY")
 {
     internal const string Schema="eclipse-pvdg-parameters/1";
+    internal const string FieldSchema="eclipse-pvdg-parameters/2";
+    internal int Column=>Field=="FORMATION_VOLUME_FACTOR"?1:2;
+    internal double Maximum=>Field=="FORMATION_VOLUME_FACTOR"?100000:1000;
+    internal static string VolumeUnit(string? system)=>system switch {"FIELD"=>"rb/Mscf","LAB"=>"rcc/scc","METRIC" or "PVT-M"=>"rm3/sm3",_=>""};
     internal static bool TryParse(JsonElement value,out EclipseGasPvtParameters? result)
     {
         result=null;string[] names=["schemaVersion","baselineRunId","sourceFile","sourceSha256","keywordLineNumber","unit","multiplier","rows"];
+        if(value.ValueKind==JsonValueKind.Object&&value.TryGetProperty("schemaVersion",out var schema)&&schema.ValueKind==JsonValueKind.String&&schema.GetString()==FieldSchema)names=[..names,"field"];
         if(value.ValueKind!=JsonValueKind.Object||value.EnumerateObject().Count()!=names.Length||!value.EnumerateObject().Select(p=>p.Name).ToHashSet(StringComparer.Ordinal).SetEquals(names))return false;
-        string Text(string key)=>value.GetProperty(key).ValueKind==JsonValueKind.String?value.GetProperty(key).GetString()!:"";
-        if(Text("schemaVersion")!=Schema||Text("unit")!="cP"||!Regex.IsMatch(Text("sourceFile"),@"^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\.DATA$",RegexOptions.IgnoreCase|RegexOptions.CultureInvariant)||!Regex.IsMatch(Text("sourceSha256"),"^[a-f0-9]{64}$",RegexOptions.CultureInvariant)
+        string Text(string key)=>value.TryGetProperty(key,out var property)&&property.ValueKind==JsonValueKind.String?property.GetString()!:"";
+        var field=Text("schemaVersion")==Schema?"VISCOSITY":Text("field");
+        if(Text("schemaVersion") is not (Schema or FieldSchema)||field is not ("VISCOSITY" or "FORMATION_VOLUME_FACTOR")
+            ||(field=="VISCOSITY"?Text("unit")!="cP":Text("unit") is not ("rb/Mscf" or "rm3/sm3" or "rcc/scc"))
+            ||!Regex.IsMatch(Text("sourceFile"),@"^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\.DATA$",RegexOptions.IgnoreCase|RegexOptions.CultureInvariant)||!Regex.IsMatch(Text("sourceSha256"),"^[a-f0-9]{64}$",RegexOptions.CultureInvariant)
             ||value.GetProperty("baselineRunId").ValueKind!=JsonValueKind.Number||!value.GetProperty("baselineRunId").TryGetInt64(out var baseline)||baseline<=0
             ||value.GetProperty("keywordLineNumber").ValueKind!=JsonValueKind.Number||!value.GetProperty("keywordLineNumber").TryGetInt32(out var keywordLine)||keywordLine<=0||keywordLine>2_000_000
             ||value.GetProperty("multiplier").ValueKind!=JsonValueKind.Number||!value.GetProperty("multiplier").TryGetDouble(out var multiplier)||!double.IsFinite(multiplier)||multiplier<.000001||multiplier>100||multiplier==1)return false;
@@ -24,12 +32,14 @@ internal sealed record EclipseGasPvtParameters(long BaselineRunId,string SourceF
             rows.Add(new(number,values.EnumerateArray().Select(v=>v.GetString()!).ToArray()));
         }
         if(!EclipseGasPvtReader.ValidRows(rows))return false;
-        foreach(var row in rows){EclipsePvtwReader.Number(row.Values[2],out var mu);if(!double.IsFinite(mu*multiplier)||mu*multiplier<=0||mu*multiplier>1000)return false;}
-        result=new(baseline,Text("sourceFile"),Text("sourceSha256"),keywordLine,Text("unit"),multiplier,rows.ToArray());return true;
+        int column=field=="FORMATION_VOLUME_FACTOR"?1:2;double maximum=column==1?100000:1000,priorTarget=double.PositiveInfinity;
+        foreach(var row in rows){EclipsePvtwReader.Number(row.Values[column],out var original);var target=original*multiplier;if(!double.IsFinite(target)||target<=0||target>maximum||column==1&&target>=priorTarget)return false;priorTarget=target;}
+        result=new(baseline,Text("sourceFile"),Text("sourceSha256"),keywordLine,Text("unit"),multiplier,rows.ToArray(),field);return true;
     }
     internal bool MatchesInspection(EclipseDataInspection inspection) {
         var c=inspection.GasPvtContext;
-        return c is not null&&c.SchemaVersion=="eclipse-gas-pvt-context/1"&&inspection.Phases.Contains("GAS")&&inspection.UnitSystem is "METRIC" or "FIELD" or "LAB" or "PVT-M"
+        return (Field is "VISCOSITY" or "FORMATION_VOLUME_FACTOR")&&Unit==(Field=="VISCOSITY"?"cP":VolumeUnit(inspection.UnitSystem))
+            &&c is not null&&c.SchemaVersion=="eclipse-gas-pvt-context/1"&&inspection.Phases.Contains("GAS")&&inspection.UnitSystem is "METRIC" or "FIELD" or "LAB" or "PVT-M"
             &&c.SourceFile==SourceFile&&c.KeywordLineNumber==KeywordLineNumber&&c.Rows.Count==Rows.Length&&c.Rows.Zip(Rows).All(pair=>pair.First.LineNumber==pair.Second.LineNumber&&pair.First.Values.SequenceEqual(pair.Second.Values));
     }
 }

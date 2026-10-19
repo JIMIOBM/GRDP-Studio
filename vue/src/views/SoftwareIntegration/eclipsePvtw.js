@@ -12,6 +12,7 @@ export function pvtwUnit(system,field){
 }
 const scalar=(field,unit,n)=>typeof n==='number'&&Number.isFinite(n)&&(field==='REFERENCE_PRESSURE'?n>=0&&n*(unit==='psia'?.0689475729:unit==='atma'?1.01325:1)<=20000
   :field==='FORMATION_VOLUME_FACTOR'?n>0&&n<=10:field==='VISCOSITY'?n>0&&n<=1000:['COMPRESSIBILITY','VISCOSIBILITY'].includes(field)&&n>=0&&n*(unit==='1/psi'?14.5037738:unit==='1/atm'?1/1.01325:1)<=.001)
+export const validPvtwScalar=scalar
 export const validPvtw=p=>!!p&&Object.keys(p).length===names.length&&names.every(k=>Object.hasOwn(p,k))&&['eclipse-pvtw-parameters/1','eclipse-pvtw-parameters/2'].includes(p.schemaVersion)
   &&(p.schemaVersion!=='eclipse-pvtw-parameters/1'||p.field==='VISCOSITY')&&pvtwIndex(p.field)>=0
   &&Number.isSafeInteger(p.baselineRunId)&&p.baselineRunId>0&&Number.isSafeInteger(p.lineNumber)&&p.lineNumber>0&&p.lineNumber<=2e6

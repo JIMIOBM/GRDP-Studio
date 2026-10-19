@@ -525,7 +525,7 @@ public class SoftwareIntegrationRunDispatcher {
                     expectedCaseName = runParameters.path("forecastDataFile").asText();
                 }
                 EclipseSummaryResultValidator.ValidatedResult validated = "eclipse_300".equals(version.getModelKind())
-                        ? ("eclipse-data-inspection/15".equals(inspection.path("schemaVersion").asText())
+                        ? ("THERMAL".equals(inspection.path("simulation").path("modelType").asText())
                             ? eclipseResultValidator.validateThermal(expectedCaseName, snapshot.result(), inspection)
                             : eclipseResultValidator.validateCompositional(expectedCaseName, snapshot.result(), inspection))
                         : eclipseResultValidator.validate(expectedCaseName, snapshot.result());
@@ -583,7 +583,7 @@ public class SoftwareIntegrationRunDispatcher {
                 return;
             }
             String schema = switch (run.getRunType()) {
-                case "eclipse" -> "eclipse-summary-result/1";
+                case "eclipse" -> expectedEclipseResultSchema(run);
                 case "network" -> "pipesim-network-result/1";
                 case "system-analysis" -> "pipesim-system-analysis-result/1";
                 case "network-optimizer" -> "pipesim-network-optimizer-result/1";
@@ -611,6 +611,13 @@ public class SoftwareIntegrationRunDispatcher {
         }
     }
 
+    private String expectedEclipseResultSchema(SoftwareIntegrationRunEntity run) {
+        var version = versionMapper.selectById(run.getModelVersionId());
+        var inspection = version == null ? null : EclipseDataInspectionValidator.parsePersisted(version.getInspectionJson());
+        if (version != null && "eclipse_300".equals(version.getModelKind()) && inspection != null)
+            return "THERMAL".equals(inspection.path("simulation").path("modelType").asText()) ? "eclipse-summary-result/3" : "eclipse-summary-result/2";
+        return "eclipse-summary-result/1";
+    }
     private static void requireDeclaredResultArtifacts(JsonNode result, PublishedArtifacts published) {
         for (JsonNode reference : List.of(result.path("application"), result.path("pwiArtifact"))) {
             JsonNode name = reference.path("artifactName");

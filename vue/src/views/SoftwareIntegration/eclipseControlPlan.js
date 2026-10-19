@@ -1,3 +1,4 @@
+import { validPackageControlPlan, packageControlPlanRecords, packageControlPlanMatches, buildPackageControlPlan } from './eclipsePackageControlPlan.js'
 const fields=['well','sourceFile','lineNumber','date','timeDays','unit','originalOilRate','targetOilRate']
 const recordFields=['well','sourceFile','lineNumber','date','timeDays','unit','originalOilRate','bhpLimit']
 const shape=(o,keys)=>o && Object.keys(o).length===keys.length && keys.every(k=>Object.hasOwn(o,k))
@@ -11,6 +12,7 @@ const day=s=>{
 }
 export const controlPlanKey=c=>`${c.sourceFile}:${c.lineNumber}:${c.well}`
 export function validControlPlan(p) {
+ if(p?.schemaVersion==='eclipse-control-plan-parameters/2')return validPackageControlPlan(p)
  if(!shape(p,['schemaVersion','baselineRunId','edits']) || p.schemaVersion!=='eclipse-control-plan-parameters/1' || !Number.isSafeInteger(p.baselineRunId) || p.baselineRunId<=0 || !Array.isArray(p.edits) || !p.edits.length || p.edits.length>24)return false
  let previous=0,file=null;const seen=new Set()
  for(const e of p.edits){
@@ -30,6 +32,7 @@ function expanded(values) {
  return result
 }
 export function controlPlanRecords(i) {
+ if(i && Object.hasOwn(i,'packageProductionControlPlanContext'))return packageControlPlanRecords(i)
  if(i?.schemaVersion!=='eclipse-data-inspection/13' || !['FIELD','METRIC'].includes(i.unitSystem) || !source(i.caseName) || i.packageFiles?.length!==1 || i.packageFiles[0].relativePath!==i.caseName
   || !shape(i.productionControlPlan,['startDate','endTimeDays','records']) || !Array.isArray(i.scheduleTimeline) || i.scheduleTimeline.length<2)return []
  const plan=i.productionControlPlan,start=day(plan.startDate),records=plan.records,metadata=i.scheduleMetadata,unit=i.unitSystem==='FIELD'?'STB/day':'sm3/day'
@@ -71,10 +74,11 @@ export function controlPlanPeriods(i) {
  const records=controlPlanRecords(i)
  return records.map(c=>{
   const next=records.find(r=>r.well===c.well && r.timeDays>c.timeDays)
-  return {...c,nextTimeDays:next?.timeDays??i.productionControlPlan.endTimeDays,nextDate:next?.date??null}
+  return {...c,nextTimeDays:next?.timeDays??(i.packageProductionControlPlanContext?.endTimeDays??i.productionControlPlan?.endTimeDays),nextDate:next?.date??null}
  })
 }
 export function buildControlPlan({inspection,baselineRunId,edits}) {
+ if(inspection && Object.hasOwn(inspection,'packageProductionControlPlanContext'))return buildPackageControlPlan({inspection,baselineRunId,edits})
  const records=controlPlanRecords(inspection)
  if(!records.length || !Array.isArray(edits) || edits.some(e=>!positive(e.targetOilRate)))return null
  const selected=edits.filter(e=>e.targetOilRate!==e.originalOilRate)
@@ -82,6 +86,7 @@ export function buildControlPlan({inspection,baselineRunId,edits}) {
  return matches(p,inspection)?p:null
 }
 function matches(p,i) {
+ if(p?.schemaVersion==='eclipse-control-plan-parameters/2')return packageControlPlanMatches(p,i)
  const records=controlPlanRecords(i)
  return validControlPlan(p) && records.length>0 && p.edits.every(e=>records.filter(c=>fields.filter(k=>k!=='targetOilRate').every(k=>c[k]===e[k])).length===1)
 }
@@ -101,7 +106,7 @@ export function controlPlanResponse(summary,baseline,p,inspection) {
   const curves=wells.map(well=>({well,rate:curve(s,'WOPR',well,flowUnit),pressure:curve(s,'WBHP',well,pressureUnit)})),maps=curves.flatMap(c=>[c.rate,c.pressure])
   if(maps.some(m=>!m))return null
   const times=[...maps[0].keys()].filter(t=>t>0).sort((a,b)=>a-b)
-  if(times.at(-1)!==inspection.productionControlPlan.endTimeDays || maps.some(m=>[...m.keys()].filter(t=>t>0).length!==times.length || times.some(t=>!m.has(t))))return null
+  if(times.at(-1)!==(inspection.packageProductionControlPlanContext?.endTimeDays??inspection.productionControlPlan?.endTimeDays) || maps.some(m=>[...m.keys()].filter(t=>t>0).length!==times.length || times.some(t=>!m.has(t))))return null
   return curves.flatMap(c=>times.map(timeDays=>{
    const record=records.filter(r=>r.well===c.well && r.timeDays<timeDays).at(-1)
    if(!record || timeDays>record.nextTimeDays)return null

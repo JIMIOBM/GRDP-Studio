@@ -179,6 +179,24 @@ public sealed class ArtifactStore
         return await CopyEclipseOutputAsync(outputDirectory, sourcePath, cancellationToken);
     }
 
+    internal async Task<ArtifactDescriptor> CopyEclipseCompositionalSaveOutputAsync(
+        string outputDirectory, string sourcePath, EclipseCompositionalSaveFile expected, CancellationToken cancellationToken = default)
+    {
+        var name = Path.GetFileName(sourcePath);
+        if (!Regex.IsMatch(name, @"^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\.(?:V|X)[0-9]{4}$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
+            || name != expected.Name || expected.ArtifactName != "eclipse-output-" + name || expected.SizeBytes is < 24 or > 128 * 1024 * 1024
+            || !Regex.IsMatch(expected.Sha256, "^[a-f0-9]{64}$", RegexOptions.CultureInvariant))
+            throw new InvalidDataException("Only a catalog-bound native SAVE or identity report may be copied.");
+        await using var guard = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        if (guard.Length != expected.SizeBytes || Convert.ToHexStringLower(await SHA256.HashDataAsync(guard, cancellationToken)) != expected.Sha256)
+            throw new InvalidDataException("Historical SAVE bytes changed after catalog validation.");
+        var result = await CopyEclipseOutputAsync(outputDirectory, sourcePath, cancellationToken);
+        if (result.Size != expected.SizeBytes || result.Sha256 != expected.Sha256)
+            throw new InvalidDataException("Published SAVE differs from the verified historical file.");
+        return result;
+    }
+
     public async Task<ArtifactDescriptor> CopyEclipseFormattedSummaryOutputAsync(
         string outputDirectory, string sourcePath, CancellationToken cancellationToken = default)
     {
@@ -239,17 +257,27 @@ public sealed class ArtifactStore
     public Task<ArtifactDescriptor> WriteEclipseThermalPackageAsync(string outputDirectory, EclipseDeckPackage package, CancellationToken cancellationToken = default)
         => WriteEclipseInputPackageAsync(outputDirectory, package, "eclipse-thermal-input-package.zip", cancellationToken);
 
+    internal async Task<ArtifactDescriptor> WriteEclipseCompositionalForecastPackageAsync(
+        string outputDirectory, EclipseDeckPackage package, CancellationToken cancellationToken = default)
+    {
+        _ = EclipseCompositionalSaveState.ReadPortable(package)
+            ?? throw new InvalidDataException("Forecast export requires the complete bound historical source and native SAVE state.");
+        var complete = package with { Files = Directory.EnumerateFiles(package.Root, "*", SearchOption.AllDirectories)
+            .OrderBy(p => Path.GetRelativePath(package.Root, p), StringComparer.OrdinalIgnoreCase).ToArray() };
+        return await WriteEclipseInputPackageAsync(outputDirectory, complete, "eclipse-forecast-applied-package.zip", cancellationToken);
+    }
+
     public async Task<ArtifactDescriptor> WriteEclipseForecastPackageAsync(
         string outputDirectory, EclipseDeckPackage package, string restartPath, CancellationToken cancellationToken = default)
     {
-        var catalog = EclipseFormattedRestartReader.Read(restartPath);
+        var catalog = EclipseRestartReader.Read(restartPath);
         if (catalog.Reports.Count != 1 || catalog.ArtifactSizeBytes > 64L * 1024 * 1024)
             throw new InvalidDataException("Portable forecast requires exactly one complete bounded restart report.");
-        var source = EclipseForecastSourceReader.Read(package, true);
-        if (source.StartDate != catalog.StartDate || source.RestartCase != catalog.CaseName || source.RestartReport != catalog.Reports[0].ReportNumber
+        var source = EclipseForecastSourceReader.Read(package, true, EclipseRestartReader.IsBinary(catalog));
+        if ((source.RestartFormat == "BINARY") != EclipseRestartReader.IsBinary(catalog) || source.StartDate != catalog.StartDate || source.RestartCase != catalog.CaseName || source.RestartReport != catalog.Reports[0].ReportNumber
             || source.FutureDates.Any(date => string.CompareOrdinal(date, catalog.Reports[0].Date) <= 0))
             throw new InvalidDataException("Portable restart must match the actual forecast declaration and future dates.");
-        var binding = new EclipsePortableRestartBinding("eclipse-portable-restart/1", source.PhysicsSha256, catalog);
+        var binding = new EclipsePortableRestartBinding(EclipseRestartReader.IsBinary(catalog) ? "eclipse-portable-restart/2" : "eclipse-portable-restart/1", source.PhysicsSha256, catalog);
         await WriteJsonAsync(package.Root, EclipsePortableRestartBinding.Filename, binding, cancellationToken);
         var bindingPath = Path.Combine(package.Root, EclipsePortableRestartBinding.Filename);
         var portable = package with { Files = package.Files.Concat(new[] { restartPath, bindingPath }).ToArray() };

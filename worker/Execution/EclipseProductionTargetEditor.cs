@@ -10,6 +10,7 @@ internal static class EclipseProductionTargetEditor
     private sealed record Token(string Value, int Start, int Length);
     internal static async Task<string> ApplyAsync(EclipseDeckPackage package, EclipseProductionTargetParameters parameters, CancellationToken cancellationToken)
     {
+        if (parameters.SourceSha256 is not null) return await ApplyPackageAsync(package, parameters, cancellationToken);
         // INCLUDE ordering and inherited controls require a separate contract; never guess them here.
         if (package.Files.Count != 1 || !Path.GetFileName(package.MainFile).Equals(parameters.SourceFile, StringComparison.Ordinal)) Fail();
         var bytes = await File.ReadAllBytesAsync(package.MainFile, cancellationToken);
@@ -62,6 +63,27 @@ internal static class EclipseProductionTargetEditor
         cancellationToken.ThrowIfCancellationRequested();
         await File.WriteAllBytesAsync(package.MainFile, encoding.GetBytes(updated), cancellationToken);
         return $"Applied initial WCONPROD {parameters.Well} OPEN ORAT {parameters.OriginalOilRate:G17}->{replacement} STB/day at {parameters.SourceFile}:{parameters.LineNumber}; other constraints preserved.";
+    }
+    private static async Task<string> ApplyPackageAsync(EclipseDeckPackage package, EclipseProductionTargetParameters p, CancellationToken cancellationToken)
+    {
+        var snapshot = EclipsePackageProductionTargetReader.Read(package);
+        var matches = snapshot?.Targets.Where(t => t.Well == p.Well && t.SourceFile == p.SourceFile
+            && t.LineNumber == p.LineNumber && t.OriginalOilRate == p.OriginalOilRate && t.SourceSha256 == p.SourceSha256).ToArray();
+        if (matches is not { Length: 1 } || !double.IsFinite(p.TargetOilRate) || p.TargetOilRate <= 0
+            || p.TargetOilRate > 100_000_000 || p.TargetOilRate == p.OriginalOilRate)
+            throw new EclipseDeckPackageException("ECLIPSE_PACKAGE_PRODUCTION_TARGET_MISMATCH", "The initial INCLUDE target, source hash or execution order no longer matches the inspected package.");
+        var target = matches[0];
+        var path = Path.Combine(package.Root, target.SourceFile.Replace('/', Path.DirectorySeparatorChar));
+        var bytes = await File.ReadAllBytesAsync(path, cancellationToken);
+        if (Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes)) != p.SourceSha256)
+            throw new EclipseDeckPackageException("ECLIPSE_PACKAGE_PRODUCTION_TARGET_MISMATCH", "The selected INCLUDE file changed before editing.");
+        var encoding = new UTF8Encoding(false, true);
+        var text = encoding.GetString(bytes);
+        var replacement = p.TargetOilRate.ToString("G17", CultureInfo.InvariantCulture);
+        var updated = text[..target.ValueStart] + replacement + text[(target.ValueStart + target.ValueLength)..];
+        cancellationToken.ThrowIfCancellationRequested();
+        await File.WriteAllBytesAsync(path, encoding.GetBytes(updated), cancellationToken);
+        return $"Applied initial WCONPROD {p.Well} OPEN ORAT {p.OriginalOilRate:G17}->{replacement} STB/day at {p.SourceFile}:{p.LineNumber}; INCLUDE files and other controls preserved.";
     }
     private static MatchCollection Keyword(string text, string alternatives) => Regex.Matches(text,
         "(?im)^[ \\t]*(" + alternatives + ")[ \\t]*(?:(?:--|=)[^\\r\\n]*)?\\r?$",

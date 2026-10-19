@@ -205,7 +205,7 @@ public class SoftwareIntegrationValidationDispatcher {
                 if (eclipse) {
                     try {
                         inspection = EclipseDataInspectionValidator.validateAndSerialize(payload.get("inspection"), objectMapper);
-                        if ("eclipse_300".equals(modelKind) != Set.of("eclipse-data-inspection/14", "eclipse-data-inspection/15").contains(payload.path("inspection").path("schemaVersion").asText()))
+                        if ("eclipse_300".equals(modelKind) != Set.of("eclipse-data-inspection/14", "eclipse-data-inspection/15", "eclipse-data-inspection/16", "eclipse-data-inspection/17", "eclipse-data-inspection/18", "eclipse-data-inspection/19", "eclipse-data-inspection/20", "eclipse-data-inspection/21", "eclipse-data-inspection/22", "eclipse-data-inspection/23").contains(payload.path("inspection").path("schemaVersion").asText()))
                             throw new IllegalArgumentException("Eclipse model kind does not match inspection schema");
                     } catch (IllegalArgumentException exception) {
                         update(version, "INVALID", "INSPECTION_RESPONSE_INVALID: Worker inspection metadata is invalid", null);

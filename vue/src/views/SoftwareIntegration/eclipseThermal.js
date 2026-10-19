@@ -1,4 +1,6 @@
 import { compositionalObject, compositionalCsv } from './eclipseCompositional.js'
+import { validThermalRockContext } from './eclipseThermalRock.js'
+import { validThermalInjectionContext } from './eclipseThermalInjection.js'
 
 const fields = (value, names) => value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === names.length && names.every(n => Object.hasOwn(value, n))
 const integer = (n, low, high = Number.MAX_SAFE_INTEGER) => Number.isSafeInteger(n) && n >= low && n <= high
@@ -7,8 +9,8 @@ export const validThermalMetadata = value => fields(value, ['solver', 'modelType
   value.solver === 300 && value.modelType === 'THERMAL' && value.fluidModel === 'LIVEOIL' && value.summaryProgramIdentifier === 500 &&
   integer(value.componentCount, 1, 100) && Array.isArray(value.componentNames) && value.componentNames.length === value.componentCount &&
   new Set(value.componentNames).size === value.componentCount && value.componentNames.every(n => safe(n) && n.length <= 8 && /^[\x20-\x7e]+$/.test(n))
-export const validThermalInspection = value => fields(value, ['schemaVersion', 'caseName', 'sections', 'unitSystem', 'phases', 'dimensions', 'wellNames', 'scheduleTimeline', 'packageFiles', 'simulation']) &&
-  value.schemaVersion === 'eclipse-data-inspection/15' && validThermalMetadata(value.simulation) && safe(value.caseName) && /\.DATA$/i.test(value.caseName) &&
+export const validThermalInspection = value => fields(value, ['schemaVersion', 'caseName', 'sections', 'unitSystem', 'phases', 'dimensions', 'wellNames', 'scheduleTimeline', 'packageFiles', 'simulation', ...(Object.hasOwn(value || {}, 'thermalInjectionContext') ? ['thermalInjectionContext'] : []), ...(value?.schemaVersion === 'eclipse-data-inspection/23' ? ['thermalRockContext'] : [])]) && (!Object.hasOwn(value, 'thermalInjectionContext') || validThermalInjectionContext(value.thermalInjectionContext, value)) &&
+  ['eclipse-data-inspection/15', 'eclipse-data-inspection/23'].includes(value.schemaVersion) && (value.schemaVersion !== 'eclipse-data-inspection/23' || validThermalRockContext(value.thermalRockContext, value)) && validThermalMetadata(value.simulation) && safe(value.caseName) && /\.DATA$/i.test(value.caseName) &&
   ['FIELD', 'METRIC'].includes(value.unitSystem) && fields(value.dimensions, ['nx', 'ny', 'nz']) && ['nx', 'ny', 'nz'].every(k => integer(value.dimensions[k], 1, 1000000)) &&
   Array.isArray(value.phases) && value.phases.join(',') === 'OIL,WATER,GAS' && Array.isArray(value.sections) && Array.isArray(value.wellNames) && value.wellNames.every(safe) &&
   Array.isArray(value.scheduleTimeline) && Array.isArray(value.packageFiles) && value.packageFiles.length > 0 && value.packageFiles.length <= 4096 &&

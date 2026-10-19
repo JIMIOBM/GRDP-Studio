@@ -1,0 +1,133 @@
+{
+  "schemaVersion": "eclipse-data-inspection/14",
+  "caseName": "SPE3_GASCOND.DATA",
+  "sections": [
+    "RUNSPEC",
+    "GRID",
+    "PROPS",
+    "SOLUTION",
+    "SUMMARY",
+    "SCHEDULE"
+  ],
+  "unitSystem": "FIELD",
+  "phases": [
+    "WATER"
+  ],
+  "dimensions": {
+    "nx": 9,
+    "ny": 9,
+    "nz": 4
+  },
+  "wellNames": [
+    "I",
+    "P"
+  ],
+  "scheduleTimeline": [
+    {
+      "kind": "TSTEP",
+      "steps": [
+        "328.5",
+        "328.5",
+        "328.5",
+        "328.5",
+        "328.5",
+        "328.5",
+        "328.5",
+        "328.5",
+        "328.5",
+        "328.5"
+      ],
+      "sourceFile": "SPE3_GASCOND.DATA",
+      "lineNumber": 463
+    },
+    {
+      "kind": "TSTEP",
+      "steps": [
+        "36.5",
+        "36.5",
+        "36.5",
+        "36.5",
+        "36.5",
+        "36.5",
+        "36.5",
+        "36.5",
+        "36.5",
+        "36.5"
+      ],
+      "sourceFile": "SPE3_GASCOND.DATA",
+      "lineNumber": 476
+    },
+    {
+      "kind": "TSTEP",
+      "steps": [
+        "182.5",
+        "182.5",
+        "182.5",
+        "182.5",
+        "182.5",
+        "182.5",
+        "182.5",
+        "182.5",
+        "182.5",
+        "182.5"
+      ],
+      "sourceFile": "SPE3_GASCOND.DATA",
+      "lineNumber": 486
+    }
+  ],
+  "packageFiles": [
+    {
+      "relativePath": "SPE3_GASCOND.DATA",
+      "sizeBytes": 8773,
+      "sha256": "30f36c71726bae3e1c3da3820eefa60212f0628a5c4c1a2163f42c51d75d7feb"
+    }
+  ],
+  "simulation": {
+    "solver": 300,
+    "modelType": "COMPOSITIONAL",
+    "componentCount": 9,
+    "componentNames": [
+      "CO2",
+      "N2",
+      "C1",
+      "C2",
+      "C3",
+      "C4-6",
+      "C7\u002B1",
+      "C7\u002B2",
+      "C7\u002B3"
+    ],
+    "equationOfState": "PR"
+  },
+  "compositionalProductionContext": {
+    "schemaVersion": "eclipse-compositional-production-context/1",
+    "sourceFile": "SPE3_GASCOND.DATA",
+    "sourceSha256": "30f36c71726bae3e1c3da3820eefa60212f0628a5c4c1a2163f42c51d75d7feb",
+    "sourceSizeBytes": 8773,
+    "solver": 300,
+    "componentCount": 9,
+    "componentNames": [
+      "CO2",
+      "N2",
+      "C1",
+      "C2",
+      "C3",
+      "C4-6",
+      "C7\u002B1",
+      "C7\u002B2",
+      "C7\u002B3"
+    ],
+    "equationOfState": "PR",
+    "records": [
+      {
+        "well": "P",
+        "lineNumber": 430,
+        "controlMode": "GRAT",
+        "unit": "Mscf/day",
+        "originalGasRate": 6200,
+        "bhpLimit": 500,
+        "bhpLineNumber": 433
+      }
+    ]
+  }
+}

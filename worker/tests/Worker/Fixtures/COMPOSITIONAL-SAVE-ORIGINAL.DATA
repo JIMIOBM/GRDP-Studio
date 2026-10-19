@@ -1,0 +1,91 @@
+LOAD
+'HISTORY' 10 /
+SUMMARY    =============================================================
+
+ALL
+
+RUNSUM
+
+--Field oil production rate and total, GOR and field pressure
+
+FOPR
+FOPT
+FGOR
+FPR
+WXMF
+P 1 /
+/
+WXMF
+P 2 /
+/
+WXMF
+P 3 /
+/
+WXMF
+P 4 /
+/
+
+
+--Producer block data
+
+BVOIL
+7 7 4 /
+/
+BSOIL
+7 7 4 /
+/
+BSWAT
+7 7 4 /
+/
+BSGAS
+7 7 4 /
+/
+BPRES
+1 1 1 /
+/
+BXMF
+1 1 1 6 /
+/
+BYMF
+1 1 1 6 /
+/
+
+BSSOLID
+7 7 1 /
+/
+BPRES
+7 7 1 /
+/
+
+MSUMLINS
+
+MSUMNEWT
+
+--Schedule section------------------------------------------------------
+
+
+SCHEDULE
+
+
+--Change separator conditions
+
+SEPCOND
+SEP FIELD 1 80 315 /
+/
+
+--Time steps to 10 years : ten day step after separator modification
+
+TSTEP
+10*36.5 /
+
+--2000a WELLSHUT is for back-compatibility, prefered keyword is WELOPEN
+--WELLSHUT
+--I /
+WELOPEN
+I SHUT/
+/
+
+TSTEP
+10*182.5 /
+
+END

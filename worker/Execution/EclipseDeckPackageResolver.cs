@@ -23,12 +23,12 @@ public sealed class EclipseDeckPackageResolver
         var main = Path.GetFullPath(mainFile);
         EnsureInside(root, main, "ECLIPSE_MAIN_OUTSIDE_PACKAGE", "The ECLIPSE main DATA file is outside its package.");
         var files = new List<string>();
-        Visit(main, root, files, new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+        Visit(main, root, Path.GetDirectoryName(main)!, files, new HashSet<string>(StringComparer.OrdinalIgnoreCase),
             new HashSet<string>(StringComparer.OrdinalIgnoreCase), 0);
         return new EclipseDeckPackage(main, root, files);
     }
 
-    private static void Visit(string file, string root, List<string> files, HashSet<string> visited,
+    private static void Visit(string file, string root, string workingDirectory, List<string> files, HashSet<string> visited,
         HashSet<string> active, int depth)
     {
         var full = Path.GetFullPath(file);
@@ -46,7 +46,7 @@ public sealed class EclipseDeckPackageResolver
             foreach (var include in EclipseIncludeParser.Parse(text))
             {
                 if (depth >= MaxDepth) throw new EclipseDeckPackageException("ECLIPSE_INCLUDE_DEPTH", "The ECLIPSE INCLUDE graph is too deep.");
-                Visit(ResolveInclude(full, include), root, files, visited, active, depth + 1);
+                Visit(ResolveInclude(full, include, workingDirectory), root, workingDirectory, files, visited, active, depth + 1);
             }
         }
         active.Remove(full);
@@ -64,13 +64,14 @@ public sealed class EclipseDeckPackageResolver
         catch (IOException) { throw new EclipseDeckPackageException("ECLIPSE_INCLUDE_READ_FAILED", "An ECLIPSE deck file could not be read."); }
     }
 
-    public static string ResolveInclude(string includingFile, string include)
+    public static string ResolveInclude(string includingFile, string include, string? workingDirectory = null)
     {
         var normalized = include.Trim().Replace('\\', '/');
         if (normalized.Length == 0 || normalized.Contains('\0') || normalized.Contains(':') ||
             Path.IsPathRooted(normalized) || normalized.StartsWith("//", StringComparison.Ordinal))
             throw new EclipseDeckPackageException("ECLIPSE_INCLUDE_PATH_INVALID", "ECLIPSE INCLUDE paths must be relative package paths.");
-        try { return Path.GetFullPath(Path.Combine(Path.GetDirectoryName(includingFile)!, normalized)); }
+        // All native INCLUDE paths use the main DATA directory, including nested references.
+        try { return Path.GetFullPath(Path.Combine(workingDirectory ?? Path.GetDirectoryName(includingFile)!, normalized)); }
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
         { throw new EclipseDeckPackageException("ECLIPSE_INCLUDE_PATH_INVALID", "An ECLIPSE INCLUDE path is invalid."); }
     }

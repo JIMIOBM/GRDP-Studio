@@ -39,4 +39,19 @@ public sealed class EclipseOilPvtTests
             var rows=p.Rows.ToArray();rows[0]=rows[0] with{LineNumber=183};Assert.False((p with{Rows=rows}).MatchesInspection(inspection));
         }finally{Directory.Delete(root,true);}
     }
+    [Fact] public async Task VolumeFactorChangesOnlySixBoTokensAndRetainsViscosityPressureAndUnits()
+    {
+        var root=Path.Combine(Path.GetTempPath(),"grdp-pvdo-volume",Guid.NewGuid().ToString("N"));Directory.CreateDirectory(root);
+        try {
+            var path=Path.Combine(root,"CASE.DATA");var source=Encoding.UTF8.GetBytes(Source);var sha=Convert.ToHexStringLower(SHA256.HashData(source));await File.WriteAllBytesAsync(path,source,TestContext.Current.CancellationToken);
+            var inspection=EclipseDataInspector.InspectPackage([path],"CASE.DATA");var request=JsonNode.Parse(Request(sha))!.AsObject();request["schemaVersion"]=EclipseOilPvtParameters.FieldSchema;request["field"]="FORMATION_VOLUME_FACTOR";request["unit"]="rb/stb";request["multiplier"]=1.02;
+            using var doc=JsonDocument.Parse(request.ToJsonString());Assert.True(EclipseOilPvtParameters.TryParse(doc.RootElement,out var p));Assert.Equal(1,p!.Column);Assert.True(p.MatchesInspection(inspection));
+            foreach(var system in new[]{"METRIC","LAB","PVT-M"}){Assert.False(p.MatchesInspection(inspection with{UnitSystem=system}));Assert.True((p with{Unit=EclipseOilPvtParameters.VolumeUnit(system)}).MatchesInspection(inspection with{UnitSystem=system}));}
+            await EclipseOilPvtEditor.ApplyAsync(new EclipseDeckPackage(path,root,[path]),p,TestContext.Current.CancellationToken);
+            var expected=Source;foreach(var row in p.Rows){var original=double.Parse(row.Values[1],System.Globalization.CultureInfo.InvariantCulture);var replacement=(original*1.02).ToString("G17",System.Globalization.CultureInfo.InvariantCulture);var lines=expected.Split('\n');lines[row.LineNumber-1]=lines[row.LineNumber-1].Replace(row.Values[1],replacement,StringComparison.Ordinal);expected=string.Join('\n',lines);}
+            Assert.Equal(Encoding.UTF8.GetBytes(expected),await File.ReadAllBytesAsync(path,TestContext.Current.CancellationToken));
+            foreach(var change in new[]{("field","PRESSURE"),("unit","cP"),("schemaVersion",EclipseOilPvtParameters.Schema)}){var bad=request.DeepClone().AsObject();bad[change.Item1]=change.Item2;using var value=JsonDocument.Parse(bad.ToJsonString());Assert.False(EclipseOilPvtParameters.TryParse(value.RootElement,out _));}
+            request["multiplier"]=8;using var over=JsonDocument.Parse(request.ToJsonString());Assert.False(EclipseOilPvtParameters.TryParse(over.RootElement,out _));request.Remove("field");using var missing=JsonDocument.Parse(request.ToJsonString());Assert.False(EclipseOilPvtParameters.TryParse(missing.RootElement,out _));
+        }finally{Directory.Delete(root,true);}
+    }
 }

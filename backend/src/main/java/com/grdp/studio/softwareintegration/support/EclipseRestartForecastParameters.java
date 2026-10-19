@@ -9,20 +9,21 @@ import java.util.regex.Pattern;
 /** Report/time/physical-source binding for verified, portable E100 forecasts. */
 public final class EclipseRestartForecastParameters {
     public static final String SCHEMA = "eclipse-history-forecast-parameters/2";
+    public static final String BINARY_SCHEMA = "eclipse-history-forecast-parameters/3";
     private static final Pattern SHA = Pattern.compile("^[a-f0-9]{64}$");
     private static final Pattern CASE = Pattern.compile("^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}$");
     private EclipseRestartForecastParameters() {}
 
     public static boolean valid(JsonNode value) {
         return fields(value, "schemaVersion", "historyRunId", "forecastDataFile", "restartArtifactName", "restartArtifactSha256", "restartReport", "restartTimeDays", "restartDate", "physicsSha256")
-                && SCHEMA.equals(value.path("schemaVersion").asText())
+                && Set.of(SCHEMA, BINARY_SCHEMA).contains(value.path("schemaVersion").asText())
                 && integer(value.path("historyRunId"), 1, Long.MAX_VALUE)
                 && integer(value.path("restartReport"), 1, Integer.MAX_VALUE)
                 && integer(value.path("restartTimeDays"), 0, 3_000_000)
                 && date(value.path("restartDate")) != null && sha(value.path("physicsSha256"))
                 && value.path("forecastDataFile").isTextual() && EclipseHistoryForecastParameters.isSafeRelativeData(value.path("forecastDataFile").asText())
                 && value.path("restartArtifactName").isTextual()
-                && value.path("restartArtifactName").asText().matches("(?i)^eclipse-output-[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\\.FUNRST$")
+                && value.path("restartArtifactName").asText().matches("(?i)^eclipse-output-[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\\." + (BINARY_SCHEMA.equals(value.path("schemaVersion").asText()) ? "UNRST" : "FUNRST") + "$")
                 && sha(value.path("restartArtifactSha256"));
     }
 
@@ -30,7 +31,8 @@ public final class EclipseRestartForecastParameters {
                                          String artifactName, String artifactSha256, long artifactSize) {
         if (!valid(value) || !validCatalog(source) || inspection == null || !inspection.path("packageFiles").isArray()) return false;
         var catalog = source.path("catalog");
-        if (!artifactName.equals(catalog.path("artifactName").asText()) || !artifactSha256.equals(catalog.path("artifactSha256").asText())
+        if (BINARY_SCHEMA.equals(value.path("schemaVersion").asText()) != "eclipse-restart-source/2".equals(source.path("schemaVersion").asText())
+                || !artifactName.equals(catalog.path("artifactName").asText()) || !artifactSha256.equals(catalog.path("artifactSha256").asText())
                 || artifactSize != catalog.path("artifactSizeBytes").asLong()
                 || !artifactName.equals(value.path("restartArtifactName").asText()) || !artifactSha256.equals(value.path("restartArtifactSha256").asText())
                 || !source.path("physicsSha256").equals(value.path("physicsSha256"))) return false;
@@ -47,13 +49,15 @@ public final class EclipseRestartForecastParameters {
     }
 
     public static boolean validCatalog(JsonNode source) {
+        if (source == null) return false;
+        boolean binary = "eclipse-restart-source/2".equals(source.path("schemaVersion").asText());
         if (!fields(source, "schemaVersion", "catalog", "physicsSha256", "forecastInputs")
-                || !"eclipse-restart-source/1".equals(source.path("schemaVersion").asText()) || !sha(source.path("physicsSha256"))) return false;
+                || !(binary || "eclipse-restart-source/1".equals(source.path("schemaVersion").asText())) || !sha(source.path("physicsSha256"))) return false;
         var catalog = source.path("catalog");
         if (!fields(catalog, "schemaVersion", "caseName", "startDate", "artifactName", "artifactSha256", "artifactSizeBytes", "reports")
-                || !"eclipse-restart-catalog/1".equals(catalog.path("schemaVersion").asText())
+                || !(binary ? "eclipse-restart-catalog/2" : "eclipse-restart-catalog/1").equals(catalog.path("schemaVersion").asText())
                 || !catalog.path("caseName").isTextual() || !CASE.matcher(catalog.path("caseName").asText()).matches()
-                || !catalog.path("artifactName").asText().equals("eclipse-output-" + catalog.path("caseName").asText() + ".FUNRST")
+                || !catalog.path("artifactName").asText().equals("eclipse-output-" + catalog.path("caseName").asText() + (binary ? ".UNRST" : ".FUNRST"))
                 || !sha(catalog.path("artifactSha256")) || !integer(catalog.path("artifactSizeBytes"), 1, 128L * 1024 * 1024)) return false;
         var origin = date(catalog.path("startDate")); var reports = catalog.path("reports");
         if (origin == null || !reports.isArray() || reports.size() < 1 || reports.size() > 8192) return false;

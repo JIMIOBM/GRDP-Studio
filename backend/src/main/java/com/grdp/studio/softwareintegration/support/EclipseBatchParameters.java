@@ -16,7 +16,7 @@ public final class EclipseBatchParameters {
         for(var item:n.path("cases")){
             if(!fields(item,Set.of("name","parameters"))||!name(item.path("name"),80)||!names.add(item.path("name").asText().toLowerCase(Locale.ROOT)))return false;
             var p=item.path("parameters");
-            if(!scenario(p)||p.path("baselineRunId").asLong()!=baseline||parameters.stream().anyMatch(old->sameContent(old,p)))return false;
+            if(EclipseCompositionalFluidPropertyParameters.valid(p)!=EclipseCompositionalFluidPropertyParameters.valid(n.path("cases").get(0).path("parameters"))||!scenario(p)||p.path("baselineRunId").asLong()!=baseline||parameters.stream().anyMatch(old->sameContent(old,p)))return false;
             parameters.add(p);
         }
         return true;
@@ -28,5 +28,5 @@ public final class EclipseBatchParameters {
         if(a.isArray()&&b.isArray()){if(a.size()!=b.size())return false;for(int i=0;i<a.size();i++)if(!sameContent(a.path(i),b.path(i)))return false;return true;}
         return a.equals(b);
     }
-    public static boolean scenario(JsonNode p){return EclipsePvtwParameters.valid(p)||EclipseOilPvtParameters.valid(p)||EclipseGasPvtParameters.valid(p)||EclipseRelpermParameters.valid(p)||EclipseGridFieldParameters.valid(p)||EclipseGridRegionParameters.valid(p);}
+    public static boolean scenario(JsonNode p){return EclipseCompositionalFluidPropertyParameters.valid(p)||EclipseMultiWaterPvtParameters.valid(p)||EclipseMultiWetGasPvtParameters.valid(p)||EclipseMultiLiveOilPvtParameters.valid(p)||EclipseMultiPvtParameters.valid(p)||EclipseMultiSatFamilyIIParameters.valid(p)||EclipseMultiSatRelpermParameters.valid(p)||EclipseCoupledRelpermParameters.valid(p)||EclipsePvtwParameters.valid(p)||EclipseWetGasPvtParameters.valid(p)||EclipseLiveOilPvtParameters.valid(p)||EclipseOilPvtParameters.valid(p)||EclipseGasPvtParameters.valid(p)||EclipseRelpermParameters.valid(p)||EclipseGridFieldParameters.valid(p)||EclipseGridRegionParameters.valid(p);}
 }

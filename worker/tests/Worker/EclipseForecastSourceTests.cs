@@ -111,4 +111,26 @@ public sealed class EclipseForecastSourceTests : IDisposable
         var other = Package("OTHER.DATA", false, text);
         Assert.Equal(original.PhysicsSha256, EclipseForecastSourceReader.Read(other, false).PhysicsSha256);
     }
+    [Fact]
+    public void BinaryForecastRequiresItsOwnParameterAndCatalogVersionsAndMatchesOnlyBinaryCandidates()
+    {
+        var history = Package("CASE.DATA", false);
+        var formatted = Package("FORMATTED.DATA", true);
+        var future = Package("FORE.DATA", true, (Static.Replace("FMTOUT\n", "UNIFIN\n") + Future));
+        var source = EclipseForecastSourceReader.Read(history, false);
+        var binary = Catalog() with { SchemaVersion = "eclipse-restart-catalog/2", ArtifactName = "eclipse-output-CASE.UNRST" };
+        var described = EclipseForecastSourceReader.Describe(history, binary);
+        Assert.Equal("eclipse-restart-source/2", described.SchemaVersion); Assert.Equal("FORE.DATA", Assert.Single(described.ForecastInputs).RelativePath);
+        Assert.Equal("FORMATTED.DATA", Assert.Single(EclipseForecastSourceReader.Describe(history, Catalog()).ForecastInputs).RelativePath);
+        var node = System.Text.Json.Nodes.JsonNode.Parse(Parameters(source.PhysicsSha256).GetRawText())!;
+        node["schemaVersion"] = EclipseRestartForecastParameters.BinarySchema; node["restartArtifactName"] = binary.ArtifactName;
+        Assert.True(EclipseRestartForecastParameters.TryParse(JsonSerializer.SerializeToElement(node), out var parameters));
+        parameters!.Validate(history, future, binary);
+        Assert.Throws<EclipseDeckPackageException>(() => parameters.Validate(history, formatted, binary));
+        Assert.Throws<EclipseDeckPackageException>(() => parameters.Validate(history, future, Catalog()));
+        node["schemaVersion"] = EclipseRestartForecastParameters.Schema;
+        Assert.False(EclipseRestartForecastParameters.TryParse(JsonSerializer.SerializeToElement(node), out _));
+        node["schemaVersion"] = EclipseRestartForecastParameters.BinarySchema; node["restartArtifactName"] = "eclipse-output-CASE.FUNRST";
+        Assert.False(EclipseRestartForecastParameters.TryParse(JsonSerializer.SerializeToElement(node), out _));
+    }
 }

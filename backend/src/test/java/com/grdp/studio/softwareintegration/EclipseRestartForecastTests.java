@@ -75,4 +75,33 @@ class EclipseRestartForecastTests {
             assertThat(EclipseRestartForecastParameters.valid(p)).as(key).isFalse();
         }
     }
+    private ObjectNode binarySource() throws Exception {
+        try (var input = getClass().getResourceAsStream("/eclipse-binary-restart-source-catalog.json")) { return (ObjectNode)mapper.readTree(input); }
+    }
+    @Test void actualBinaryCatalogRequiresItsOwnParameterAndFormatContracts() throws Exception {
+        var s = binarySource(); var p = parameters(s).put("schemaVersion", EclipseRestartForecastParameters.BINARY_SCHEMA);
+        assertThat(EclipseRestartForecastParameters.validCatalog(s)).isTrue(); assertThat(matches(p, s, inspection(s))).isTrue();
+        assertThat(s.path("catalog").path("reports").size()).isEqualTo(81);
+        p.put("forecastDataFile", "FOREB.DATA"); assertThat(matches(p, s, inspection(s))).isTrue();
+        p.put("schemaVersion", EclipseRestartForecastParameters.SCHEMA); assertThat(EclipseRestartForecastParameters.valid(p)).isFalse();
+        p.put("schemaVersion", EclipseRestartForecastParameters.BINARY_SCHEMA).put("restartArtifactName", "eclipse-output-EX5.FUNRST");
+        assertThat(EclipseRestartForecastParameters.valid(p)).isFalse();
+    }
+    @Test void mixedSourceCatalogAndExtensionVersionsCannotMasqueradeAsBinaryState() throws Exception {
+        for (var fault : new String[] {"source", "catalog", "extension"}) {
+            var s = binarySource();
+            if (fault.equals("source")) s.put("schemaVersion", "eclipse-restart-source/1");
+            else ((ObjectNode)s.path("catalog")).put(fault.equals("catalog") ? "schemaVersion" : "artifactName",
+                    fault.equals("catalog") ? "eclipse-restart-catalog/1" : "eclipse-output-EX5.FUNRST");
+            assertThat(EclipseRestartForecastParameters.validCatalog(s)).as(fault).isFalse();
+        }
+    }
+    @Test void binaryCutoffAndPhysicalSourceCannotBeForged() throws Exception {
+        for (var fault : new String[] {"restartReport", "restartTimeDays", "restartDate", "physicsSha256", "restartArtifactSha256", "forecastDataFile"}) {
+            var s = binarySource(); var p = parameters(s).put("schemaVersion", EclipseRestartForecastParameters.BINARY_SCHEMA);
+            switch (fault) { case "restartReport" -> p.put(fault, 79); case "restartTimeDays" -> p.put(fault, 2191);
+                case "restartDate" -> p.put(fault, "1975-12-30"); case "forecastDataFile" -> p.put(fault, "EX5.DATA"); default -> p.put(fault, "b".repeat(64)); }
+            assertThat(matches(p, s, inspection(s))).as(fault).isFalse();
+        }
+    }
 }

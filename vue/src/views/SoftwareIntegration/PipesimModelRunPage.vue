@@ -38,6 +38,7 @@ import { groupProductionRecords, buildGroupProduction } from './eclipseGroupProd
 import { groupRateRecords, buildGroupRate } from './eclipseGroupRate'
 import { groupWaterProductionRecords, buildGroupWaterProduction } from './eclipseGroupWaterProduction'
 import { controlPlanPeriods, buildControlPlan } from './eclipseControlPlan'
+import { waterInjectionPlanPeriods, buildWaterInjectionPlan } from './eclipseWaterInjectionPlan'
 import { validRestartSource, buildRestartForecast } from './eclipseRestartForecast'
 import { groupStructureRecords, groupStructureKey, groupStructureLabel, buildGroupStructure } from './eclipseGroupStructure'
 import { advancedInjectionRecords, buildAdvancedInjection } from './eclipseAdvancedInjection'
@@ -809,7 +810,7 @@ const runCapabilityMessage = computed(() => {
 })
 const modelTypeLabel = computed(() => {
   if (isNetworkModel.value) return 'PIPESIM 管网模型'
-  if (isEclipseModel.value) return activeVersion.value?.modelKind === 'eclipse_300' ? (activeVersion.value?.inspection?.schemaVersion === 'eclipse-data-inspection/15' ? 'ECLIPSE 300 热采模型' : 'ECLIPSE 300 组分模型') : 'ECLIPSE 100 模型'
+  if (isEclipseModel.value) return activeVersion.value?.modelKind === 'eclipse_300' ? (['eclipse-data-inspection/15', 'eclipse-data-inspection/23'].includes(activeVersion.value?.inspection?.schemaVersion) ? 'ECLIPSE 300 热采模型' : 'ECLIPSE 300 组分模型') : 'ECLIPSE 100 模型'
   if (activeVersion.value?.modelKind === 'legacy_well') return 'PIPESIM 通用井模型'
   return isWellModel.value ? 'PIPESIM 井筒模型' : '待识别 PIPESIM 模型'
 })
@@ -1013,6 +1014,8 @@ const eclipseNewDatesEnabled = ref(false)
 const eclipseTstepEnabled = ref(false)
 const eclipseControlPlanEnabled = ref(false)
 const eclipseControlPlanDraft = ref([])
+const eclipseWaterInjectionPlanEnabled = ref(false)
+const eclipseWaterInjectionPlanDraft = ref([])
 const eclipseGroupStructureEnabled = ref(false)
 const eclipseGroupStructureControl = ref('')
 const eclipseGroupStructureTarget = ref(null)
@@ -1178,6 +1181,9 @@ const eclipseTstepRecords = computed(() => tstepRecords(activeVersion.value?.ins
 const eclipseControlPlanRecords = computed(() => controlPlanPeriods(activeVersion.value?.inspection))
 const eclipseControlPlanAvailable = computed(() => isEclipseModel.value && eclipseBaselineOptions.value.length > 0 && eclipseControlPlanRecords.value.length > 0)
 watch(eclipseControlPlanRecords, rows => { eclipseControlPlanDraft.value = rows.map(c => ({ ...c, targetOilRate: c.originalOilRate })) }, { immediate: true })
+const eclipseWaterInjectionPlanRecords = computed(() => waterInjectionPlanPeriods(activeVersion.value?.inspection))
+const eclipseWaterInjectionPlanAvailable = computed(() => isEclipseModel.value && eclipseBaselineOptions.value.length > 0 && eclipseWaterInjectionPlanRecords.value.length > 0)
+watch(eclipseWaterInjectionPlanRecords, rows => { eclipseWaterInjectionPlanDraft.value = rows.map(c => ({ ...c, targetInjectionRate: c.originalInjectionRate })) }, { immediate: true })
 const eclipseGroupStructureRecords = computed(() => groupStructureRecords(activeVersion.value?.inspection))
 const eclipseGroupStructureRecord = computed(() => eclipseGroupStructureRecords.value.find(c => groupStructureKey(c) === eclipseGroupStructureControl.value) || null)
 const eclipseGroupStructureAvailable = computed(() => isEclipseModel.value && eclipseBaselineOptions.value.length > 0 && eclipseGroupStructureRecords.value.length > 0)
@@ -1252,9 +1258,12 @@ const eclipseForecastHistoryDetail = computed(() => {
   return id > 0 ? (eclipseHistoryRunDetails.value[id] || (selectedRun.value?.id === id ? selectedRun.value : null)) : null
 })
 const eclipseForecastRestartArtifacts = computed(() => (eclipseForecastHistoryDetail.value?.artifacts || [])
-  .filter(artifact => artifact?.name && /^eclipse-output-[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\.FUNRST$/i.test(artifact.name) && /^[a-f0-9]{64}$/i.test(artifact.sha256 || '')))
+  .filter(artifact => artifact?.name && (/^eclipse-output-[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\.FUNRST$/i.test(artifact.name) ||
+    /^eclipse-output-[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\.UNRST$/i.test(artifact.name) && eclipseForecastHistoryDetail.value.artifacts.some(a => a.name === 'eclipse-restart-catalog.json')) && /^[a-f0-9]{64}$/i.test(artifact.sha256 || '')))
 const eclipseForecastSource = computed(() => eclipseForecastSources.value[Number(eclipseForecastHistoryRunId.value)] || null)
 const eclipseForecastCatalogPresent = computed(() => (eclipseForecastHistoryDetail.value?.artifacts || []).some(a => a.name === 'eclipse-restart-catalog.json'))
+const eclipseForecastRequiresCatalog = computed(() => eclipseForecastCatalogPresent.value ||
+  (eclipseForecastHistoryDetail.value?.artifacts || []).some(a => /^eclipse-output-.+\.UNRST$/i.test(a.name || '')))
 const eclipseForecastSelectableDataFiles = computed(() => eclipseForecastCatalogPresent.value
   ? (eclipseForecastSource.value?.forecastInputs || []).filter(f => activeVersion.value?.inspection?.packageFiles?.some(p => p.relativePath === f.relativePath && p.sha256 === f.sha256)).map(f => f.relativePath)
   : eclipseForecastDataFiles.value)
@@ -1294,6 +1303,7 @@ const disableOtherEclipseScenarios = () => {
   eclipseGroupInjectionEnabled.value = false
   eclipseGroupGasInjectionEnabled.value = false
   eclipseControlPlanEnabled.value = false
+  eclipseWaterInjectionPlanEnabled.value = false
   eclipseGroupStructureEnabled.value = false
   eclipseAdvancedInjectionEnabled.value = false
   eclipseGroupWaterProductionEnabled.value = false
@@ -1312,6 +1322,7 @@ const toggleEclipseThp = value => { if (value) { disableOtherEclipseScenarios();
 const toggleEclipseNewDates = value => { if (value) { disableOtherEclipseScenarios(); eclipseNewDatesEnabled.value = true } }
 const toggleEclipseTstep = value => { if (value) { disableOtherEclipseScenarios(); eclipseTstepEnabled.value = true } }
 const toggleEclipseControlPlan = value => { if (value) { disableOtherEclipseScenarios(); eclipseControlPlanEnabled.value = true } }
+const toggleEclipseWaterInjectionPlan = value => { if (value) { disableOtherEclipseScenarios(); eclipseWaterInjectionPlanEnabled.value = true } }
 const toggleEclipseGroupStructure = value => { if (value) { disableOtherEclipseScenarios(); eclipseGroupStructureEnabled.value = true } }
 const toggleEclipseAdvancedInjection = value => { if (value) { disableOtherEclipseScenarios(); eclipseAdvancedInjectionEnabled.value = true } }
 const toggleEclipseGroupWaterProduction = value => { if (value) { disableOtherEclipseScenarios(); eclipseGroupWaterProductionEnabled.value = true } }
@@ -1326,6 +1337,7 @@ const toggleEclipseForecast = value => { if (value) { disableOtherEclipseScenari
 const eclipseScenarioSummary = computed(() => {
   if (eclipseTstepEnabled.value) return 'TSTEP 报告间隔方案'
   if (eclipseControlPlanEnabled.value) return '多井分阶段产油目标方案'
+  if (eclipseWaterInjectionPlanEnabled.value) return '多井分阶段注水目标方案'
   if (eclipseGroupStructureEnabled.value) return '组树目标、井导向与开工比例方案'
   if (eclipseAdvancedInjectionEnabled.value) return '注入目标与回注比例方案'
   if (eclipseGroupWaterProductionEnabled.value) return '生产组总产水目标方案'
@@ -1393,6 +1405,7 @@ watch([activeVersionId, () => activeVersion.value?.inspection, () => runHistory.
   eclipseGroupInjectionEnabled.value = false
   eclipseGroupGasInjectionEnabled.value = false
   eclipseControlPlanEnabled.value = false
+  eclipseWaterInjectionPlanEnabled.value = false
   eclipseGroupStructureEnabled.value = false
   eclipseAdvancedInjectionEnabled.value = false
   eclipseGroupWaterProductionEnabled.value = false
@@ -1939,6 +1952,7 @@ watch([activeVersionId, runType], () => {
   eclipseGroupInjectionEnabled.value = false
   eclipseGroupGasInjectionEnabled.value = false
   eclipseControlPlanEnabled.value = false
+  eclipseWaterInjectionPlanEnabled.value = false
   eclipseGroupStructureEnabled.value = false
   eclipseAdvancedInjectionEnabled.value = false
   eclipseGroupWaterProductionEnabled.value = false
@@ -1988,26 +2002,42 @@ const buildWellTubingDiameterParameters = () => {
 }
 const submitRun = async (scenarioOverride = null) => {
   const feedback = beginFeedback()
+  const eclipseThermalScenario = ['eclipse-thermal-injection-parameters/1', 'eclipse-thermal-injection-parameters/2', 'eclipse-thermal-injection-parameters/3', 'eclipse-thermal-injection-plan-parameters/1', 'eclipse-thermal-rock-parameters/1'].includes(scenarioOverride?.schemaVersion)
+  const eclipseCompositionalScenario = ['eclipse-compositional-production-parameters/1', 'eclipse-compositional-pressure-parameters/1', 'eclipse-compositional-reinjection-parameters/1', 'eclipse-compositional-gas-sales-parameters/1', 'eclipse-compositional-injection-pressure-parameters/1', 'eclipse-compositional-fluid-property-parameters/1', 'eclipse-compositional-temperature-parameters/1', 'eclipse-compositional-critical-z-parameters/1', 'eclipse-compositional-acentric-factor-parameters/1', 'eclipse-compositional-eos-property-parameters/1', 'eclipse-compositional-forecast-parameters/1'].includes(scenarioOverride?.schemaVersion)
+  const eclipseScenarioSourceId = scenarioOverride?.schemaVersion === 'eclipse-compositional-forecast-parameters/1' ? scenarioOverride.historyRunId : scenarioOverride?.baselineRunId
   const eclipseGridScenario = ['eclipse-grid-field-parameters/1', 'eclipse-grid-region-parameters/1'].includes(scenarioOverride?.schemaVersion)
   const eclipseGeometryScenario = scenarioOverride?.schemaVersion === 'eclipse-completion-geometry-parameters/1'
   const eclipseNewWellScenario = scenarioOverride?.schemaVersion === 'eclipse-new-well-parameters/1'
-  const eclipseGasPvtScenario = scenarioOverride?.schemaVersion === 'eclipse-pvdg-parameters/1'
-  const eclipseRelpermScenario = scenarioOverride?.schemaVersion === 'eclipse-relperm-parameters/1'
-  const eclipseOilPvtScenario = scenarioOverride?.schemaVersion === 'eclipse-pvdo-parameters/1'
-  const eclipsePvtwScenario = ['eclipse-pvtw-parameters/1','eclipse-pvtw-parameters/2'].includes(scenarioOverride?.schemaVersion)
+  const eclipseGasPvtScenario = ['eclipse-multi-pvtg-parameters/1', 'eclipse-pvtg-parameters/1', 'eclipse-pvdg-parameters/1', 'eclipse-pvdg-parameters/2'].includes(scenarioOverride?.schemaVersion)
+  const eclipseRelpermScenario = ['eclipse-relperm-parameters/1','eclipse-relperm-parameters/2','eclipse-coupled-relperm-parameters/1','eclipse-multi-sat-relperm-parameters/1','eclipse-multi-sat-relperm-parameters/2'].includes(scenarioOverride?.schemaVersion)
+  const eclipseOilPvtScenario = ['eclipse-multi-pvto-parameters/1', 'eclipse-multi-pvt-parameters/1', 'eclipse-pvto-parameters/1', 'eclipse-pvdo-parameters/1', 'eclipse-pvdo-parameters/2'].includes(scenarioOverride?.schemaVersion)
+  const eclipsePvtwScenario = ['eclipse-pvtw-parameters/1','eclipse-pvtw-parameters/2','eclipse-multi-pvtw-parameters/1','eclipse-multi-pvtw-parameters/2','eclipse-multi-pvtw-parameters/3'].includes(scenarioOverride?.schemaVersion)
   const eclipseNewCompletionScenario = scenarioOverride?.schemaVersion === 'eclipse-new-completion-parameters/1'
   const networkConnectionScenario = scenarioOverride?.schemaVersion === 'pipesim-network-connection-parameters/1'
   if (networkConnectionScenario && runType.value !== 'network') runType.value = 'network'
   if (!canRun.value) return
-  if (scenarioOverride && !eclipseGridScenario && !eclipseGeometryScenario && !eclipseNewWellScenario && !eclipseNewCompletionScenario && !eclipsePvtwScenario && !eclipseOilPvtScenario && !eclipseGasPvtScenario && !eclipseRelpermScenario && !networkConnectionScenario) {
+  if (scenarioOverride && !eclipseGridScenario && !eclipseGeometryScenario && !eclipseNewWellScenario && !eclipseNewCompletionScenario && !eclipsePvtwScenario && !eclipseOilPvtScenario && !eclipseGasPvtScenario && !eclipseRelpermScenario && !eclipseCompositionalScenario && !eclipseThermalScenario && !networkConnectionScenario) {
     feedback.error('当前结果页提交了不支持的受控方案类型。')
     return
   }
-  if ((eclipseGridScenario || eclipseGeometryScenario || eclipseNewWellScenario || eclipseNewCompletionScenario || eclipsePvtwScenario || eclipseOilPvtScenario || eclipseGasPvtScenario || eclipseRelpermScenario) && (!isEclipseModel.value || Number(scenarioOverride.baselineRunId) !== Number(selectedRun.value?.id)
+  if ((eclipseGridScenario || eclipseGeometryScenario || eclipseNewWellScenario || eclipseNewCompletionScenario || eclipsePvtwScenario || eclipseOilPvtScenario || eclipseGasPvtScenario || eclipseRelpermScenario || eclipseCompositionalScenario || eclipseThermalScenario) && (!isEclipseModel.value || Number(eclipseScenarioSourceId) !== Number(selectedRun.value?.id)
     || selectedRun.value?.status !== 'SUCCEEDED' || selectedRun.value?.resultContract !== 'VALID_FULL'
     || selectedRun.value?.parameters != null)) {
     feedback.error('受控重算仅能绑定当前选中的完整成功无参数 ECLIPSE 基线。')
     return
+  }
+  if (eclipseThermalScenario && (activeVersion.value?.modelKind !== 'eclipse_300' || !['eclipse-data-inspection/15', 'eclipse-data-inspection/23'].includes(activeVersion.value?.inspection?.schemaVersion))) { feedback.error('注汽参数仅适用于当前已核准的E300热采模型。'); return }
+  if (scenarioOverride?.schemaVersion === 'eclipse-compositional-temperature-parameters/1' && !['eclipse-data-inspection/19', 'eclipse-data-inspection/20', 'eclipse-data-inspection/21', 'eclipse-data-inspection/22'].includes(activeVersion.value?.inspection?.schemaVersion)) { feedback.error('请重新验证模型以启用已核准的TCRIT临界温度。'); return }
+  if (scenarioOverride?.schemaVersion === 'eclipse-compositional-eos-property-parameters/1' && activeVersion.value?.inspection?.schemaVersion !== 'eclipse-data-inspection/22') { feedback.error('请重新验证模型以启用已核准的分子量和状态方程系数。'); return }
+  if (scenarioOverride?.schemaVersion === 'eclipse-compositional-acentric-factor-parameters/1' && !['eclipse-data-inspection/21', 'eclipse-data-inspection/22'].includes(activeVersion.value?.inspection?.schemaVersion)) { feedback.error('请重新验证模型以启用已核准的ACF偏心因子。'); return }
+  if (scenarioOverride?.schemaVersion === 'eclipse-compositional-critical-z-parameters/1' && !['eclipse-data-inspection/20', 'eclipse-data-inspection/21', 'eclipse-data-inspection/22'].includes(activeVersion.value?.inspection?.schemaVersion)) { feedback.error('请重新验证模型以启用已核准的ZCRIT临界Z因子。'); return }
+  if (scenarioOverride?.schemaVersion === 'eclipse-compositional-reinjection-parameters/1' && !['eclipse-data-inspection/16', 'eclipse-data-inspection/17', 'eclipse-data-inspection/19', 'eclipse-data-inspection/20', 'eclipse-data-inspection/21', 'eclipse-data-inspection/22'].includes(activeVersion.value?.inspection?.schemaVersion)) { feedback.error('请重新验证模型以启用已核准的可用气回注比例。'); return }
+  if (scenarioOverride?.schemaVersion === 'eclipse-compositional-gas-sales-parameters/1' && !['eclipse-data-inspection/16', 'eclipse-data-inspection/17', 'eclipse-data-inspection/19', 'eclipse-data-inspection/20', 'eclipse-data-inspection/21', 'eclipse-data-inspection/22'].includes(activeVersion.value?.inspection?.schemaVersion)) { feedback.error('请重新验证模型以启用已核准的固定销售目标。'); return }
+  if (scenarioOverride?.schemaVersion === 'eclipse-compositional-injection-pressure-parameters/1' && !['eclipse-data-inspection/16', 'eclipse-data-inspection/17', 'eclipse-data-inspection/19', 'eclipse-data-inspection/20', 'eclipse-data-inspection/21', 'eclipse-data-inspection/22'].includes(activeVersion.value?.inspection?.schemaVersion)) { feedback.error('请重新验证模型以启用已核准的注气井BHP上限。'); return }
+  if (scenarioOverride?.schemaVersion === 'eclipse-compositional-forecast-parameters/1' && !['eclipse-data-inspection/17', 'eclipse-data-inspection/19', 'eclipse-data-inspection/20', 'eclipse-data-inspection/21', 'eclipse-data-inspection/22'].includes(activeVersion.value?.inspection?.schemaVersion)) { feedback.error('请从已核准原模型的完整历史保存点创建续算。'); return }
+  if (scenarioOverride?.schemaVersion === 'eclipse-compositional-fluid-property-parameters/1' && !['eclipse-data-inspection/17', 'eclipse-data-inspection/19', 'eclipse-data-inspection/20', 'eclipse-data-inspection/21', 'eclipse-data-inspection/22'].includes(activeVersion.value?.inspection?.schemaVersion)) { feedback.error('请重新验证模型以启用已核准的PCRIT组分物性。'); return }
+  if (eclipseCompositionalScenario && (activeVersion.value?.modelKind !== 'eclipse_300' || !['eclipse-data-inspection/14', 'eclipse-data-inspection/16', 'eclipse-data-inspection/17', 'eclipse-data-inspection/19', 'eclipse-data-inspection/20', 'eclipse-data-inspection/21', 'eclipse-data-inspection/22'].includes(activeVersion.value?.inspection?.schemaVersion))) {
+    feedback.error('产气目标编辑仅适用于当前已核准的E300组分模型。'); return
   }
   if (networkConnectionScenario && (!isNetworkWorkflow.value || runType.value !== 'network' ||
     Number(scenarioOverride.baselineRunId) !== Number(selectedRun.value?.id) || selectedRun.value?.runType !== 'network' ||
@@ -2041,6 +2071,10 @@ const submitRun = async (scenarioOverride = null) => {
   if (!scenarioOverride && isEclipseModel.value && eclipseControlPlanEnabled.value) {
     parameters = buildControlPlan({ inspection: activeVersion.value?.inspection, baselineRunId: Number(eclipseBaselineRunId.value), edits: eclipseControlPlanDraft.value })
     if (!parameters) { feedback.error('请选择同版本成功基线，并修改 1–24 条已有产油目标；新值必须为不同于原值的正数'); return }
+  }
+  if (!scenarioOverride && isEclipseModel.value && eclipseWaterInjectionPlanEnabled.value) {
+    parameters = buildWaterInjectionPlan({ inspection: activeVersion.value?.inspection, baselineRunId: Number(eclipseBaselineRunId.value), edits: eclipseWaterInjectionPlanDraft.value })
+    if (!parameters) { feedback.error('请选择同版本成功基线，并修改 1–24 条已有注水目标；新值必须为不同于原值的正数'); return }
   }
   if (!scenarioOverride && isEclipseModel.value && eclipseGroupStructureEnabled.value) {
     parameters = buildGroupStructure({ inspection: activeVersion.value?.inspection, baselineRunId: Number(eclipseBaselineRunId.value), controlKey: eclipseGroupStructureControl.value, targetValue: Number(eclipseGroupStructureTarget.value) })
@@ -2085,7 +2119,7 @@ const submitRun = async (scenarioOverride = null) => {
     parameters = buildPressureControl({ inspection: activeVersion.value?.inspection, baselineRunId: Number(eclipseBaselineRunId.value), well: eclipsePressureWell.value, targetBhp: Number(eclipsePressureTarget.value) })
     if (!parameters) { feedback.error('请选择有效开井记录和成功基线；BHP 必须在 0–100000 psia 内，已有 BHP 控制须修改原压力'); return }
   } else if (!scenarioOverride && isEclipseModel.value && eclipseForecastEnabled.value) {
-    if (eclipseForecastCatalogPresent.value) {
+    if (eclipseForecastRequiresCatalog.value) {
       parameters = buildRestartForecast({ source: eclipseForecastSource.value, history: eclipseForecastHistoryDetail.value, inspection: activeVersion.value?.inspection,
         forecastDataFile: eclipseForecastDataFile.value, restartReport: Number(eclipseForecastRestartReport.value) })
       if (!parameters) { feedback.error('请等待历史目录核对完成，并选择同源物理模型及有效截止日期的预测方案'); return }
@@ -2241,7 +2275,7 @@ const submitRun = async (scenarioOverride = null) => {
       !eclipseForecastDataFiles.value.includes(parameters.forecastDataFile) ||
       !eclipseForecastRestartArtifacts.value.some(artifact => artifact.name === parameters.restartArtifactName && artifact.sha256?.toLowerCase() === parameters.restartArtifactSha256) ||
       !Number.isSafeInteger(parameters.restartReport) || parameters.restartReport <= 0)) {
-    feedback.error('预测运行必须选择当前版本的预测 DATA、成功历史运行、FUNRST Artifact 和正整数重启报告')
+    feedback.error(eclipseForecastRequiresCatalog.value ? '预测运行必须选择当前版本的预测 DATA、成功历史运行、FUNRST / UNRST 状态文件和正整数重启报告' : '预测运行必须选择当前版本的预测 DATA、成功历史运行、FUNRST Artifact 和正整数重启报告')
     return
   }
   if (!scenarioOverride && isNetworkWellPerformanceRun.value) {
@@ -2953,11 +2987,26 @@ defineExpose({ eclipseRunRequest })
           <label>基线运行</label><el-select v-model="eclipseBaselineRunId" :disabled="hasActiveRun || submittingRun" aria-label="ECLIPSE 阶段方案基线"><el-option v-for="run in eclipseBaselineOptions" :key="run.id" :value="run.id" :label="`#${run.id} · 成功基线`" /></el-select>
           <p>在已有日期上调整 OPEN/ORAT 目标，未修改的记录保持原值。每行目标延续至该井下一条控制；后续明确记录会覆盖前期。最多同时修改 24 条，保留原日期、其它井和注入控制及压力下限。</p>
           <el-table :data="eclipseControlPlanDraft" max-height="380" border size="small" aria-label="ECLIPSE 已有阶段目标编辑">
+            <el-table-column v-if="activeVersion.inspection.packageProductionControlPlanContext" prop="sourceFile" label="源文件" min-width="170" />
             <el-table-column prop="well" label="井" min-width="110" /><el-table-column prop="date" label="生效日期" min-width="130" /><el-table-column prop="timeDays" label="生效天数" /><el-table-column label="下一覆盖"><template #default="{ row }">{{ row.nextDate || `计划结束第 ${row.nextTimeDays} 天` }}</template></el-table-column>
             <el-table-column prop="originalOilRate" label="原产油目标" /><el-table-column label="新产油目标" min-width="190"><template #default="{ row }"><el-input-number v-model="row.targetOilRate" :min="0.000001" :max="100000000" :precision="6" :disabled="hasActiveRun || submittingRun" :aria-label="`ECLIPSE 阶段目标 ${row.well} ${row.date}`" /></template></el-table-column>
             <el-table-column prop="unit" label="流量单位" /><el-table-column prop="bhpLimit" label="BHP 下限" /><el-table-column prop="lineNumber" label="源行" />
           </el-table>
-          <p>原文件 {{ activeVersion.inspection.caseName }}；BHP 单位 {{ activeVersion.inspection.unitSystem === 'FIELD' ? 'psia' : 'barsa' }}。日期边界报告对应刚结束的时段，新目标从边界之后生效。</p>
+          <p>{{ activeVersion.inspection.packageProductionControlPlanContext ? '主文件' : '原文件' }} {{ activeVersion.inspection.caseName }}；BHP 单位 {{ activeVersion.inspection.unitSystem === 'FIELD' ? 'psia' : 'barsa' }}。日期边界报告对应刚结束的时段，新目标从边界之后生效。</p>
+        </template>
+      </section>
+      <section v-if="isEclipse100RunPresentation && eclipseWaterInjectionPlanAvailable" class="eclipse-scenario" aria-label="ECLIPSE 分阶段注水目标方案">
+        <el-checkbox v-model="eclipseWaterInjectionPlanEnabled" :disabled="hasActiveRun || submittingRun" @change="toggleEclipseWaterInjectionPlan">制定多井分阶段注水目标</el-checkbox>
+        <template v-if="eclipseWaterInjectionPlanEnabled">
+          <label>基线运行</label><el-select v-model="eclipseBaselineRunId" :disabled="hasActiveRun || submittingRun" aria-label="ECLIPSE 调注阶段方案基线"><el-option v-for="run in eclipseBaselineOptions" :key="run.id" :value="run.id" :label="`#${run.id} · 成功基线`" /></el-select>
+          <p>在已有日期上调整 OPEN/RATE 目标，未修改的记录保持原值。每行目标延续至该井下一条控制；后续明确记录会覆盖前期。最多同时修改 24 条，保留原日期、其它井和生产控制及压力上限。</p>
+          <el-table :data="eclipseWaterInjectionPlanDraft" max-height="380" border size="small" aria-label="ECLIPSE 已有调注阶段目标编辑">
+            <el-table-column v-if="activeVersion.inspection.waterInjectionControlPlanContext" prop="sourceFile" label="源文件" min-width="170" />
+            <el-table-column prop="well" label="井" min-width="110" /><el-table-column prop="date" label="生效日期" min-width="130" /><el-table-column prop="timeDays" label="生效天数" /><el-table-column label="下一覆盖"><template #default="{ row }">{{ row.nextDate || `计划结束第 ${row.nextTimeDays} 天` }}</template></el-table-column>
+            <el-table-column prop="originalInjectionRate" label="原注水目标" /><el-table-column label="新注水目标" min-width="190"><template #default="{ row }"><el-input-number v-model="row.targetInjectionRate" :min="0.000001" :max="100000000" :precision="6" :disabled="hasActiveRun || submittingRun" :aria-label="`ECLIPSE 调注阶段目标 ${row.well} ${row.date}`" /></template></el-table-column>
+            <el-table-column prop="unit" label="流量单位" /><el-table-column prop="bhpLimit" label="BHP 上限" /><el-table-column prop="lineNumber" label="源行" />
+          </el-table>
+          <p>{{ activeVersion.inspection.waterInjectionControlPlanContext ? '主文件' : '原文件' }} {{ activeVersion.inspection.caseName }}；BHP 单位 {{ activeVersion.inspection.unitSystem === 'FIELD' ? 'psia' : 'barsa' }}。日期边界报告对应刚结束的时段，新目标从边界之后生效。</p>
         </template>
       </section>
       <section v-if="isEclipse100RunPresentation && eclipseGroupStructureAvailable" class="eclipse-scenario" aria-label="ECLIPSE 组树与分配方案">
@@ -3163,14 +3212,14 @@ defineExpose({ eclipseRunRequest })
               <el-option value="SHUT" label="SHUT（关闭）" />
             </el-select>
           </label>
-          <div v-if="eclipseProductionTargetRecord">初始阶段 · 保持 OPEN<br />原产油目标：{{ eclipseProductionTargetRecord.originalOilRate }} {{ eclipseProductionTargetRecord.unit }}</div>
+          <div v-if="eclipseProductionTargetRecord">初始阶段 · 保持 OPEN<br />原产油目标：{{ eclipseProductionTargetRecord.originalOilRate }} {{ eclipseProductionTargetRecord.unit }}<br />来源：{{ eclipseProductionTargetRecord.sourceFile }}:{{ eclipseProductionTargetRecord.lineNumber }}</div>
           <label>控制模式
             <el-input model-value="ORAT" disabled aria-label="ECLIPSE WCONPROD 控制模式" />
           </label>
           <label>ORAT 目标值 {{ eclipseProductionTargetRecord?.unit || '' }}
             <el-input-number v-model="eclipseWconProdTargetOilRate" :min="0.000001" :max="100000000" :controls="false" :disabled="hasActiveRun || submittingRun" aria-label="ECLIPSE WCONPROD ORAT 目标值" />
           </label>
-          <small v-if="eclipseProductionTargetMode">修改初始产油目标并保留其它压力限制；实际产量可能受压力或油藏供给限制。计算后可下载完整方案工程，再上传复算。当前支持无 INCLUDE 的 FIELD 工程。</small>
+          <small v-if="eclipseProductionTargetMode">修改初始产油目标并保留其它压力限制；实际产量可能受压力或油藏供给限制。计算后可下载完整方案工程，再上传复算。支持已核准执行顺序的 FIELD 单文件及 INCLUDE 工程；只修改所选源记录，其它文件保留。</small>
           <small v-else>此选项只修改预测段初始 WCONPROD 中已有 ORAT 行的状态和目标值；井底压力使用单独的 BHP 方案选项。WRAT/GRAT、批量多井或任意 Schedule 文本仍待开发。</small>
         </template>
       </section>
@@ -3258,9 +3307,10 @@ defineExpose({ eclipseRunRequest })
             <el-select v-if="eclipseForecastRestartReports.length" v-model="eclipseForecastRestartReport" :disabled="hasActiveRun || submittingRun" aria-label="ECLIPSE 重启报告编号">
               <el-option v-for="report in eclipseForecastRestartReports" :key="report" :value="report" :label="eclipseForecastReportLabel(report)" />
             </el-select>
-            <el-input-number v-else-if="!eclipseForecastCatalogPresent" v-model="eclipseForecastRestartReport" :min="1" :max="1000000" :controls="false" :disabled="hasActiveRun || submittingRun" aria-label="ECLIPSE 重启报告编号" />
+            <el-input-number v-else-if="!eclipseForecastRequiresCatalog" v-model="eclipseForecastRestartReport" :min="1" :max="1000000" :controls="false" :disabled="hasActiveRun || submittingRun" aria-label="ECLIPSE 重启报告编号" />
           </label>
-          <small v-if="eclipseForecastSource">已核对 {{ eclipseForecastSource.catalog.reports.length }} 个真实历史报告；仅显示与当前预测输入相符的截止日期。计算后可下载含完整重启状态的工程，重新上传复算。</small>
+          <small v-if="eclipseForecastSource">已核对 {{ eclipseForecastSource.catalog.reports.length }} 个真实历史报告；{{ eclipseForecastSource.schemaVersion === 'eclipse-restart-source/2' ? '二进制 UNRST' : '格式化 FUNRST' }} 状态。仅显示与当前预测输入相符的截止日期。计算后可下载含完整重启状态的工程，重新上传复算。</small>
+          <small v-else-if="eclipseForecastRequiresCatalog && !eclipseForecastCatalogPresent">二进制重启状态缺少已核准报告目录，请重新运行历史模型；不能手填报告号。</small>
           <small v-else-if="eclipseForecastCatalogLoading">正在核对历史报告目录…</small>
           <small v-else-if="eclipseForecastCatalogError" role="alert">{{ eclipseForecastCatalogError }}</small>
           <small v-else-if="eclipseForecastRestartReports.length">候选报告来自所选历史 Run 的 FUNRST SEQNUM 索引；仍须与预测 DATA 的 SOLUTION / RESTART 声明一致，Worker 会在启动求解器前复核。</small>
@@ -3365,8 +3415,8 @@ defineExpose({ eclipseRunRequest })
          <PipesimPackageOverview :inspection="activeVersion.inspection" />
        </el-tab-pane>
       <el-tab-pane v-if="isEclipseModel" label="ECLIPSE 结果" name="eclipse">
-        <EclipseThermalResult v-if="activeVersion?.modelKind === 'eclipse_300' && activeVersion?.inspection?.schemaVersion === 'eclipse-data-inspection/15'" :run="selectedRun" :inspection="activeVersion?.inspection" />
-        <EclipseCompositionalResult v-else-if="activeVersion?.modelKind === 'eclipse_300'" :run="selectedRun" :inspection="activeVersion?.inspection" />
+        <EclipseThermalResult v-if="activeVersion?.modelKind === 'eclipse_300' && ['eclipse-data-inspection/15', 'eclipse-data-inspection/23'].includes(activeVersion?.inspection?.schemaVersion)" :run="selectedRun" :inspection="activeVersion?.inspection" :disabled="hasActiveRun || submittingRun" @run-scenario="submitRun" @select-run="selectHistoryRun" />
+        <EclipseCompositionalResult v-else-if="activeVersion?.modelKind === 'eclipse_300'" :run="selectedRun" :inspection="activeVersion?.inspection" :history="runHistory" :disabled="hasActiveRun || submittingRun" @run-scenario="submitRun" @select-run="selectHistoryRun" />
         <EclipseRunResult v-else :run="selectedRun" :history="runHistory" :inspection="activeVersion?.inspection" @create-grid-field-run="submitRun" @create-completion-geometry-run="submitRun" @create-new-well-run="submitRun" @create-new-completion-run="submitRun" @create-pvtw-run="submitRun" @create-oil-pvt-run="submitRun" @create-gas-pvt-run="submitRun" @create-relperm-run="submitRun" @select-run="selectHistoryRun" />
       </el-tab-pane>
       <el-tab-pane v-if="isEclipseModel" label="DATA 检查" name="inspection">

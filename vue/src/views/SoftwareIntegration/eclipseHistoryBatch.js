@@ -60,6 +60,7 @@ export function historyBatchComparison({ batch, dataset, evaluations, failures =
 }
 export function historyBatchCsv(rows, dataset) {
   const cell=value=>{const s=String(value??''),safe=typeof value==='string' && /^[=+\-@\t\r]/.test(s)?"'"+s:s;return '"'+safe.replaceAll('"','""')+'"'}
-  return '\uFEFF'+[['观察源SHA256','方案','运行','状态','井/对象','指标','单位','观察点','可比点','覆盖率','MAE','RMSE','平均误差','排名','原因'],
-    ...rows.map(r=>[dataset.metadata.sourceSha256,r.name,r.runId,r.status,r.metric?.well,r.metric?.keyword,r.metric?.unit,r.metric?.observedCount,r.metric?.matchedCount,r.metric?.coverage,r.metric?.mae,r.metric?.rmse,r.metric?.bias,r.rank,r.reason])].map(row=>row.map(cell).join(',')).join('\r\n')
+  const indexed=rows.some(r=>r.metric?.vectorIndex!=null)
+  return '\uFEFF'+[[...(indexed?['原始列（从1计）']:[]),'观察源SHA256','方案','运行','状态','井/对象','指标','单位','观察点','可比点','覆盖率','MAE','RMSE','平均误差','排名','原因'],
+    ...rows.map(r=>[...(indexed?[r.metric?.vectorIndex==null?null:r.metric.vectorIndex+1]:[]),dataset.metadata.sourceSha256,r.name,r.runId,r.status,r.metric?.well,r.metric?.keyword,r.metric?.unit,r.metric?.observedCount,r.metric?.matchedCount,r.metric?.coverage,r.metric?.mae,r.metric?.rmse,r.metric?.bias,r.rank,r.reason])].map(row=>row.map(cell).join(',')).join('\r\n')
 }

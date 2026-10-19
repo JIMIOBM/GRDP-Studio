@@ -5,6 +5,7 @@ import java.util.Set;
 /** One explicit saturation region. SOF3 oil columns always move together. */
 public final class EclipseRelpermParameters {
     public static final String SCHEMA="eclipse-relperm-parameters/1";
+    public static final String GAS_SCHEMA="eclipse-relperm-parameters/2";
     private static final Set<String> FIELDS=Set.of("schemaVersion","baselineRunId","sourceFile","sourceSha256","keyword","keywordLineNumber","unit","multiplier","rows");
     private EclipseRelpermParameters(){}
     private static boolean fields(JsonNode v,Set<String> expected){if(v==null||!v.isObject())return false;var names=new HashSet<String>();v.properties().forEach(p->names.add(p.getKey()));return names.equals(expected);}
@@ -37,12 +38,12 @@ public final class EclipseRelpermParameters {
         double swco=number(water.path("rows").path(0).path("values").path(0).asText());var rows=oil.path("rows");double somax=number(rows.path(rows.size()-1).path("values").path(0).asText());return Math.abs(swco+somax-1)<=1e-12;
     }
     public static boolean valid(JsonNode v){
-        if(!fields(v,FIELDS)||!v.path("schemaVersion").isString()||!SCHEMA.equals(v.path("schemaVersion").asText())||!v.path("unit").isString()||!"1".equals(v.path("unit").asText())||!v.path("keyword").isString()||!Set.of("SWFN","SOF3").contains(v.path("keyword").asText())
+        if(!fields(v,FIELDS)||!v.path("schemaVersion").isString()||!(SCHEMA.equals(v.path("schemaVersion").asText())&&Set.of("SWFN","SOF3").contains(v.path("keyword").asText())||GAS_SCHEMA.equals(v.path("schemaVersion").asText())&&"SGFN".equals(v.path("keyword").asText()))||!v.path("unit").isString()||!"1".equals(v.path("unit").asText())||!v.path("keyword").isString()
             ||!v.path("sourceFile").isString()||!v.path("sourceFile").asText().matches("(?i)^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\\.DATA$")||!v.path("sourceSha256").isString()||!v.path("sourceSha256").asText().matches("^[a-f0-9]{64}$")
             ||!v.path("baselineRunId").isIntegralNumber()||!v.path("baselineRunId").canConvertToLong()||v.path("baselineRunId").asLong()<=0||!v.path("keywordLineNumber").isIntegralNumber()||!v.path("keywordLineNumber").canConvertToInt()||v.path("keywordLineNumber").asInt()<=0||v.path("keywordLineNumber").asInt()>2000000||!v.path("multiplier").isNumber())return false;
         double m=v.path("multiplier").asDouble();String key=v.path("keyword").asText();if(!Double.isFinite(m)||m<.000001||m>100||m==1||!validRows(key,v.path("rows"),v.path("keywordLineNumber").asInt()))return false;
         boolean changed=false;
-        for(var row:v.path("rows"))for(int column=1;column<=("SWFN".equals(key)?1:2);column++){double kr=number(row.path("values").path(column).asText()),target=kr*m;if(!Double.isFinite(target)||target<0||target>1)return false;changed|=target!=kr;}
+        for(var row:v.path("rows"))for(int column=1;column<=("SOF3".equals(key)?2:1);column++){double kr=number(row.path("values").path(column).asText()),target=kr*m;if(!Double.isFinite(target)||target<0||target>1)return false;changed|=target!=kr;}
         return changed;
     }
     public static boolean matchesInspection(JsonNode v,JsonNode inspection){

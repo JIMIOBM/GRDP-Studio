@@ -17,7 +17,7 @@ function submit(){try{const p=buildPvtw({run:props.run,inspection:props.inspecti
   <section v-if="baseline" class="result-panel" aria-label="ECLIPSE 水物性调整">
     <h2>水物性 · PVTW</h2>
     <p>用于比较水样物性或不确定性对注采压力的影响。作用于唯一PVT区全部水相；定产量井可能只改变压力。压缩性与黏压系数本期支持非负值。</p>
-    <el-alert v-if="!record" type="info" :closable="false" title="需要单DATA纯水模型及唯一明确五项PVTW。多PVT区、默认字段、INCLUDE和热模型尚未开放。" />
+    <el-alert v-if="!record" type="info" :closable="false" title="需要单DATA纯水模型及唯一明确五项PVTW。分区水物性请使用对应分区面板；默认字段、INCLUDE和热模型尚未开放。" />
     <template v-else>
       <p>基线 #{{ run.id }} · {{ pvtwLabels[field] }}原值 {{ originalViscosity }} {{ unit }} · {{ record.sourceFile }}:{{ record.lineNumber }}</p>
       <p>参考压力 {{ record.recordValues[0] }} {{ pressureUnit }}；水体积系数 {{ record.recordValues[1] }} {{ pvtwUnit(inspection.unitSystem,'FORMATION_VOLUME_FACTOR') }}；水压缩性 {{ record.recordValues[2] }} 1/{{ inversePressureUnit }}；黏压系数 {{ record.recordValues[4] }} 1/{{ inversePressureUnit }}。</p>

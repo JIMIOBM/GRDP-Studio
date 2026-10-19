@@ -27,9 +27,28 @@ import com.grdp.studio.softwareintegration.support.EclipseCompletionGeometryPara
 import com.grdp.studio.softwareintegration.support.EclipseNewWellParameters;
 import com.grdp.studio.softwareintegration.support.EclipseNewCompletionParameters;
 import com.grdp.studio.softwareintegration.support.EclipsePvtwParameters;
+import com.grdp.studio.softwareintegration.support.EclipseWetGasPvtParameters;
+import com.grdp.studio.softwareintegration.support.EclipseLiveOilPvtParameters;
 import com.grdp.studio.softwareintegration.support.EclipseOilPvtParameters;
 import com.grdp.studio.softwareintegration.support.EclipseGasPvtParameters;
 import com.grdp.studio.softwareintegration.support.EclipseRelpermParameters;
+import com.grdp.studio.softwareintegration.support.EclipseCoupledRelpermParameters;
+import com.grdp.studio.softwareintegration.support.EclipseMultiSatRelpermParameters;
+import com.grdp.studio.softwareintegration.support.EclipseMultiSatFamilyIIParameters;
+import com.grdp.studio.softwareintegration.support.EclipseMultiPvtParameters;
+import com.grdp.studio.softwareintegration.support.EclipseMultiLiveOilPvtParameters;
+import com.grdp.studio.softwareintegration.support.EclipseMultiWetGasPvtParameters;
+import com.grdp.studio.softwareintegration.support.EclipseMultiWaterPvtParameters;
+import com.grdp.studio.softwareintegration.support.EclipseCompositionalProductionParameters;
+import com.grdp.studio.softwareintegration.support.EclipseCompositionalPressureParameters;
+import com.grdp.studio.softwareintegration.support.EclipseCompositionalReinjectionParameters;
+import com.grdp.studio.softwareintegration.support.EclipseCompositionalGasSalesParameters;
+import com.grdp.studio.softwareintegration.support.EclipseCompositionalInjectionPressureParameters;
+import com.grdp.studio.softwareintegration.support.EclipseCompositionalFluidPropertyParameters;
+import com.grdp.studio.softwareintegration.support.EclipseCompositionalForecastParameters;
+import com.grdp.studio.softwareintegration.support.EclipseThermalInjectionParameters;
+import com.grdp.studio.softwareintegration.support.EclipseThermalPlanParameters;
+import com.grdp.studio.softwareintegration.support.EclipseThermalRockParameters;
 import com.grdp.studio.softwareintegration.support.EclipseScheduleParameters;
 import com.grdp.studio.softwareintegration.support.EclipseProductionTargetParameters;
 import com.grdp.studio.softwareintegration.support.EclipsePressureControlParameters;
@@ -132,6 +151,13 @@ public class SoftwareIntegrationRunServiceImpl implements SoftwareIntegrationRun
                 && scenario instanceof tools.jackson.databind.node.ObjectNode object) {
             object.putNull("referenceGroup");
         }
+        // An explicit null target inherits the original future controls; an omitted target is invalid.
+        if (request.getParameters() instanceof java.util.Map<?, ?> input
+                && EclipseCompositionalForecastParameters.SCHEMA.equals(input.get("schemaVersion"))
+                && input.containsKey("targetGasRate") && input.get("targetGasRate") == null
+                && scenario instanceof tools.jackson.databind.node.ObjectNode object) {
+            object.putNull("targetGasRate");
+        }
         boolean eclipseModelCandidate = "ECLIPSE_100".equals(simulatorType(version.getModelKind())) || "ECLIPSE_300".equals(simulatorType(version.getModelKind()));
         JsonNode persistedWellInspection = PipesimWellInspectionValidator.supports(version.getModelKind())
                 ? PipesimWellInspectionValidator.parsePersisted(version.getInspectionJson()) : null;
@@ -154,14 +180,143 @@ public class SoftwareIntegrationRunServiceImpl implements SoftwareIntegrationRun
                 ? "" : version.getOriginalName().toLowerCase(java.util.Locale.ROOT);
         JsonNode persistedEclipseInspection = eclipse
                 ? EclipseDataInspectionValidator.parsePersisted(version.getInspectionJson()) : null;
-        if (compositional && (persistedEclipseInspection == null || !Set.of("eclipse-data-inspection/14", "eclipse-data-inspection/15").contains(persistedEclipseInspection.path("schemaVersion").asText())))
+        if (compositional && (persistedEclipseInspection == null || !Set.of("eclipse-data-inspection/14", "eclipse-data-inspection/15", "eclipse-data-inspection/16", "eclipse-data-inspection/17", "eclipse-data-inspection/18", "eclipse-data-inspection/19", "eclipse-data-inspection/20", "eclipse-data-inspection/21", "eclipse-data-inspection/22", "eclipse-data-inspection/23").contains(persistedEclipseInspection.path("schemaVersion").asText())))
             throw new RunException(HttpStatus.CONFLICT, "E300模型缺少已验证的组分或热采检查，请重新验证");
-        if (compositional && !scenario.isNull()) throw new RunException(HttpStatus.BAD_REQUEST, "E300组分工程暂不支持套用E100编辑或重启方案，请直接计算完整工程");
+        if (compositional && !scenario.isNull() && !EclipseCompositionalProductionParameters.valid(scenario) && !EclipseCompositionalPressureParameters.valid(scenario) && !EclipseCompositionalReinjectionParameters.valid(scenario) && !EclipseCompositionalGasSalesParameters.valid(scenario) && !EclipseCompositionalInjectionPressureParameters.valid(scenario) && !EclipseCompositionalFluidPropertyParameters.valid(scenario) && !EclipseThermalInjectionParameters.valid(scenario) && !EclipseThermalPlanParameters.valid(scenario) && !EclipseThermalRockParameters.valid(scenario) && !EclipseCompositionalForecastParameters.valid(scenario)) throw new RunException(HttpStatus.BAD_REQUEST, "E300仅开放已核准的组分井控、回注、售气、PCRIT/TCRIT/ZCRIT、历史SAVE续算及热采注入参数");
         JsonNode persistedNetworkInspection = !eclipse && "network".equals(version.getModelKind())
                 ? PipesimNetworkInspectionValidator.parsePersisted(version.getInspectionJson())
                 : PipesimWellInspectionValidator.networkInspection(persistedWellInspection);
         if (eclipse && !scenario.isNull()) {
-            if (EclipseRelpermParameters.valid(scenario)) {
+            if (EclipseCompositionalForecastParameters.valid(scenario)) {
+                validateCompositionalForecast(scenario, persistedEclipseInspection, versionId, compositional);
+            }
+            else if (EclipseThermalRockParameters.valid(scenario)) {
+                if (!compositional || !EclipseThermalRockParameters.matchesInspection(scenario,persistedEclipseInspection))
+                    throw new RunException(HttpStatus.BAD_REQUEST,"热物性方案须绑定已核准完整源、统一活动网格属性、物理记录、原单位与原值");
+                var baseline=runStore.find(scenario.path("baselineRunId").asLong());
+                if (baseline==null || baseline.getModelVersionId()!=versionId || !"eclipse".equals(baseline.getRunType()) || !"SUCCEEDED".equals(baseline.getStatus())
+                    || !"VALID_FULL".equals(baseline.getResultContract()) || !parse(baseline.getParametersJson()).isNull())
+                    throw new RunException(HttpStatus.CONFLICT,"热物性方案需要同版本完整无参数成功基线");
+            }
+            else if (EclipseThermalPlanParameters.valid(scenario)) {
+                if (!compositional || !EclipseThermalPlanParameters.matchesInspection(scenario, persistedEclipseInspection))
+                    throw new RunException(HttpStatus.BAD_REQUEST,"多阶段注汽方案须绑定完整原工程、井、两条源记录、单位、原值及原报告时刻");
+                var baseline=runStore.find(scenario.path("baselineRunId").asLong());
+                if (baseline==null || baseline.getModelVersionId()!=versionId || !"eclipse".equals(baseline.getRunType()) || !"SUCCEEDED".equals(baseline.getStatus())
+                    || !"VALID_FULL".equals(baseline.getResultContract()) || !parse(baseline.getParametersJson()).isNull())
+                    throw new RunException(HttpStatus.CONFLICT,"多阶段注汽方案需要同版本完整无参数成功基线");
+            }
+            else if (EclipseThermalInjectionParameters.valid(scenario)) {
+                if (!compositional || !EclipseThermalInjectionParameters.matchesInspection(scenario, persistedEclipseInspection))
+                    throw new RunException(HttpStatus.BAD_REQUEST,"热采注入方案须绑定完整WINJTEMP源、井、行号、字段、单位及原值");
+                var baseline=runStore.find(scenario.path("baselineRunId").asLong());
+                if (baseline==null || baseline.getModelVersionId()!=versionId || !"eclipse".equals(baseline.getRunType()) || !"SUCCEEDED".equals(baseline.getStatus())
+                    || !"VALID_FULL".equals(baseline.getResultContract()) || !parse(baseline.getParametersJson()).isNull())
+                    throw new RunException(HttpStatus.CONFLICT,"热采注入方案需要同版本完整无参数成功基线");
+            }
+            else if (EclipseCompositionalReinjectionParameters.valid(scenario)) {
+                if (!compositional || !EclipseCompositionalReinjectionParameters.matchesInspection(scenario, persistedEclipseInspection))
+                    throw new RunException(HttpStatus.BAD_REQUEST, "E300回注比例须绑定完整自组GV气源、销售与原关井计划、源SHA、组、行号和原值");
+                var baseline = runStore.find(scenario.path("baselineRunId").asLong());
+                if (baseline == null || baseline.getModelVersionId() != versionId || !"eclipse".equals(baseline.getRunType())
+                    || !"SUCCEEDED".equals(baseline.getStatus()) || !"VALID_FULL".equals(baseline.getResultContract()) || !parse(baseline.getParametersJson()).isNull())
+                    throw new RunException(HttpStatus.CONFLICT, "E300回注比例需要同版本完整无参数成功基线");
+            }
+            else if (EclipseCompositionalGasSalesParameters.valid(scenario)) {
+                if (!compositional || !EclipseCompositionalGasSalesParameters.matchesInspection(scenario, persistedEclipseInspection))
+                    throw new RunException(HttpStatus.BAD_REQUEST, "E300固定销售目标须绑定完整自组GV气源、销售与原关井计划、源SHA、组、行号和原值");
+                var baseline = runStore.find(scenario.path("baselineRunId").asLong());
+                if (baseline == null || baseline.getModelVersionId() != versionId || !"eclipse".equals(baseline.getRunType())
+                    || !"SUCCEEDED".equals(baseline.getStatus()) || !"VALID_FULL".equals(baseline.getResultContract()) || !parse(baseline.getParametersJson()).isNull())
+                    throw new RunException(HttpStatus.CONFLICT, "E300固定销售目标需要同版本完整无参数成功基线");
+            }
+            else if (EclipseCompositionalInjectionPressureParameters.valid(scenario)) {
+                if (!compositional || !EclipseCompositionalInjectionPressureParameters.matchesInspection(scenario, persistedEclipseInspection))
+                    throw new RunException(HttpStatus.BAD_REQUEST, "E300注气井BHP上限须绑定完整自组GV气源、销售与原关井计划、源SHA、组、行号和原值");
+                var baseline = runStore.find(scenario.path("baselineRunId").asLong());
+                if (baseline == null || baseline.getModelVersionId() != versionId || !"eclipse".equals(baseline.getRunType())
+                    || !"SUCCEEDED".equals(baseline.getStatus()) || !"VALID_FULL".equals(baseline.getResultContract()) || !parse(baseline.getParametersJson()).isNull())
+                    throw new RunException(HttpStatus.CONFLICT, "E300注气井BHP上限需要同版本完整无参数成功基线");
+            }
+            else if (EclipseCompositionalFluidPropertyParameters.valid(scenario)) {
+                if (!compositional || !EclipseCompositionalFluidPropertyParameters.matchesInspection(scenario, persistedEclipseInspection))
+                    throw new RunException(HttpStatus.BAD_REQUEST, "E300PCRIT组分临界压力须绑定完整自组GV气源、销售与原关井计划、源SHA、组、行号和原值");
+                var baseline = runStore.find(scenario.path("baselineRunId").asLong());
+                if (baseline == null || baseline.getModelVersionId() != versionId || !"eclipse".equals(baseline.getRunType())
+                    || !"SUCCEEDED".equals(baseline.getStatus()) || !"VALID_FULL".equals(baseline.getResultContract()) || !parse(baseline.getParametersJson()).isNull())
+                    throw new RunException(HttpStatus.CONFLICT, "E300PCRIT组分临界压力需要同版本完整无参数成功基线");
+            }
+            else if (EclipseCompositionalPressureParameters.valid(scenario)) {
+                if (!compositional || !EclipseCompositionalPressureParameters.matchesInspection(scenario, persistedEclipseInspection))
+                    throw new RunException(HttpStatus.BAD_REQUEST, "E300生产BHP下限须绑定已核准PR九组分完整源、井、压力记录行、单位及原值");
+                var baseline = runStore.find(scenario.path("baselineRunId").asLong());
+                if (baseline == null || baseline.getModelVersionId() != versionId || !"eclipse".equals(baseline.getRunType())
+                    || !"SUCCEEDED".equals(baseline.getStatus()) || !"VALID_FULL".equals(baseline.getResultContract()) || !parse(baseline.getParametersJson()).isNull())
+                    throw new RunException(HttpStatus.CONFLICT, "E300生产BHP下限需要同版本完整无参数成功基线");
+            }
+            else if (EclipseCompositionalProductionParameters.valid(scenario)) {
+                if (!compositional || !EclipseCompositionalProductionParameters.matchesInspection(scenario, persistedEclipseInspection))
+                    throw new RunException(HttpStatus.BAD_REQUEST, "E300产气目标须绑定已核准PR九组分完整源、井、物理行、单位及原值");
+                var baseline = runStore.find(scenario.path("baselineRunId").asLong());
+                if (baseline == null || baseline.getModelVersionId() != versionId || !"eclipse".equals(baseline.getRunType())
+                    || !"SUCCEEDED".equals(baseline.getStatus()) || !"VALID_FULL".equals(baseline.getResultContract()) || !parse(baseline.getParametersJson()).isNull())
+                    throw new RunException(HttpStatus.CONFLICT, "E300产气目标需要同版本完整无参数成功基线");
+            }
+            else if(EclipseMultiWaterPvtParameters.valid(scenario)){
+                if(!EclipseMultiWaterPvtParameters.matchesInspection(scenario,persistedEclipseInspection))
+                    throw new RunException(HttpStatus.BAD_REQUEST,"PVTW分区方案必须绑定完整水物性原记录、明确区号及源文件SHA");
+                var baseline=runStore.find(scenario.path("baselineRunId").asLong());
+                if(baseline==null||baseline.getModelVersionId()!=versionId||!"eclipse".equals(baseline.getRunType())||!"SUCCEEDED".equals(baseline.getStatus())||!"VALID_FULL".equals(baseline.getResultContract())||!parse(baseline.getParametersJson()).isNull())
+                    throw new RunException(HttpStatus.CONFLICT,"PVTW分区方案需要同版本完整无参数成功基线");
+            }
+            else if(EclipseMultiWetGasPvtParameters.valid(scenario)){
+                if(!EclipseMultiWetGasPvtParameters.matchesInspection(scenario,persistedEclipseInspection))
+                    throw new RunException(HttpStatus.BAD_REQUEST,"PVTG分区方案必须绑定完整油气原表、明确区号及源文件SHA");
+                var baseline=runStore.find(scenario.path("baselineRunId").asLong());
+                if(baseline==null||baseline.getModelVersionId()!=versionId||!"eclipse".equals(baseline.getRunType())||!"SUCCEEDED".equals(baseline.getStatus())||!"VALID_FULL".equals(baseline.getResultContract())||!parse(baseline.getParametersJson()).isNull())
+                    throw new RunException(HttpStatus.CONFLICT,"PVTG分区方案需要同版本完整无参数成功基线");
+            }
+            else if(EclipseMultiLiveOilPvtParameters.valid(scenario)){
+                if(!EclipseMultiLiveOilPvtParameters.matchesInspection(scenario,persistedEclipseInspection))
+                    throw new RunException(HttpStatus.BAD_REQUEST,"PVTO分区方案必须绑定完整油气原表、明确区号及源文件SHA");
+                var baseline=runStore.find(scenario.path("baselineRunId").asLong());
+                if(baseline==null||baseline.getModelVersionId()!=versionId||!"eclipse".equals(baseline.getRunType())||!"SUCCEEDED".equals(baseline.getStatus())||!"VALID_FULL".equals(baseline.getResultContract())||!parse(baseline.getParametersJson()).isNull())
+                    throw new RunException(HttpStatus.CONFLICT,"PVTO分区方案需要同版本完整无参数成功基线");
+            } else if (EclipseMultiPvtParameters.valid(scenario)) {
+                if(!EclipseMultiPvtParameters.matchesInspection(scenario,persistedEclipseInspection))
+                    throw new RunException(HttpStatus.BAD_REQUEST,"PVT分区方案必须绑定完整油气原表、明确区号及源文件SHA");
+                var baseline=runStore.find(scenario.path("baselineRunId").asLong());
+                if(baseline==null||baseline.getModelVersionId()!=versionId||!"eclipse".equals(baseline.getRunType())||!"SUCCEEDED".equals(baseline.getStatus())
+                    ||!"VALID_FULL".equals(baseline.getResultContract())||!parse(baseline.getParametersJson()).isNull())
+                    throw new RunException(HttpStatus.CONFLICT,"PVT分区方案需要同版本完整无参数成功基线");
+            } else if (EclipseMultiSatFamilyIIParameters.valid(scenario)) {
+                if(!EclipseMultiSatFamilyIIParameters.matchesInspection(scenario,persistedEclipseInspection))
+                    throw new RunException(HttpStatus.BAD_REQUEST,"SWOF/SGOF相渗方案须绑定唯一明确三相SAT区、源SHA及完整原表；油相两列必须联动");
+                var baseline=runStore.find(scenario.path("baselineRunId").asLong());
+                if(baseline==null||baseline.getModelVersionId()!=versionId||!"eclipse".equals(baseline.getRunType())||!"SUCCEEDED".equals(baseline.getStatus())
+                    ||!"VALID_FULL".equals(baseline.getResultContract())||!parse(baseline.getParametersJson()).isNull())
+                    throw new RunException(HttpStatus.CONFLICT,"SWOF/SGOF相渗方案必须绑定同版本完整无参数成功基线");
+
+
+
+            } else if (EclipseMultiSatRelpermParameters.valid(scenario)) {
+                if(!EclipseMultiSatRelpermParameters.matchesInspection(scenario,persistedEclipseInspection))
+                    throw new RunException(HttpStatus.BAD_REQUEST,"SWOF/SGOF相渗方案须绑定唯一明确三相SAT区、源SHA及完整原表；油相两列必须联动");
+                var baseline=runStore.find(scenario.path("baselineRunId").asLong());
+                if(baseline==null||baseline.getModelVersionId()!=versionId||!"eclipse".equals(baseline.getRunType())||!"SUCCEEDED".equals(baseline.getStatus())
+                    ||!"VALID_FULL".equals(baseline.getResultContract())||!parse(baseline.getParametersJson()).isNull())
+                    throw new RunException(HttpStatus.CONFLICT,"SWOF/SGOF相渗方案必须绑定同版本完整无参数成功基线");
+
+
+            } else if (EclipseCoupledRelpermParameters.valid(scenario)) {
+                if(!EclipseCoupledRelpermParameters.matchesInspection(scenario,persistedEclipseInspection))
+                    throw new RunException(HttpStatus.BAD_REQUEST,"SWOF/SGOF相渗方案须绑定唯一明确三相SAT区、源SHA及完整原表；油相两列必须联动");
+                var baseline=runStore.find(scenario.path("baselineRunId").asLong());
+                if(baseline==null||baseline.getModelVersionId()!=versionId||!"eclipse".equals(baseline.getRunType())||!"SUCCEEDED".equals(baseline.getStatus())
+                    ||!"VALID_FULL".equals(baseline.getResultContract())||!parse(baseline.getParametersJson()).isNull())
+                    throw new RunException(HttpStatus.CONFLICT,"SWOF/SGOF相渗方案必须绑定同版本完整无参数成功基线");
+
+            } else if (EclipseRelpermParameters.valid(scenario)) {
                 if(!EclipseRelpermParameters.matchesInspection(scenario,persistedEclipseInspection))
                     throw new RunException(HttpStatus.BAD_REQUEST,"相渗方案须绑定唯一明确三相SAT区、源SHA及完整原表；油相两列必须联动");
                 var baseline=runStore.find(scenario.path("baselineRunId").asLong());
@@ -170,14 +325,28 @@ public class SoftwareIntegrationRunServiceImpl implements SoftwareIntegrationRun
                     throw new RunException(HttpStatus.CONFLICT,"相渗方案必须绑定同版本完整无参数成功基线");
             } else if (EclipseGasPvtParameters.valid(scenario)) {
                 if(!EclipseGasPvtParameters.matchesInspection(scenario,persistedEclipseInspection))
-                    throw new RunException(HttpStatus.BAD_REQUEST,"气物性方案须绑定单DATA干气PVDG、源SHA、完整原表与cP单位");
+                    throw new RunException(HttpStatus.BAD_REQUEST,"气物性方案须绑定单DATA干气PVDG、源SHA、完整原表与所选物性的原单位");
                 var baseline=runStore.find(scenario.path("baselineRunId").asLong());
                 if(baseline==null||baseline.getModelVersionId()!=versionId||!"eclipse".equals(baseline.getRunType())||!"SUCCEEDED".equals(baseline.getStatus())
                     ||!"VALID_FULL".equals(baseline.getResultContract())||!parse(baseline.getParametersJson()).isNull())
                     throw new RunException(HttpStatus.CONFLICT,"气物性方案必须绑定同版本完整无参数成功基线");
+            } else if (EclipseWetGasPvtParameters.valid(scenario)) {
+                if(!EclipseWetGasPvtParameters.matchesInspection(scenario,persistedEclipseInspection))
+                    throw new RunException(HttpStatus.BAD_REQUEST,"湿气物性方案须绑定单DATA含挥发油PVTG、源SHA、完整饱和及欠饱和分支与所选物性的原单位");
+                var baseline=runStore.find(scenario.path("baselineRunId").asLong());
+                if(baseline==null||baseline.getModelVersionId()!=versionId||!"eclipse".equals(baseline.getRunType())||!"SUCCEEDED".equals(baseline.getStatus())
+                    ||!"VALID_FULL".equals(baseline.getResultContract())||!parse(baseline.getParametersJson()).isNull())
+                    throw new RunException(HttpStatus.CONFLICT,"湿气物性方案必须绑定同版本完整无参数成功基线");
+            } else if (EclipseLiveOilPvtParameters.valid(scenario)) {
+                if(!EclipseLiveOilPvtParameters.matchesInspection(scenario,persistedEclipseInspection))
+                    throw new RunException(HttpStatus.BAD_REQUEST,"含溶解气油物性方案须绑定单DATA含溶解气PVTO、源SHA、完整饱和及欠饱和分支与所选物性的原单位");
+                var baseline=runStore.find(scenario.path("baselineRunId").asLong());
+                if(baseline==null||baseline.getModelVersionId()!=versionId||!"eclipse".equals(baseline.getRunType())||!"SUCCEEDED".equals(baseline.getStatus())
+                    ||!"VALID_FULL".equals(baseline.getResultContract())||!parse(baseline.getParametersJson()).isNull())
+                    throw new RunException(HttpStatus.CONFLICT,"含溶解气油物性方案必须绑定同版本完整无参数成功基线");
             } else if (EclipseOilPvtParameters.valid(scenario)) {
                 if(!EclipseOilPvtParameters.matchesInspection(scenario,persistedEclipseInspection))
-                    throw new RunException(HttpStatus.BAD_REQUEST,"油物性方案须绑定单DATA死油PVDO、源SHA、完整原表与cP单位");
+                    throw new RunException(HttpStatus.BAD_REQUEST,"油物性方案须绑定单DATA死油PVDO、源SHA、完整原表与所选物性的原单位");
                 var baseline=runStore.find(scenario.path("baselineRunId").asLong());
                 if(baseline==null||baseline.getModelVersionId()!=versionId||!"eclipse".equals(baseline.getRunType())||!"SUCCEEDED".equals(baseline.getStatus())
                     ||!"VALID_FULL".equals(baseline.getResultContract())||!parse(baseline.getParametersJson()).isNull())
@@ -373,7 +542,7 @@ public class SoftwareIntegrationRunServiceImpl implements SoftwareIntegrationRun
         boolean eclipsePackage = eclipse
                 && lowerOriginalName.endsWith(".zip")
                 && persistedEclipseInspection != null
-                && Set.of("eclipse-data-inspection/3", "eclipse-data-inspection/4", "eclipse-data-inspection/5", "eclipse-data-inspection/6", "eclipse-data-inspection/7", "eclipse-data-inspection/8", "eclipse-data-inspection/9", "eclipse-data-inspection/10", "eclipse-data-inspection/11", "eclipse-data-inspection/12", "eclipse-data-inspection/13", "eclipse-data-inspection/14", "eclipse-data-inspection/15").contains(persistedEclipseInspection.path("schemaVersion").asText())
+                && Set.of("eclipse-data-inspection/3", "eclipse-data-inspection/4", "eclipse-data-inspection/5", "eclipse-data-inspection/6", "eclipse-data-inspection/7", "eclipse-data-inspection/8", "eclipse-data-inspection/9", "eclipse-data-inspection/10", "eclipse-data-inspection/11", "eclipse-data-inspection/12", "eclipse-data-inspection/13", "eclipse-data-inspection/14", "eclipse-data-inspection/15", "eclipse-data-inspection/16", "eclipse-data-inspection/17", "eclipse-data-inspection/18", "eclipse-data-inspection/19", "eclipse-data-inspection/20", "eclipse-data-inspection/21", "eclipse-data-inspection/22", "eclipse-data-inspection/23").contains(persistedEclipseInspection.path("schemaVersion").asText())
                 && persistedEclipseInspection.path("packageFiles").isArray()
                 && !persistedEclipseInspection.path("packageFiles").isEmpty();
         if (eclipse
@@ -512,6 +681,52 @@ public class SoftwareIntegrationRunServiceImpl implements SoftwareIntegrationRun
         }
         return new ArtifactRangeDownload(artifact.path(), artifact.name(), artifact.contentType(),
                 offset, length, artifact.sizeBytes());
+    }
+
+    private void validateCompositionalForecast(JsonNode scenario, JsonNode inspection, long versionId, boolean compositional) {
+        if (!compositional || inspection == null || !Set.of("eclipse-data-inspection/17", "eclipse-data-inspection/19", "eclipse-data-inspection/20", "eclipse-data-inspection/21", "eclipse-data-inspection/22").contains(inspection.path("schemaVersion").asText()))
+            throw new RunException(HttpStatus.BAD_REQUEST, "E300历史续算需要已核准的完整原模型，不能再次修改导入的预测包");
+        var history = runStore.find(scenario.path("historyRunId").asLong());
+        if (history == null || history.getModelVersionId() != versionId || !"eclipse".equals(history.getRunType())
+            || !"SUCCEEDED".equals(history.getStatus()) || !"VALID_FULL".equals(history.getResultContract()) || !parse(history.getParametersJson()).isNull())
+            throw new RunException(HttpStatus.CONFLICT, "E300续算必须绑定同版本完整无参数成功历史运行");
+        var historicalArtifacts = runStore.artifacts(history.getId());
+        var catalogs = historicalArtifacts.stream().filter(a -> EclipseCompositionalForecastParameters.CATALOG.equals(a.getArtifactName())).toList();
+        if (catalogs.size() != 1 || catalogs.get(0).getSizeBytes() == null || catalogs.get(0).getSizeBytes() > 64 * 1024)
+            throw new RunException(HttpStatus.CONFLICT, "历史运行没有完整的E300保存点，请用支持SAVE的原模型重新运行");
+        var catalogArtifact = catalogs.get(0);
+        if (!scenario.path("saveCatalogSha256").asText().equals(catalogArtifact.getSha256()))
+            throw new RunException(HttpStatus.BAD_REQUEST, "选择的E300保存点目录与请求校验值不匹配");
+        try {
+            var downloaded = downloadArtifact(history.getId(), catalogArtifact.getId());
+            var bytes = Files.readAllBytes(downloaded.path());
+            if (bytes.length > 64 * 1024 || !java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(bytes)).equals(catalogArtifact.getSha256()))
+                throw new RunException(HttpStatus.CONFLICT, "历史保存点目录已变化，请重新计算历史模型");
+            var catalog = objectMapper.readTree(bytes);
+            if (!EclipseCompositionalForecastParameters.matchesRequest(scenario, catalog, inspection)
+                || !EclipseCompositionalForecastParameters.matchesResult(catalog, parse(history.getResultJson())))
+                throw new RunException(HttpStatus.BAD_REQUEST, "E300预测目标、原模型、组分、网格、报告号或历史结果不匹配");
+            for (var file : catalog.path("files")) {
+                var states = historicalArtifacts.stream().filter(a -> file.path("artifactName").asText().equals(a.getArtifactName())
+                    && file.path("sha256").asText().equals(a.getSha256()) && a.getSizeBytes() != null && a.getSizeBytes() == file.path("sizeBytes").asLong()
+                    && "application/octet-stream".equals(a.getContentType())).toList();
+                if (states.size() != 1) throw new RunException(HttpStatus.CONFLICT, "历史保存点缺少匹配的完整原生状态文件");
+                var state = downloadArtifact(history.getId(), states.get(0).getId());
+                if (!compositionalStateSha256(state.path()).equals(file.path("sha256").asText()))
+                    throw new RunException(HttpStatus.CONFLICT, "历史保存点原生状态文件已变化，请重新计算历史模型");
+            }
+        } catch (IOException | java.security.NoSuchAlgorithmException error) {
+            throw new RunException(HttpStatus.CONFLICT, "E300历史保存点不可用，请重新计算历史模型");
+        }
+    }
+
+    private static String compositionalStateSha256(Path path) throws IOException, java.security.NoSuchAlgorithmException {
+        var digest = java.security.MessageDigest.getInstance("SHA-256");
+        try (var input = Files.newInputStream(path)) {
+            var buffer = new byte[1024 * 1024]; int count;
+            while ((count = input.read(buffer)) != -1) digest.update(buffer, 0, count);
+        }
+        return java.util.HexFormat.of().formatHex(digest.digest());
     }
 
     @Override

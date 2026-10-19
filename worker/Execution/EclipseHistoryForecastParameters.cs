@@ -13,7 +13,7 @@ internal sealed partial record EclipseHistoryForecastParameters(
 {
     internal const string Schema = "eclipse-history-forecast-parameters/1";
 
-    internal static bool TryParse(JsonElement value, out EclipseHistoryForecastParameters? parameters)
+    internal static bool TryParse(JsonElement value, out EclipseHistoryForecastParameters? parameters, bool binary = false)
     {
         parameters = null;
         if (value.ValueKind != JsonValueKind.Object || value.EnumerateObject().Count() != 6
@@ -22,7 +22,7 @@ internal sealed partial record EclipseHistoryForecastParameters(
             || !value.TryGetProperty("forecastDataFile", out var forecast) || forecast.ValueKind != JsonValueKind.String
             || !SafeDataPath().IsMatch(forecast.GetString() ?? string.Empty)
             || !value.TryGetProperty("restartArtifactName", out var artifact) || artifact.ValueKind != JsonValueKind.String
-            || !RestartArtifact().IsMatch(artifact.GetString() ?? string.Empty)
+            || !(binary ? BinaryRestartArtifact() : RestartArtifact()).IsMatch(artifact.GetString() ?? string.Empty)
             || !value.TryGetProperty("restartArtifactSha256", out var sha) || sha.ValueKind != JsonValueKind.String
             || !Sha256().IsMatch(sha.GetString() ?? string.Empty)
             || !value.TryGetProperty("restartReport", out var report) || report.ValueKind != JsonValueKind.Number || !report.TryGetInt32(out var reportNumber) || reportNumber <= 0)
@@ -57,14 +57,15 @@ internal sealed partial record EclipseHistoryForecastParameters(
                 declarations.Count == 0 ? "The selected forecast DATA package has no unambiguous RESTART declaration." : "The selected forecast DATA package contains multiple RESTART declarations.");
 
         var declaration = declarations[0];
-        var artifactBaseName = parameters.RestartArtifactName["eclipse-output-".Length..^".FUNRST".Length];
-        var deckBaseName = declaration.BaseName.EndsWith(".FUNRST", StringComparison.OrdinalIgnoreCase)
-            ? declaration.BaseName[..^".FUNRST".Length]
+        var extension = Path.GetExtension(parameters.RestartArtifactName);
+        var artifactBaseName = parameters.RestartArtifactName["eclipse-output-".Length..^extension.Length];
+        var deckBaseName = declaration.BaseName.EndsWith(extension, StringComparison.OrdinalIgnoreCase)
+            ? declaration.BaseName[..^extension.Length]
             : declaration.BaseName;
         if (!string.Equals(deckBaseName, artifactBaseName, StringComparison.OrdinalIgnoreCase)
             || declaration.Report != parameters.RestartReport)
             throw new EclipseDeckPackageException("ECLIPSE_FORECAST_RESTART_MISMATCH",
-                "The selected FUNRST Artifact and report must exactly match the forecast DATA RESTART declaration.");
+                "The selected restart Artifact and report must exactly match the forecast DATA RESTART declaration.");
     }
 
     private static string WithoutComments(string source)
@@ -105,6 +106,8 @@ internal sealed partial record EclipseHistoryForecastParameters(
     private static partial Regex SafeDataPath();
     [GeneratedRegex(@"^eclipse-output-[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\.FUNRST$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex RestartArtifact();
+    [GeneratedRegex(@"^eclipse-output-[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\.UNRST$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex BinaryRestartArtifact();
     [GeneratedRegex("^[a-f0-9]{64}$", RegexOptions.CultureInvariant)]
     private static partial Regex Sha256();
     [GeneratedRegex("(?im)^[ \\t]*RESTART\\b[ \\t\\r\\n]+(?:'(?<single>[^'\\r\\n]+)'|\"(?<double>[^\"\\r\\n]+)\"|(?<bare>[A-Za-z0-9_.-]+))[ \\t\\r\\n]+(?<report>[0-9]+)[ \\t\\r\\n]*/[ \\t]*$", RegexOptions.CultureInvariant)]

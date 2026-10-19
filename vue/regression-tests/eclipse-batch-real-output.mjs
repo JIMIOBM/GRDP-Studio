@@ -1,9 +1,13 @@
+import * as wetGasPvt from '../src/views/SoftwareIntegration/eclipseWetGasPvt.js'
+import * as liveOilPvt from '../src/views/SoftwareIntegration/eclipseLiveOilPvt.js'
 import assert from 'node:assert/strict'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { compileScript, parse } from '@vue/compiler-sfc'
 import * as Vue from 'vue'
 import * as batch from '../src/views/SoftwareIntegration/eclipseBatch.js'
+import * as oilPvt from '../src/views/SoftwareIntegration/eclipseOilPvt.js'
+import * as gasPvt from '../src/views/SoftwareIntegration/eclipseGasPvt.js'
 
 const directory = resolve(process.argv[2]), load = name => JSON.parse(readFileSync(resolve(directory, name + '.json'), 'utf8'))
 const receipt = load('acceptance-summary'); assert.equal(receipt.apiVerified, true)
@@ -16,7 +20,7 @@ const saved = new Map()
 Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: key => saved.get(key) ?? null, setItem: (key, value) => saved.set(key, value), removeItem: key => saved.delete(key) } })
 const { descriptor } = parse(readFileSync(new URL('../src/views/SoftwareIntegration/EclipseBatchPanel.vue', import.meta.url), 'utf8'))
 const code = compileScript(descriptor, { id: 'real-batch', genDefaultAs: 'component' }).content.replace(/^import (.+) from ['"](.+)['"]\r?$/gm, (_, bindings, module) => `const ${bindings} = deps[${JSON.stringify(module)}]`)
-const component = new Function('deps', `${code}; return component`)({ vue: Vue, './eclipseBatch.js': batch, '@/api/softwareIntegration': { softwareIntegrationApi: api } })
+const component = new Function('deps', `${code}; return component`)({ vue: Vue, './eclipseBatch.js': batch, './eclipseWetGasPvt.js': wetGasPvt, './eclipseLiveOilPvt.js': liveOilPvt, './eclipseOilPvt.js': oilPvt, './eclipseGasPvt.js': gasPvt, '@/api/softwareIntegration': { softwareIntegrationApi: api } })
 const setup = component.setup; let state
 component.setup = (props, context) => { state = setup(props, context); return state }; component.render = () => null
 const renderer = Vue.createRenderer({ createElement: () => ({}), createText: () => ({}), createComment: () => ({}), insert() {}, remove() {}, setText() {}, setElementText() {}, patchProp() {}, parentNode: () => null, nextSibling: () => null })

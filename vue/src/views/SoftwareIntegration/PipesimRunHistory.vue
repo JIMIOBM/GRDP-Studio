@@ -39,7 +39,7 @@ const formatElapsed = value => {
 }
 const formatParameters = row => {
   const parameters = row.parameters
-  if (parameters?.schemaVersion === 'eclipse-history-forecast-parameters/2') {
+  if (['eclipse-history-forecast-parameters/2', 'eclipse-history-forecast-parameters/3'].includes(parameters?.schemaVersion)) {
     return `${parameters.forecastDataFile} · 历史 #${parameters.historyRunId} · 截止 ${parameters.restartDate}（${parameters.restartTimeDays} 天，报告 ${parameters.restartReport}）`
   }
   if (parameters?.schemaVersion === 'pipesim-well-parameters/1' && Number.isFinite(parameters.reservoirPressurePsi)) return `地层压力 ${parameters.reservoirPressurePsi} psia`
@@ -86,7 +86,7 @@ const formatParameters = row => {
   if (['eclipse-schedule-parameters/6', 'eclipse-schedule-parameters/7'].includes(parameters?.schemaVersion)) {
     return `WELOPEN ${parameters.wells?.join('、') || '-'} · ${parameters.events?.map(event => `${event.status} ${event.date}`).join(' → ') || '-'} · 基线 #${parameters.baselineRunId || '-'}`
   }
-  if (parameters?.schemaVersion === 'eclipse-production-target-parameters/1') {
+  if (['eclipse-production-target-parameters/1', 'eclipse-production-target-parameters/2'].includes(parameters?.schemaVersion)) {
     return `WCONPROD ${parameters.well || '-'} · OPEN ORAT ${parameters.originalOilRate} → ${parameters.targetOilRate} ${parameters.unit} · 基线 #${parameters.baselineRunId || '-'}`
   }
   if (parameters?.schemaVersion === 'eclipse-production-control-parameters/1') {
@@ -95,8 +95,27 @@ const formatParameters = row => {
   if (parameters?.schemaVersion === 'eclipse-tstep-parameters/1') {
     return `TSTEP 第${parameters.lineNumber}行 · ${parameters.targetSteps.join('、')} 天 · 基线 #${parameters.baselineRunId}`
   }
-  if (parameters?.schemaVersion === 'eclipse-control-plan-parameters/1') {
+  if (['eclipse-control-plan-parameters/1', 'eclipse-control-plan-parameters/2'].includes(parameters?.schemaVersion)) {
     return `分阶段 ORAT · ${parameters.edits?.map(e => `${e.well} ${e.date} ${e.originalOilRate}→${e.targetOilRate} ${e.unit}`).join('；')} · 基线 #${parameters.baselineRunId}`
+  }
+  if (parameters?.schemaVersion === 'eclipse-thermal-rock-parameters/1') { return `E300 ${parameters.field === 'HEATCR' ? '岩石体积热容' : '综合导热率'} · ${parameters.originalValue} → ${parameters.targetValue} ${parameters.unit} · 基线 #${parameters.baselineRunId}` }
+  if (parameters?.schemaVersion === 'eclipse-thermal-injection-plan-parameters/1') { return `E300多阶段注汽 ${parameters.well} · ${parameters.stages?.length || 0}次调整 · 第${parameters.stages?.map(s => s.startTimeDays).join('、')}天报告后 · 基线 #${parameters.baselineRunId}` }
+  if (['eclipse-thermal-injection-parameters/1', 'eclipse-thermal-injection-parameters/2', 'eclipse-thermal-injection-parameters/3'].includes(parameters?.schemaVersion)) { return `E300 ${parameters.startTimeDays ? '第'+parameters.startTimeDays+'天报告后 · ' : ''}${{ STEAM_QUALITY: '蒸汽干度', INJECTION_TEMPERATURE: '注入温度', SURFACE_INJECTION_RATE: '地面注入目标', BHP_UPPER_LIMIT: '注入BHP上限' }[parameters.field]} ${parameters.well} · ${parameters.originalValue} → ${parameters.targetValue} ${parameters.unit === 'fraction' ? '无量纲' : parameters.unit === 'degF' ? '°F' : parameters.unit === 'degC' ? '°C' : parameters.unit} · 基线 #${parameters.baselineRunId}` }
+  if (parameters?.schemaVersion === 'eclipse-compositional-reinjection-parameters/1') { return `E300可用气回注比例 ${parameters.group} · ${parameters.originalFraction} → ${parameters.targetFraction} · 基线 #${parameters.baselineRunId}` }
+  if (parameters?.schemaVersion === 'eclipse-compositional-gas-sales-parameters/1') { return `E300固定销售目标 ${parameters.group} · ${parameters.originalSalesTarget} → ${parameters.targetSalesTarget} Mscf/day · 基线 #${parameters.baselineRunId}` }
+  if (parameters?.schemaVersion === 'eclipse-compositional-forecast-parameters/1') { return `E300续算 · 历史 #${parameters.historyRunId} · 报告 ${parameters.saveReport} · ${parameters.targetGasRate === null ? '沿原计划' : `产气目标 ${parameters.targetGasRate} Mscf/day`}` }
+  if (parameters?.schemaVersion === 'eclipse-compositional-fluid-property-parameters/1') { return `E300组分PCRIT ${parameters.componentName} · ${parameters.originalValue} → ${parameters.targetValue} ${parameters.unit} · 基线 #${parameters.baselineRunId}` }
+  if (parameters?.schemaVersion === 'eclipse-compositional-temperature-parameters/1') { return `E300组分TCRIT ${parameters.componentName} · ${parameters.originalValue} → ${parameters.targetValue} ${parameters.unit} · 基线 #${parameters.baselineRunId}` }
+  if (parameters?.schemaVersion === 'eclipse-compositional-eos-property-parameters/1') { return `E300组分${parameters.field} ${parameters.componentName} · ${parameters.originalValue} → ${parameters.targetValue} ${parameters.unit} · 基线 #${parameters.baselineRunId}` }
+  if (parameters?.schemaVersion === 'eclipse-compositional-acentric-factor-parameters/1') { return `E300组分ACF ${parameters.componentName} · ${parameters.originalValue} → ${parameters.targetValue} ${parameters.unit} · 基线 #${parameters.baselineRunId}` }
+  if (parameters?.schemaVersion === 'eclipse-compositional-critical-z-parameters/1') { return `E300组分ZCRIT ${parameters.componentName} · ${parameters.originalValue} → ${parameters.targetValue} ${parameters.unit} · 基线 #${parameters.baselineRunId}` }
+  if (parameters?.schemaVersion === 'eclipse-compositional-injection-pressure-parameters/1') { return `E300注气BHP上限 ${parameters.well} · ${parameters.originalBhpUpperLimit} → ${parameters.targetBhpUpperLimit} psia · 基线 #${parameters.baselineRunId}` }
+  if (parameters?.schemaVersion === 'eclipse-compositional-pressure-parameters/1') { return `E300生产BHP下限 ${parameters.well} · ${parameters.originalBhpLowerLimit} → ${parameters.targetBhpLowerLimit} ${parameters.unit} · 基线 #${parameters.baselineRunId}` }
+  if (parameters?.schemaVersion === 'eclipse-compositional-production-parameters/1') {
+    return `E300 GRAT ${parameters.well} · ${parameters.originalGasRate} → ${parameters.targetGasRate} ${parameters.unit} · 基线 #${parameters.baselineRunId}`
+  }
+  if (parameters?.schemaVersion === 'eclipse-water-injection-plan-parameters/1') {
+    return `分阶段注水 RATE · ${parameters.edits?.map(e => `${e.well} ${e.date} ${e.originalInjectionRate}→${e.targetInjectionRate} ${e.unit}`).join('；')} · 基线 #${parameters.baselineRunId}`
   }
   if (parameters?.schemaVersion === 'eclipse-group-structure-parameters/1') {
     return `${parameters.keyword} ${parameters.objectName} · 父组 ${parameters.parentGroup} · ${parameters.originalValue} → ${parameters.targetValue} ${parameters.unit} · ${parameters.sourceFile}:${parameters.lineNumber} · 基线 #${parameters.baselineRunId}`

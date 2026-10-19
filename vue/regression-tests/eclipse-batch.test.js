@@ -1,9 +1,22 @@
+import * as compositionalFluidProperty from '../src/views/SoftwareIntegration/eclipseCompositionalFluidProperty.js'
+import * as coupledRelperm from '../src/views/SoftwareIntegration/eclipseCoupledRelperm.js'
+import * as multiLiveOilPvt from '../src/views/SoftwareIntegration/eclipseMultiLiveOilPvt.js'
+import * as multiWaterPvt from '../src/views/SoftwareIntegration/eclipseMultiWaterPvt.js'
+import * as pvtwProperties from '../src/views/SoftwareIntegration/eclipsePvtw.js'
+import * as multiWetGasPvt from '../src/views/SoftwareIntegration/eclipseMultiWetGasPvt.js'
+import * as multiPvt from '../src/views/SoftwareIntegration/eclipseMultiPvt.js'
+import * as multiFamilyII from '../src/views/SoftwareIntegration/eclipseMultiSatFamilyII.js'
+import * as multiSatRelperm from '../src/views/SoftwareIntegration/eclipseMultiSatRelperm.js'
+import * as wetGasPvt from '../src/views/SoftwareIntegration/eclipseWetGasPvt.js'
+import * as liveOilPvt from '../src/views/SoftwareIntegration/eclipseLiveOilPvt.js'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFileSync } from 'node:fs'
 import { compileScript, parse } from '@vue/compiler-sfc'
 import * as Vue from 'vue'
 import * as batch from '../src/views/SoftwareIntegration/eclipseBatch.js'
+import * as oilPvt from '../src/views/SoftwareIntegration/eclipseOilPvt.js'
+import * as gasPvt from '../src/views/SoftwareIntegration/eclipseGasPvt.js'
 import { gridRegionBrowserFixture } from '../tests/fixtures/eclipseGridRegion.js'
 const root = new URL('../tests/fixtures/eclipseRelperm/', import.meta.url)
 const load = name => JSON.parse(readFileSync(new URL(name + '.json', root), 'utf8'))
@@ -55,8 +68,8 @@ const deferred = () => { let resolve, reject; const promise = new Promise((yes, 
 function mount(api, saved = new Map()) {
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: key => saved.get(key) ?? null, setItem: (key, value) => saved.set(key, value), removeItem: key => saved.delete(key) } })
   const { descriptor } = parse(readFileSync(new URL('../src/views/SoftwareIntegration/EclipseBatchPanel.vue', import.meta.url), 'utf8'))
-  const code = compileScript(descriptor, { id: 'batch', genDefaultAs: 'component' }).content.replace(/^import (.+) from ['"](.+)['"]\r?$/gm, (_, bindings, module) => `const ${bindings.startsWith('{') ? bindings : bindings.slice(5)} = deps[${JSON.stringify(module)}]`)
-  const component = new Function('deps', `${code}; return component`)({ vue: Vue, './eclipseBatch.js': batch, '@/api/softwareIntegration': { softwareIntegrationApi: api } })
+  const code = compileScript(descriptor, { id: 'batch', genDefaultAs: 'component' }).content.replace(/^import (.+) from ['"](.+)['"]\r?$/gm, (_, bindings, module) => bindings.startsWith('{') ? `const ${bindings} = deps[${JSON.stringify(module)}]` : bindings.startsWith('* as ') ? `const ${bindings.slice(5)} = deps[${JSON.stringify(module)}]` : `const ${bindings} = {}`)
+  const component = new Function('deps', `${code}; return component`)({ './eclipseCompositionalFluidProperty.js': compositionalFluidProperty, vue: Vue, './eclipseBatch.js': batch, './eclipseCoupledRelperm.js': coupledRelperm, './eclipseCoupledRelperm': coupledRelperm, './eclipseMultiSatRelperm.js': multiSatRelperm, './eclipseMultiLiveOilPvt.js': multiLiveOilPvt, './eclipseMultiLiveOilPvt': multiLiveOilPvt, './eclipseMultiWaterPvt.js': multiWaterPvt, './eclipseMultiWaterPvt': multiWaterPvt, './eclipsePvtw.js': pvtwProperties, './eclipseMultiWetGasPvt.js': multiWetGasPvt, './eclipseMultiWetGasPvt': multiWetGasPvt, './eclipseMultiPvt.js': multiPvt, './eclipseMultiPvt': multiPvt, './eclipseMultiSatFamilyII.js': multiFamilyII, './eclipseMultiSatFamilyII': multiFamilyII, './eclipseWetGasPvt.js': wetGasPvt, './eclipseLiveOilPvt.js': liveOilPvt, './eclipseOilPvt.js': oilPvt, './eclipseGasPvt.js': gasPvt, '@/api/softwareIntegration': { softwareIntegrationApi: api } })
   const setup = component.setup; let state
   component.setup = (props, context) => { state = setup(props, context); return state }; component.render = () => null
   const props = Vue.reactive({ run: structuredClone(baseline), inspection: structuredClone(inspection) })

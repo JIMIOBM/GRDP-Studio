@@ -1,4 +1,10 @@
 <script setup>
+import { validThermalRockContext } from './eclipseThermalRock.js'
+import { validCompositionalPortableContext } from './eclipseCompositionalForecast'
+import { validCompositionalFluidPropertyContext, validCompositionalTemperatureContext, validCompositionalCriticalZContext, validCompositionalAcentricFactorContext, validCompositionalEosPropertyContexts } from './eclipseCompositionalFluidProperty'
+import { compositionalProductionRecords } from './eclipseCompositionalProduction'
+import { validCompositionalReinjectionContext } from './eclipseCompositionalReinjection'
+import { thermalInjectionRecords } from './eclipseThermalInjection' 
 import { computed, ref } from 'vue'
 import { validCompositionalMetadata } from './eclipseCompositional'
 import { validThermalMetadata } from './eclipseThermal'
@@ -9,6 +15,9 @@ import { groupProductionRecords } from './eclipseGroupProduction'
 import { groupRateRecords } from './eclipseGroupRate'
 import { groupWaterProductionRecords } from './eclipseGroupWaterProduction'
 import { controlPlanPeriods } from './eclipseControlPlan'
+import { packageControlPlanRecords } from './eclipsePackageControlPlan'
+import { waterInjectionPlanRecords, waterInjectionPlanPeriods } from './eclipseWaterInjectionPlan'
+import { productionTargetRecords } from './eclipseProductionTarget'
 import { groupStructureRecords, groupStructureLabel } from './eclipseGroupStructure'
 import { advancedInjectionRecords } from './eclipseAdvancedInjection'
 import { groupInjectionRecords } from './eclipseGroupInjection'
@@ -19,6 +28,7 @@ const store = useSoftwareIntegrationStore()
 const { activeModel, activeVersion, activeVersionId, versions } = storeToRefs(store)
 const inspection = computed(() => activeVersion.value?.inspection || null)
 const productionControlPlan = computed(() => controlPlanPeriods(inspection.value))
+const waterInjectionControlPlan = computed(() => waterInjectionPlanPeriods(inspection.value))
 const groupStructureControls = computed(() => groupStructureRecords(inspection.value))
 const advancedInjectionGroups = computed(() => advancedInjectionRecords(inspection.value))
 const waterProductionGroups = computed(() => groupWaterProductionRecords(inspection.value))
@@ -26,7 +36,7 @@ const rateGroups = computed(() => groupRateRecords(inspection.value))
 const productionGroups = computed(() => groupProductionRecords(inspection.value))
 const injectionGroups = computed(() => groupInjectionRecords(inspection.value))
 const gasInjectionGroups = computed(() => groupGasInjectionRecords(inspection.value))
-const inspectionSchemas = new Set(['eclipse-data-inspection/1', 'eclipse-data-inspection/2', 'eclipse-data-inspection/3', 'eclipse-data-inspection/4', 'eclipse-data-inspection/5', 'eclipse-data-inspection/6', 'eclipse-data-inspection/7', 'eclipse-data-inspection/8', 'eclipse-data-inspection/9', 'eclipse-data-inspection/10', 'eclipse-data-inspection/11', 'eclipse-data-inspection/12', 'eclipse-data-inspection/13', 'eclipse-data-inspection/14', 'eclipse-data-inspection/15'])
+const inspectionSchemas = new Set(['eclipse-data-inspection/1', 'eclipse-data-inspection/2', 'eclipse-data-inspection/3', 'eclipse-data-inspection/4', 'eclipse-data-inspection/5', 'eclipse-data-inspection/6', 'eclipse-data-inspection/7', 'eclipse-data-inspection/8', 'eclipse-data-inspection/9', 'eclipse-data-inspection/10', 'eclipse-data-inspection/11', 'eclipse-data-inspection/12', 'eclipse-data-inspection/13', 'eclipse-data-inspection/14', 'eclipse-data-inspection/15', 'eclipse-data-inspection/16', 'eclipse-data-inspection/17', 'eclipse-data-inspection/18', 'eclipse-data-inspection/19', 'eclipse-data-inspection/20', 'eclipse-data-inspection/21', 'eclipse-data-inspection/22', 'eclipse-data-inspection/23'])
 const sectionOrder = ['RUNSPEC', 'GRID', 'EDIT', 'PROPS', 'REGIONS', 'SOLUTION', 'SUMMARY', 'SCHEDULE']
 const phaseOrder = ['OIL', 'WATER', 'GAS']
 const unitSystems = new Set(['METRIC', 'FIELD', 'LAB', 'PVT-M'])
@@ -78,18 +88,19 @@ const inspectionDetails = computed(() => {
     ? ['schemaVersion', 'caseName', 'sections', 'unitSystem', 'phases', 'dimensions']
     : value.schemaVersion === 'eclipse-data-inspection/2'
     ? ['schemaVersion', 'caseName', 'sections', 'unitSystem', 'phases', 'dimensions', 'wellNames', 'scheduleTimeline']
-    : ['eclipse-data-inspection/3', 'eclipse-data-inspection/14', 'eclipse-data-inspection/15'].includes(value.schemaVersion)
+    : ['eclipse-data-inspection/3', 'eclipse-data-inspection/14', 'eclipse-data-inspection/15', 'eclipse-data-inspection/16', 'eclipse-data-inspection/17', 'eclipse-data-inspection/18', 'eclipse-data-inspection/19', 'eclipse-data-inspection/20', 'eclipse-data-inspection/21', 'eclipse-data-inspection/22', 'eclipse-data-inspection/23'].includes(value.schemaVersion)
     ? ['schemaVersion', 'caseName', 'sections', 'unitSystem', 'phases', 'dimensions', 'wellNames', 'scheduleTimeline', 'packageFiles']
     : ['schemaVersion', 'caseName', 'sections', 'unitSystem', 'phases', 'dimensions', 'wellNames', 'scheduleTimeline', 'packageFiles', 'scheduleMetadata']
   if (value.schemaVersion === 'eclipse-data-inspection/5') expectedFields.push('vfpTables')
-  if (value.schemaVersion === 'eclipse-data-inspection/14') {
+  if (['eclipse-data-inspection/14', 'eclipse-data-inspection/16', 'eclipse-data-inspection/17', 'eclipse-data-inspection/18', 'eclipse-data-inspection/19', 'eclipse-data-inspection/20', 'eclipse-data-inspection/21', 'eclipse-data-inspection/22'].includes(value.schemaVersion)) {
     expectedFields.push('simulation')
     if (!validCompositionalMetadata(value.simulation)) return null
   }
-  if (value.schemaVersion === 'eclipse-data-inspection/15') {
+  if (['eclipse-data-inspection/15', 'eclipse-data-inspection/23'].includes(value.schemaVersion)) {
     expectedFields.push('simulation')
     if (!validThermalMetadata(value.simulation) || !Array.isArray(value.phases) || value.phases.join(',') !== 'OIL,WATER,GAS') return null
   }
+  if (value.schemaVersion === 'eclipse-data-inspection/23') { expectedFields.push('thermalRockContext'); if (!validThermalRockContext(value.thermalRockContext, value)) return null }
   if (value.schemaVersion === 'eclipse-data-inspection/13') expectedFields.push('vfpTables', 'productionControlPlan')
   if (value.schemaVersion === 'eclipse-data-inspection/12') expectedFields.push('vfpTables', 'groupStructureControls')
   if (value.schemaVersion === 'eclipse-data-inspection/11') expectedFields.push('vfpTables', 'advancedInjectionGroupControls')
@@ -98,6 +109,61 @@ const inspectionDetails = computed(() => {
   if (value.schemaVersion === 'eclipse-data-inspection/6') expectedFields.push('vfpTables', 'groupControls')
   if (value.schemaVersion === 'eclipse-data-inspection/7') expectedFields.push('vfpTables', 'injectionGroupControls')
   if (value.schemaVersion === 'eclipse-data-inspection/8') expectedFields.push('vfpTables', 'gasInjectionGroupControls')
+  if (Object.hasOwn(value, 'waterInjectionControlPlanContext')) {
+    expectedFields.push('waterInjectionControlPlanContext')
+    if (!waterInjectionPlanRecords(value).length) return null
+  }
+  if (Object.hasOwn(value, 'packageProductionControlPlanContext')) {
+    expectedFields.push('packageProductionControlPlanContext')
+    if (!packageControlPlanRecords(value).length) return null
+  }
+  if (Object.hasOwn(value, 'packageProductionTargetContext')) {
+    expectedFields.push('packageProductionTargetContext')
+    if (!productionTargetRecords(value).length) return null
+  }
+  if (Object.hasOwn(value, 'compositionalProductionContext')) {
+    expectedFields.push('compositionalProductionContext')
+    if (!compositionalProductionRecords(value).length) return null
+  }
+  if (Object.hasOwn(value, 'compositionalReinjectionContext')) {
+    expectedFields.push('compositionalReinjectionContext')
+    if (!validCompositionalReinjectionContext(value.compositionalReinjectionContext, value)) return null
+  }
+  if (value.schemaVersion === 'eclipse-data-inspection/16' && !Object.hasOwn(value, 'compositionalReinjectionContext')) return null
+  if (Object.hasOwn(value, 'compositionalFluidPropertyContext')) {
+    expectedFields.push('compositionalFluidPropertyContext')
+    if (!validCompositionalFluidPropertyContext(value.compositionalFluidPropertyContext, value)) return null
+  }
+  if (['eclipse-data-inspection/17', 'eclipse-data-inspection/19', 'eclipse-data-inspection/20', 'eclipse-data-inspection/21', 'eclipse-data-inspection/22'].includes(value.schemaVersion) && !Object.hasOwn(value, 'compositionalFluidPropertyContext')) return null
+  if (Object.hasOwn(value, 'compositionalTemperatureContext')) {
+    expectedFields.push('compositionalTemperatureContext')
+    if (!validCompositionalTemperatureContext(value.compositionalTemperatureContext, value)) return null
+  }
+  if (['eclipse-data-inspection/19', 'eclipse-data-inspection/20', 'eclipse-data-inspection/21', 'eclipse-data-inspection/22'].includes(value.schemaVersion) && !Object.hasOwn(value, 'compositionalTemperatureContext')) return null
+  if (Object.hasOwn(value, 'compositionalEosPropertyContexts')) {
+    expectedFields.push('compositionalEosPropertyContexts')
+    if (!validCompositionalEosPropertyContexts(value.compositionalEosPropertyContexts, value)) return null
+  }
+  if (value.schemaVersion === 'eclipse-data-inspection/22' && !Object.hasOwn(value, 'compositionalEosPropertyContexts')) return null
+  if (Object.hasOwn(value, 'compositionalAcentricFactorContext')) {
+    expectedFields.push('compositionalAcentricFactorContext')
+    if (!validCompositionalAcentricFactorContext(value.compositionalAcentricFactorContext, value)) return null
+  }
+  if (['eclipse-data-inspection/21', 'eclipse-data-inspection/22'].includes(value.schemaVersion) && !Object.hasOwn(value, 'compositionalAcentricFactorContext')) return null
+  if (Object.hasOwn(value, 'compositionalCriticalZContext')) {
+    expectedFields.push('compositionalCriticalZContext')
+    if (!validCompositionalCriticalZContext(value.compositionalCriticalZContext, value)) return null
+  }
+  if (['eclipse-data-inspection/20', 'eclipse-data-inspection/21', 'eclipse-data-inspection/22'].includes(value.schemaVersion) && !Object.hasOwn(value, 'compositionalCriticalZContext')) return null
+  if (Object.hasOwn(value, 'compositionalRestartContext')) {
+    expectedFields.push('compositionalRestartContext')
+    if (!validCompositionalPortableContext(value.compositionalRestartContext, value)) return null
+  }
+  if (value.schemaVersion === 'eclipse-data-inspection/18' && !Object.hasOwn(value, 'compositionalRestartContext')) return null
+  if (Object.hasOwn(value, 'thermalInjectionContext')) {
+    expectedFields.push('thermalInjectionContext')
+    if (!thermalInjectionRecords(value).length) return null
+  }
   if (Object.keys(value).length !== expectedFields.length || !expectedFields.every(key => Object.hasOwn(value, key)) ||
     !isSafeFileName(value.caseName) || !orderedValues(value.sections, sectionOrder) || !orderedValues(value.phases, phaseOrder) ||
     !(value.unitSystem === null || unitSystems.has(value.unitSystem)) || !(value.dimensions === null || safeDimensions(value.dimensions))) return null
@@ -107,13 +173,13 @@ const inspectionDetails = computed(() => {
     unitSystem: value.unitSystem,
     phases: value.phases,
     dimensions: value.dimensions,
-    packageFiles: ['eclipse-data-inspection/3', 'eclipse-data-inspection/4', 'eclipse-data-inspection/5', 'eclipse-data-inspection/6', 'eclipse-data-inspection/7', 'eclipse-data-inspection/8', 'eclipse-data-inspection/9', 'eclipse-data-inspection/10', 'eclipse-data-inspection/11', 'eclipse-data-inspection/12', 'eclipse-data-inspection/13', 'eclipse-data-inspection/14', 'eclipse-data-inspection/15'].includes(value.schemaVersion) ? value.packageFiles : null
+    packageFiles: ['eclipse-data-inspection/3', 'eclipse-data-inspection/4', 'eclipse-data-inspection/5', 'eclipse-data-inspection/6', 'eclipse-data-inspection/7', 'eclipse-data-inspection/8', 'eclipse-data-inspection/9', 'eclipse-data-inspection/10', 'eclipse-data-inspection/11', 'eclipse-data-inspection/12', 'eclipse-data-inspection/13', 'eclipse-data-inspection/14', 'eclipse-data-inspection/15', 'eclipse-data-inspection/16', 'eclipse-data-inspection/17', 'eclipse-data-inspection/19', 'eclipse-data-inspection/20', 'eclipse-data-inspection/21', 'eclipse-data-inspection/22', 'eclipse-data-inspection/23'].includes(value.schemaVersion) ? value.packageFiles : null
   }
 })
 
 const inspectionV2 = computed(() => {
   const value = inspection.value
-  if (!inspectionDetails.value || !['eclipse-data-inspection/2', 'eclipse-data-inspection/3', 'eclipse-data-inspection/4', 'eclipse-data-inspection/5', 'eclipse-data-inspection/6', 'eclipse-data-inspection/7', 'eclipse-data-inspection/8', 'eclipse-data-inspection/9', 'eclipse-data-inspection/10', 'eclipse-data-inspection/11', 'eclipse-data-inspection/12', 'eclipse-data-inspection/13', 'eclipse-data-inspection/14', 'eclipse-data-inspection/15'].includes(value?.schemaVersion) ||
+  if (!inspectionDetails.value || !['eclipse-data-inspection/2', 'eclipse-data-inspection/3', 'eclipse-data-inspection/4', 'eclipse-data-inspection/5', 'eclipse-data-inspection/6', 'eclipse-data-inspection/7', 'eclipse-data-inspection/8', 'eclipse-data-inspection/9', 'eclipse-data-inspection/10', 'eclipse-data-inspection/11', 'eclipse-data-inspection/12', 'eclipse-data-inspection/13', 'eclipse-data-inspection/14', 'eclipse-data-inspection/15', 'eclipse-data-inspection/16', 'eclipse-data-inspection/17', 'eclipse-data-inspection/19', 'eclipse-data-inspection/20', 'eclipse-data-inspection/21', 'eclipse-data-inspection/22', 'eclipse-data-inspection/23'].includes(value?.schemaVersion) ||
     !Array.isArray(value.wellNames) || value.wellNames.length > maxWellNames ||
     !Array.isArray(value.scheduleTimeline) || value.scheduleTimeline.length > maxScheduleEvents) return null
 
@@ -121,7 +187,7 @@ const inspectionV2 = computed(() => {
   if (wellNames.some(name => !name)) return null
   let dateCount = 0
   let tstepCount = 0
-  const withSource = ['eclipse-data-inspection/4', 'eclipse-data-inspection/5', 'eclipse-data-inspection/6', 'eclipse-data-inspection/7', 'eclipse-data-inspection/8', 'eclipse-data-inspection/9', 'eclipse-data-inspection/10', 'eclipse-data-inspection/11', 'eclipse-data-inspection/12', 'eclipse-data-inspection/13', 'eclipse-data-inspection/14', 'eclipse-data-inspection/15'].includes(value.schemaVersion)
+  const withSource = ['eclipse-data-inspection/4', 'eclipse-data-inspection/5', 'eclipse-data-inspection/6', 'eclipse-data-inspection/7', 'eclipse-data-inspection/8', 'eclipse-data-inspection/9', 'eclipse-data-inspection/10', 'eclipse-data-inspection/11', 'eclipse-data-inspection/12', 'eclipse-data-inspection/13', 'eclipse-data-inspection/14', 'eclipse-data-inspection/15', 'eclipse-data-inspection/16', 'eclipse-data-inspection/17', 'eclipse-data-inspection/19', 'eclipse-data-inspection/20', 'eclipse-data-inspection/21', 'eclipse-data-inspection/22', 'eclipse-data-inspection/23'].includes(value.schemaVersion)
   const schedule = value.scheduleTimeline.flatMap((event, eventIndex) => {
       if (!event || typeof event !== 'object') return []
       if (event.kind === 'DATES' && Array.isArray(event.records)) {
@@ -157,7 +223,7 @@ const inspectionV2 = computed(() => {
 })
 const inspectionV3 = computed(() => {
   const value = inspection.value
-  if (!inspectionV2.value || !['eclipse-data-inspection/3', 'eclipse-data-inspection/4', 'eclipse-data-inspection/5', 'eclipse-data-inspection/6', 'eclipse-data-inspection/7', 'eclipse-data-inspection/8', 'eclipse-data-inspection/9', 'eclipse-data-inspection/10', 'eclipse-data-inspection/11', 'eclipse-data-inspection/12', 'eclipse-data-inspection/13', 'eclipse-data-inspection/14', 'eclipse-data-inspection/15'].includes(value?.schemaVersion) ||
+  if (!inspectionV2.value || !['eclipse-data-inspection/3', 'eclipse-data-inspection/4', 'eclipse-data-inspection/5', 'eclipse-data-inspection/6', 'eclipse-data-inspection/7', 'eclipse-data-inspection/8', 'eclipse-data-inspection/9', 'eclipse-data-inspection/10', 'eclipse-data-inspection/11', 'eclipse-data-inspection/12', 'eclipse-data-inspection/13', 'eclipse-data-inspection/14', 'eclipse-data-inspection/15', 'eclipse-data-inspection/16', 'eclipse-data-inspection/17', 'eclipse-data-inspection/19', 'eclipse-data-inspection/20', 'eclipse-data-inspection/21', 'eclipse-data-inspection/22', 'eclipse-data-inspection/23'].includes(value?.schemaVersion) ||
     !Array.isArray(value.packageFiles) || value.packageFiles.length < 1 || value.packageFiles.length > 4096) return null
   const paths = new Set()
   const files = value.packageFiles.flatMap(file => {
@@ -172,7 +238,7 @@ const inspectionV3 = computed(() => {
 })
 const inspectionV4 = computed(() => {
   const value = inspection.value
-  if (!inspectionV2.value || !['eclipse-data-inspection/4', 'eclipse-data-inspection/5', 'eclipse-data-inspection/6', 'eclipse-data-inspection/7', 'eclipse-data-inspection/8', 'eclipse-data-inspection/9', 'eclipse-data-inspection/10', 'eclipse-data-inspection/11', 'eclipse-data-inspection/12', 'eclipse-data-inspection/13', 'eclipse-data-inspection/14', 'eclipse-data-inspection/15'].includes(value?.schemaVersion) ||
+  if (!inspectionV2.value || !['eclipse-data-inspection/4', 'eclipse-data-inspection/5', 'eclipse-data-inspection/6', 'eclipse-data-inspection/7', 'eclipse-data-inspection/8', 'eclipse-data-inspection/9', 'eclipse-data-inspection/10', 'eclipse-data-inspection/11', 'eclipse-data-inspection/12', 'eclipse-data-inspection/13', 'eclipse-data-inspection/14', 'eclipse-data-inspection/15', 'eclipse-data-inspection/16', 'eclipse-data-inspection/17', 'eclipse-data-inspection/19', 'eclipse-data-inspection/20', 'eclipse-data-inspection/21', 'eclipse-data-inspection/22', 'eclipse-data-inspection/23'].includes(value?.schemaVersion) ||
     !value.scheduleMetadata || typeof value.scheduleMetadata !== 'object' || Object.keys(value.scheduleMetadata).length !== 4) return null
   const metadata = value.scheduleMetadata
   if (!Array.isArray(metadata.wells) || metadata.wells.length > maxScheduleMetadataWells ||
@@ -268,7 +334,7 @@ const changeVersion = async versionId => {
           <h1>{{ activeModel.name }}</h1>
           <el-tag :type="activeVersion?.status === 'READY' ? 'success' : 'warning'">{{ activeVersion?.status || '无版本' }}</el-tag>
         </div>
-        <p>{{ activeVersion?.modelKind === 'eclipse_300' ? (inspection?.schemaVersion === 'eclipse-data-inspection/15' ? 'ECLIPSE 300 热采' : 'ECLIPSE 300 组分') : 'ECLIPSE 100' }} .DATA 模型</p>
+        <p>{{ activeVersion?.modelKind === 'eclipse_300' ? (['eclipse-data-inspection/15', 'eclipse-data-inspection/23'].includes(inspection?.schemaVersion) ? 'ECLIPSE 300 热采' : 'ECLIPSE 300 组分') : 'ECLIPSE 100' }} .DATA 模型</p>
       </div>
     </header>
 
@@ -298,14 +364,14 @@ const changeVersion = async versionId => {
           <div><dt>架构版本</dt><dd>{{ inspectionDetails.schemaVersion }}</dd></div>
           <div><dt>单位制</dt><dd>{{ inspectionDetails.unitSystem ?? '未知' }}</dd></div>
           <div><dt>检查状态</dt><dd>有效</dd></div>
-          <template v-if="inspection.schemaVersion === 'eclipse-data-inspection/14'">
+          <template v-if="['eclipse-data-inspection/14', 'eclipse-data-inspection/16', 'eclipse-data-inspection/17', 'eclipse-data-inspection/19', 'eclipse-data-inspection/20', 'eclipse-data-inspection/21', 'eclipse-data-inspection/22'].includes(inspection.schemaVersion)">
             <div><dt>求解器</dt><dd>ECLIPSE {{ inspection.simulation.solver }}</dd></div>
             <div><dt>组分数</dt><dd>{{ inspection.simulation.componentCount }}</dd></div>
             <div><dt>状态方程</dt><dd>Peng-Robinson</dd></div>
             <div class="wide"><dt>组分顺序</dt><dd>{{ inspection.simulation.componentNames.map((n, i) => `${i + 1}: ${n}`).join(' · ') }}</dd></div>
             <div class="wide"><dt>组分相态</dt><dd>油气相由 COMPS 与状态方程定义；下列相态标签为 DATA 中显式声明的相。</dd></div>
           </template>
-          <template v-if="inspection.schemaVersion === 'eclipse-data-inspection/15'">
+          <template v-if="['eclipse-data-inspection/15', 'eclipse-data-inspection/23'].includes(inspection.schemaVersion)">
             <div><dt>求解器</dt><dd>ECLIPSE 300 热采</dd></div>
             <div><dt>油组分数</dt><dd>{{ inspection.simulation.componentCount }}</dd></div>
             <div><dt>热物性模式</dt><dd>LIVEOIL</dd></div>
@@ -413,6 +479,11 @@ const changeVersion = async versionId => {
         <h4>已有分阶段产油目标</h4>
         <p>含初始与后续控制链。生效后持续至该井下一条控制，期间没有新记录则继承原目标；修改前可核对后续覆盖。</p>
         <el-table :data="productionControlPlan" max-height="300" border size="small"><el-table-column prop="well" label="井" /><el-table-column prop="date" label="生效日期" /><el-table-column prop="timeDays" label="生效天数" /><el-table-column prop="originalOilRate" label="原产油目标" /><el-table-column prop="unit" label="单位" /><el-table-column prop="bhpLimit" label="BHP 下限" /><el-table-column label="下一覆盖"><template #default="{ row }">{{ row.nextDate || `计划结束第 ${row.nextTimeDays} 天` }}</template></el-table-column><el-table-column prop="lineNumber" label="源行" /></el-table>
+      </section>
+      <section v-if="waterInjectionControlPlan.length" aria-label="已有分阶段注水目标">
+        <h4>已有分阶段注水目标</h4>
+        <p>含初始与后续控制链。生效后持续至该井下一条控制，期间没有新记录则继承原目标；修改前可核对后续覆盖。</p>
+        <el-table :data="waterInjectionControlPlan" max-height="300" border size="small"><el-table-column prop="sourceFile" label="源文件" /><el-table-column prop="well" label="井" /><el-table-column prop="date" label="生效日期" /><el-table-column prop="timeDays" label="生效天数" /><el-table-column prop="originalInjectionRate" label="原注水目标" /><el-table-column prop="unit" label="单位" /><el-table-column prop="bhpLimit" label="BHP 上限" /><el-table-column label="下一覆盖"><template #default="{ row }">{{ row.nextDate || `计划结束第 ${row.nextTimeDays} 天` }}</template></el-table-column><el-table-column prop="lineNumber" label="源行" /></el-table>
       </section>
       <section v-if="groupStructureControls.length" aria-label="已有生产组树与分配控制">
         <h4>已有生产组树与分配控制</h4>

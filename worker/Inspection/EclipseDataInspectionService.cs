@@ -35,15 +35,40 @@ public sealed class EclipseDataInspectionService(StorageResolver storage)
             var package = packages.Resolve(source, storage.ResolveModelPackageRoot(source));
             var packageBytes = package.Files.Sum(path => new FileInfo(path).Length);
             if (packageBytes > MaxDataBytes) return Invalid("ECLIPSE_DATA_PACKAGE_TOO_LARGE", "The ECLIPSE DATA package exceeds the 64 MiB inspection limit.");
-            var inspection = EclipseDataInspector.InspectPackage(package.Files, Path.GetFileName(request.ModelStorageKey));
+            var portable = EclipseCompositionalSaveState.ReadPortable(package);
+            if (portable is not null)
+            {
+                var portableInspection = EclipseCompositionalPortableInspection.Create(package, portable) with {
+                    PackageFiles = await DescribePackageAsync(package, cancellationToken)
+                };
+                return new(StatusCodes.Status200OK, new ModelValidationResponse("READY", [],
+                    "ECLIPSE 300 compositional historical-state forecast inspection completed.", "eclipse_300", Inspection: portableInspection));
+            }
+            var inspection = EclipseDataInspector.InspectPackage(package.Files, Path.GetFileName(request.ModelStorageKey), package.Root);
             var packageFiles = await DescribePackageAsync(package, cancellationToken);
             var simulation = EclipseSimulationModelReader.Read(package);
             if (simulation is not null)
             {
                 // Keep E100 schedule editors outside the E300 metadata contract.
-                inspection = inspection with { SchemaVersion = simulation.ModelType == "THERMAL" ? "eclipse-data-inspection/15" : "eclipse-data-inspection/14", PackageFiles = packageFiles, Simulation = simulation.Metadata,
+                var productionContext = simulation.ModelType == "COMPOSITIONAL" ? EclipseCompositionalProductionReader.Read(package)?.Context : null;
+                var reinjectionContext = simulation.ModelType == "COMPOSITIONAL" ? EclipseCompositionalReinjectionReader.Read(package)?.Context : null;
+                if (reinjectionContext is not null && (productionContext is null || productionContext.SourceSha256 != reinjectionContext.SourceSha256)) reinjectionContext = null;
+                var fluidPropertyContext = simulation.ModelType == "COMPOSITIONAL" ? EclipseCompositionalFluidPropertyReader.Read(package)?.Context : null;
+                if (fluidPropertyContext is not null && (productionContext is null || productionContext.SourceSha256 != fluidPropertyContext.SourceSha256 || productionContext.SourceSizeBytes != fluidPropertyContext.SourceSizeBytes)) fluidPropertyContext = null;
+                var temperatureContext = fluidPropertyContext is not null ? EclipseCompositionalFluidPropertyReader.Read(package, "TCRIT")?.Context : null;
+                if (temperatureContext is not null && (temperatureContext.SourceSha256 != fluidPropertyContext!.SourceSha256 || temperatureContext.SourceSizeBytes != fluidPropertyContext.SourceSizeBytes)) temperatureContext = null;
+                var criticalZContext = temperatureContext is not null ? EclipseCompositionalFluidPropertyReader.Read(package, "ZCRIT")?.Context : null;
+                if (criticalZContext is not null && (criticalZContext.SourceSha256 != temperatureContext!.SourceSha256 || criticalZContext.SourceSizeBytes != temperatureContext.SourceSizeBytes)) criticalZContext = null;
+                var acentricFactorContext = criticalZContext is not null ? EclipseCompositionalFluidPropertyReader.Read(package, "ACF")?.Context : null;
+                if (acentricFactorContext is not null && (acentricFactorContext.SourceSha256 != criticalZContext!.SourceSha256 || acentricFactorContext.SourceSizeBytes != criticalZContext.SourceSizeBytes)) acentricFactorContext = null;
+                var eosProperties = new[] { "MW", "OMEGAA", "OMEGAB" }.Select(field => acentricFactorContext is not null ? EclipseCompositionalFluidPropertyReader.Read(package, field)?.Context : null).ToArray();
+                IReadOnlyList<EclipseCompositionalFluidPropertyContext>? eosPropertyContexts = eosProperties.All(c => c is not null && c.SourceSha256 == acentricFactorContext!.SourceSha256 && c.SourceSizeBytes == acentricFactorContext.SourceSizeBytes) ? eosProperties.Select(c => c!).ToArray() : null;
+                var thermalRock = simulation.ModelType == "THERMAL" ? EclipseThermalRockReader.Read(package)?.Context : null;
+                inspection = inspection with { SchemaVersion = simulation.ModelType == "THERMAL" ? thermalRock is null ? "eclipse-data-inspection/15" : "eclipse-data-inspection/23" : eosPropertyContexts is not null ? "eclipse-data-inspection/22" : acentricFactorContext is not null ? "eclipse-data-inspection/21" : criticalZContext is not null ? "eclipse-data-inspection/20" : temperatureContext is not null ? "eclipse-data-inspection/19" : fluidPropertyContext is not null ? "eclipse-data-inspection/17" : reinjectionContext is null ? "eclipse-data-inspection/14" : "eclipse-data-inspection/16", PackageFiles = packageFiles, Simulation = simulation.Metadata,
                     ScheduleMetadata = null, VfpTables = null, GroupControls = null, InjectionGroupControls = null, GasInjectionGroupControls = null,
-                    GroupRateControls = null, WaterProductionGroupControls = null, AdvancedInjectionGroupControls = null, GroupStructureControls = null, ProductionControlPlan = null };
+                    GroupRateControls = null, WaterProductionGroupControls = null, AdvancedInjectionGroupControls = null, GroupStructureControls = null, ProductionControlPlan = null,
+                    CompositionalProductionContext = productionContext, CompositionalReinjectionContext = reinjectionContext, CompositionalFluidPropertyContext = fluidPropertyContext, CompositionalTemperatureContext = temperatureContext, CompositionalCriticalZContext = criticalZContext, CompositionalAcentricFactorContext = acentricFactorContext, CompositionalEosPropertyContexts = eosPropertyContexts,
+                    ThermalInjectionContext = simulation.ModelType == "THERMAL" ? EclipseThermalInjectionReader.Read(package)?.Context : null, ThermalRockContext = thermalRock };
                 return new(StatusCodes.Status200OK, new ModelValidationResponse("READY", [], $"ECLIPSE 300 {simulation.ModelType.ToLowerInvariant()} DATA inspection completed.", "eclipse_300", Inspection: inspection));
             }
             inspection = inspection with
@@ -54,6 +79,10 @@ public sealed class EclipseDataInspectionService(StorageResolver storage)
             return new(StatusCodes.Status200OK, new ModelValidationResponse(
                 "READY", [], "ECLIPSE .DATA inspection completed.", "eclipse_100",
                 Inspection: inspection));
+        }
+        catch (InvalidDataException error)
+        {
+            return Invalid("ECLIPSE_COMPOSITIONAL_RESTART_INVALID", error.Message);
         }
         catch (EclipseDataInspectionException error)
         {

@@ -1,0 +1,878 @@
+{
+  "schemaVersion": "eclipse-data-inspection/4",
+  "caseName": "MODEL.DATA",
+  "sections": [
+    "RUNSPEC",
+    "GRID",
+    "PROPS",
+    "SOLUTION",
+    "SUMMARY",
+    "SCHEDULE"
+  ],
+  "unitSystem": "FIELD",
+  "phases": [
+    "OIL",
+    "WATER",
+    "GAS"
+  ],
+  "dimensions": {
+    "nx": 20,
+    "ny": 20,
+    "nz": 10
+  },
+  "wellNames": [
+    "PRODUCR1",
+    "PRODUCR2",
+    "PRODUCR3",
+    "PRODUCR4",
+    "INJECTR1",
+    "INJECTR2",
+    "INJECTR3",
+    "INJECTR4",
+    "INJECTR5",
+    "INJECTR6"
+  ],
+  "scheduleTimeline": [
+    {
+      "kind": "DATES",
+      "records": [
+        {
+          "day": "19",
+          "month": "OCT",
+          "year": "1983",
+          "time": null
+        }
+      ],
+      "sourceFile": "controls/PLAN.INC",
+      "lineNumber": 77
+    },
+    {
+      "kind": "DATES",
+      "records": [
+        {
+          "day": "18",
+          "month": "OCT",
+          "year": "1984",
+          "time": null
+        }
+      ],
+      "sourceFile": "controls/PLAN.INC",
+      "lineNumber": 82
+    },
+    {
+      "kind": "DATES",
+      "records": [
+        {
+          "day": "18",
+          "month": "OCT",
+          "year": "1985",
+          "time": null
+        }
+      ],
+      "sourceFile": "controls/PLAN.INC",
+      "lineNumber": 87
+    },
+    {
+      "kind": "DATES",
+      "records": [
+        {
+          "day": "18",
+          "month": "OCT",
+          "year": "1986",
+          "time": null
+        }
+      ],
+      "sourceFile": "controls/PLAN.INC",
+      "lineNumber": 92
+    },
+    {
+      "kind": "DATES",
+      "records": [
+        {
+          "day": "18",
+          "month": "OCT",
+          "year": "1987",
+          "time": null
+        }
+      ],
+      "sourceFile": "controls/PLAN.INC",
+      "lineNumber": 95
+    },
+    {
+      "kind": "DATES",
+      "records": [
+        {
+          "day": "17",
+          "month": "OCT",
+          "year": "1988",
+          "time": null
+        }
+      ],
+      "sourceFile": "controls/PLAN.INC",
+      "lineNumber": 98
+    },
+    {
+      "kind": "DATES",
+      "records": [
+        {
+          "day": "17",
+          "month": "OCT",
+          "year": "1989",
+          "time": null
+        }
+      ],
+      "sourceFile": "controls/PLAN.INC",
+      "lineNumber": 101
+    },
+    {
+      "kind": "DATES",
+      "records": [
+        {
+          "day": "17",
+          "month": "OCT",
+          "year": "1990",
+          "time": null
+        }
+      ],
+      "sourceFile": "controls/PLAN.INC",
+      "lineNumber": 104
+    },
+    {
+      "kind": "DATES",
+      "records": [
+        {
+          "day": "17",
+          "month": "OCT",
+          "year": "1991",
+          "time": null
+        }
+      ],
+      "sourceFile": "controls/PLAN.INC",
+      "lineNumber": 107
+    },
+    {
+      "kind": "DATES",
+      "records": [
+        {
+          "day": "16",
+          "month": "OCT",
+          "year": "1992",
+          "time": null
+        }
+      ],
+      "sourceFile": "controls/PLAN.INC",
+      "lineNumber": 110
+    }
+  ],
+  "packageFiles": [
+    {
+      "relativePath": "controls/INITIAL.INC",
+      "sizeBytes": 305,
+      "sha256": "25b03ece141604230d9af2224a88dfb14d560992d84882442c962dbf77469fbf"
+    },
+    {
+      "relativePath": "controls/PLAN.INC",
+      "sizeBytes": 2760,
+      "sha256": "149bd150f7e76f339e59f7a9c2cc6712920382c4bc4be9a4b1e063be1991c25f"
+    },
+    {
+      "relativePath": "controls/YEAR1.INC",
+      "sizeBytes": 107,
+      "sha256": "bad4499855d57e7e0a493d87c1877858ccdedf184079a5f510d88772610a470a"
+    },
+    {
+      "relativePath": "controls/YEAR2.INC",
+      "sizeBytes": 107,
+      "sha256": "bad4499855d57e7e0a493d87c1877858ccdedf184079a5f510d88772610a470a"
+    },
+    {
+      "relativePath": "controls/YEAR3.INC",
+      "sizeBytes": 107,
+      "sha256": "bad4499855d57e7e0a493d87c1877858ccdedf184079a5f510d88772610a470a"
+    },
+    {
+      "relativePath": "MODEL.DATA",
+      "sizeBytes": 17268,
+      "sha256": "30119205aaaac78119965f53f5891ed071bd05908c0a2756f35cdcb2170c9530"
+    }
+  ],
+  "scheduleMetadata": {
+    "wells": [
+      {
+        "name": "PRODUCR1",
+        "group": "G",
+        "sourceFile": "controls/PLAN.INC",
+        "lineNumber": 27
+      },
+      {
+        "name": "PRODUCR2",
+        "group": "G",
+        "sourceFile": "controls/PLAN.INC",
+        "lineNumber": 28
+      },
+      {
+        "name": "PRODUCR3",
+        "group": "G",
+        "sourceFile": "controls/PLAN.INC",
+        "lineNumber": 29
+      },
+      {
+        "name": "PRODUCR4",
+        "group": "G",
+        "sourceFile": "controls/PLAN.INC",
+        "lineNumber": 30
+      },
+      {
+        "name": "INJECTR1",
+        "group": "I",
+        "sourceFile": "controls/PLAN.INC",
+        "lineNumber": 31
+      },
+      {
+        "name": "INJECTR2",
+        "group": "I",
+        "sourceFile": "controls/PLAN.INC",
+        "lineNumber": 32
+      },
+      {
+        "name": "INJECTR3",
+        "group": "I",
+        "sourceFile": "controls/PLAN.INC",
+        "lineNumber": 33
+      },
+      {
+        "name": "INJECTR4",
+        "group": "I",
+        "sourceFile": "controls/PLAN.INC",
+        "lineNumber": 34
+      },
+      {
+        "name": "INJECTR5",
+        "group": "WI",
+        "sourceFile": "controls/PLAN.INC",
+        "lineNumber": 35
+      },
+      {
+        "name": "INJECTR6",
+        "group": "WI",
+        "sourceFile": "controls/PLAN.INC",
+        "lineNumber": 36
+      }
+    ],
+    "groups": [],
+    "records": [
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "PRODUCR1",
+          "5",
+          "5",
+          "4",
+          "6",
+          "OPEN",
+          "0",
+          "-1",
+          "0.5"
+        ],
+        "sourceFile": "controls/PLAN.INC",
+        "lineNumber": 44
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "PRODUCR2",
+          "5",
+          "10",
+          "4",
+          "6",
+          "OPEN",
+          "0",
+          "-1",
+          "0.5"
+        ],
+        "sourceFile": "controls/PLAN.INC",
+        "lineNumber": 45
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "PRODUCR3",
+          "5",
+          "15",
+          "4",
+          "6",
+          "OPEN",
+          "0",
+          "-1",
+          "0.5"
+        ],
+        "sourceFile": "controls/PLAN.INC",
+        "lineNumber": 46
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "PRODUCR4",
+          "10",
+          "15",
+          "4",
+          "6",
+          "OPEN",
+          "0",
+          "-1",
+          "0.5"
+        ],
+        "sourceFile": "controls/PLAN.INC",
+        "lineNumber": 47
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "INJECTR1",
+          "20",
+          "1",
+          "1",
+          "1",
+          "OPEN",
+          "1",
+          "-1",
+          "0.5"
+        ],
+        "sourceFile": "controls/PLAN.INC",
+        "lineNumber": 48
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "INJECTR2",
+          "20",
+          "6",
+          "1",
+          "1",
+          "OPEN",
+          "1",
+          "-1",
+          "0.5"
+        ],
+        "sourceFile": "controls/PLAN.INC",
+        "lineNumber": 49
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "INJECTR3",
+          "20",
+          "16",
+          "1",
+          "1",
+          "OPEN",
+          "1",
+          "-1",
+          "0.5"
+        ],
+        "sourceFile": "controls/PLAN.INC",
+        "lineNumber": 50
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "INJECTR4",
+          "16",
+          "20",
+          "1",
+          "1",
+          "OPEN",
+          "1",
+          "-1",
+          "0.5"
+        ],
+        "sourceFile": "controls/PLAN.INC",
+        "lineNumber": 51
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "INJECTR5",
+          "20",
+          "20",
+          "8",
+          "9",
+          "OPEN",
+          "1",
+          "-1",
+          "0.5"
+        ],
+        "sourceFile": "controls/PLAN.INC",
+        "lineNumber": 52
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "INJECTR6",
+          "16",
+          "1",
+          "8",
+          "9",
+          "OPEN",
+          "1",
+          "-1",
+          "0.5"
+        ],
+        "sourceFile": "controls/PLAN.INC",
+        "lineNumber": 53
+      },
+      {
+        "keyword": "WCONPROD",
+        "values": [
+          "PRODUCR1",
+          "OPEN",
+          "ORAT",
+          "20000",
+          "4*",
+          "2500"
+        ],
+        "sourceFile": "controls/PLAN.INC",
+        "lineNumber": 61
+      },
+      {
+        "keyword": "WCONPROD",
+        "values": [
+          "PRODUCR2",
+          "OPEN",
+          "ORAT",
+          "20000",
+          "4*",
+          "2500"
+        ],
+        "sourceFile": "controls/PLAN.INC",
+        "lineNumber": 62
+      },
+      {
+        "keyword": "WCONPROD",
+        "values": [
+          "PRODUCR3",
+          "OPEN",
+          "ORAT",
+          "20000",
+          "4*",
+          "2500"
+        ],
+        "sourceFile": "controls/PLAN.INC",
+        "lineNumber": 63
+      },
+      {
+        "keyword": "WCONPROD",
+        "values": [
+          "PRODUCR4",
+          "OPEN",
+          "ORAT",
+          "20000",
+          "4*",
+          "2500"
+        ],
+        "sourceFile": "controls/PLAN.INC",
+        "lineNumber": 64
+      },
+      {
+        "keyword": "WCONINJE",
+        "values": [
+          "INJECTR1",
+          "GAS",
+          "OPEN",
+          "RATE",
+          "50000"
+        ],
+        "sourceFile": "controls/INITIAL.INC",
+        "lineNumber": 2
+      },
+      {
+        "keyword": "WCONINJE",
+        "values": [
+          "INJECTR2",
+          "GAS",
+          "OPEN",
+          "RATE",
+          "50000"
+        ],
+        "sourceFile": "controls/INITIAL.INC",
+        "lineNumber": 3
+      },
+      {
+        "keyword": "WCONINJE",
+        "values": [
+          "INJECTR3",
+          "GAS",
+          "OPEN",
+          "RATE",
+          "50000"
+        ],
+        "sourceFile": "controls/INITIAL.INC",
+        "lineNumber": 4
+      },
+      {
+        "keyword": "WCONINJE",
+        "values": [
+          "INJECTR4",
+          "GAS",
+          "OPEN",
+          "RATE",
+          "50000"
+        ],
+        "sourceFile": "controls/INITIAL.INC",
+        "lineNumber": 5
+      },
+      {
+        "keyword": "WCONINJE",
+        "values": [
+          "INJECTR5",
+          "WAT",
+          "OPEN",
+          "RATE",
+          "1",
+          "1*",
+          "6000"
+        ],
+        "sourceFile": "controls/INITIAL.INC",
+        "lineNumber": 6
+      },
+      {
+        "keyword": "WCONINJE",
+        "values": [
+          "INJECTR6",
+          "WAT",
+          "OPEN",
+          "RATE",
+          "1",
+          "1*",
+          "6000"
+        ],
+        "sourceFile": "controls/INITIAL.INC",
+        "lineNumber": 7
+      },
+      {
+        "keyword": "WCONINJE",
+        "values": [
+          "INJECTR5",
+          "WATER",
+          "OPEN",
+          "RATE",
+          "1",
+          "1*",
+          "6000"
+        ],
+        "sourceFile": "controls/YEAR1.INC",
+        "lineNumber": 2
+      },
+      {
+        "keyword": "WCONINJE",
+        "values": [
+          "INJECTR6",
+          "WATER",
+          "OPEN",
+          "RATE",
+          "1",
+          "1*",
+          "6000"
+        ],
+        "sourceFile": "controls/YEAR1.INC",
+        "lineNumber": 3
+      },
+      {
+        "keyword": "WCONINJE",
+        "values": [
+          "INJECTR5",
+          "WATER",
+          "OPEN",
+          "RATE",
+          "1",
+          "1*",
+          "6000"
+        ],
+        "sourceFile": "controls/YEAR2.INC",
+        "lineNumber": 2
+      },
+      {
+        "keyword": "WCONINJE",
+        "values": [
+          "INJECTR6",
+          "WATER",
+          "OPEN",
+          "RATE",
+          "1",
+          "1*",
+          "6000"
+        ],
+        "sourceFile": "controls/YEAR2.INC",
+        "lineNumber": 3
+      },
+      {
+        "keyword": "WCONINJE",
+        "values": [
+          "INJECTR5",
+          "WATER",
+          "OPEN",
+          "RATE",
+          "1",
+          "1*",
+          "6000"
+        ],
+        "sourceFile": "controls/YEAR3.INC",
+        "lineNumber": 2
+      },
+      {
+        "keyword": "WCONINJE",
+        "values": [
+          "INJECTR6",
+          "WATER",
+          "OPEN",
+          "RATE",
+          "1",
+          "1*",
+          "6000"
+        ],
+        "sourceFile": "controls/YEAR3.INC",
+        "lineNumber": 3
+      }
+    ],
+    "completions": [
+      {
+        "keyword": "COMPDAT",
+        "well": "PRODUCR1",
+        "i": "5",
+        "j": "5",
+        "k1": "4",
+        "k2": "6",
+        "status": "OPEN",
+        "sourceFile": "controls/PLAN.INC",
+        "lineNumber": 44
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "PRODUCR2",
+        "i": "5",
+        "j": "10",
+        "k1": "4",
+        "k2": "6",
+        "status": "OPEN",
+        "sourceFile": "controls/PLAN.INC",
+        "lineNumber": 45
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "PRODUCR3",
+        "i": "5",
+        "j": "15",
+        "k1": "4",
+        "k2": "6",
+        "status": "OPEN",
+        "sourceFile": "controls/PLAN.INC",
+        "lineNumber": 46
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "PRODUCR4",
+        "i": "10",
+        "j": "15",
+        "k1": "4",
+        "k2": "6",
+        "status": "OPEN",
+        "sourceFile": "controls/PLAN.INC",
+        "lineNumber": 47
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "INJECTR1",
+        "i": "20",
+        "j": "1",
+        "k1": "1",
+        "k2": "1",
+        "status": "OPEN",
+        "sourceFile": "controls/PLAN.INC",
+        "lineNumber": 48
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "INJECTR2",
+        "i": "20",
+        "j": "6",
+        "k1": "1",
+        "k2": "1",
+        "status": "OPEN",
+        "sourceFile": "controls/PLAN.INC",
+        "lineNumber": 49
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "INJECTR3",
+        "i": "20",
+        "j": "16",
+        "k1": "1",
+        "k2": "1",
+        "status": "OPEN",
+        "sourceFile": "controls/PLAN.INC",
+        "lineNumber": 50
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "INJECTR4",
+        "i": "16",
+        "j": "20",
+        "k1": "1",
+        "k2": "1",
+        "status": "OPEN",
+        "sourceFile": "controls/PLAN.INC",
+        "lineNumber": 51
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "INJECTR5",
+        "i": "20",
+        "j": "20",
+        "k1": "8",
+        "k2": "9",
+        "status": "OPEN",
+        "sourceFile": "controls/PLAN.INC",
+        "lineNumber": 52
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "INJECTR6",
+        "i": "16",
+        "j": "1",
+        "k1": "8",
+        "k2": "9",
+        "status": "OPEN",
+        "sourceFile": "controls/PLAN.INC",
+        "lineNumber": 53
+      }
+    ]
+  },
+  "packageProductionTargetContext": {
+    "schemaVersion": "eclipse-package-production-target-context/1",
+    "targets": [
+      {
+        "well": "PRODUCR1",
+        "sourceFile": "controls/PLAN.INC",
+        "sourceSha256": "149bd150f7e76f339e59f7a9c2cc6712920382c4bc4be9a4b1e063be1991c25f",
+        "lineNumber": 61,
+        "originalOilRate": 20000
+      },
+      {
+        "well": "PRODUCR2",
+        "sourceFile": "controls/PLAN.INC",
+        "sourceSha256": "149bd150f7e76f339e59f7a9c2cc6712920382c4bc4be9a4b1e063be1991c25f",
+        "lineNumber": 62,
+        "originalOilRate": 20000
+      },
+      {
+        "well": "PRODUCR3",
+        "sourceFile": "controls/PLAN.INC",
+        "sourceSha256": "149bd150f7e76f339e59f7a9c2cc6712920382c4bc4be9a4b1e063be1991c25f",
+        "lineNumber": 63,
+        "originalOilRate": 20000
+      },
+      {
+        "well": "PRODUCR4",
+        "sourceFile": "controls/PLAN.INC",
+        "sourceSha256": "149bd150f7e76f339e59f7a9c2cc6712920382c4bc4be9a4b1e063be1991c25f",
+        "lineNumber": 64,
+        "originalOilRate": 20000
+      }
+    ]
+  },
+  "waterInjectionControlPlanContext": {
+    "schemaVersion": "eclipse-water-injection-control-plan-context/1",
+    "startDate": "1982-10-19",
+    "endTimeDays": 3650,
+    "records": [
+      {
+        "well": "INJECTR5",
+        "sourceFile": "controls/INITIAL.INC",
+        "sourceSha256": "25b03ece141604230d9af2224a88dfb14d560992d84882442c962dbf77469fbf",
+        "lineNumber": 6,
+        "date": "1982-10-19",
+        "timeDays": 0,
+        "unit": "STB/day",
+        "originalInjectionRate": 1,
+        "bhpLimit": 6000
+      },
+      {
+        "well": "INJECTR6",
+        "sourceFile": "controls/INITIAL.INC",
+        "sourceSha256": "25b03ece141604230d9af2224a88dfb14d560992d84882442c962dbf77469fbf",
+        "lineNumber": 7,
+        "date": "1982-10-19",
+        "timeDays": 0,
+        "unit": "STB/day",
+        "originalInjectionRate": 1,
+        "bhpLimit": 6000
+      },
+      {
+        "well": "INJECTR5",
+        "sourceFile": "controls/YEAR1.INC",
+        "sourceSha256": "bad4499855d57e7e0a493d87c1877858ccdedf184079a5f510d88772610a470a",
+        "lineNumber": 2,
+        "date": "1983-10-19",
+        "timeDays": 365,
+        "unit": "STB/day",
+        "originalInjectionRate": 1,
+        "bhpLimit": 6000
+      },
+      {
+        "well": "INJECTR6",
+        "sourceFile": "controls/YEAR1.INC",
+        "sourceSha256": "bad4499855d57e7e0a493d87c1877858ccdedf184079a5f510d88772610a470a",
+        "lineNumber": 3,
+        "date": "1983-10-19",
+        "timeDays": 365,
+        "unit": "STB/day",
+        "originalInjectionRate": 1,
+        "bhpLimit": 6000
+      },
+      {
+        "well": "INJECTR5",
+        "sourceFile": "controls/YEAR2.INC",
+        "sourceSha256": "bad4499855d57e7e0a493d87c1877858ccdedf184079a5f510d88772610a470a",
+        "lineNumber": 2,
+        "date": "1984-10-18",
+        "timeDays": 730,
+        "unit": "STB/day",
+        "originalInjectionRate": 1,
+        "bhpLimit": 6000
+      },
+      {
+        "well": "INJECTR6",
+        "sourceFile": "controls/YEAR2.INC",
+        "sourceSha256": "bad4499855d57e7e0a493d87c1877858ccdedf184079a5f510d88772610a470a",
+        "lineNumber": 3,
+        "date": "1984-10-18",
+        "timeDays": 730,
+        "unit": "STB/day",
+        "originalInjectionRate": 1,
+        "bhpLimit": 6000
+      },
+      {
+        "well": "INJECTR5",
+        "sourceFile": "controls/YEAR3.INC",
+        "sourceSha256": "bad4499855d57e7e0a493d87c1877858ccdedf184079a5f510d88772610a470a",
+        "lineNumber": 2,
+        "date": "1985-10-18",
+        "timeDays": 1095,
+        "unit": "STB/day",
+        "originalInjectionRate": 1,
+        "bhpLimit": 6000
+      },
+      {
+        "well": "INJECTR6",
+        "sourceFile": "controls/YEAR3.INC",
+        "sourceSha256": "bad4499855d57e7e0a493d87c1877858ccdedf184079a5f510d88772610a470a",
+        "lineNumber": 3,
+        "date": "1985-10-18",
+        "timeDays": 1095,
+        "unit": "STB/day",
+        "originalInjectionRate": 1,
+        "bhpLimit": 6000
+      }
+    ]
+  }
+}

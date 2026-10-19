@@ -21,12 +21,12 @@ export function validRelpermTables(tables){
   return !!water&&!!oil&&Math.abs(number(water.rows[0].values[0])+number(oil.rows.at(-1).values[0])-1)<=1e-12
 }
 export function validRelperm(p){
-  if(!p||Object.keys(p).length!==keys.length||!keys.every(k=>Object.hasOwn(p,k))||p.schemaVersion!=='eclipse-relperm-parameters/1'||!['SWFN','SOF3'].includes(p.keyword)||p.unit!=='1'
+  if(!p||Object.keys(p).length!==keys.length||!keys.every(k=>Object.hasOwn(p,k))||!(p.schemaVersion==='eclipse-relperm-parameters/1'&&['SWFN','SOF3'].includes(p.keyword)||p.schemaVersion==='eclipse-relperm-parameters/2'&&p.keyword==='SGFN')||p.unit!=='1'
     ||!Number.isSafeInteger(p.baselineRunId)||p.baselineRunId<=0||!Number.isSafeInteger(p.keywordLineNumber)||p.keywordLineNumber<=0||p.keywordLineNumber>2e6
     ||typeof p.sourceFile!=='string'||!/^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\.DATA$/i.test(p.sourceFile)||typeof p.sourceSha256!=='string'||!/^[a-f0-9]{64}$/.test(p.sourceSha256)
     ||typeof p.multiplier!=='number'||!Number.isFinite(p.multiplier)||p.multiplier<.000001||p.multiplier>100||p.multiplier===1||!validRelpermRows(p.keyword,p.rows,p.keywordLineNumber))return false
   let changed=false
-  for(const row of p.rows)for(const column of p.keyword==='SWFN'?[1]:[1,2]){const kr=number(row.values[column]),target=kr*p.multiplier;if(!Number.isFinite(target)||target<0||target>1)return false;changed ||= target!==kr}
+  for(const row of p.rows)for(const column of p.keyword==='SOF3'?[1,2]:[1]){const kr=number(row.values[column]),target=kr*p.multiplier;if(!Number.isFinite(target)||target<0||target>1)return false;changed ||= target!==kr}
   return changed
 }
 export function relpermContext(inspection){
@@ -39,8 +39,8 @@ export function buildRelperm({run,inspection,keyword,multiplier}){
   if(run?.runType!=='eclipse'||run.status!=='SUCCEEDED'||run.resultContract!=='VALID_FULL'||run.parameters!=null)throw new Error('请选择当前模型版本的完整无参数成功基线。')
   const c=relpermContext(inspection),t=c?.tables.find(t=>t.keyword===keyword)
   if(!t)throw new Error('需要单DATA三相模型、唯一明确SAT区及完整SWFN/SGFN/SOF3；多区、默认字段、滞后和端点缩放尚未开放。')
-  const p={schemaVersion:'eclipse-relperm-parameters/1',baselineRunId:run.id,sourceFile:c.sourceFile,sourceSha256:inspection.packageFiles[0].sha256,keyword,keywordLineNumber:t.keywordLineNumber,unit:'1',multiplier,rows:t.rows.map(r=>({lineNumber:r.lineNumber,values:[...r.values]}))}
+  const p={schemaVersion:keyword==='SGFN'?'eclipse-relperm-parameters/2':'eclipse-relperm-parameters/1',baselineRunId:run.id,sourceFile:c.sourceFile,sourceSha256:inspection.packageFiles[0].sha256,keyword,keywordLineNumber:t.keywordLineNumber,unit:'1',multiplier,rows:t.rows.map(r=>({lineNumber:r.lineNumber,values:[...r.values]}))}
   if(!validRelperm(p))throw new Error('乘数须为0.000001–100有限数值且不为1；目标相渗必须在0–1之间且有变化。SOF3油相两列联动，保留相同末端值。')
   return p
 }
-export const relpermResponse=(current,baseline)=>gridRegionResponse(current,baseline,['WBHP','WOPR','WWPR','WLPR','WGPR','WOPT','WWPT','WGPT'])
+export const relpermResponse=(current,baseline)=>gridRegionResponse(current,baseline,['WBHP','WOPR','WWPR','WLPR','WGPR','WOPT','WWPT','WGPT','WGIR','WGIT'])

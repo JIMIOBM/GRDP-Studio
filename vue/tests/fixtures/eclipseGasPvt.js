@@ -8,3 +8,11 @@ export function gasPvtBrowserFixture(){
  const parameters={...target.parameters,baselineRunId:baseline.id};Object.assign(target,{id:9063,projectId:1,modelId:22,modelVersionId:201,versionNo:1,modelName:'ECLIPSE演示模型',parameters,artifacts:[]})
  return{inspection,baseline,target,parameters}
 }
+
+export function gasVolumeBrowserFixture(){
+ const baseline=load('volume/baseline'),target=load('volume/target'),volume=load('volume/native-acceptance'),inspection=load('platform-inspection')
+ if(!volume.nativeVerified||!volume.onlyGasVolumeColumnChanged||JSON.stringify(baseline.result.summary.series)!==JSON.stringify(volume.baseline.series)||JSON.stringify(target.result.summary.series)!==JSON.stringify(volume.target.series))throw new Error('Gas volume API/native output differs')
+ Object.assign(baseline,{id:9062,projectId:1,modelId:22,modelVersionId:201,versionNo:1,modelName:'ECLIPSE演示模型',artifacts:[]})
+ const parameters={...target.parameters,baselineRunId:baseline.id};Object.assign(target,{id:9064,projectId:1,modelId:22,modelVersionId:201,versionNo:1,modelName:'ECLIPSE演示模型',parameters,artifacts:[]})
+ return{inspection,baseline,target,parameters}
+}

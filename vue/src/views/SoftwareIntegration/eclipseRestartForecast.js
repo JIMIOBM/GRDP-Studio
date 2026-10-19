@@ -10,10 +10,10 @@ const dateMs = value => {
 const daysBetween = (origin, date) => (dateMs(date) - dateMs(origin)) / 86400000
 
 export const validRestartSource = source => {
-  if (!fields(source, ['schemaVersion', 'catalog', 'physicsSha256', 'forecastInputs']) || source.schemaVersion !== 'eclipse-restart-source/1' || !sha(source.physicsSha256)) return false
-  const c = source.catalog
-  if (!fields(c, ['schemaVersion', 'caseName', 'startDate', 'artifactName', 'artifactSha256', 'artifactSizeBytes', 'reports']) || c.schemaVersion !== 'eclipse-restart-catalog/1' ||
-    typeof c.caseName !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}$/.test(c.caseName) || c.artifactName !== `eclipse-output-${c.caseName}.FUNRST` ||
+  if (!fields(source, ['schemaVersion', 'catalog', 'physicsSha256', 'forecastInputs']) || !['eclipse-restart-source/1', 'eclipse-restart-source/2'].includes(source.schemaVersion) || !sha(source.physicsSha256)) return false
+  const c = source.catalog, binary = source.schemaVersion === 'eclipse-restart-source/2'
+  if (!fields(c, ['schemaVersion', 'caseName', 'startDate', 'artifactName', 'artifactSha256', 'artifactSizeBytes', 'reports']) || c.schemaVersion !== (binary ? 'eclipse-restart-catalog/2' : 'eclipse-restart-catalog/1') ||
+    typeof c.caseName !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}$/.test(c.caseName) || c.artifactName !== `eclipse-output-${c.caseName}.${binary ? 'UNRST' : 'FUNRST'}` ||
     !sha(c.artifactSha256) || !integer(c.artifactSizeBytes, 1, 128 * 1024 * 1024) || dateMs(c.startDate) === null || !Array.isArray(c.reports) || !c.reports.length || c.reports.length > 8192) return false
   let previousNumber = -1, previousTime = -1, end = null
   const first = c.reports[0]
@@ -43,8 +43,8 @@ export const validRestartSource = source => {
   return true
 }
 export const validRestartForecast = parameters => fields(parameters, ['schemaVersion', 'historyRunId', 'forecastDataFile', 'restartArtifactName', 'restartArtifactSha256', 'restartReport', 'restartTimeDays', 'restartDate', 'physicsSha256']) &&
-  parameters.schemaVersion === 'eclipse-history-forecast-parameters/2' && integer(parameters.historyRunId, 1) && dataPath(parameters.forecastDataFile) &&
-  typeof parameters.restartArtifactName === 'string' && /^eclipse-output-[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\.FUNRST$/i.test(parameters.restartArtifactName) &&
+  ['eclipse-history-forecast-parameters/2', 'eclipse-history-forecast-parameters/3'].includes(parameters.schemaVersion) && integer(parameters.historyRunId, 1) && dataPath(parameters.forecastDataFile) &&
+  typeof parameters.restartArtifactName === 'string' && (parameters.schemaVersion === 'eclipse-history-forecast-parameters/3' ? /^eclipse-output-[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\.UNRST$/i : /^eclipse-output-[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\.FUNRST$/i).test(parameters.restartArtifactName) &&
   sha(parameters.restartArtifactSha256) && integer(parameters.restartReport, 1, 2147483647) && integer(parameters.restartTimeDays, 0, 3000000) && dateMs(parameters.restartDate) !== null && sha(parameters.physicsSha256)
 
 export const buildRestartForecast = ({ source, history, inspection, forecastDataFile, restartReport }) => {
@@ -53,7 +53,7 @@ export const buildRestartForecast = ({ source, history, inspection, forecastData
   const report = c.reports.find(r => r.reportNumber === restartReport)
   if (!future || !report || !(inspection?.packageFiles || []).some(f => f.relativePath === future.relativePath && f.sha256 === future.sha256) ||
     !(history.artifacts || []).some(a => a.name === c.artifactName && a.sha256 === c.artifactSha256 && a.sizeBytes === c.artifactSizeBytes)) return null
-  return { schemaVersion: 'eclipse-history-forecast-parameters/2', historyRunId: history.id, forecastDataFile, restartArtifactName: c.artifactName,
+  return { schemaVersion: c.schemaVersion === 'eclipse-restart-catalog/2' ? 'eclipse-history-forecast-parameters/3' : 'eclipse-history-forecast-parameters/2', historyRunId: history.id, forecastDataFile, restartArtifactName: c.artifactName,
     restartArtifactSha256: c.artifactSha256, restartReport, restartTimeDays: report.timeDays, restartDate: report.date, physicsSha256: source.physicsSha256 }
 }
 export const restartForecastMatchesSource = (parameters, source, history, inspection) => {

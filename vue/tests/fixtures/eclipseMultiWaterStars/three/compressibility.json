@@ -1,0 +1,1437 @@
+{
+  "id": 1352,
+  "projectId": 245,
+  "modelId": 281,
+  "modelVersionId": 285,
+  "modelName": "ECLIPSE_MULTI_PVTW_STAR_DEFAULT",
+  "versionNo": 1,
+  "status": "SUCCEEDED",
+  "study": null,
+  "runType": "eclipse",
+  "parameters": {
+    "unit": "1/psi",
+    "field": "COMPRESSIBILITY",
+    "lineNumber": 225,
+    "sourceFile": "ECLIPSE_MULTI_PVTW_STAR_DEFAULT.DATA",
+    "targetValue": 6e-05,
+    "recordValues": [
+      "4500",
+      "1.03",
+      "3.0E-5",
+      "0.4",
+      "1*"
+    ],
+    "regionNumber": 2,
+    "sourceSha256": "8bb5d129ffd8a92cac57664c87e6e10f1723ebcde7974f2f9b29473c93bf7013",
+    "baselineRunId": 1347,
+    "originalValue": 3e-05,
+    "schemaVersion": "eclipse-multi-pvtw-parameters/3"
+  },
+  "createdAt": "2026-10-15T10:25:07.022",
+  "queuedAt": "2026-10-15T10:25:07.022",
+  "claimedAt": "2026-10-15T10:25:07.23",
+  "startedAt": "2026-10-15T10:25:07.73",
+  "deadlineAt": "2026-10-15T10:55:07.73",
+  "finishedAt": "2026-10-15T10:25:14.523",
+  "timeoutSeconds": 1800,
+  "elapsedMillis": 6792,
+  "cancellable": false,
+  "error": null,
+  "cleanup": {
+    "message": "ECLIPSE cleanup completed.",
+    "killUsed": false,
+    "inputDeleted": true,
+    "workDirectoryDeleted": true,
+    "processTreeExitConfirmed": true
+  },
+  "resultContract": "VALID_FULL",
+  "result": {
+    "schemaVersion": "eclipse-summary-result/1",
+    "modelKind": "eclipse_100",
+    "runTask": "eclipse",
+    "resultContract": "VALID_FULL",
+    "caseName": "ECLIPSE_MULTI_PVTW_STAR_DEFAULT.DATA",
+    "eclEnd": {
+      "comments": 0,
+      "warnings": 1,
+      "problems": 0,
+      "errors": 0,
+      "bugs": 0
+    },
+    "summary": {
+      "series": [
+        {
+          "keyword": "YEARS",
+          "objectName": null,
+          "unit": "YEARS",
+          "points": [
+            {
+              "timeDays": 0,
+              "value": 0
+            },
+            {
+              "timeDays": 5,
+              "value": 0.01368925254791975
+            },
+            {
+              "timeDays": 10,
+              "value": 0.02737850695848465
+            },
+            {
+              "timeDays": 15,
+              "value": 0.041067760437726974
+            },
+            {
+              "timeDays": 20,
+              "value": 0.0547570139169693
+            },
+            {
+              "timeDays": 25,
+              "value": 0.06844627112150192
+            },
+            {
+              "timeDays": 30,
+              "value": 0.08213552087545395
+            },
+            {
+              "timeDays": 35,
+              "value": 0.09582477807998657
+            },
+            {
+              "timeDays": 40,
+              "value": 0.1095140278339386
+            },
+            {
+              "timeDays": 45,
+              "value": 0.12320329248905182
+            },
+            {
+              "timeDays": 50,
+              "value": 0.13689254224300385
+            },
+            {
+              "timeDays": 55,
+              "value": 0.15058179199695587
+            },
+            {
+              "timeDays": 60,
+              "value": 0.1642710417509079
+            },
+            {
+              "timeDays": 65,
+              "value": 0.17796030640602112
+            },
+            {
+              "timeDays": 70,
+              "value": 0.19164955615997314
+            },
+            {
+              "timeDays": 75,
+              "value": 0.20533880591392517
+            },
+            {
+              "timeDays": 80,
+              "value": 0.2190280556678772
+            },
+            {
+              "timeDays": 85,
+              "value": 0.23271732032299042
+            },
+            {
+              "timeDays": 90,
+              "value": 0.24640657007694244
+            },
+            {
+              "timeDays": 95,
+              "value": 0.26009583473205566
+            },
+            {
+              "timeDays": 100,
+              "value": 0.2737850844860077
+            }
+          ]
+        },
+        {
+          "keyword": "WLPR",
+          "objectName": "P1",
+          "unit": "STB/DAY",
+          "points": [
+            {
+              "timeDays": 0,
+              "value": 0
+            },
+            {
+              "timeDays": 5,
+              "value": 5000
+            },
+            {
+              "timeDays": 10,
+              "value": 5000
+            },
+            {
+              "timeDays": 15,
+              "value": 4309.2978515625
+            },
+            {
+              "timeDays": 20,
+              "value": 1963.3485107421875
+            },
+            {
+              "timeDays": 25,
+              "value": 1197.1575927734375
+            },
+            {
+              "timeDays": 30,
+              "value": 932.0732421875
+            },
+            {
+              "timeDays": 35,
+              "value": 836.4611206054688
+            },
+            {
+              "timeDays": 40,
+              "value": 800.54052734375
+            },
+            {
+              "timeDays": 45,
+              "value": 787.513427734375
+            },
+            {
+              "timeDays": 50,
+              "value": 782.0511474609375
+            },
+            {
+              "timeDays": 55,
+              "value": 779.9444580078125
+            },
+            {
+              "timeDays": 60,
+              "value": 779.5949096679688
+            },
+            {
+              "timeDays": 65,
+              "value": 780.2329711914062
+            },
+            {
+              "timeDays": 70,
+              "value": 780.5048828125
+            },
+            {
+              "timeDays": 75,
+              "value": 781.2406005859375
+            },
+            {
+              "timeDays": 80,
+              "value": 782.0711669921875
+            },
+            {
+              "timeDays": 85,
+              "value": 782.33203125
+            },
+            {
+              "timeDays": 90,
+              "value": 782.2889404296875
+            },
+            {
+              "timeDays": 95,
+              "value": 782.1132202148438
+            },
+            {
+              "timeDays": 100,
+              "value": 781.67578125
+            }
+          ]
+        },
+        {
+          "keyword": "WBHP",
+          "objectName": "P1",
+          "unit": "PSIA",
+          "points": [
+            {
+              "timeDays": 0,
+              "value": 4500
+            },
+            {
+              "timeDays": 5,
+              "value": 3815.007568359375
+            },
+            {
+              "timeDays": 10,
+              "value": 3346.656494140625
+            },
+            {
+              "timeDays": 15,
+              "value": 3000
+            },
+            {
+              "timeDays": 20,
+              "value": 3000
+            },
+            {
+              "timeDays": 25,
+              "value": 3000
+            },
+            {
+              "timeDays": 30,
+              "value": 3000
+            },
+            {
+              "timeDays": 35,
+              "value": 3000
+            },
+            {
+              "timeDays": 40,
+              "value": 3000
+            },
+            {
+              "timeDays": 45,
+              "value": 3000
+            },
+            {
+              "timeDays": 50,
+              "value": 3000
+            },
+            {
+              "timeDays": 55,
+              "value": 3000
+            },
+            {
+              "timeDays": 60,
+              "value": 3000
+            },
+            {
+              "timeDays": 65,
+              "value": 3000
+            },
+            {
+              "timeDays": 70,
+              "value": 3000
+            },
+            {
+              "timeDays": 75,
+              "value": 3000
+            },
+            {
+              "timeDays": 80,
+              "value": 3000
+            },
+            {
+              "timeDays": 85,
+              "value": 3000
+            },
+            {
+              "timeDays": 90,
+              "value": 3000
+            },
+            {
+              "timeDays": 95,
+              "value": 3000
+            },
+            {
+              "timeDays": 100,
+              "value": 3000
+            }
+          ]
+        },
+        {
+          "keyword": "WBHP",
+          "objectName": "I1",
+          "unit": "PSIA",
+          "points": [
+            {
+              "timeDays": 0,
+              "value": 4500
+            },
+            {
+              "timeDays": 5,
+              "value": 4091.4462890625
+            },
+            {
+              "timeDays": 10,
+              "value": 3637.1142578125
+            },
+            {
+              "timeDays": 15,
+              "value": 3266.223876953125
+            },
+            {
+              "timeDays": 20,
+              "value": 3148.84326171875
+            },
+            {
+              "timeDays": 25,
+              "value": 3111.056884765625
+            },
+            {
+              "timeDays": 30,
+              "value": 3098.8232421875
+            },
+            {
+              "timeDays": 35,
+              "value": 3094.55029296875
+            },
+            {
+              "timeDays": 40,
+              "value": 3093.352294921875
+            },
+            {
+              "timeDays": 45,
+              "value": 3092.70166015625
+            },
+            {
+              "timeDays": 50,
+              "value": 3092.35986328125
+            },
+            {
+              "timeDays": 55,
+              "value": 3092.1181640625
+            },
+            {
+              "timeDays": 60,
+              "value": 3091.9765625
+            },
+            {
+              "timeDays": 65,
+              "value": 3091.906494140625
+            },
+            {
+              "timeDays": 70,
+              "value": 3091.868408203125
+            },
+            {
+              "timeDays": 75,
+              "value": 3091.83837890625
+            },
+            {
+              "timeDays": 80,
+              "value": 3091.85986328125
+            },
+            {
+              "timeDays": 85,
+              "value": 3091.909423828125
+            },
+            {
+              "timeDays": 90,
+              "value": 3092.00537109375
+            },
+            {
+              "timeDays": 95,
+              "value": 3092.150146484375
+            },
+            {
+              "timeDays": 100,
+              "value": 3092.349365234375
+            }
+          ]
+        },
+        {
+          "keyword": "WOPR",
+          "objectName": "P1",
+          "unit": "STB/DAY",
+          "points": [
+            {
+              "timeDays": 0,
+              "value": 0
+            },
+            {
+              "timeDays": 5,
+              "value": 4994.83740234375
+            },
+            {
+              "timeDays": 10,
+              "value": 4989.81787109375
+            },
+            {
+              "timeDays": 15,
+              "value": 4297.02734375
+            },
+            {
+              "timeDays": 20,
+              "value": 1957.3292236328125
+            },
+            {
+              "timeDays": 25,
+              "value": 1193.3975830078125
+            },
+            {
+              "timeDays": 30,
+              "value": 929.1185302734375
+            },
+            {
+              "timeDays": 35,
+              "value": 833.797607421875
+            },
+            {
+              "timeDays": 40,
+              "value": 797.98388671875
+            },
+            {
+              "timeDays": 45,
+              "value": 784.9920043945312
+            },
+            {
+              "timeDays": 50,
+              "value": 779.5408325195312
+            },
+            {
+              "timeDays": 55,
+              "value": 777.43408203125
+            },
+            {
+              "timeDays": 60,
+              "value": 777.078369140625
+            },
+            {
+              "timeDays": 65,
+              "value": 777.7064819335938
+            },
+            {
+              "timeDays": 70,
+              "value": 777.9685668945312
+            },
+            {
+              "timeDays": 75,
+              "value": 778.68994140625
+            },
+            {
+              "timeDays": 80,
+              "value": 779.5023803710938
+            },
+            {
+              "timeDays": 85,
+              "value": 779.7432861328125
+            },
+            {
+              "timeDays": 90,
+              "value": 779.6773681640625
+            },
+            {
+              "timeDays": 95,
+              "value": 779.4751586914062
+            },
+            {
+              "timeDays": 100,
+              "value": 779.0076293945312
+            }
+          ]
+        },
+        {
+          "keyword": "WWPR",
+          "objectName": "P1",
+          "unit": "STB/DAY",
+          "points": [
+            {
+              "timeDays": 0,
+              "value": 0
+            },
+            {
+              "timeDays": 5,
+              "value": 5.1627044677734375
+            },
+            {
+              "timeDays": 10,
+              "value": 10.182302474975586
+            },
+            {
+              "timeDays": 15,
+              "value": 12.270398139953613
+            },
+            {
+              "timeDays": 20,
+              "value": 6.019339084625244
+            },
+            {
+              "timeDays": 25,
+              "value": 3.760011911392212
+            },
+            {
+              "timeDays": 30,
+              "value": 2.9547278881073
+            },
+            {
+              "timeDays": 35,
+              "value": 2.6635072231292725
+            },
+            {
+              "timeDays": 40,
+              "value": 2.5566461086273193
+            },
+            {
+              "timeDays": 45,
+              "value": 2.5214035511016846
+            },
+            {
+              "timeDays": 50,
+              "value": 2.5103189945220947
+            },
+            {
+              "timeDays": 55,
+              "value": 2.510357618331909
+            },
+            {
+              "timeDays": 60,
+              "value": 2.5165562629699707
+            },
+            {
+              "timeDays": 65,
+              "value": 2.52653431892395
+            },
+            {
+              "timeDays": 70,
+              "value": 2.536306858062744
+            },
+            {
+              "timeDays": 75,
+              "value": 2.550690174102783
+            },
+            {
+              "timeDays": 80,
+              "value": 2.568812131881714
+            },
+            {
+              "timeDays": 85,
+              "value": 2.588747024536133
+            },
+            {
+              "timeDays": 90,
+              "value": 2.6115686893463135
+            },
+            {
+              "timeDays": 95,
+              "value": 2.638064384460449
+            },
+            {
+              "timeDays": 100,
+              "value": 2.668149471282959
+            }
+          ]
+        },
+        {
+          "keyword": "WGPR",
+          "objectName": "P1",
+          "unit": "MSCF/DAY",
+          "points": [
+            {
+              "timeDays": 0,
+              "value": 0
+            },
+            {
+              "timeDays": 5,
+              "value": 0
+            },
+            {
+              "timeDays": 10,
+              "value": 0
+            },
+            {
+              "timeDays": 15,
+              "value": 0
+            },
+            {
+              "timeDays": 20,
+              "value": 0
+            },
+            {
+              "timeDays": 25,
+              "value": 0
+            },
+            {
+              "timeDays": 30,
+              "value": 0
+            },
+            {
+              "timeDays": 35,
+              "value": 0
+            },
+            {
+              "timeDays": 40,
+              "value": 0
+            },
+            {
+              "timeDays": 45,
+              "value": 0
+            },
+            {
+              "timeDays": 50,
+              "value": 0
+            },
+            {
+              "timeDays": 55,
+              "value": 0
+            },
+            {
+              "timeDays": 60,
+              "value": 0
+            },
+            {
+              "timeDays": 65,
+              "value": 0
+            },
+            {
+              "timeDays": 70,
+              "value": 0
+            },
+            {
+              "timeDays": 75,
+              "value": 0
+            },
+            {
+              "timeDays": 80,
+              "value": 0
+            },
+            {
+              "timeDays": 85,
+              "value": 0
+            },
+            {
+              "timeDays": 90,
+              "value": 0
+            },
+            {
+              "timeDays": 95,
+              "value": 0
+            },
+            {
+              "timeDays": 100,
+              "value": 0
+            }
+          ]
+        },
+        {
+          "keyword": "WOPT",
+          "objectName": "P1",
+          "unit": "STB",
+          "points": [
+            {
+              "timeDays": 0,
+              "value": 0
+            },
+            {
+              "timeDays": 5,
+              "value": 24974.185546875
+            },
+            {
+              "timeDays": 10,
+              "value": 49923.2734375
+            },
+            {
+              "timeDays": 15,
+              "value": 71408.4140625
+            },
+            {
+              "timeDays": 20,
+              "value": 81195.0546875
+            },
+            {
+              "timeDays": 25,
+              "value": 87162.046875
+            },
+            {
+              "timeDays": 30,
+              "value": 91807.640625
+            },
+            {
+              "timeDays": 35,
+              "value": 95976.625
+            },
+            {
+              "timeDays": 40,
+              "value": 99966.546875
+            },
+            {
+              "timeDays": 45,
+              "value": 103891.5078125
+            },
+            {
+              "timeDays": 50,
+              "value": 107789.2109375
+            },
+            {
+              "timeDays": 55,
+              "value": 111676.3828125
+            },
+            {
+              "timeDays": 60,
+              "value": 115561.7734375
+            },
+            {
+              "timeDays": 65,
+              "value": 119450.296875
+            },
+            {
+              "timeDays": 70,
+              "value": 123340.1484375
+            },
+            {
+              "timeDays": 75,
+              "value": 127233.59375
+            },
+            {
+              "timeDays": 80,
+              "value": 131131.109375
+            },
+            {
+              "timeDays": 85,
+              "value": 135029.828125
+            },
+            {
+              "timeDays": 90,
+              "value": 138928.21875
+            },
+            {
+              "timeDays": 95,
+              "value": 142825.59375
+            },
+            {
+              "timeDays": 100,
+              "value": 146720.625
+            }
+          ]
+        },
+        {
+          "keyword": "WWPT",
+          "objectName": "P1",
+          "unit": "STB",
+          "points": [
+            {
+              "timeDays": 0,
+              "value": 0
+            },
+            {
+              "timeDays": 5,
+              "value": 25.813522338867188
+            },
+            {
+              "timeDays": 10,
+              "value": 76.72503662109375
+            },
+            {
+              "timeDays": 15,
+              "value": 138.0770263671875
+            },
+            {
+              "timeDays": 20,
+              "value": 168.17372131347656
+            },
+            {
+              "timeDays": 25,
+              "value": 186.97378540039062
+            },
+            {
+              "timeDays": 30,
+              "value": 201.74742126464844
+            },
+            {
+              "timeDays": 35,
+              "value": 215.06495666503906
+            },
+            {
+              "timeDays": 40,
+              "value": 227.8481903076172
+            },
+            {
+              "timeDays": 45,
+              "value": 240.4552001953125
+            },
+            {
+              "timeDays": 50,
+              "value": 253.00680541992188
+            },
+            {
+              "timeDays": 55,
+              "value": 265.55859375
+            },
+            {
+              "timeDays": 60,
+              "value": 278.141357421875
+            },
+            {
+              "timeDays": 65,
+              "value": 290.7740478515625
+            },
+            {
+              "timeDays": 70,
+              "value": 303.45556640625
+            },
+            {
+              "timeDays": 75,
+              "value": 316.2090148925781
+            },
+            {
+              "timeDays": 80,
+              "value": 329.0531005859375
+            },
+            {
+              "timeDays": 85,
+              "value": 341.996826171875
+            },
+            {
+              "timeDays": 90,
+              "value": 355.0546569824219
+            },
+            {
+              "timeDays": 95,
+              "value": 368.2449951171875
+            },
+            {
+              "timeDays": 100,
+              "value": 381.5857238769531
+            }
+          ]
+        },
+        {
+          "keyword": "WGPT",
+          "objectName": "P1",
+          "unit": "MSCF",
+          "points": [
+            {
+              "timeDays": 0,
+              "value": 0
+            },
+            {
+              "timeDays": 5,
+              "value": 0
+            },
+            {
+              "timeDays": 10,
+              "value": 0
+            },
+            {
+              "timeDays": 15,
+              "value": 0
+            },
+            {
+              "timeDays": 20,
+              "value": 0
+            },
+            {
+              "timeDays": 25,
+              "value": 0
+            },
+            {
+              "timeDays": 30,
+              "value": 0
+            },
+            {
+              "timeDays": 35,
+              "value": 0
+            },
+            {
+              "timeDays": 40,
+              "value": 0
+            },
+            {
+              "timeDays": 45,
+              "value": 0
+            },
+            {
+              "timeDays": 50,
+              "value": 0
+            },
+            {
+              "timeDays": 55,
+              "value": 0
+            },
+            {
+              "timeDays": 60,
+              "value": 0
+            },
+            {
+              "timeDays": 65,
+              "value": 0
+            },
+            {
+              "timeDays": 70,
+              "value": 0
+            },
+            {
+              "timeDays": 75,
+              "value": 0
+            },
+            {
+              "timeDays": 80,
+              "value": 0
+            },
+            {
+              "timeDays": 85,
+              "value": 0
+            },
+            {
+              "timeDays": 90,
+              "value": 0
+            },
+            {
+              "timeDays": 95,
+              "value": 0
+            },
+            {
+              "timeDays": 100,
+              "value": 0
+            }
+          ]
+        },
+        {
+          "keyword": "WGIR",
+          "objectName": "I1",
+          "unit": "MSCF/DAY",
+          "points": [
+            {
+              "timeDays": 0,
+              "value": 0
+            },
+            {
+              "timeDays": 5,
+              "value": 1851.851806640625
+            },
+            {
+              "timeDays": 10,
+              "value": 1711.1138916015625
+            },
+            {
+              "timeDays": 15,
+              "value": 1566.9920654296875
+            },
+            {
+              "timeDays": 20,
+              "value": 1431.6278076171875
+            },
+            {
+              "timeDays": 25,
+              "value": 1387.546630859375
+            },
+            {
+              "timeDays": 30,
+              "value": 1372.5830078125
+            },
+            {
+              "timeDays": 35,
+              "value": 1367.087646484375
+            },
+            {
+              "timeDays": 40,
+              "value": 1364.8126220703125
+            },
+            {
+              "timeDays": 45,
+              "value": 1363.705810546875
+            },
+            {
+              "timeDays": 50,
+              "value": 1363.0574951171875
+            },
+            {
+              "timeDays": 55,
+              "value": 1362.599365234375
+            },
+            {
+              "timeDays": 60,
+              "value": 1362.2493896484375
+            },
+            {
+              "timeDays": 65,
+              "value": 1361.971435546875
+            },
+            {
+              "timeDays": 70,
+              "value": 1361.7332763671875
+            },
+            {
+              "timeDays": 75,
+              "value": 1361.5262451171875
+            },
+            {
+              "timeDays": 80,
+              "value": 1361.3446044921875
+            },
+            {
+              "timeDays": 85,
+              "value": 1361.189208984375
+            },
+            {
+              "timeDays": 90,
+              "value": 1361.056396484375
+            },
+            {
+              "timeDays": 95,
+              "value": 1360.9517822265625
+            },
+            {
+              "timeDays": 100,
+              "value": 1360.876953125
+            }
+          ]
+        },
+        {
+          "keyword": "WGIT",
+          "objectName": "I1",
+          "unit": "MSCF",
+          "points": [
+            {
+              "timeDays": 0,
+              "value": 0
+            },
+            {
+              "timeDays": 5,
+              "value": 9259.2587890625
+            },
+            {
+              "timeDays": 10,
+              "value": 17814.828125
+            },
+            {
+              "timeDays": 15,
+              "value": 25649.7890625
+            },
+            {
+              "timeDays": 20,
+              "value": 32807.9296875
+            },
+            {
+              "timeDays": 25,
+              "value": 39745.66015625
+            },
+            {
+              "timeDays": 30,
+              "value": 46608.578125
+            },
+            {
+              "timeDays": 35,
+              "value": 53444.015625
+            },
+            {
+              "timeDays": 40,
+              "value": 60268.078125
+            },
+            {
+              "timeDays": 45,
+              "value": 67086.609375
+            },
+            {
+              "timeDays": 50,
+              "value": 73901.8984375
+            },
+            {
+              "timeDays": 55,
+              "value": 80714.890625
+            },
+            {
+              "timeDays": 60,
+              "value": 87526.140625
+            },
+            {
+              "timeDays": 65,
+              "value": 94335.9921875
+            },
+            {
+              "timeDays": 70,
+              "value": 101144.65625
+            },
+            {
+              "timeDays": 75,
+              "value": 107952.296875
+            },
+            {
+              "timeDays": 80,
+              "value": 114759.0234375
+            },
+            {
+              "timeDays": 85,
+              "value": 121564.9609375
+            },
+            {
+              "timeDays": 90,
+              "value": 128370.2421875
+            },
+            {
+              "timeDays": 95,
+              "value": 135175
+            },
+            {
+              "timeDays": 100,
+              "value": 141979.390625
+            }
+          ]
+        }
+      ]
+    },
+    "grid": null,
+    "fieldIndex": null,
+    "outputFiles": [
+      {
+        "name": "ECLIPSE_MULTI_PVTW_STAR_DEFAULT.ECLEND",
+        "sizeBytes": 335,
+        "sha256": "f3e542726f3dbae147c624090f8e26c4c95dfa7ff0a2d6a50f1a8a9e4f72f79f"
+      },
+      {
+        "name": "ECLIPSE_MULTI_PVTW_STAR_DEFAULT.FEGRID",
+        "sizeBytes": 7999,
+        "sha256": "abc3fe1c94a3154c4a4bb0c5c5066a9ea0122c15e999a9d1dfc6b156d789d411"
+      },
+      {
+        "name": "ECLIPSE_MULTI_PVTW_STAR_DEFAULT.FINIT",
+        "sizeBytes": 36872,
+        "sha256": "0508cccece420073849cd17b7f04be61388a38b78b6de744bf82147994f0d667"
+      },
+      {
+        "name": "ECLIPSE_MULTI_PVTW_STAR_DEFAULT.FSMSPEC",
+        "sizeBytes": 2557,
+        "sha256": "ace5aa6b30af088e3c4511f832ff4dc24259fd7134e1775fb7e95a0b655bd001"
+      },
+      {
+        "name": "ECLIPSE_MULTI_PVTW_STAR_DEFAULT.FUNRST",
+        "sizeBytes": 1466304,
+        "sha256": "1064c74858af891607fc343996376a99efca90cfaa23b6a8543de55cf612512c"
+      },
+      {
+        "name": "ECLIPSE_MULTI_PVTW_STAR_DEFAULT.FUNSMRY",
+        "sizeBytes": 7367,
+        "sha256": "ca38d5d9e96630e01791f9521e3e723c92ac8283221e8a6c4e6bd959f04f4e49"
+      },
+      {
+        "name": "ECLIPSE_MULTI_PVTW_STAR_DEFAULT.MSG",
+        "sizeBytes": 7089,
+        "sha256": "e74763bdf67b64ba382a528b7aca3a62b1e686d8b8af618de62d543127a39513"
+      },
+      {
+        "name": "ECLIPSE_MULTI_PVTW_STAR_DEFAULT.PRT",
+        "sizeBytes": 291231,
+        "sha256": "edf5e485831ac09142a729b58798bbf1f543e5d4ef686d41fc774bb5a1ff6159"
+      }
+    ],
+    "messages": [
+      {
+        "category": "SOLVER",
+        "severity": "WARNING",
+        "code": "ECLIPSE_WARNING",
+        "message": "THERE IS A TRANSMISSIBILITY IN THE X DIRECTION BETWEEN CELLS 6,1,1 AND 7,1,1 THESE CELLS ARE IN DIFFERENT PVT REGIONS",
+        "retryable": false
+      }
+    ]
+  },
+  "events": [
+    {
+      "id": 41410,
+      "sequence": 1,
+      "workerSequence": null,
+      "type": "STATE",
+      "status": "CREATED",
+      "message": "运行已创建",
+      "error": null,
+      "occurredAt": "2026-10-15T10:25:07.022"
+    },
+    {
+      "id": 41411,
+      "sequence": 2,
+      "workerSequence": null,
+      "type": "STATE",
+      "status": "QUEUED",
+      "message": "运行已进入持久队列",
+      "error": null,
+      "occurredAt": "2026-10-15T10:25:07.022"
+    },
+    {
+      "id": 41412,
+      "sequence": 3,
+      "workerSequence": null,
+      "type": "STATE",
+      "status": "CLAIMED",
+      "message": "运行已由调度器认领",
+      "error": null,
+      "occurredAt": "2026-10-15T10:25:07.23"
+    },
+    {
+      "id": 41413,
+      "sequence": 4,
+      "workerSequence": null,
+      "type": "WORKER_ACCEPTED",
+      "status": "CLAIMED",
+      "message": "Worker 已接受运行",
+      "error": null,
+      "occurredAt": "2026-10-15T10:25:07.73"
+    },
+    {
+      "id": 41414,
+      "sequence": 5,
+      "workerSequence": 1,
+      "type": "STATE",
+      "status": "CLAIMED",
+      "message": "Run claimed by Worker generation.",
+      "error": null,
+      "occurredAt": "2026-10-15T02:25:07.729"
+    },
+    {
+      "id": 41415,
+      "sequence": 6,
+      "workerSequence": 2,
+      "type": "STATE",
+      "status": "PREPARING",
+      "message": "Preparing isolated ECLIPSE deck.",
+      "error": null,
+      "occurredAt": "2026-10-15T02:25:07.729"
+    },
+    {
+      "id": 41416,
+      "sequence": 7,
+      "workerSequence": null,
+      "type": "STATE",
+      "status": "PREPARING",
+      "message": "Worker 正在准备模型",
+      "error": null,
+      "occurredAt": "2026-10-15T10:25:07.765"
+    },
+    {
+      "id": 41417,
+      "sequence": 8,
+      "workerSequence": 3,
+      "type": "STATE",
+      "status": "PREPARING",
+      "message": "Applied PVT region 2 water COMPRESSIBILITY target 6.0000000000000002E-05; all other water records, oil/gas tables, maps and source bytes retained.",
+      "error": null,
+      "occurredAt": "2026-10-15T02:25:07.748"
+    },
+    {
+      "id": 41418,
+      "sequence": 9,
+      "workerSequence": 4,
+      "type": "STATE",
+      "status": "RUNNING_ECLIPSE",
+      "message": "Running ECLIPSE 100.",
+      "error": null,
+      "occurredAt": "2026-10-15T02:25:07.751"
+    },
+    {
+      "id": 41419,
+      "sequence": 10,
+      "workerSequence": null,
+      "type": "STATE",
+      "status": "RUNNING_ECLIPSE",
+      "message": "Worker 正在执行 ECLIPSE 计算",
+      "error": null,
+      "occurredAt": "2026-10-15T10:25:08.305"
+    },
+    {
+      "id": 41420,
+      "sequence": 11,
+      "workerSequence": 5,
+      "type": "STATE",
+      "status": "COLLECTING",
+      "message": "Collecting fresh ECLIPSE output.",
+      "error": null,
+      "occurredAt": "2026-10-15T02:25:13.967"
+    },
+    {
+      "id": 41421,
+      "sequence": 12,
+      "workerSequence": 6,
+      "type": "STATE",
+      "status": "SUCCEEDED",
+      "message": "ECLIPSE 100 completed successfully.",
+      "error": null,
+      "occurredAt": "2026-10-15T02:25:13.994"
+    },
+    {
+      "id": 41422,
+      "sequence": 13,
+      "workerSequence": null,
+      "type": "STATE",
+      "status": "COLLECTING",
+      "message": "Worker 正在收集结果",
+      "error": null,
+      "occurredAt": "2026-10-15T10:25:14.488"
+    },
+    {
+      "id": 41423,
+      "sequence": 14,
+      "workerSequence": null,
+      "type": "STATE",
+      "status": "SUCCEEDED",
+      "message": "运行完成",
+      "error": null,
+      "occurredAt": "2026-10-15T10:25:14.523"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": 10658,
+      "name": "eclipse-schedule-applied-package.zip",
+      "type": "output",
+      "contentType": "application/zip",
+      "sizeBytes": 2012,
+      "sha256": "4ba1d01ffb4a1f1a733d860815162d88b094d5ad66aeabd9c06a3668e64b105a",
+      "createdAt": "2026-10-15T10:25:14.506",
+      "expiresAt": "2026-11-14T10:25:14.506"
+    },
+    {
+      "id": 10659,
+      "name": "eclipse-output-ECLIPSE_MULTI_PVTW_STAR_DEFAULT.FUNRST",
+      "type": "output",
+      "contentType": "application/octet-stream",
+      "sizeBytes": 1466304,
+      "sha256": "1064c74858af891607fc343996376a99efca90cfaa23b6a8543de55cf612512c",
+      "createdAt": "2026-10-15T10:25:14.51",
+      "expiresAt": "2026-11-14T10:25:14.51"
+    },
+    {
+      "id": 10660,
+      "name": "eclipse-output-ECLIPSE_MULTI_PVTW_STAR_DEFAULT.FEGRID",
+      "type": "output",
+      "contentType": "application/octet-stream",
+      "sizeBytes": 7999,
+      "sha256": "abc3fe1c94a3154c4a4bb0c5c5066a9ea0122c15e999a9d1dfc6b156d789d411",
+      "createdAt": "2026-10-15T10:25:14.512",
+      "expiresAt": "2026-11-14T10:25:14.512"
+    },
+    {
+      "id": 10661,
+      "name": "eclipse-output-ECLIPSE_MULTI_PVTW_STAR_DEFAULT.FINIT",
+      "type": "output",
+      "contentType": "application/octet-stream",
+      "sizeBytes": 36872,
+      "sha256": "0508cccece420073849cd17b7f04be61388a38b78b6de744bf82147994f0d667",
+      "createdAt": "2026-10-15T10:25:14.514",
+      "expiresAt": "2026-11-14T10:25:14.514"
+    },
+    {
+      "id": 10662,
+      "name": "eclipse-output-ECLIPSE_MULTI_PVTW_STAR_DEFAULT.FUNSMRY",
+      "type": "output",
+      "contentType": "application/octet-stream",
+      "sizeBytes": 7367,
+      "sha256": "ca38d5d9e96630e01791f9521e3e723c92ac8283221e8a6c4e6bd959f04f4e49",
+      "createdAt": "2026-10-15T10:25:14.515",
+      "expiresAt": "2026-11-14T10:25:14.515"
+    },
+    {
+      "id": 10663,
+      "name": "normalized-result.json",
+      "type": "normalized-result",
+      "contentType": "application/json",
+      "sizeBytes": 26685,
+      "sha256": "ec7e3971b17180d154ba9194efaf8c797f1659a39755b070fbbe814d01a94d31",
+      "createdAt": "2026-10-15T10:25:14.517",
+      "expiresAt": "2026-11-14T10:25:14.517"
+    },
+    {
+      "id": 10664,
+      "name": "run.log",
+      "type": "log",
+      "contentType": "text/plain",
+      "sizeBytes": 20,
+      "sha256": "49a9a2378ce2aa9174c8c9da7faa3f814612d01699e43a52b84d2fe7b63e06aa",
+      "createdAt": "2026-10-15T10:25:14.519",
+      "expiresAt": "2026-11-14T10:25:14.519"
+    },
+    {
+      "id": 10665,
+      "name": "manifest.json",
+      "type": "manifest",
+      "contentType": "application/json",
+      "sizeBytes": 1891,
+      "sha256": "7d5d839088f7b7e62ae9c746bd226fda2aac6eaedde7c11c1ef0d7a89a69a388",
+      "createdAt": "2026-10-15T10:25:14.52",
+      "expiresAt": "2026-11-14T10:25:14.52"
+    }
+  ],
+  "resultExpiresAt": "2026-11-14T10:25:14.523",
+  "resultExpired": false
+}

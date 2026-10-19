@@ -1,0 +1,49 @@
+{
+  "seedSha256": "bd42d940b61c6ae188154636a8f55d5c1cbd4d4694c176aa89481aa959e5a126",
+  "sourceSha256": "95b5d5c6162b82eef23631ef6a3bb5c0a5ef8eb2583be55fd8c888e26dc103ab",
+  "originalOfficialModel": false,
+  "derivation": [
+    "Existing qualified group-injection seed; complete physics, geometry and producer/gas controls retained.",
+    "Remove only WI GCONINJE and set both existing water injectors to independent RATE 1 STB/day, explicit BHP 6000 psia retained.",
+    "Express the same ten annual intervals as literal DATES, restate two water controls on first three dates.",
+    "Request real water injection cumulative and field outputs; split physical sources without flattening the exported package."
+  ],
+  "nativeVerified": true,
+  "completeCurvesEqualFlatSource": true,
+  "completeOverrideChainVerified": true,
+  "fullCurveComparisonTolerance": 0,
+  "seed": "test-data/ECLIPSE_GROUP_INJECTION.DATA",
+  "officialBase": "C:/ecl/2024.1/eclipse/data/BIG3D3P.DATA",
+  "mainFile": "MODEL.DATA",
+  "fileCount": 6,
+  "startDate": "1982-10-19",
+  "endTimeDays": 3650,
+  "phase": "WATER",
+  "controlMode": "RATE",
+  "unit": "STB/day",
+  "originalPerWellRate": 1,
+  "bhpUpperLimit": 6000,
+  "edits": [
+    {
+      "well": "INJECTR5",
+      "timeDays": 365,
+      "targetInjectionRate": 0.5,
+      "sourceFile": "controls/YEAR1.INC"
+    },
+    {
+      "well": "INJECTR6",
+      "timeDays": 730,
+      "targetInjectionRate": 0.7,
+      "sourceFile": "controls/YEAR2.INC"
+    },
+    {
+      "well": "INJECTR5",
+      "timeDays": 1095,
+      "targetInjectionRate": 0.9,
+      "sourceFile": "controls/YEAR3.INC"
+    }
+  ],
+  "limitedPerWellRate": 10,
+  "manualUiVerified": false,
+  "scope": "E100 FIELD native-qualified example; METRIC code only. Literal DATES, existing OPEN/RATE water controls, safe relative INCLUDE paths. No dynamic execution, repeated source use or E300 injection editing."
+}

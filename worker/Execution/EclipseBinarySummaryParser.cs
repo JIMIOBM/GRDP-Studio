@@ -36,7 +36,8 @@ public static class EclipseBinarySummaryParser
             if (index == timeIndex) continue;
             var objectName = ObjectName(wells.ElementAtOrDefault(index));
             var key = SeriesKey(keywords[index], objectName);
-            series.TryAdd(key, new MutableSeries(keywords[index], objectName, units.ElementAtOrDefault(index)));
+            if (!series.TryAdd(key, new MutableSeries(keywords[index], objectName, units.ElementAtOrDefault(index))))
+                throw new InvalidDataException("Duplicate binary Summary identities require a vector-aware contract; they must not be merged.");
         }
 
         foreach (var path in paths)
@@ -60,6 +61,28 @@ public static class EclipseBinarySummaryParser
         }
 
         return series.Values.Select(item => new EclipseSummarySeries(item.Keyword, item.ObjectName, item.Unit, item.Points)).ToArray();
+    }
+
+    public static string ReadStartDate(string path)
+    {
+        var index = EclipseBinaryFieldIndexParser.TryParse(path) ?? throw new InvalidDataException("Invalid binary Summary specification.");
+        var fields = index.Sections.Where(s => s.Keyword is "STARTDAT" or "INTEHEAD").ToArray();
+        if (fields.Length != 2 || fields.Count(s => s.Keyword == "STARTDAT" && s.DataType == "INTE" && s.Count == 6) != 1
+            || fields.Count(s => s.Keyword == "INTEHEAD" && s.DataType == "INTE" && s.Count == 2) != 1)
+            throw new InvalidDataException("A complete E100 midnight Summary origin is required.");
+        using var file = File.OpenRead(path);
+        var arrays = new Dictionary<string, int[]>();
+        foreach (var field in fields)
+        {
+            var data = new byte[field.Count * 4]; var offset = 0;
+            foreach (var segment in field.Segments) { file.Position = segment.Offset; file.ReadExactly(data.AsSpan(offset, segment.Length)); offset += segment.Length; }
+            arrays[field.Keyword] = Enumerable.Range(0, field.Count).Select(i => ReadInt32(data, i * 4, index.ByteOrder == "BIG")).ToArray();
+        }
+        var start = arrays["STARTDAT"]; var header = arrays["INTEHEAD"];
+        if (header[0] is not (1 or 2) || header[1] != 100 || start.Skip(3).Any(n => n != 0))
+            throw new InvalidDataException("Only E100 FIELD/METRIC midnight Summary origins are supported.");
+        try { return new DateOnly(start[2], start[1], start[0]).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture); }
+        catch (ArgumentOutOfRangeException e) { throw new InvalidDataException("Invalid binary Summary start date.", e); }
     }
 
     private static IReadOnlyList<Section> ReadSections(string path)

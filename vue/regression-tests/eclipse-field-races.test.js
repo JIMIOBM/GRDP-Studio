@@ -1,3 +1,15 @@
+import * as compositionalFluidProperty from '../src/views/SoftwareIntegration/eclipseCompositionalFluidProperty.js'
+import * as waterInjectionPlan from '../src/views/SoftwareIntegration/eclipseWaterInjectionPlan.js'
+import * as multiLiveOilPvt from '../src/views/SoftwareIntegration/eclipseMultiLiveOilPvt.js'
+import * as multiWaterPvt from '../src/views/SoftwareIntegration/eclipseMultiWaterPvt.js'
+import * as pvtwProperties from '../src/views/SoftwareIntegration/eclipsePvtw.js'
+import * as multiWetGasPvt from '../src/views/SoftwareIntegration/eclipseMultiWetGasPvt.js'
+import * as multiPvt from '../src/views/SoftwareIntegration/eclipseMultiPvt.js'
+import * as wetGasPvt from '../src/views/SoftwareIntegration/eclipseWetGasPvt.js'
+import * as liveOilPvt from '../src/views/SoftwareIntegration/eclipseLiveOilPvt.js'
+import * as multiFamilyII from '../src/views/SoftwareIntegration/eclipseMultiSatFamilyII.js'
+import * as multiSatRelperm from '../src/views/SoftwareIntegration/eclipseMultiSatRelperm.js'
+import * as coupledRelperm from '../src/views/SoftwareIntegration/eclipseCoupledRelperm.js'
 import * as relperm from '../src/views/SoftwareIntegration/eclipseRelperm.js'
 import * as pvtw from '../src/views/SoftwareIntegration/eclipsePvtw.js'
 import * as gasPvt from '../src/views/SoftwareIntegration/eclipseGasPvt.js'
@@ -8,6 +20,7 @@ import * as completionGeometry from '../src/views/SoftwareIntegration/eclipseCom
 import * as controlPlan from '../src/views/SoftwareIntegration/eclipseControlPlan.js'
 import * as completionFactor from '../src/views/SoftwareIntegration/eclipseCompletionFactor.js'
 import * as gridRegion from '../src/views/SoftwareIntegration/eclipseGridRegion.js'
+import * as gridPresentation from '../src/views/SoftwareIntegration/eclipseGridPresentation.js'
 import * as batch from '../src/views/SoftwareIntegration/eclipseBatch.js'
 import * as restartForecast from '../src/views/SoftwareIntegration/eclipseRestartForecast.js'
 import * as groupStructure from '../src/views/SoftwareIntegration/eclipseGroupStructure.js'
@@ -53,11 +66,15 @@ const mount = (name, initial) => {
     }
   }
   const dependencies = {
-    './eclipseBatch.js': batch,
+    './eclipseWaterInjectionPlan': waterInjectionPlan,
+    './eclipseBatch.js': batch, './eclipseCoupledRelperm.js': coupledRelperm,
+    './eclipseWetGasPvt.js': wetGasPvt, './eclipseLiveOilPvt.js': liveOilPvt, './eclipseOilPvt.js': oilPvt, './eclipseGasPvt.js': gasPvt,
     './eclipseCompletionFactor': completionFactor,
-    './eclipseOilPvt': oilPvt, './eclipseGasPvt': gasPvt, './eclipseRelperm': relperm,
+    './eclipseWetGasPvt': wetGasPvt, './eclipseLiveOilPvt': liveOilPvt, './eclipseOilPvt': oilPvt, './eclipseGasPvt': gasPvt, './eclipseRelperm': relperm, './eclipseCoupledRelperm': coupledRelperm, './eclipseMultiSatRelperm': multiSatRelperm, './eclipseMultiSatRelperm.js': multiSatRelperm, './eclipseMultiLiveOilPvt.js': multiLiveOilPvt, './eclipseMultiLiveOilPvt': multiLiveOilPvt, './eclipseMultiWaterPvt.js': multiWaterPvt, './eclipseMultiWaterPvt': multiWaterPvt, './eclipsePvtw.js': pvtwProperties, './eclipseMultiWetGasPvt.js': multiWetGasPvt, './eclipseMultiWetGasPvt': multiWetGasPvt, './eclipseMultiPvt.js': multiPvt, './eclipseMultiPvt': multiPvt, './eclipseMultiSatFamilyII.js': multiFamilyII, './eclipseMultiSatFamilyII': multiFamilyII,
     './eclipseNewCompletion': newCompletion, './eclipseNewWell': newWell, './eclipsePvtw': pvtw, './eclipseCompletionGeometry': completionGeometry, './eclipseGridRegion': gridRegion,
     './eclipseRestartForecast': restartForecast,
+    './eclipseCompositionalFluidProperty.js': compositionalFluidProperty,
+    './eclipseGridPresentation.js': gridPresentation,
     vue: Vue, three: THREE,
     'three/addons/controls/OrbitControls.js': { OrbitControls: class {} },
     'element-plus': { ElMessage: { warning() {}, success() {}, error() {} } },
@@ -84,14 +101,29 @@ const mount = (name, initial) => {
   const pvtwEmitted = []
   const oilPvtEmitted = []
   const gasPvtEmitted = []
+  const multiPvtEmitted = []
   const relpermEmitted = []
-  const app = renderer.createApp({ render: () => Vue.h(component, {...props, onCreateRelpermRun: parameters => relpermEmitted.push(parameters), onCreateGasPvtRun: parameters => gasPvtEmitted.push(parameters), onCreateOilPvtRun: parameters => oilPvtEmitted.push(parameters), onCreatePvtwRun: parameters => pvtwEmitted.push(parameters), onCreateNewWellRun: parameters => emitted.push(parameters), onCreateNewCompletionRun: parameters => completionEmitted.push(parameters)}) })
+  const app = renderer.createApp({ render: () => Vue.h(component, {...props, onCreatePvtRun: parameters => multiPvtEmitted.push(parameters), onCreateRelpermRun: parameters => relpermEmitted.push(parameters), onCreateGasPvtRun: parameters => gasPvtEmitted.push(parameters), onCreateOilPvtRun: parameters => oilPvtEmitted.push(parameters), onCreatePvtwRun: parameters => pvtwEmitted.push(parameters), onCreateNewWellRun: parameters => emitted.push(parameters), onCreateNewCompletionRun: parameters => completionEmitted.push(parameters)}) })
   app.mount({})
-  return { state, props, pending, emitted, completionEmitted, pvtwEmitted, oilPvtEmitted, gasPvtEmitted, relpermEmitted, unmount: () => app.unmount() }
+  return { state, props, pending, emitted, completionEmitted, pvtwEmitted, oilPvtEmitted, gasPvtEmitted, relpermEmitted, multiPvtEmitted, unmount: () => app.unmount() }
 }
 const flush = async () => {
   for (let i = 0; i < 12; i++) { await Promise.resolve(); await Vue.nextTick() }
 }
+
+test('live oil source branches baseline and selected property clear stale preview and submission',async()=>{
+  const inspection=JSON.parse(readFileSync(new URL('../tests/fixtures/eclipseLiveOilPvt/inspection.json',import.meta.url),'utf8'))
+  const run={id:1,modelVersionId:2,runType:'eclipse',status:'SUCCEEDED',resultContract:'VALID_FULL',parameters:null}
+  const h=mount('EclipseLiveOilPvtEditor',{run,inspection})
+  try{h.state.multiplier.value=2;h.state.submit();assert.equal(h.oilPvtEmitted.length,1);assert.equal(h.state.preview.value.length,12);assert.equal(h.state.preview.value.at(-1).state,'欠饱和');h.state.field.value='FORMATION_VOLUME_FACTOR';await flush();assert.equal(h.state.multiplier.value,null);h.state.multiplier.value=1.02;h.state.submit();assert.equal(h.oilPvtEmitted[1].unit,'rb/stb');h.props.inspection.liveOilPvtContext.records.at(-1).rows.pop();await flush();assert.equal(h.state.record.value,null);assert.equal(h.state.multiplier.value,null);h.state.submit();assert.equal(h.oilPvtEmitted.length,2);h.props.run.id++;await flush();assert.equal(h.state.multiplier.value,null)}finally{h.unmount()}
+})
+
+test('wet gas source branches baseline and selected property clear stale preview and submission',async()=>{
+  const inspection=JSON.parse(readFileSync(new URL('../tests/fixtures/eclipseWetGasPvt/inspection.json',import.meta.url),'utf8'))
+  const run={id:1,modelVersionId:2,runType:'eclipse',status:'SUCCEEDED',resultContract:'VALID_FULL',parameters:null}
+  const h=mount('EclipseWetGasPvtEditor',{run,inspection})
+  try{h.state.multiplier.value=2;h.state.submit();assert.equal(h.gasPvtEmitted.length,1);assert.equal(h.state.preview.value.length,29);assert.equal(h.state.preview.value.at(-1).state,'欠饱和');h.state.field.value='FORMATION_VOLUME_FACTOR';await flush();assert.equal(h.state.multiplier.value,null);h.state.multiplier.value=1.02;h.state.submit();assert.equal(h.gasPvtEmitted[1].unit,'rm3/sm3');h.props.inspection.wetGasPvtContext.records.at(-1).rows.splice(1);await flush();assert.equal(h.state.record.value,null);assert.equal(h.state.multiplier.value,null);h.state.submit();assert.equal(h.gasPvtEmitted.length,2);h.props.run.id++;await flush();assert.equal(h.state.multiplier.value,null)}finally{h.unmount()}
+})
 
 test('gas PVT editor clears multiplier when source rows or selected baseline change',async()=>{
   const inspection=JSON.parse(readFileSync(new URL('../tests/fixtures/eclipseGasPvt/inspection.json',import.meta.url),'utf8'))
@@ -117,6 +149,14 @@ test('oil PVT editor clears multiplier when source rows or selected baseline cha
     h.state.submit();assert.equal(h.oilPvtEmitted.length,1)
     h.props.inspection.oilPvtContext.rows[0].values[2]='1*';await flush();assert.equal(h.state.record.value,null)
   }finally{h.unmount()}
+})
+test('oil volume selection clears the old multiplier and emits a Bo snapshot',async()=>{
+  const inspection=JSON.parse(readFileSync(new URL('../tests/fixtures/eclipseOilPvt/inspection.json',import.meta.url),'utf8')),run={id:1,modelVersionId:2,runType:'eclipse',status:'SUCCEEDED',resultContract:'VALID_FULL',parameters:null},h=mount('EclipseOilPvtEditor',{run,inspection})
+  try{h.state.multiplier.value=2;h.state.field.value='FORMATION_VOLUME_FACTOR';await flush();assert.equal(h.state.multiplier.value,null);h.state.multiplier.value=1.02;h.state.submit();assert.equal(h.oilPvtEmitted[0].field,'FORMATION_VOLUME_FACTOR');assert.equal(h.oilPvtEmitted[0].unit,'rb/stb');assert.equal(h.state.preview.value[0].target,1.26*1.02);h.props.run.id++;await flush();assert.equal(h.state.multiplier.value,null);h.state.submit();assert.equal(h.oilPvtEmitted.length,1)}finally{h.unmount()}
+})
+test('dry gas volume selection clears the old multiplier and emits a Bg snapshot',async()=>{
+ const inspection=JSON.parse(readFileSync(new URL('../tests/fixtures/eclipseGasPvt/inspection.json',import.meta.url),'utf8')),run={id:1,modelVersionId:2,runType:'eclipse',status:'SUCCEEDED',resultContract:'VALID_FULL',parameters:null},h=mount('EclipseGasPvtEditor',{run,inspection})
+ try{h.state.multiplier.value=2;h.state.field.value='FORMATION_VOLUME_FACTOR';await flush();assert.equal(h.state.multiplier.value,null);h.state.multiplier.value=1.02;h.state.submit();assert.equal(h.gasPvtEmitted[0].field,'FORMATION_VOLUME_FACTOR');assert.equal(h.gasPvtEmitted[0].unit,'rb/Mscf');assert.equal(h.state.preview.value[0].target,1.02);h.props.run.id++;await flush();assert.equal(h.state.multiplier.value,null);h.state.submit();assert.equal(h.gasPvtEmitted.length,1)}finally{h.unmount()}
 })
 
 test('new well editor: actual ACTNUM byte order, inactive rejection and stale coordinate/run replies never submit', async () => {
@@ -467,4 +507,89 @@ test('relative permeability editor invalidates baseline or cross-table endpoint 
  const inspection=JSON.parse(readFileSync(new URL('../tests/fixtures/eclipseRelperm/inspection.json',import.meta.url),'utf8'))
  const run={id:1,modelVersionId:2,runType:'eclipse',status:'SUCCEEDED',resultContract:'VALID_FULL',parameters:null},h=mount('EclipseRelpermEditor',{run,inspection})
  try{h.state.multiplier.value=.5;h.props.run={...run,id:3};await flush();assert.equal(h.state.multiplier.value,null);h.state.multiplier.value=.5;h.props.inspection.relpermContext.tables[2].rows.at(-1).values[2]='0.8';await flush();assert.equal(h.state.context.value,null);assert.equal(h.state.multiplier.value,null);h.state.submit();assert.equal(h.relpermEmitted.length,0)}finally{h.unmount()}
+})
+
+
+test('coupled relperm editor resets multiplier on phase and baseline changes and emits both linked tables',async()=>{
+ const inspection=JSON.parse(readFileSync(new URL('../tests/fixtures/eclipseCoupledRelperm/inspection.json',import.meta.url),'utf8'))
+ const run={id:1,modelVersionId:2,runType:'eclipse',status:'SUCCEEDED',resultContract:'VALID_FULL',parameters:null},h=mount('EclipseCoupledRelpermEditor',{run,inspection})
+ try{h.state.multiplier.value=.5;h.state.field.value='OIL_KR';await flush();assert.equal(h.state.multiplier.value,null);h.state.multiplier.value=.5;h.state.submit();assert.equal(h.state.error.value,'');const p=h.relpermEmitted[0];assert.equal(p.field,'OIL_KR');assert.deepEqual(p.tables,inspection.coupledRelpermContext.tables);h.props.run={...run,id:2};await flush();assert.equal(h.state.multiplier.value,null)}finally{h.unmount()}
+})
+
+
+test('multi SAT editor changes region without carrying an old multiplier and emits only chosen original rows',async()=>{
+ const inspection=JSON.parse(readFileSync(new URL('../tests/fixtures/eclipseMultiSatRelperm/inspection.json',import.meta.url),'utf8'))
+ const run={id:1,modelVersionId:2,runType:'eclipse',status:'SUCCEEDED',resultContract:'VALID_FULL',parameters:null},h=mount('EclipseCoupledRelpermEditor',{run,inspection})
+ try{h.state.multiplier.value=.5;h.state.regionNumber.value=2;await flush();assert.equal(h.state.multiplier.value,null);h.state.field.value='OIL_KR';await flush();h.state.multiplier.value=.5;h.state.submit();const p=h.relpermEmitted[0];assert.equal(p.regionNumber,2);assert.equal(p.schemaVersion,'eclipse-multi-sat-relperm-parameters/1');assert.deepEqual(p.tables,inspection.multiSatRelpermContext.regions[1].tables);h.props.run={...run,id:3};await flush();assert.equal(h.state.regionNumber.value,1);assert.equal(h.state.multiplier.value,null)}finally{h.unmount()}
+})
+
+
+test('three-table multi SAT editor clears region drafts and emits both SOF3 oil columns from chosen source',async()=>{
+ const inspection=JSON.parse(readFileSync(new URL('../tests/fixtures/eclipseMultiSatFamilyII/inspection.json',import.meta.url),'utf8'))
+ const run={id:1,modelVersionId:2,runType:'eclipse',status:'SUCCEEDED',resultContract:'VALID_FULL',parameters:null},h=mount('EclipseMultiSatFamilyIIEditor',{run,inspection})
+ try{h.state.multiplier.value=.5;h.state.regionNumber.value=2;await flush();assert.equal(h.state.multiplier.value,null);h.state.field.value='OIL_KR';await flush();h.state.multiplier.value=.5;h.state.submit();const p=h.relpermEmitted[0];assert.equal(p.regionNumber,2);assert.equal(p.schemaVersion,'eclipse-multi-sat-relperm-parameters/2');assert.deepEqual(p.tables,inspection.multiSatRelpermContext.regions[1].tables);assert.equal(h.state.preview.value[2].rows.at(-1).target,h.state.preview.value[2].rows.at(-1).targetOilGas);h.props.run={...run,id:3};await flush();assert.equal(h.state.regionNumber.value,1);assert.equal(h.state.multiplier.value,null)}finally{h.unmount()}
+})
+
+test('multi PVT editor clears drafts when fluid region field or baseline changes and binds the chosen complete pair',async()=>{
+ const inspection=JSON.parse(readFileSync(new URL('../tests/fixtures/eclipseMultiPvt/inspection.json',import.meta.url),'utf8'))
+ const run={id:1,modelVersionId:2,runType:'eclipse',status:'SUCCEEDED',resultContract:'VALID_FULL',parameters:null},h=mount('EclipseMultiPvtEditor',{run,inspection})
+ try{h.state.multiplier.value=2;h.state.regionNumber.value=2;await flush();assert.equal(h.state.multiplier.value,null);h.state.kind.value='PVT_GAS_BG';await flush();h.state.multiplier.value=1.02;h.state.submit();assert.equal(h.state.error.value,'');const p=h.multiPvtEmitted[0];assert.equal(p.regionNumber,2);assert.equal(p.keyword,'PVDG');assert.equal(p.unit,'rb/Mscf');assert.deepEqual(p.tables,inspection.multiPvtContext.regions[1].tables);h.props.run={...run,id:3};await flush();assert.equal(h.state.regionNumber.value,1);assert.equal(h.state.multiplier.value,null)}finally{h.unmount()}
+})
+
+test('multi PVTO editor clears region field and baseline drafts and binds every selected branch with original dry gas rows',async()=>{
+ const inspection=JSON.parse(readFileSync(new URL('../tests/fixtures/eclipseMultiLiveOilPvt/inspection.json',import.meta.url),'utf8'))
+ const run={id:1,modelVersionId:2,runType:'eclipse',status:'SUCCEEDED',resultContract:'VALID_FULL',parameters:null},h=mount('EclipseMultiLiveOilPvtEditor',{run,inspection})
+ try{h.state.multiplier.value=2;h.state.regionNumber.value=2;await flush();assert.equal(h.state.multiplier.value,null);h.state.field.value='FORMATION_VOLUME_FACTOR';await flush();h.state.multiplier.value=1.02;h.state.submit();assert.equal(h.state.error.value,'');const p=h.oilPvtEmitted[0];assert.equal(p.regionNumber,2);assert.equal(p.unit,'rb/stb');assert.equal(p.records.length,9);assert.equal(h.state.preview.value.length,12);assert.deepEqual(p.gasTable,inspection.multiLiveOilPvtContext.regions[1].gasTable);h.props.run={...run,id:3};await flush();assert.equal(h.state.regionNumber.value,1);assert.equal(h.state.multiplier.value,null)}finally{h.unmount()}
+})
+
+test('multi PVTG editor clears region field and baseline drafts and binds every selected branch with original dry gas rows',async()=>{
+ const inspection=JSON.parse(readFileSync(new URL('../tests/fixtures/eclipseMultiWetGasPvt/inspection.json',import.meta.url),'utf8'))
+ const run={id:1,modelVersionId:2,runType:'eclipse',status:'SUCCEEDED',resultContract:'VALID_FULL',parameters:null},h=mount('EclipseMultiWetGasPvtEditor',{run,inspection})
+ try{h.state.multiplier.value=2;h.state.regionNumber.value=2;await flush();assert.equal(h.state.multiplier.value,null);h.state.field.value='FORMATION_VOLUME_FACTOR';await flush();h.state.multiplier.value=1.02;h.state.submit();assert.equal(h.state.error.value,'');const p=h.gasPvtEmitted[0];assert.equal(p.regionNumber,2);assert.equal(p.unit,'rm3/sm3');assert.equal(p.records.length,13);assert.equal(h.state.preview.value.length,29);assert.deepEqual(p.oilTable,inspection.multiWetGasPvtContext.regions[1].oilTable);h.props.run={...run,id:3};await flush();assert.equal(h.state.regionNumber.value,1);assert.equal(h.state.multiplier.value,null)}finally{h.unmount()}
+})
+
+test('combined SAT and PVT batch switches require a fresh region selection',async()=>{
+ const inspection=JSON.parse(readFileSync(new URL('../tests/fixtures/eclipseMultiSatPvt/inspection.json',import.meta.url),'utf8'))
+ const run={id:1,modelVersionId:2,runType:'eclipse',status:'SUCCEEDED',resultContract:'VALID_FULL',parameters:null},h=mount('EclipseBatchPanel',{run,inspection})
+ try{h.state.kind.value='PVT_OIL_MU';await flush();h.state.regionNumber.value=2;await flush();h.state.value.value=2;h.state.kind.value='FAMILY_II_GAS_KR';await flush();assert.equal(h.state.regionNumber.value,null);assert.equal(h.state.value.value,null);h.state.regionNumber.value=2;await flush();h.state.value.value=.5;h.state.kind.value='PVT_GAS_BG';await flush();assert.equal(h.state.regionNumber.value,null);assert.equal(h.state.value.value,null)}finally{h.unmount()}
+})
+
+test('coupled-table SAT and PVT batch switches require a fresh region selection',async()=>{
+ const inspection=JSON.parse(readFileSync(new URL('../tests/fixtures/eclipseMultiSatFamilyIPvt/inspection.json',import.meta.url),'utf8'))
+ const run={id:1,modelVersionId:2,runType:'eclipse',status:'SUCCEEDED',resultContract:'VALID_FULL',parameters:null},h=mount('EclipseBatchPanel',{run,inspection})
+ try{h.state.kind.value='PVT_OIL_MU';await flush();h.state.regionNumber.value=2;await flush();h.state.value.value=2;h.state.kind.value='MULTI_GAS_KR';await flush();assert.equal(h.state.regionNumber.value,null);assert.equal(h.state.value.value,null);h.state.regionNumber.value=2;await flush();h.state.value.value=.5;h.state.kind.value='PVT_GAS_BG';await flush();assert.equal(h.state.regionNumber.value,null);assert.equal(h.state.value.value,null)}finally{h.unmount()}
+})
+
+test('regional water editor resets absolute target on region, field and baseline changes',async()=>{
+ const inspection=JSON.parse(readFileSync(new URL('../tests/fixtures/eclipseMultiWaterPvt/inspection.json',import.meta.url),'utf8'))
+ const run={id:1,modelVersionId:2,runType:'eclipse',status:'SUCCEEDED',resultContract:'VALID_FULL',parameters:null},h=mount('EclipseMultiWaterPvtEditor',{run,inspection})
+ try{assert.equal(h.state.regionNumber.value,null);h.state.regionNumber.value=2;await flush();assert.equal(h.state.preview.value.length,5);h.state.target.value=.8;h.state.field.value='VISCOSIBILITY';await flush();assert.equal(h.state.target.value,null);h.state.target.value=1e-6;h.state.submit();assert.equal(h.state.error.value,'');const p=h.pvtwEmitted[0];assert.equal(p.regionNumber,2);assert.equal(p.unit,'1/psi');assert.equal(p.targetValue,1e-6);assert.deepEqual(p.recordValues,inspection.multiWaterPvtContext.regions[1].recordValues);h.state.regionNumber.value=1;await flush();assert.equal(h.state.target.value,null);h.props.run={...run,id:3};await flush();assert.equal(h.state.regionNumber.value,null);assert.equal(h.state.target.value,null)}finally{h.unmount()}
+})
+
+test('live-oil combined panels require independent SAT and PVT selections and clear invalid drafts',async()=>{
+ const inspection=JSON.parse(readFileSync(new URL('../tests/fixtures/eclipseMultiSatPvto/inspection.json',import.meta.url),'utf8')),run={id:1,modelVersionId:2,runType:'eclipse',status:'SUCCEEDED',resultContract:'VALID_FULL',parameters:null}
+ for(const [name,field,emitted] of [['EclipseMultiLiveOilPvtEditor','FORMATION_VOLUME_FACTOR','oilPvtEmitted'],['EclipseMultiSatFamilyIIEditor','OIL_KR','relpermEmitted']]){const h=mount(name,{run,inspection});try{assert.equal(h.state.regionNumber.value,null);h.state.multiplier.value=.5;h.state.submit();assert.equal(h[emitted].length,0);h.state.regionNumber.value=2;await flush();assert.equal(h.state.multiplier.value,null);h.state.field.value=field;await flush();h.state.multiplier.value=field==='OIL_KR'?.5:1.02;h.state.submit();assert.equal(h.state.error.value,'');assert.equal(h[emitted][0].regionNumber,2);h.props.run={...run,id:3};await flush();assert.equal(h.state.regionNumber.value,null);assert.equal(h.state.multiplier.value,null)}finally{h.unmount()}}
+ const h=mount('EclipseBatchPanel',{run,inspection});try{h.state.kind.value='REGION_PVTO_MU';await flush();h.state.regionNumber.value=2;await flush();h.state.value.value=2;h.state.kind.value='FAMILY_II_GAS_KR';await flush();assert.equal(h.state.regionNumber.value,null);assert.equal(h.state.value.value,null)}finally{h.unmount()}
+})
+
+test('wet-gas combined panels require independent SAT and PVT selections and clear invalid drafts',async()=>{
+ const inspection=JSON.parse(readFileSync(new URL('../tests/fixtures/eclipseMultiSatPvtg/inspection.json',import.meta.url),'utf8')),run={id:1,modelVersionId:2,runType:'eclipse',status:'SUCCEEDED',resultContract:'VALID_FULL',parameters:null}
+ for(const [name,field,emitted] of [['EclipseMultiWetGasPvtEditor','FORMATION_VOLUME_FACTOR','gasPvtEmitted'],['EclipseMultiSatFamilyIIEditor','OIL_KR','relpermEmitted']]){const h=mount(name,{run,inspection});try{assert.equal(h.state.regionNumber.value,null);h.state.multiplier.value=.5;h.state.submit();assert.equal(h[emitted].length,0);h.state.regionNumber.value=2;await flush();assert.equal(h.state.multiplier.value,null);h.state.field.value=field;await flush();h.state.multiplier.value=field==='OIL_KR'?.5:1.02;h.state.submit();assert.equal(h.state.error.value,'');assert.equal(h[emitted][0].regionNumber,2);h.props.run={...run,id:3};await flush();assert.equal(h.state.regionNumber.value,null);assert.equal(h.state.multiplier.value,null)}finally{h.unmount()}}
+ const h=mount('EclipseBatchPanel',{run,inspection});try{h.state.kind.value='REGION_PVTG_MU';await flush();h.state.regionNumber.value=2;await flush();h.state.value.value=2;h.state.kind.value='FAMILY_II_GAS_KR';await flush();assert.equal(h.state.regionNumber.value,null);assert.equal(h.state.value.value,null)}finally{h.unmount()}
+})
+
+test('Family I wet-gas combined panels require independent SAT and PVT selections and clear invalid drafts',async()=>{
+ const inspection=JSON.parse(readFileSync(new URL('../tests/fixtures/eclipseMultiSatFamilyIPvtg/inspection.json',import.meta.url),'utf8')),run={id:1,modelVersionId:2,runType:'eclipse',status:'SUCCEEDED',resultContract:'VALID_FULL',parameters:null}
+ for(const [name,field,emitted] of [['EclipseMultiWetGasPvtEditor','FORMATION_VOLUME_FACTOR','gasPvtEmitted'],['EclipseCoupledRelpermEditor','OIL_KR','relpermEmitted']]){const h=mount(name,{run,inspection});try{assert.equal(h.state.regionNumber.value,null);h.state.multiplier.value=.5;h.state.submit();assert.equal(h[emitted].length,0);h.state.regionNumber.value=2;await flush();assert.equal(h.state.multiplier.value,null);h.state.field.value=field;await flush();h.state.multiplier.value=field==='OIL_KR'?.5:1.02;h.state.submit();assert.equal(h.state.error.value,'');assert.equal(h[emitted][0].regionNumber,2);h.props.run={...run,id:3};await flush();assert.equal(h.state.regionNumber.value,null);assert.equal(h.state.multiplier.value,null)}finally{h.unmount()}}
+ const h=mount('EclipseBatchPanel',{run,inspection});try{h.state.kind.value='REGION_PVTG_MU';await flush();h.state.regionNumber.value=2;await flush();h.state.value.value=2;h.state.kind.value='MULTI_GAS_KR';await flush();assert.equal(h.state.regionNumber.value,null);assert.equal(h.state.value.value,null)}finally{h.unmount()}
+})
+
+test('Family I original live-oil combined panels require independent SAT and PVT selections and clear invalid drafts',async()=>{
+ const inspection=JSON.parse(readFileSync(new URL('../tests/fixtures/eclipseMultiSatFamilyIPvto/inspection.json',import.meta.url),'utf8')),run={id:1,modelVersionId:2,runType:'eclipse',status:'SUCCEEDED',resultContract:'VALID_FULL',parameters:null}
+ for(const [name,field,emitted] of [['EclipseMultiLiveOilPvtEditor','FORMATION_VOLUME_FACTOR','oilPvtEmitted'],['EclipseCoupledRelpermEditor','OIL_KR','relpermEmitted']]){const h=mount(name,{run,inspection});try{assert.equal(h.state.regionNumber.value,null);h.state.multiplier.value=.5;h.state.submit();assert.equal(h[emitted].length,0);h.state.regionNumber.value=2;await flush();assert.equal(h.state.multiplier.value,null);h.state.field.value=field;await flush();h.state.multiplier.value=field==='OIL_KR'?.5:1.02;h.state.submit();assert.equal(h.state.error.value,'');assert.equal(h[emitted][0].regionNumber,2);h.props.run={...run,id:3};await flush();assert.equal(h.state.regionNumber.value,null);assert.equal(h.state.multiplier.value,null)}finally{h.unmount()}}
+ const h=mount('EclipseBatchPanel',{run,inspection});try{h.state.kind.value='REGION_PVTO_MU';await flush();h.state.regionNumber.value=2;await flush();h.state.value.value=2;h.state.kind.value='MULTI_GAS_KR';await flush();assert.equal(h.state.regionNumber.value,null);assert.equal(h.state.value.value,null)}finally{h.unmount()}
+})
+
+test('official fifth water 1* previews effective zero while retaining raw source through region and field changes',async()=>{
+ for(const kind of ['three','pure']){const inspection=JSON.parse(readFileSync(new URL(`../tests/fixtures/eclipseMultiWaterStars/${kind}/inspection.json`,import.meta.url),'utf8')),run={id:1,modelVersionId:2,runType:'eclipse',status:'SUCCEEDED',resultContract:'VALID_FULL',parameters:null},h=mount('EclipseMultiWaterPvtEditor',{run,inspection});try{assert.equal(h.state.regionNumber.value,null);h.state.regionNumber.value=2;await flush();assert.equal(h.state.preview.value[4].value,'0（官方默认，源记录1*）');h.state.field.value='VISCOSIBILITY';await flush();assert.equal(h.state.original.value,0);h.state.target.value=1e-6;h.state.submit();assert.equal(h.state.error.value,'');assert.equal(h.pvtwEmitted[0].schemaVersion,'eclipse-multi-pvtw-parameters/3');assert.equal(h.pvtwEmitted[0].recordValues[4],'1*');h.state.regionNumber.value=1;await flush();assert.equal(h.state.target.value,null);h.props.run={...run,id:3};await flush();assert.equal(h.state.regionNumber.value,null)}finally{h.unmount()}}
 })

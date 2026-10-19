@@ -8,12 +8,23 @@
     <DefaultItemExcludes>$(DefaultItemExcludes);bin\**;bin/**;obj\**;obj/**;bin-*\**;bin-*/**;obj-*\**;obj-*/**</DefaultItemExcludes>
   </PropertyGroup>
   <ItemGroup>
+    <None Update="Fixtures/THERMAL-ROCK-*.DATA" CopyToOutputDirectory="Always" />
+    <None Update="Fixtures/THERMAL-PLAN-*.DATA" CopyToOutputDirectory="Always" />
+    <None Update="Fixtures/THERMAL-CONTROL-*.DATA" CopyToOutputDirectory="Always" />
+    <None Update="Fixtures/THERMAL-INJECTION-*.DATA" CopyToOutputDirectory="Always" />
+    <None Update="Fixtures/INCLUDE-CONTROL-*" CopyToOutputDirectory="Always" />
+    <None Update="Fixtures/BINARY-RESTART*" CopyToOutputDirectory="Always" />
+    <None Include="..\..\..\test-data\ECLIPSE_INCLUDE_PRODUCTION.zip" Link="Fixtures\ECLIPSE_INCLUDE_PRODUCTION.zip" CopyToOutputDirectory="Always" />
+    <None Update="Fixtures\INCLUDE-PRODUCTION-TARGET.INC" CopyToOutputDirectory="Always" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.0" />
     <PackageReference Include="xunit.v3" Version="3.2.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
     <ProjectReference Include="..\..\Grdp.SoftwareIntegration.Worker.csproj" />
     <None Include="Fixtures/RELPERM-SWFN.DATA" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Fixtures/RELPERM-SOF3.DATA" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Fixtures\MULTI-SAT-PVT-*.DATA" CopyToOutputDirectory="Always" />
+    <None Update="Fixtures\MULTI-SAT-FAMILY-I-PVT-*.DATA" CopyToOutputDirectory="Always" />
+    <None Update="Fixtures\MULTI-PVT-WATER-*.DATA" CopyToOutputDirectory="Always" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\..\test-data\ECLIPSE_GROUP_OIL_INJECTION.DATA;..\..\..\test-data\ECLIPSE_GROUP_GAS_RESV.DATA;..\..\..\test-data\ECLIPSE_GROUP_GAS_REIN.DATA;..\..\..\test-data\ECLIPSE_GROUP_GAS_VREP.DATA" Link="Fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
@@ -28,7 +39,65 @@
     <None Include="..\..\..\test-data\ECLIPSE_PVTW_WATER.DATA" Link="Fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\..\test-data\ECLIPSE_PVDG_GASWATER.DATA" Link="Fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\..\test-data\ECLIPSE_PVDO_OIL.DATA" Link="Fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\..\test-data\ECLIPSE_PVTO_LIVE_OIL.DATA" Link="Fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\..\test-data\ECLIPSE_PVTG_WET_GAS.DATA" Link="Fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Fixtures\PVTG-VOLUME.DATA;Fixtures\PVTG-VISCOSITY.DATA" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\..\test-data\ECLIPSE_SGFN_GAS_INJECTION.DATA" Link="Fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Fixtures\RELPERM-SGFN.DATA" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\..\test-data\ECLIPSE_SWOF_SGOF_OIL.DATA" Link="Fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Fixtures\COUPLED-WATER.DATA;Fixtures\COUPLED-GAS.DATA;Fixtures\COUPLED-OIL.DATA" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\..\test-data\ECLIPSE_MULTI_SAT_OIL.DATA" Link="Fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Fixtures\MULTI-SAT-WATER.DATA;Fixtures\MULTI-SAT-GAS.DATA;Fixtures\MULTI-SAT-OIL.DATA" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\..\test-data\ECLIPSE_MULTI_SAT_PVTO_LIVE_OIL.DATA" Link="Fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="Always" />
+    <None Update="Fixtures\MULTI-SAT-PVTO-*.DATA" CopyToOutputDirectory="Always" />
+    <None Include="..\..\..\test-data\ECLIPSE_MULTI_SAT_PVTG_WET_GAS.DATA" Link="Fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="Always" />
+    <None Update="Fixtures\MULTI-SAT-PVTG-*.DATA" CopyToOutputDirectory="Always" />
+    <None Include="..\..\..\test-data\ECLIPSE_MULTI_SAT_FAMILY_I_PVTG_WET_GAS.DATA" Link="Fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="Always" />
+    <None Update="Fixtures\MULTI-SAT-FAMILY-I-PVTG-*.DATA" CopyToOutputDirectory="Always" />
+    <None Include="..\..\..\test-data\ECLIPSE_MULTI_SAT_FAMILY_I_PVTO_LIVE_OIL.DATA" Link="Fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="Always" />
+    <None Update="Fixtures\MULTI-SAT-FAMILY-I-PVTO-*.DATA" CopyToOutputDirectory="Always" />
+    <None Include="..\..\..\test-data\ECLIPSE_MULTI_PVTO_LIVE_OIL.DATA" Link="Fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="Always" />
+    <None Include="..\..\..\test-data\ECLIPSE_MULTI_PVTG_WET_GAS.DATA" Link="Fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="Always" />
+    <None Include="..\..\..\test-data\ECLIPSE_MULTI_PVTW_PURE_DEFAULT.DATA" Link="Fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="Always" />
+    <None Update="Fixtures\MULTI-PVTW-DEFAULT-*.DATA" CopyToOutputDirectory="Always" />
+    <None Include="..\..\..\test-data\ECLIPSE_MULTI_PVTW_STAR_DEFAULT.DATA;..\..\..\test-data\ECLIPSE_MULTI_PVTW_PURE_STAR.DATA" Link="Fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="Always" />
+    <None Update="Fixtures\MULTI-PVTW-STAR-*.DATA;Fixtures\MULTI-PVTW-PURE-STAR-*.DATA" CopyToOutputDirectory="Always" />
+    <None Include="..\..\..\test-data\ECLIPSE_MULTI_PVTW_PURE_WATER.DATA" Link="Fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="Always" />
+    <None Update="Fixtures\MULTI-PVTW-PURE-WATER-*.DATA" CopyToOutputDirectory="Always" />
+    <None Include="..\..\..\test-data\ECLIPSE_MULTI_PVT_WATER.DATA" Link="Fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="Always" />
+    <None Include="..\..\..\test-data\ECLIPSE_MULTI_SAT_PVT_OIL_GAS.DATA" Link="Fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="Always" />
+    <None Include="..\..\..\test-data\ECLIPSE_MULTI_SAT_FAMILY_I_PVT_OIL_GAS.DATA" Link="Fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="Always" />
+    <None Update="Fixtures\MULTI-PVTO-VISCOSITY.DATA;Fixtures\MULTI-PVTO-VOLUME.DATA" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Fixtures\MULTI-PVTG-VISCOSITY.DATA;Fixtures\MULTI-PVTG-VOLUME.DATA" CopyToOutputDirectory="Always" />
+    <None Include="..\..\..\test-data\ECLIPSE_MULTI_PVT_OIL_GAS.DATA" Link="Fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="Always" />
+    <None Update="Fixtures\MULTI-PVT-OIL-MU.DATA;Fixtures\MULTI-PVT-OIL-BO.DATA;Fixtures\MULTI-PVT-GAS-MU.DATA;Fixtures\MULTI-PVT-GAS-BG.DATA" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\..\test-data\ECLIPSE_MULTI_SAT_FAMILY_II.DATA" Link="Fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Fixtures\MULTI-FAMILY-II-WATER.DATA;Fixtures\MULTI-FAMILY-II-GAS.DATA;Fixtures\MULTI-FAMILY-II-OIL.DATA" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Fixtures\PVTO-VOLUME.DATA;Fixtures\PVTO-VISCOSITY.DATA" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Fixtures\PVDO.FINIT;Fixtures\PVDO.FEGRID" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Fixtures\ECLIPSE_NEW_WELL_BASELINE.EGRID" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+  <ItemGroup>
+    <None Update="Fixtures/INJECTION-PLAN-*" CopyToOutputDirectory="Always" />
+  </ItemGroup>
+  <ItemGroup><None Update="Fixtures/COMPOSITIONAL-TARGET-*" CopyToOutputDirectory="Always" /></ItemGroup>
+  <ItemGroup><None Update="Fixtures/COMPOSITIONAL-PRESSURE-OFFICIAL.DATA" CopyToOutputDirectory="Always" /></ItemGroup>
+  <ItemGroup><None Update="Fixtures/COMPOSITIONAL-REIN-OFFICIAL.DATA" CopyToOutputDirectory="Always" /></ItemGroup>
+  <ItemGroup>
+    <None Update="Fixtures/COMPOSITIONAL-SALES-OFFICIAL.DATA" CopyToOutputDirectory="Always" />
+    <None Update="Fixtures/COMPOSITIONAL-SALES-UNAVAILABLE.DATA" CopyToOutputDirectory="Always" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Update="Fixtures/COMPOSITIONAL-INJECTION-PRESSURE-OFFICIAL.DATA" CopyToOutputDirectory="Always" />
+    <None Update="Fixtures/COMPOSITIONAL-INJECTION-PRESSURE-INACTIVE.DATA" CopyToOutputDirectory="Always" />
+  </ItemGroup>
+  <ItemGroup><None Update="Fixtures/COMPOSITIONAL-PCRIT-OFFICIAL.DATA" CopyToOutputDirectory="Always" /></ItemGroup>
+  <ItemGroup><None Update="Fixtures/COMPOSITIONAL-TCRIT-OFFICIAL.DATA" CopyToOutputDirectory="Always" /></ItemGroup>
+  <ItemGroup><None Update="Fixtures/COMPOSITIONAL-ZCRIT-OFFICIAL.DATA" CopyToOutputDirectory="Always" /></ItemGroup>
+  <ItemGroup><None Update="Fixtures/COMPOSITIONAL-ACF-OFFICIAL.DATA" CopyToOutputDirectory="Always" /></ItemGroup>
+  <ItemGroup><None Update="Fixtures/COMPOSITIONAL-EOS-*.DATA" CopyToOutputDirectory="Always" /></ItemGroup>
+  <ItemGroup><None Update="Fixtures/COMPOSITIONAL-SAVE-*.DATA" CopyToOutputDirectory="Always" /></ItemGroup>
+  <ItemGroup><None Update="Fixtures/SAVE-HISTORY/*" CopyToOutputDirectory="Always" /></ItemGroup>
+  <ItemGroup><None Update="Fixtures/COMPOSITIONAL-SAVE-NESTED-*.DATA" CopyToOutputDirectory="Always" /></ItemGroup>
+<ItemGroup><None Update="Fixtures/THERMAL-STAGE-*.DATA" CopyToOutputDirectory="Always" /></ItemGroup>
 </Project>

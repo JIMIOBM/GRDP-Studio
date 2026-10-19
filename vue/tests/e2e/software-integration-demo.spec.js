@@ -1,13 +1,56 @@
+import { thermalStageFixture } from '../fixtures/eclipseThermalStage.js'
+import { createHash } from 'node:crypto'
+import { compositionalHistoryFixture } from '../fixtures/eclipseCompositionalHistory.js'
+import { compositionalBatchFixture } from '../fixtures/eclipseCompositionalBatch.js'
+import { compositionalEosPropertyFixture,eosPropertyCases } from '../fixtures/eclipseCompositionalEosProperties.js'
+import { compositionalAcentricFactorFixture } from '../fixtures/eclipseCompositionalAcentricFactor.js'
+import { compositionalCriticalZFixture } from '../fixtures/eclipseCompositionalCriticalZ.js'
+import { compositionalTemperatureFixture } from '../fixtures/eclipseCompositionalTemperature.js'
+import { compositionalForecastFixture } from '../fixtures/eclipseCompositionalForecast.js'
+import { compositionalFluidPropertyFixture } from '../fixtures/eclipseCompositionalFluidProperty.js'
+import { compositionalInjectionPressureFixture } from '../fixtures/eclipseCompositionalInjectionPressure.js'
+import { compositionalGasSalesFixture } from '../fixtures/eclipseCompositionalGasSales.js'
+import { compositionalReinjectionFixture } from '../fixtures/eclipseCompositionalReinjection.js'
+import { compositionalPressureInactiveFixture } from '../fixtures/eclipseCompositionalPressureInactive.js'
+import { compositionalPressureFixture } from '../fixtures/eclipseCompositionalPressure.js'
+import { thermalControlFixture } from '../fixtures/eclipseThermalControl.js'
+import { thermalInjectionFixture } from '../fixtures/eclipseThermalInjection.js'
+import { compositionalProductionFixture } from '../fixtures/eclipseCompositionalProduction.js'
+import { waterInjectionPlanFixture } from '../fixtures/eclipseWaterInjectionPlan.js'
+import {waterStarsBrowserFixture} from '../fixtures/eclipseMultiWaterStars.js'
+import {multiSatFamilyIPvtoBrowserFixture} from '../fixtures/eclipseMultiSatFamilyIPvto.js'
+import {multiSatFamilyIPvtgBrowserFixture} from '../fixtures/eclipseMultiSatFamilyIPvtg.js'
+import {multiSatPvtgBrowserFixture} from '../fixtures/eclipseMultiSatPvtg.js'
+import {multiSatPvtoBrowserFixture} from '../fixtures/eclipseMultiSatPvto.js'
+import {waterDefaultsBrowserFixture} from '../fixtures/eclipseMultiWaterDefaults.js'
+import {multiPureWaterPvtBrowserFixture} from '../fixtures/eclipseMultiPureWaterPvt.js'
+import {multiWaterPvtBrowserFixture} from '../fixtures/eclipseMultiWaterPvt.js'
+import {multiSatFamilyIPvtBrowserFixture} from '../fixtures/eclipseMultiSatFamilyIPvt.js'
+import {coupledRelpermLabels} from '../../src/views/SoftwareIntegration/eclipseCoupledRelperm.js'
+import {multiSatPvtBrowserFixture} from '../fixtures/eclipseMultiSatPvt.js'
+import {multiPvtChoices} from '../../src/views/SoftwareIntegration/eclipseMultiPvt.js'
+import {multiFamilyIILabels} from '../../src/views/SoftwareIntegration/eclipseMultiSatFamilyII.js'
+import {multiLiveOilBrowserFixture} from '../fixtures/eclipseMultiLiveOilPvt.js'
+import {multiWetGasBrowserFixture} from '../fixtures/eclipseMultiWetGasPvt.js'
+import {multiPvtBrowserFixture} from '../fixtures/eclipseMultiPvt.js'
+import {multiFamilyIIBrowserFixture} from '../fixtures/eclipseMultiSatFamilyII.js'
+import {multiSatRelpermBrowserFixture} from '../fixtures/eclipseMultiSatRelperm.js'
+import {coupledRelpermBrowserFixture} from '../fixtures/eclipseCoupledRelperm.js'
+import { sgfnBrowserFixture } from '../fixtures/eclipseSgfn.js'
+import { wetGasBrowserFixture } from '../fixtures/eclipseWetGasPvt.js'
 import { historyBrowserFixture } from '../fixtures/eclipseHistory.js'
 import { historyBatchBrowserFixture } from '../fixtures/eclipseHistoryBatch.js'
 import { batchBrowserFixture } from '../fixtures/eclipseBatch.js'
 import { relpermBrowserFixture } from '../fixtures/eclipseRelperm.js'
-import { gasPvtBrowserFixture } from '../fixtures/eclipseGasPvt.js'
-import { oilPvtBrowserFixture } from '../fixtures/eclipseOilPvt.js'
+import { gasPvtBrowserFixture, gasVolumeBrowserFixture } from '../fixtures/eclipseGasPvt.js'
+import { oilPvtBrowserFixture, oilVolumeBrowserFixture } from '../fixtures/eclipseOilPvt.js'
+import { liveOilBrowserFixture } from '../fixtures/eclipseLiveOilPvt.js'
 import { pvtwBrowserFixture } from '../fixtures/eclipsePvtw.js'
 import { groupStructureFixture as structure } from '../fixtures/eclipseGroupStructure.js'
 import { controlPlanFixture } from '../fixtures/eclipseControlPlan.js'
 import { restartForecastFixture } from '../fixtures/eclipseRestartForecast.js'
+import { binaryRestartForecastFixture } from '../fixtures/eclipseBinaryRestart.js'
+import { includeControlPlanFixture } from '../fixtures/eclipseIncludeControlPlan.js'
 import { compositionalBrowserFixture } from '../fixtures/eclipseCompositional.js'
 import { thermalBrowserFixture } from '../fixtures/eclipseThermal.js'
 import { gridRegionBrowserFixture } from '../fixtures/eclipseGridRegion.js'
@@ -1874,6 +1917,69 @@ test('ECLIPSE 接续预测目录损坏不会退回手填号或创建运行', asy
 
 test('ECLIPSE 接续预测错误时间偏移不能生成新增产油对比表', async ({ page }) => {
   const f = restartForecastFixture()
+  for (const series of f.second.result.summary.series) for (const point of series.points) point.timeDays -= 2190
+  const state = await installMockBackend(page, { eclipseInspection: f.inspection, eclipseHistory: [f.first, f.second, f.history].map(r => ({ ...summary(r), parameters: r.parameters })),
+    runs: [f.first, f.second, f.history], artifactPayloads: f.artifactPayloads })
+  await openWorkspace(page); await activateModel(page, 'ECLIPSE演示模型')
+  const region = page.getByRole('region', { name: 'ECLIPSE 历史接续与未来方案对比', exact: true })
+  await expect(region).toContainText('截止状态已核对'); await region.locator('.el-select').filter({ has: page.getByRole('combobox', { name: 'ECLIPSE 另一个未来方案', exact: true }) }).click(); await page.getByRole('option', { name: '#9553 · FOREB.DATA', exact: true }).click()
+  await expect(region).toContainText('未来输出时刻与原始日期不一致')
+  await expect(region.getByLabel('ECLIPSE 未来累计产油与新增产油', { exact: true })).toHaveCount(0)
+  expect(state.unexpectedRequests).toEqual([])
+})
+
+test('ECLIPSE 二进制接续预测按真实截止日期提交完整来源和报告', async ({ page }) => {
+  const f = binaryRestartForecastFixture()
+  const state = await installMockBackend(page, { eclipseInspection: f.inspection, eclipseHistory: [summary(f.history)], runs: [f.history], artifactPayloads: f.artifactPayloads })
+  await openWorkspace(page); await activateModel(page, 'ECLIPSE演示模型')
+  const editor = page.getByRole('region', { name: 'ECLIPSE 历史重启预测方案', exact: true })
+  await editor.getByText('创建历史重启预测方案', { exact: true }).click()
+  await expect(editor).toContainText('已核对 81 个真实历史报告')
+  await expect(editor).toContainText('二进制 UNRST')
+  await expect(editor).toContainText('1975-12-31 · 第 2190 天 · 报告 80')
+  await editor.locator('.el-select').nth(1).click(); await page.getByRole('option', { name: 'FOREB.DATA', exact: true }).click()
+  await page.getByRole('button', { name: '运行', exact: true }).click()
+  await expect.poll(() => state.createPayloads.length).toBe(1)
+  expect(state.createPayloads[0].payload.parameters).toEqual(f.second.parameters)
+  expect(state.unexpectedRequests).toEqual([])
+})
+
+test('ECLIPSE 二进制接续预测核对两个未来新增产油且刷新可恢复来源', async ({ page }) => {
+  const f = binaryRestartForecastFixture()
+  const histories = [f.first, f.second, f.history].map(r => ({ ...summary(r), parameters: r.parameters }))
+  const state = await installMockBackend(page, { eclipseInspection: f.inspection, eclipseHistory: histories, runs: [f.first, f.second, f.history], artifactPayloads: f.artifactPayloads })
+  await openWorkspace(page); await activateModel(page, 'ECLIPSE演示模型')
+  const check = async () => {
+    const region = page.getByRole('region', { name: 'ECLIPSE 历史接续与未来方案对比', exact: true })
+    await expect(region).toContainText('截止状态已核对')
+    await expect(region).toContainText('共同起算日期 1970-01-01')
+    await region.locator('.el-select').filter({ has: page.getByRole('combobox', { name: 'ECLIPSE 另一个未来方案', exact: true }) }).click(); await page.getByRole('option', { name: '#9553 · FOREB.DATA', exact: true }).click()
+    await expect(region).toContainText('累计增量来自真实累计值')
+    const table = region.getByLabel('ECLIPSE 未来累计产油与新增产油', { exact: true })
+    await expect(table).toContainText('1976-12-31'); await expect(table).toContainText('1977-12-31')
+    const a = f.first.result.summary.series.find(s => s.keyword === 'FOPT').points.at(-1).value
+    const b = f.second.result.summary.series.find(s => s.keyword === 'FOPT').points.at(-1).value
+    await expect(table).toContainText((a - b).toLocaleString('zh-CN', { maximumFractionDigits: 3 }))
+  }
+  await check(); await page.reload(); await activateModel(page, 'ECLIPSE演示模型'); await check()
+  expect(state.unexpectedRequests).toEqual([])
+})
+
+test('ECLIPSE 二进制接续预测目录损坏不会退回手填号或创建运行', async ({ page }) => {
+  const f = binaryRestartForecastFixture()
+  const state = await installMockBackend(page, { eclipseInspection: f.inspection, eclipseHistory: [summary(f.history)], runs: [f.history], artifactPayloads: { '9551:552': f.catalogText.replace('1975-12-31', '1975-12-30') } })
+  await openWorkspace(page); await activateModel(page, 'ECLIPSE演示模型')
+  const editor = page.getByRole('region', { name: 'ECLIPSE 历史重启预测方案', exact: true })
+  await editor.getByText('创建历史重启预测方案', { exact: true }).click()
+  await expect(editor).toContainText('历史报告目录读取或核对失败')
+  await expect(editor.getByRole('spinbutton')).toHaveCount(0)
+  await page.getByRole('button', { name: '运行', exact: true }).click()
+  await expect(page.getByTestId('run-feedback')).toContainText('请等待历史目录核对完成')
+  expect(state.createPayloads).toHaveLength(0)
+})
+
+test('ECLIPSE 二进制接续预测错误时间偏移不能生成新增产油对比表', async ({ page }) => {
+  const f = binaryRestartForecastFixture()
   for (const series of f.second.result.summary.series) for (const point of series.points) point.timeDays -= 2190
   const state = await installMockBackend(page, { eclipseInspection: f.inspection, eclipseHistory: [f.first, f.second, f.history].map(r => ({ ...summary(r), parameters: r.parameters })),
     runs: [f.first, f.second, f.history], artifactPayloads: f.artifactPayloads })
@@ -4315,3 +4421,1694 @@ test('ECLIPSE 批量历史 实际失败运行不请求拟合不参与排名',asy
  const failed=table.locator('tbody tr').filter({hasText:'FAILED'});await expect(failed).toContainText('不可计算');await expect(failed).toContainText('不排序');await expect(failed).toContainText('no longer matches')
  expect(calls).not.toContain(9081);expect(calls).toContain(9080);expect(calls).toContain(9082);expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
 })
+
+
+test('ECLIPSE 油体积系数 Bo 原单位完整表格与切换清空提交',async({page})=>{
+ const f=oilPvtBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]})
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 油物性调整',exact:true})
+ await panel.getByRole('spinbutton',{name:'油黏度乘数',exact:true}).fill('2')
+ await panel.locator('.el-select').click();await page.getByRole('option',{name:'油体积系数 Bo',exact:true}).click()
+ const input=panel.getByRole('spinbutton',{name:'油体积系数乘数',exact:true});await expect(input).toHaveValue('');await expect(panel).toContainText('rb/stb')
+ await input.fill('1.02');await expect(panel.getByLabel('ECLIPSE 原油物性与目标预览',{exact:true})).toContainText('1.2852000000000001');await panel.getByRole('button',{name:'创建油物性方案并计算',exact:true}).click()
+ await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload.parameters).toEqual({...f.parameters,schemaVersion:'eclipse-pvdo-parameters/2',field:'FORMATION_VOLUME_FACTOR',unit:'rb/stb',multiplier:1.02});expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE 油体积系数 Bo 超过范围不创建计算',async({page})=>{
+ const f=oilPvtBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]})
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 油物性调整',exact:true})
+ await panel.locator('.el-select').click();await page.getByRole('option',{name:'油体积系数 Bo',exact:true}).click();await panel.getByRole('spinbutton',{name:'油体积系数乘数',exact:true}).fill('8');await panel.getByRole('button',{name:'创建油物性方案并计算',exact:true}).click();await expect(panel.getByRole('alert')).toContainText('≤10');expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+
+
+test('ECLIPSE 油体积系数 Bo 实际油水总液与刷新恢复',async({page})=>{
+ const f=oilVolumeBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.target),summary(f.baseline)],runs:[f.target,f.baseline]})
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 油物性方案验收',exact:true})
+ const check=async()=>{await expect(panel).toContainText('6 行油体积系数 Bo × 1.02');await expect(panel).toContainText('rb/stb');await expect(panel).toContainText('压力与油黏度原列');await expect(panel).toContainText('84 项实际井级数值');const table=panel.getByLabel('ECLIPSE 油物性井级响应',{exact:true});for(const value of ['770.3286743164062','771.85546875','1.5267847776412964','3000','STB/DAY','PSIA'])await expect(table).toContainText(value)}
+ await check();await page.reload();await activateModel(page,'ECLIPSE演示模型');await check();expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE 油体积系数 Bo 与黏度独立加入批量清单',async({page})=>{
+ const f=oilVolumeBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]})
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 批量方案',exact:true})
+ for(const [label,name,value] of [['死油体积系数 Bo 乘数','Bo方案','1.02'],['死油黏度乘数','黏度方案','2']]){await panel.locator('.el-select').filter({has:page.getByRole('combobox',{name:'批量物性项目',exact:true})}).click();await page.getByRole('option',{name:label,exact:true}).click();await panel.getByRole('textbox',{name:'批量方案名称',exact:true}).fill(name);await panel.getByRole('spinbutton',{name:'批量方案数值',exact:true}).fill(value);await panel.getByRole('button',{name:'加入方案清单',exact:true}).click()}
+ const table=panel.getByLabel('待计算方案清单',{exact:true});await expect(table.locator('tbody tr')).toHaveCount(2);await expect(table).toContainText('Bo方案');await expect(table).toContainText('黏度方案');await expect(panel.getByRole('button',{name:'运行全部方案',exact:true})).toBeEnabled();expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+
+
+test('ECLIPSE 气体积系数 Bg 原单位完整表格与切换清空提交',async({page})=>{
+ const f=gasPvtBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]})
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 气物性调整',exact:true})
+ await panel.getByRole('spinbutton',{name:'气黏度乘数',exact:true}).fill('2');await panel.locator('.el-select').click();await page.getByRole('option',{name:'气体积系数 Bg',exact:true}).click();const input=panel.getByRole('spinbutton',{name:'气体积系数乘数',exact:true});await expect(input).toHaveValue('');await expect(panel).toContainText('rb/Mscf')
+ await input.fill('1.02');await expect(panel.getByLabel('ECLIPSE 原气物性与目标预览',{exact:true})).toContainText('0.9384');await panel.getByRole('button',{name:'创建气物性方案并计算',exact:true}).click();await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload.parameters).toEqual({...f.parameters,schemaVersion:'eclipse-pvdg-parameters/2',field:'FORMATION_VOLUME_FACTOR',unit:'rb/Mscf',multiplier:1.02});expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE 气体积系数 Bg 超过支持乘数不创建计算',async({page})=>{
+ const f=gasPvtBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]})
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 气物性调整',exact:true})
+ await panel.locator('.el-select').click();await page.getByRole('option',{name:'气体积系数 Bg',exact:true}).click();await panel.getByRole('spinbutton',{name:'气体积系数乘数',exact:true}).fill('101');await panel.getByRole('button',{name:'创建气物性方案并计算',exact:true}).click();await expect(panel.getByRole('alert')).toContainText('0.000001–100');expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+
+
+test('ECLIPSE 气体积系数 Bg 实际气水井压缺失时刻与刷新恢复',async({page})=>{
+ const f=gasVolumeBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.target),summary(f.baseline)],runs:[f.target,f.baseline]})
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 气物性方案验收',exact:true})
+ const check=async()=>{await expect(panel).toContainText('2 行气体积系数 Bg × 1.02');await expect(panel).toContainText('rb/Mscf');await expect(panel).toContainText('压力与气黏度原列');await expect(panel).toContainText('928 项实际井级数值');await expect(panel).toContainText('880 项缺少同时间值');await panel.getByText('全部报告时刻',{exact:true}).click();await page.getByRole('option',{name:'6000天',exact:true}).click();const table=panel.getByLabel('ECLIPSE 气物性井级响应',{exact:true});for(const value of ['4138.6943359375','4138.58984375','1188125.625','600000','4000','MSCF','PSIA'])await expect(table).toContainText(value);await expect(table.locator('tbody tr')).toHaveCount(8)}
+ await check();await page.reload();await activateModel(page,'ECLIPSE演示模型');await check();expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE 气体积系数 Bg 与黏度以中文项目独立加入批量清单',async({page})=>{
+ const f=gasVolumeBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]})
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 批量方案',exact:true})
+ for(const [label,name,value] of [['干气体积系数 Bg 乘数','Bg方案','1.02'],['干气黏度乘数','黏度方案','2']]){await panel.locator('.el-select').filter({has:page.getByRole('combobox',{name:'批量物性项目',exact:true})}).click();await page.getByRole('option',{name:label,exact:true}).click();await panel.getByRole('textbox',{name:'批量方案名称',exact:true}).fill(name);await panel.getByRole('spinbutton',{name:'批量方案数值',exact:true}).fill(value);await panel.getByRole('button',{name:'加入方案清单',exact:true}).click()}
+ const table=panel.getByLabel('待计算方案清单',{exact:true});await expect(table.locator('tbody tr')).toHaveCount(2);await expect(table).toContainText('气体积系数 Bg');await expect(table).toContainText('气黏度');await expect(table).not.toContainText('FORMATION_VOLUME_FACTOR');await expect(panel.getByRole('button',{name:'运行全部方案',exact:true})).toBeEnabled();expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+
+test('ECLIPSE PVTO 完整饱和欠饱和分支预览切换清空与Bo提交',async({page})=>{
+ const f=liveOilBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]})
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 含溶解气油物性调整',exact:true})
+ const table=panel.getByLabel('ECLIPSE PVTO分支与目标预览',{exact:true});await expect(table.locator('tbody tr')).toHaveCount(12);await expect(table).toContainText('欠饱和');await expect(table).toContainText('Mscf/stb');await expect(table).toContainText('rb/stb')
+ const input=panel.getByRole('spinbutton',{name:'PVTO物性乘数',exact:true});await input.fill('2');await expect(table).toContainText('2.08')
+ await panel.locator('.el-select').filter({has:page.getByRole('combobox',{name:'调整含溶解气油物性',exact:true})}).click();await page.getByRole('option',{name:'油体积系数 Bo',exact:true}).click();await expect(input).toHaveValue('');await input.fill('1.02');await panel.getByRole('button',{name:'创建含溶解气油物性方案并计算',exact:true}).click();await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload.parameters).toEqual(f.parameters);expect(state.unexpectedRequests).toEqual([])
+})
+
+test('ECLIPSE PVTO 目标Bo越界不创建计算',async({page})=>{
+ const f=liveOilBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]})
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 含溶解气油物性调整',exact:true})
+ await panel.locator('.el-select').filter({has:page.getByRole('combobox',{name:'调整含溶解气油物性',exact:true})}).click();await page.getByRole('option',{name:'油体积系数 Bo',exact:true}).click();await panel.getByRole('spinbutton',{name:'PVTO物性乘数',exact:true}).fill('8');await panel.getByRole('button',{name:'创建含溶解气油物性方案并计算',exact:true}).click();await expect(panel.getByRole('alert')).toContainText('≤10');expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+
+test('ECLIPSE PVTO 真实油气累计注入压力与刷新恢复',async({page})=>{
+ const f=liveOilBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.target),summary(f.baseline)],runs:[f.target,f.baseline]})
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 含溶解气油物性方案验收',exact:true})
+ const check=async()=>{await expect(panel).toContainText('9 个饱和/欠饱和分支统一 × 1.02');await expect(panel).toContainText('rb/stb');const table=panel.getByLabel('ECLIPSE 含溶解气油物性井级响应',{exact:true});for(const value of ['16015.4384765625','16569.513671875','23319434','6240.84765625','120000000','WGOR','MSCF/DAY'])await expect(table).toContainText(value)}
+ await check();await page.reload();await activateModel(page,'ECLIPSE演示模型');await check();expect(state.unexpectedRequests).toEqual([])
+})
+
+test('ECLIPSE PVTO 黏度与Bo独立加入同基线批量清单',async({page})=>{
+ const f=liveOilBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]})
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 批量方案',exact:true})
+ for(const [label,name,value] of [['含溶解气原油体积系数 Bo 乘数','PVTO Bo','1.02'],['含溶解气原油黏度乘数','PVTO黏度','2']]){await panel.locator('.el-select').filter({has:page.getByRole('combobox',{name:'批量物性项目',exact:true})}).click();await page.getByRole('option',{name:label,exact:true}).click();await panel.getByRole('textbox',{name:'批量方案名称',exact:true}).fill(name);await panel.getByRole('spinbutton',{name:'批量方案数值',exact:true}).fill(value);await panel.getByRole('button',{name:'加入方案清单',exact:true}).click()}
+ const table=panel.getByLabel('待计算方案清单',{exact:true});await expect(table.locator('tbody tr')).toHaveCount(2);await expect(table).toContainText('含溶解气原油体积系数 Bo');await expect(table).toContainText('含溶解气原油黏度');await expect(table).not.toContainText('FORMATION_VOLUME_FACTOR');await expect(panel.getByRole('button',{name:'运行全部方案',exact:true})).toBeEnabled();expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+
+test('ECLIPSE PVTO 最高溶解气油比缺少欠饱和数据不提供编辑',async({page})=>{
+ const f=liveOilBrowserFixture();f.inspection.liveOilPvtContext.records.at(-1).rows.pop();await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 含溶解气油物性调整',exact:true});await expect(panel.getByRole('alert')).toContainText('最高溶解气油比');await expect(panel.getByRole('button',{name:'创建含溶解气油物性方案并计算',exact:true})).toHaveCount(0)
+})
+
+test('ECLIPSE PVTG 完整饱和欠饱和分支预览切换清空与Bg提交',async({page})=>{
+ const f=wetGasBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]})
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 湿气物性调整',exact:true})
+ const table=panel.getByLabel('ECLIPSE PVTG分支与目标预览',{exact:true});await expect(table.locator('tbody tr')).toHaveCount(29);await expect(table).toContainText('欠饱和');await expect(table).toContainText('sm3/sm3');await expect(table).toContainText('rm3/sm3')
+ const input=panel.getByRole('spinbutton',{name:'PVTG物性乘数',exact:true});await input.fill('2');await expect(table).toContainText('0.02688')
+ await panel.locator('.el-select').filter({has:page.getByRole('combobox',{name:'调整湿气物性',exact:true})}).click();await page.getByRole('option',{name:'气体积系数 Bg',exact:true}).click();await expect(input).toHaveValue('');await input.fill('1.02');await panel.getByRole('button',{name:'创建湿气物性方案并计算',exact:true}).click();await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload.parameters).toEqual(f.parameters);expect(state.unexpectedRequests).toEqual([])
+})
+
+test('ECLIPSE PVTG 目标Bg越界不创建计算',async({page})=>{
+ const f=wetGasBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]})
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 湿气物性调整',exact:true})
+ await panel.locator('.el-select').filter({has:page.getByRole('combobox',{name:'调整湿气物性',exact:true})}).click();await page.getByRole('option',{name:'气体积系数 Bg',exact:true}).click();await panel.getByRole('spinbutton',{name:'PVTG物性乘数',exact:true}).fill('101');await panel.getByRole('button',{name:'创建湿气物性方案并计算',exact:true}).click();await expect(panel.getByRole('alert')).toContainText('0.000001–100');expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+
+test('ECLIPSE PVTG 真实油气累计注入压力与刷新恢复',async({page})=>{
+ const f=wetGasBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.target),summary(f.baseline)],runs:[f.target,f.baseline]})
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 湿气物性方案验收',exact:true})
+ const check=async()=>{await expect(panel).toContainText('13 个饱和/欠饱和分支统一 × 1.02');await expect(panel).toContainText('rm3/sm3');const table=panel.getByLabel('ECLIPSE 湿气物性井级响应',{exact:true});for(const value of ['124.74900817871094','125.5829086303711','298018.625','253.55612182617188','1000000000','WGOR','SM3/DAY'])await expect(table).toContainText(value)}
+ await check();await page.reload();await activateModel(page,'ECLIPSE演示模型');await check();expect(state.unexpectedRequests).toEqual([])
+})
+
+test('ECLIPSE PVTG 黏度与Bg独立加入同基线批量清单',async({page})=>{
+ const f=wetGasBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]})
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 批量方案',exact:true})
+ for(const [label,name,value] of [['湿气体积系数 Bg 乘数','PVTG Bg','1.02'],['湿气黏度乘数','PVTG黏度','2']]){await panel.locator('.el-select').filter({has:page.getByRole('combobox',{name:'批量物性项目',exact:true})}).click();await page.getByRole('option',{name:label,exact:true}).click();await panel.getByRole('textbox',{name:'批量方案名称',exact:true}).fill(name);await panel.getByRole('spinbutton',{name:'批量方案数值',exact:true}).fill(value);await panel.getByRole('button',{name:'加入方案清单',exact:true}).click()}
+ const table=panel.getByLabel('待计算方案清单',{exact:true});await expect(table.locator('tbody tr')).toHaveCount(2);await expect(table).toContainText('湿气体积系数 Bg');await expect(table).toContainText('湿气黏度');await expect(table).not.toContainText('FORMATION_VOLUME_FACTOR');await expect(panel.getByRole('button',{name:'运行全部方案',exact:true})).toBeEnabled();expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+
+test('ECLIPSE PVTG 最高压力缺少欠饱和数据不提供编辑',async({page})=>{
+ const f=wetGasBrowserFixture();f.inspection.wetGasPvtContext.records.at(-1).rows.splice(1);await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 湿气物性调整',exact:true});await expect(panel.getByRole('alert')).toContainText('最高压力');await expect(panel.getByRole('button',{name:'创建湿气物性方案并计算',exact:true})).toHaveCount(0)
+})
+
+async function gasRelpermPanel(page){const panel=page.getByRole('region',{name:'ECLIPSE 相渗调整',exact:true});await panel.locator('.el-select').click();await page.getByRole('option',{name:'气相相渗 · SGFN',exact:true}).click();return panel}
+test('ECLIPSE SWOF SGOF 两张原表与油相联动完整提交',async({page})=>{
+ const f=coupledRelpermBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE SWOF SGOF 相渗调整',exact:true});await panel.locator('.el-select').click();await page.getByRole('option',{name:'油相 Krow/Krog · 两表联动',exact:true}).click();await panel.getByRole('spinbutton',{name:'两表相渗乘数',exact:true}).fill('0.5');for(const [keyword,rows] of [['SWOF',30],['SGOF',10]]){const table=panel.getByLabel(`ECLIPSE ${keyword} 原表与目标`,{exact:true});await expect(table.locator('tbody tr')).toHaveCount(rows);await expect(table).toContainText('原毛管压力（psi）');await expect(table.locator('tbody tr').first()).toContainText('0.5')};await panel.getByRole('button',{name:'创建两表相渗方案并计算',exact:true}).click();await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload.parameters).toEqual(f.parameters);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE SWOF SGOF 目标越界不创建计算',async({page})=>{
+ const f=coupledRelpermBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE SWOF SGOF 相渗调整',exact:true});await panel.getByRole('spinbutton',{name:'两表相渗乘数',exact:true}).fill('3');await panel.getByRole('button',{name:'创建两表相渗方案并计算',exact:true}).click();await expect(panel.getByRole('alert')).toContainText('0–1');expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE SWOF SGOF 原生产量压力与自适应报告缺失刷新恢复',async({page})=>{
+ const f=coupledRelpermBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.target),summary(f.baseline)],runs:[f.target,f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const check=async()=>{const panel=page.getByRole('region',{name:'ECLIPSE 两表相渗方案验收',exact:true});await expect(panel).toContainText('两表联动');await expect(panel).toContainText('40 行相渗 × 0.5');const table=panel.getByLabel('ECLIPSE 两表相渗井级响应',{exact:true});for(const value of ['1329.2020263671875','2098.793212890625','86092.5','90556.59375','WWIT'])await expect(table).toContainText(value)};await check();await page.reload();await activateModel(page,'ECLIPSE演示模型');await check();expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE SWOF SGOF 三相方案独立加入同一基线批量',async({page})=>{
+ const f=coupledRelpermBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 批量方案',exact:true});for(const name of ['水相 Krw · SWOF','气相 Krg · SGOF','油相 Krow/Krog · 两表联动']){await panel.locator('.el-select').filter({has:page.getByRole('combobox',{name:'批量物性项目',exact:true})}).click();await page.getByRole('option',{name:name+' 乘数',exact:true}).click();await panel.getByRole('textbox',{name:'批量方案名称',exact:true}).fill(name);await panel.getByRole('spinbutton',{name:'批量方案数值',exact:true}).fill('0.5');await panel.getByRole('button',{name:'加入方案清单',exact:true}).click()};await expect(panel.getByLabel('待计算方案清单',{exact:true}).locator('tbody tr')).toHaveCount(3);await expect(panel.getByRole('button',{name:'运行全部方案',exact:true})).toBeEnabled();expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE SWOF SGOF 混合压力单位拒绝展示差值',async({page})=>{
+ const f=coupledRelpermBrowserFixture();f.target.result.summary.series.find(s=>s.keyword==='WBHP'&&s.objectName==='PROD2').unit='BARSA';await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.target),summary(f.baseline)],runs:[f.target,f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 两表相渗方案验收',exact:true});await expect(panel).toContainText('单位不一致');await expect(panel.getByLabel('ECLIPSE 两表相渗井级响应',{exact:true})).toHaveCount(0)
+})
+test('ECLIPSE MULTI SAT 两张原表与油相联动完整提交',async({page})=>{
+ const f=multiSatRelpermBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE SWOF SGOF 相渗调整',exact:true});await panel.locator('.el-select').filter({has:page.getByRole('combobox',{name:'相渗SAT区',exact:true})}).click();await page.getByRole('option',{name:'SAT区 2 · 4500 格',exact:true}).click();await panel.locator('.el-select').filter({has:page.getByRole('combobox',{name:'两表相渗调整项目',exact:true})}).click();await page.getByRole('option',{name:'油相 Krow/Krog · 两表联动',exact:true}).click();await panel.getByRole('spinbutton',{name:'两表相渗乘数',exact:true}).fill('0.5');for(const [keyword,rows] of [['SWOF',30],['SGOF',10]]){const table=panel.getByLabel(`ECLIPSE ${keyword} 原表与目标`,{exact:true});await expect(table.locator('tbody tr')).toHaveCount(rows);await expect(table).toContainText('原毛管压力（psi）');await expect(table.locator('tbody tr').first()).toContainText('0.5')};await panel.getByRole('button',{name:'创建两表相渗方案并计算',exact:true}).click();await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload.parameters).toEqual(f.parameters);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE MULTI SAT 目标越界不创建计算',async({page})=>{
+ const f=multiSatRelpermBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE SWOF SGOF 相渗调整',exact:true});await panel.getByRole('spinbutton',{name:'两表相渗乘数',exact:true}).fill('3');await panel.getByRole('button',{name:'创建两表相渗方案并计算',exact:true}).click();await expect(panel.getByRole('alert')).toContainText('0–1');expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE MULTI SAT 原生产量压力与自适应报告缺失刷新恢复',async({page})=>{
+ const f=multiSatRelpermBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.target),summary(f.baseline)],runs:[f.target,f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const check=async()=>{const panel=page.getByRole('region',{name:'ECLIPSE 两表相渗方案验收',exact:true});await expect(panel).toContainText('两表联动');await expect(panel).toContainText('40 行相渗 × 0.5');const table=panel.getByLabel('ECLIPSE 两表相渗井级响应',{exact:true});for(const value of ['2120.931884765625','2472.542724609375','85893.5390625','90556.59375','WWIT'])await expect(table).toContainText(value)};await check();await page.reload();await activateModel(page,'ECLIPSE演示模型');await check();expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE MULTI SAT 三相方案独立加入同一基线批量',async({page})=>{
+ const f=multiSatRelpermBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 批量方案',exact:true});for(const name of ['水相 Krw · SWOF','气相 Krg · SGOF','油相 Krow/Krog · 两表联动']){await panel.locator('.el-select').filter({has:page.getByRole('combobox',{name:'批量物性项目',exact:true})}).click();await page.getByRole('option',{name:'分区 '+name+' 乘数',exact:true}).click();await panel.locator('.el-select').filter({has:page.getByRole('combobox',{name:'批量SAT区',exact:true})}).click();await page.getByRole('option',{name:'SAT区 2 · 4500 格',exact:true}).click();await panel.getByRole('textbox',{name:'批量方案名称',exact:true}).fill(name);await panel.getByRole('spinbutton',{name:'批量方案数值',exact:true}).fill('0.5');await panel.getByRole('button',{name:'加入方案清单',exact:true}).click()};await expect(panel.getByLabel('待计算方案清单',{exact:true}).locator('tbody tr')).toHaveCount(3);await expect(panel.getByRole('button',{name:'运行全部方案',exact:true})).toBeEnabled();expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE MULTI SAT 混合压力单位拒绝展示差值',async({page})=>{
+ const f=multiSatRelpermBrowserFixture();f.target.result.summary.series.find(s=>s.keyword==='WBHP'&&s.objectName==='PROD2').unit='BARSA';await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.target),summary(f.baseline)],runs:[f.target,f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 两表相渗方案验收',exact:true});await expect(panel).toContainText('单位不一致');await expect(panel.getByLabel('ECLIPSE 两表相渗井级响应',{exact:true})).toHaveCount(0)
+})
+test('ECLIPSE SGFN 气相原表毛管压力与v2完整提交',async({page})=>{
+ const f=sgfnBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=await gasRelpermPanel(page),table=panel.getByLabel('ECLIPSE 原相渗与目标预览',{exact:true});await expect(table.locator('tbody tr')).toHaveCount(13);await expect(table).toContainText('气饱和度 Sg');await expect(table).toContainText('原气相渗 Krg');await expect(table).toContainText('原毛管压力（psi）');await panel.getByRole('spinbutton',{name:'相渗乘数',exact:true}).fill('0.5');await expect(table).toContainText('0.011');await panel.getByRole('button',{name:'创建相渗方案并计算',exact:true}).click();await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload.parameters).toEqual(f.parameters);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE SGFN 目标相渗超过1拒绝创建',async({page})=>{
+ const f=sgfnBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=await gasRelpermPanel(page);await panel.getByRole('spinbutton',{name:'相渗乘数',exact:true}).fill('2');await panel.getByRole('button',{name:'创建相渗方案并计算',exact:true}).click();await expect(panel.getByRole('alert')).toContainText('0–1');expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE SGFN 原生注入压力累计与受限生产压刷新恢复',async({page})=>{
+ const f=sgfnBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.target),summary(f.baseline)],runs:[f.target,f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const check=async()=>{const panel=page.getByRole('region',{name:'ECLIPSE 相渗方案验收',exact:true});await expect(panel).toContainText('SGFN · 13 行相渗 × 0.5');await expect(panel).toContainText('231 项实际井级数值');const table=panel.getByLabel('ECLIPSE 相渗井级响应',{exact:true});for(const text of ['3114.256591796875','3090.474365234375','140881.484375','WGIR','WGIT','3000'])await expect(table).toContainText(text)};await check();await page.reload();await activateModel(page,'ECLIPSE演示模型');await check();expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE SGFN 两个气相乘数从同一基线独立加入批量',async({page})=>{
+ const f=sgfnBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 批量方案',exact:true});for(const value of ['0.5','0.75']){await panel.locator('.el-select').filter({has:page.getByRole('combobox',{name:'批量物性项目',exact:true})}).click();await page.getByRole('option',{name:'气相 Krg 乘数',exact:true}).click();await panel.getByRole('textbox',{name:'批量方案名称',exact:true}).fill('Krg '+value);await panel.getByRole('spinbutton',{name:'批量方案数值',exact:true}).fill(value);await panel.getByRole('button',{name:'加入方案清单',exact:true}).click()};await expect(panel.getByLabel('待计算方案清单',{exact:true}).locator('tbody tr')).toHaveCount(2);await expect(panel.getByRole('button',{name:'运行全部方案',exact:true})).toBeEnabled();expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE SGFN 混用压力单位拒绝展示差值',async({page})=>{
+ const f=sgfnBrowserFixture();f.target.result.summary.series.find(s=>s.keyword==='WBHP'&&s.objectName==='I1').unit='BARSA';await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.target),summary(f.baseline)],runs:[f.target,f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 相渗方案验收',exact:true});await expect(panel).toContainText('单位不一致');await expect(panel.getByLabel('ECLIPSE 相渗井级响应',{exact:true})).toHaveCount(0)
+})
+
+
+async function familyIISelectRegion(page,panel){await panel.locator('.el-select').filter({has:page.getByRole('combobox',{name:'三表相渗SAT区',exact:true})}).click();await page.getByRole('option',{name:'SAT区 2 · 7 格',exact:true}).click()}
+test('ECLIPSE MULTI FAMILY II 三张原表与SOF3两列联动完整提交',async({page})=>{
+ const f=multiFamilyIIBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 多区三表相渗调整',exact:true});await familyIISelectRegion(page,panel);await panel.locator('.el-select').filter({has:page.getByRole('combobox',{name:'三表相渗调整项目',exact:true})}).click();await page.getByRole('option',{name:'油相 Krow/Krog · SOF3两列联动',exact:true}).click();await panel.getByRole('spinbutton',{name:'三表相渗乘数',exact:true}).fill('0.5');for(const [keyword,rows] of [['SWFN',13],['SGFN',13],['SOF3',15]])await expect(panel.getByLabel(`ECLIPSE 分区${keyword}原表与目标`,{exact:true}).locator('tbody tr')).toHaveCount(rows);await expect(panel.getByLabel('ECLIPSE 分区SOF3原表与目标',{exact:true}).locator('tbody tr').last().getByText('0.45',{exact:true})).toHaveCount(2);await panel.getByRole('button',{name:'创建分区三表相渗方案并计算',exact:true}).click();await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload.parameters).toEqual(f.parameters);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE MULTI FAMILY II 目标越界不创建运行',async({page})=>{
+ const f=multiFamilyIIBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 多区三表相渗调整',exact:true});await panel.getByRole('spinbutton',{name:'三表相渗乘数',exact:true}).fill('3');await panel.getByRole('button',{name:'创建分区三表相渗方案并计算',exact:true}).click();await expect(panel.getByRole('alert')).toContainText('0–1');expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE MULTI FAMILY II 区2原生油水注气与受限压力刷新恢复',async({page})=>{
+ const f=multiFamilyIIBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.target),summary(f.baseline)],runs:[f.target,f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const check=async()=>{const panel=page.getByRole('region',{name:'ECLIPSE 分区三表相渗方案验收',exact:true});await expect(panel).toContainText('SAT区 2');await expect(panel).toContainText('41 行相渗 × 0.5');const table=panel.getByLabel('ECLIPSE 分区三表相渗井级响应',{exact:true});for(const value of ['774.0838012695312','3.0145182609558105','3148.734619140625','142591.671875','3000'])await expect(table).toContainText(value)};await check();await page.reload();await activateModel(page,'ECLIPSE演示模型');await check();expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE MULTI FAMILY II 三相区2独立加入同基线批量',async({page})=>{
+ const f=multiFamilyIIBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 批量方案',exact:true});for(const name of ['水相 Krw · SWFN','气相 Krg · SGFN','油相 Krow/Krog · SOF3两列联动']){await panel.locator('.el-select').filter({has:page.getByRole('combobox',{name:'批量物性项目',exact:true})}).click();await page.getByRole('option',{name:'分区 '+name+' 乘数',exact:true}).click();await panel.locator('.el-select').filter({has:page.getByRole('combobox',{name:'批量SAT区',exact:true})}).click();await page.getByRole('option',{name:'SAT区 2 · 7 格',exact:true}).click();await panel.getByRole('textbox',{name:'批量方案名称',exact:true}).fill(name);await panel.getByRole('spinbutton',{name:'批量方案数值',exact:true}).fill('0.5');await panel.getByRole('button',{name:'加入方案清单',exact:true}).click()};await expect(panel.getByLabel('待计算方案清单',{exact:true}).locator('tbody tr')).toHaveCount(3);await expect(panel.getByRole('button',{name:'运行全部方案',exact:true})).toBeEnabled();expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE MULTI FAMILY II 混合压力单位拒绝差值',async({page})=>{
+ const f=multiFamilyIIBrowserFixture();f.target.result.summary.series.find(s=>s.keyword==='WBHP'&&s.objectName==='I1').unit='BARSA';await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.target),summary(f.baseline)],runs:[f.target,f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 分区三表相渗方案验收',exact:true});await expect(panel).toContainText('单位不一致');await expect(panel.getByLabel('ECLIPSE 分区三表相渗井级响应',{exact:true})).toHaveCount(0)
+})
+
+async function pvtSelect(page,panel,aria,label){await panel.locator('.el-select').filter({has:page.getByRole('combobox',{name:aria,exact:true})}).click();await page.getByRole('option',{name:label,exact:true}).click()}
+for(const [label,choice,value,unit] of [['oil-mu','油黏度 · PVDO','2','cP'],['oil-bo','油体积系数 Bo · PVDO','1.02','rb/stb'],['gas-mu','气黏度 · PVDG','2','cP'],['gas-bg','气体积系数 Bg · PVDG','1.02','rb/Mscf']])test(`ECLIPSE MULTI PVT ${label} 两区预览清空与完整提交`,async({page})=>{
+ const f=multiPvtBrowserFixture(label),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 多区PVT调整',exact:true}),input=panel.getByRole('spinbutton',{name:'分区PVT乘数',exact:true});await input.fill('2');await pvtSelect(page,panel,'流体PVT区','PVT区 2 · 7 格');await expect(input).toHaveValue('');await pvtSelect(page,panel,'分区PVT调整项目',choice);await expect(input).toHaveValue('');await expect(panel).toContainText('目标单位 '+unit);await input.fill(value);for(const key of ['PVDO','PVDG'])await expect(panel.getByLabel(`ECLIPSE 分区${key}原表与目标`,{exact:true}).locator('tbody tr')).toHaveCount(6);await panel.getByRole('button',{name:'创建分区PVT方案并计算',exact:true}).click();await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload.parameters).toEqual(f.parameters);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE MULTI PVT 目标Bo越界不创建计算',async({page})=>{
+ const f=multiPvtBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 多区PVT调整',exact:true});await pvtSelect(page,panel,'分区PVT调整项目','油体积系数 Bo · PVDO');await panel.getByRole('spinbutton',{name:'分区PVT乘数',exact:true}).fill('9');await panel.getByRole('button',{name:'创建分区PVT方案并计算',exact:true}).click();await expect(panel.getByRole('alert')).toContainText('10');expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE MULTI PVT 原生油水注气与不变受限压力刷新恢复',async({page})=>{
+ const f=multiPvtBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.target),summary(f.baseline)],runs:[f.target,f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const check=async()=>{const panel=page.getByRole('region',{name:'ECLIPSE 分区PVT方案验收',exact:true});await expect(panel).toContainText('PVT区 2');await expect(panel).toContainText('rb/stb');const table=panel.getByLabel('ECLIPSE 分区PVT井级响应',{exact:true});for(const value of ['765.502197265625','781.03466796875','3090.4609375','140783.3125','3000'])await expect(table).toContainText(value)};await check();await page.reload();await activateModel(page,'ECLIPSE演示模型');await check();expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE MULTI PVT 四种选区方案独立加入同基线批量',async({page})=>{
+ const f=multiPvtBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 批量方案',exact:true});for(const [name,value] of [['油黏度 · PVDO','2'],['油体积系数 Bo · PVDO','1.02'],['气黏度 · PVDG','2'],['气体积系数 Bg · PVDG','1.02']]){await pvtSelect(page,panel,'批量物性项目','分区 '+name+' 乘数');await pvtSelect(page,panel,'批量PVT区','PVT区 2 · 7 格');await panel.getByRole('textbox',{name:'批量方案名称',exact:true}).fill(name);await panel.getByRole('spinbutton',{name:'批量方案数值',exact:true}).fill(value);await panel.getByRole('button',{name:'加入方案清单',exact:true}).click()};const table=panel.getByLabel('待计算方案清单',{exact:true});await expect(table.locator('tbody tr')).toHaveCount(4);await expect(table).toContainText('PVT区 2');await expect(table).not.toContainText('FORMATION_VOLUME_FACTOR');await expect(panel.getByRole('button',{name:'运行全部方案',exact:true})).toBeEnabled();expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE MULTI PVT 混用气累计单位拒绝差值',async({page})=>{
+ const f=multiPvtBrowserFixture('gas-bg');f.target.result.summary.series.find(s=>s.keyword==='WGIT'&&s.objectName==='I1').unit='SM3';await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.target),summary(f.baseline)],runs:[f.target,f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 分区PVT方案验收',exact:true});await expect(panel).toContainText('单位不一致');await expect(panel.getByLabel('ECLIPSE 分区PVT井级响应',{exact:true})).toHaveCount(0)
+})
+
+for(const [label,choice,value] of [['viscosity','油黏度','2'],['volume','油体积系数 Bo','1.02']])test(`ECLIPSE MULTI PVTO ${label} 完整分支原气表和同号平衡区提交`,async({page})=>{
+ const f=multiLiveOilBrowserFixture(label),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 多区含溶解气油物性调整',exact:true}),input=panel.getByRole('spinbutton',{name:'分区PVTO物性乘数',exact:true});await expect(panel).toContainText('原基线有31条原生警告');await input.fill('2');await pvtSelect(page,panel,'PVTO流体区','PVT/EQL区 2 · 150 格');await expect(input).toHaveValue('');await pvtSelect(page,panel,'调整分区含溶解气油物性',choice);await input.fill(value);const table=panel.getByLabel('ECLIPSE 分区PVTO分支与目标预览',{exact:true});await expect(table.locator('tbody tr')).toHaveCount(12);await expect(table).toContainText('欠饱和');await expect(table).toContainText('Mscf/stb');await expect(panel.getByLabel('ECLIPSE 分区PVTO原气表',{exact:true}).locator('tbody tr')).toHaveCount(f.inspection.multiLiveOilPvtContext.regions[1].gasTable.rows.length);await panel.getByRole('button',{name:'创建分区含溶解气油物性方案并计算',exact:true}).click();await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload.parameters).toEqual(f.parameters);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE MULTI PVTO 目标Bo越界不创建计算',async({page})=>{
+ const f=multiLiveOilBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 多区含溶解气油物性调整',exact:true});await pvtSelect(page,panel,'调整分区含溶解气油物性','油体积系数 Bo');await panel.getByRole('spinbutton',{name:'分区PVTO物性乘数',exact:true}).fill('9');await panel.getByRole('button',{name:'创建分区含溶解气油物性方案并计算',exact:true}).click();await expect(panel.getByRole('alert').filter({hasText:'≤10'})).toHaveCount(1);expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE MULTI PVTO 原生油气累计与原RATE约束刷新恢复',async({page})=>{
+ const f=multiLiveOilBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.target),summary(f.baseline)],runs:[f.target,f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const check=async()=>{const panel=page.getByRole('region',{name:'ECLIPSE 分区PVTO方案验收',exact:true});await expect(panel).toContainText('PVT/EQL区 2');await expect(panel).toContainText('9 个饱和/欠饱和分支统一 × 1.02');const table=panel.getByLabel('ECLIPSE 分区PVTO井级响应',{exact:true});for(const value of ['16187.2216796875','16569.513671875','6273.49560546875','23375970','120000000','1000'])await expect(table).toContainText(value)};await check();await page.reload();await activateModel(page,'ECLIPSE演示模型');await check();expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE MULTI PVTO 黏度和Bo区2独立加入同基线批量',async({page})=>{
+ const f=multiLiveOilBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 批量方案',exact:true});for(const [name,value] of [['分区含溶解气原油黏度乘数','2'],['分区含溶解气原油体积系数 Bo 乘数','1.02']]){await pvtSelect(page,panel,'批量物性项目',name);await pvtSelect(page,panel,'批量PVT区','PVT区 2 · 150 格');await panel.getByRole('textbox',{name:'批量方案名称',exact:true}).fill(name);await panel.getByRole('spinbutton',{name:'批量方案数值',exact:true}).fill(value);await panel.getByRole('button',{name:'加入方案清单',exact:true}).click()};const table=panel.getByLabel('待计算方案清单',{exact:true});await expect(table.locator('tbody tr')).toHaveCount(2);await expect(table).toContainText('PVT区 2');await expect(table).not.toContainText('FORMATION_VOLUME_FACTOR');await expect(panel.getByRole('button',{name:'运行全部方案',exact:true})).toBeEnabled();expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE MULTI PVTO 混用油量单位拒绝差值',async({page})=>{
+ const f=multiLiveOilBrowserFixture();f.target.result.summary.series.find(s=>s.keyword==='WOPR'&&s.objectName==='PRODUCER').unit='SM3/DAY';await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.target),summary(f.baseline)],runs:[f.target,f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 分区PVTO方案验收',exact:true});await expect(panel).toContainText('单位不一致');await expect(panel.getByLabel('ECLIPSE 分区PVTO井级响应',{exact:true})).toHaveCount(0)
+})
+
+for(const [label,choice,value] of [['viscosity','气黏度','2'],['volume','气体积系数 Bg','1.02']])test(`ECLIPSE MULTI PVTG ${label} 完整分支原油表和同号平衡区提交`,async({page})=>{
+ const f=multiWetGasBrowserFixture(label),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 多区湿气物性调整',exact:true}),input=panel.getByRole('spinbutton',{name:'分区PVTG物性乘数',exact:true});await expect(panel).toContainText('原基线有15条原生警告');await input.fill('2');await pvtSelect(page,panel,'PVTG流体区','PVT/EQL区 2 · 81 格');await expect(input).toHaveValue('');await pvtSelect(page,panel,'调整分区湿气物性',choice);await input.fill(value);const table=panel.getByLabel('ECLIPSE 分区PVTG分支与目标预览',{exact:true});await expect(table.locator('tbody tr')).toHaveCount(29);await expect(table).toContainText('欠饱和');await expect(table).toContainText('sm3/sm3');await expect(panel.getByLabel('ECLIPSE 分区PVTG原油表',{exact:true}).locator('tbody tr')).toHaveCount(f.inspection.multiWetGasPvtContext.regions[1].oilTable.records.reduce((n,r)=>n+r.rows.length,0));await panel.getByRole('button',{name:'创建分区湿气物性方案并计算',exact:true}).click();await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload.parameters).toEqual(f.parameters);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE MULTI PVTG 目标Bg越界不创建计算',async({page})=>{
+ const f=multiWetGasBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 多区湿气物性调整',exact:true});await pvtSelect(page,panel,'调整分区湿气物性','气体积系数 Bg');await panel.getByRole('spinbutton',{name:'分区PVTG物性乘数',exact:true}).fill('101');await panel.getByRole('button',{name:'创建分区湿气物性方案并计算',exact:true}).click();await expect(panel.getByRole('alert').filter({hasText:'0.000001–100'})).toHaveCount(1);expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE MULTI PVTG 原生油气累计与原RATE约束刷新恢复',async({page})=>{
+ const f=multiWetGasBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.target),summary(f.baseline)],runs:[f.target,f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const check=async()=>{const panel=page.getByRole('region',{name:'ECLIPSE 分区PVTG方案验收',exact:true});await expect(panel).toContainText('PVT/EQL区 2');await expect(panel).toContainText('13 个饱和/欠饱和分支统一 × 1.02');const table=panel.getByLabel('ECLIPSE 分区PVTG井级响应',{exact:true});for(const value of ['125.22637176513672','125.5829086303711','254.16590881347656','298761.71875','500000','1000000000'])await expect(table).toContainText(value)};await check();await page.reload();await activateModel(page,'ECLIPSE演示模型');await check();expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE MULTI PVTG 黏度和Bg区2独立加入同基线批量',async({page})=>{
+ const f=multiWetGasBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 批量方案',exact:true});for(const [name,value] of [['分区湿气黏度乘数','2'],['分区湿气体积系数 Bg 乘数','1.02']]){await pvtSelect(page,panel,'批量物性项目',name);await pvtSelect(page,panel,'批量PVT区','PVT区 2 · 81 格');await panel.getByRole('textbox',{name:'批量方案名称',exact:true}).fill(name);await panel.getByRole('spinbutton',{name:'批量方案数值',exact:true}).fill(value);await panel.getByRole('button',{name:'加入方案清单',exact:true}).click()};const table=panel.getByLabel('待计算方案清单',{exact:true});await expect(table.locator('tbody tr')).toHaveCount(2);await expect(table).toContainText('PVT区 2');await expect(table).not.toContainText('FORMATION_VOLUME_FACTOR');await expect(panel.getByRole('button',{name:'运行全部方案',exact:true})).toBeEnabled();expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE MULTI PVTG 混用油量单位拒绝差值',async({page})=>{
+ const f=multiWetGasBrowserFixture();f.target.result.summary.series.find(s=>s.keyword==='WOPR'&&s.objectName==='PRODUCER').unit='STB/DAY';await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.target),summary(f.baseline)],runs:[f.target,f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 分区PVTG方案验收',exact:true});await expect(panel).toContainText('单位不一致');await expect(panel.getByLabel('ECLIPSE 分区PVTG井级响应',{exact:true})).toHaveCount(0)
+})
+
+
+for(const [label,fluid,choice,value] of [['oil-mu',true,'油黏度 · PVDO','2'],['oil-bo',true,'油体积系数 Bo · PVDO','1.02'],['gas-mu',true,'气黏度 · PVDG','2'],['gas-bg',true,'气体积系数 Bg · PVDG','1.02'],['water-kr',false,'水相 Krw · SWFN','0.5'],['gas-kr',false,'气相 Krg · SGFN','0.5'],['oil-kr',false,'油相 Krow/Krog · SOF3两列联动','0.5']])test(`ECLIPSE COMBINED SAT PVT ${label} 各自选区完整原表提交`,async({page})=>{
+ const f=multiSatPvtBrowserFixture(label),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');
+ const sat=page.getByRole('region',{name:'ECLIPSE 多区三表相渗调整',exact:true}),pvt=page.getByRole('region',{name:'ECLIPSE 多区PVT调整',exact:true});await expect(sat).toContainText('本面板按岩性SAT区');await expect(pvt).toContainText('本面板按流体PVT区');const panel=fluid?pvt:sat,input=panel.getByRole('spinbutton',{name:fluid?'分区PVT乘数':'三表相渗乘数',exact:true});await input.fill('2');await pvtSelect(page,panel,fluid?'流体PVT区':'三表相渗SAT区',fluid?'PVT区 2 · 7 格':'SAT区 2 · 8 格');await expect(input).toHaveValue('');await pvtSelect(page,panel,fluid?'分区PVT调整项目':'三表相渗调整项目',choice);await input.fill(value);
+ for(const [key,count] of fluid?[['PVDO',6],['PVDG',6]]:[['SWFN',13],['SGFN',13],['SOF3',15]])await expect(panel.getByLabel(`ECLIPSE 分区${key}原表与目标`,{exact:true}).locator('tbody tr')).toHaveCount(count);
+ if(label==='oil-kr'){const last=panel.getByLabel('ECLIPSE 分区SOF3原表与目标',{exact:true}).locator('tbody tr').last();await expect(last.locator('td').nth(3)).toHaveText('0.45');await expect(last.locator('td').nth(5)).toHaveText('0.45')}
+ await panel.getByRole('button',{name:fluid?'创建分区PVT方案并计算':'创建分区三表相渗方案并计算',exact:true}).click();await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload.parameters).toEqual(f.parameters);expect(state.unexpectedRequests).toEqual([])
+})
+for(const [label,fluid] of [['oil-bo',true],['oil-kr',false]])test(`ECLIPSE COMBINED SAT PVT ${label} 真实响应刷新恢复`,async({page})=>{
+ const f=multiSatPvtBrowserFixture(label),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.target),summary(f.baseline)],runs:[f.target,f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');
+ const check=async()=>{const panel=page.getByRole('region',{name:fluid?'ECLIPSE 分区PVT方案验收':'ECLIPSE 分区三表相渗方案验收',exact:true});await expect(panel).toContainText(fluid?'PVT区 2':'SAT区 2');const table=panel.getByLabel(fluid?'ECLIPSE 分区PVT井级响应':'ECLIPSE 分区三表相渗井级响应',{exact:true});for(const keyword of ['WOPR','WGIT','WBHP']){const curve=f.target.result.summary.series.find(s=>s.keyword===keyword&&(keyword==='WOPR'?s.objectName==='P1':s.objectName==='I1'));await expect(table).toContainText(String(curve.points.at(-1).value))}};await check();await page.reload();await activateModel(page,'ECLIPSE演示模型');await check();expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE COMBINED SAT PVT 七项批量和跨类别重新选区',async({page})=>{
+ const f=multiSatPvtBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 批量方案',exact:true});
+ for(const [i,c] of [...Object.values(multiPvtChoices),...Object.entries(multiFamilyIILabels).map(([field,label])=>({field,label}))].entries()){
+  await pvtSelect(page,panel,'批量物性项目',`分区 ${c.label} 乘数`);if(i===4){await panel.getByRole('textbox',{name:'批量方案名称',exact:true}).fill('尚未选SAT区');await panel.getByRole('spinbutton',{name:'批量方案数值',exact:true}).fill('0.5');await panel.getByRole('button',{name:'加入方案清单',exact:true}).click();await expect(panel.getByRole('alert')).toContainText('SAT区');await expect(panel.getByLabel('待计算方案清单',{exact:true}).locator('tbody tr')).toHaveCount(4)}
+  await pvtSelect(page,panel,i<4?'批量PVT区':'批量SAT区',i<4?'PVT区 2 · 7 格':'SAT区 2 · 8 格');await panel.getByRole('textbox',{name:'批量方案名称',exact:true}).fill(c.label);await panel.getByRole('spinbutton',{name:'批量方案数值',exact:true}).fill(i<4?(c.field==='VISCOSITY'?'2':'1.02'):'0.5');await panel.getByRole('button',{name:'加入方案清单',exact:true}).click()
+ };await expect(panel.getByLabel('待计算方案清单',{exact:true}).locator('tbody tr')).toHaveCount(7);await expect(panel.getByRole('button',{name:'运行全部方案',exact:true})).toBeEnabled();await expect(panel.getByLabel('待计算方案清单',{exact:true})).not.toContainText('WATER_KR');expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE COMBINED SAT PVT 非完整SAT图不开放组合编辑',async({page})=>{
+ const f=multiSatPvtBrowserFixture();delete f.inspection.multiPvtContext;delete f.inspection.multiSatRelpermContext;const state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');await expect(page.getByRole('region',{name:'ECLIPSE 多区PVT调整',exact:true})).toHaveCount(0);await expect(page.getByRole('region',{name:'ECLIPSE 多区三表相渗调整',exact:true})).toHaveCount(0);expect(state.createPayloads).toHaveLength(0)
+})
+
+for(const [label,fluid,choice,value] of [['oil-mu',true,'油黏度 · PVDO','2'],['oil-bo',true,'油体积系数 Bo · PVDO','1.02'],['gas-mu',true,'气黏度 · PVDG','2'],['gas-bg',true,'气体积系数 Bg · PVDG','1.02'],['water-kr',false,'水相 Krw · SWOF','0.5'],['gas-kr',false,'气相 Krg · SGOF','0.5'],['oil-kr',false,'油相 Krow/Krog · 两表联动','0.5']])test(`ECLIPSE COMBINED FAMILY I PVT ${label} 各自选区完整原表提交`,async({page})=>{
+ const f=multiSatFamilyIPvtBrowserFixture(label),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');
+ const sat=page.getByRole('region',{name:'ECLIPSE SWOF SGOF 相渗调整',exact:true}),pvt=page.getByRole('region',{name:'ECLIPSE 多区PVT调整',exact:true});await expect(sat).toContainText('本面板按岩性SAT区');await expect(pvt).toContainText('本面板按流体PVT区');const panel=fluid?pvt:sat,input=panel.getByRole('spinbutton',{name:fluid?'分区PVT乘数':'两表相渗乘数',exact:true});await input.fill('2');await pvtSelect(page,panel,fluid?'流体PVT区':'相渗SAT区',fluid?'PVT区 2 · 7 格':'SAT区 2 · 8 格');await expect(input).toHaveValue('');await pvtSelect(page,panel,fluid?'分区PVT调整项目':'两表相渗调整项目',choice);await input.fill(value);
+ for(const [key,count] of fluid?[['PVDO',6],['PVDG',6]]:[['SWOF',15],['SGOF',13]])await expect(panel.getByLabel(fluid?`ECLIPSE 分区${key}原表与目标`:`ECLIPSE ${key} 原表与目标`,{exact:true}).locator('tbody tr')).toHaveCount(count);
+ if(label==='oil-kr')for(const key of ['SWOF','SGOF'])await expect(panel.getByLabel(`ECLIPSE ${key} 原表与目标`,{exact:true}).locator('tbody tr').first().locator('td').nth(5)).toHaveText('0.45')
+ await panel.getByRole('button',{name:fluid?'创建分区PVT方案并计算':'创建两表相渗方案并计算',exact:true}).click();await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload.parameters).toEqual(f.parameters);expect(state.unexpectedRequests).toEqual([])
+})
+for(const [label,fluid] of [['oil-bo',true],['oil-kr',false]])test(`ECLIPSE COMBINED FAMILY I PVT ${label} 真实响应刷新恢复`,async({page})=>{
+ const f=multiSatFamilyIPvtBrowserFixture(label),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.target),summary(f.baseline)],runs:[f.target,f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');
+ const check=async()=>{const panel=page.getByRole('region',{name:fluid?'ECLIPSE 分区PVT方案验收':'ECLIPSE 两表相渗方案验收',exact:true});await expect(panel).toContainText(fluid?'PVT区 2':'SAT区 2');const table=panel.getByLabel(fluid?'ECLIPSE 分区PVT井级响应':'ECLIPSE 两表相渗井级响应',{exact:true});for(const keyword of ['WOPR','WGIT','WBHP']){const curve=f.target.result.summary.series.find(s=>s.keyword===keyword&&(keyword==='WOPR'?s.objectName==='P1':s.objectName==='I1'));await expect(table).toContainText(String(curve.points.at(-1).value))}};await check();await page.reload();await activateModel(page,'ECLIPSE演示模型');await check();expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE COMBINED FAMILY I PVT 七项批量和跨类别重新选区',async({page})=>{
+ const f=multiSatFamilyIPvtBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 批量方案',exact:true});
+ for(const [i,c] of [...Object.values(multiPvtChoices),...Object.entries(coupledRelpermLabels).map(([field,label])=>({field,label}))].entries()){
+  await pvtSelect(page,panel,'批量物性项目',`分区 ${c.label} 乘数`);if(i===4){await panel.getByRole('textbox',{name:'批量方案名称',exact:true}).fill('尚未选SAT区');await panel.getByRole('spinbutton',{name:'批量方案数值',exact:true}).fill('0.5');await panel.getByRole('button',{name:'加入方案清单',exact:true}).click();await expect(panel.getByRole('alert')).toContainText('SAT区');await expect(panel.getByLabel('待计算方案清单',{exact:true}).locator('tbody tr')).toHaveCount(4)}
+  await pvtSelect(page,panel,i<4?'批量PVT区':'批量SAT区',i<4?'PVT区 2 · 7 格':'SAT区 2 · 8 格');await panel.getByRole('textbox',{name:'批量方案名称',exact:true}).fill(c.label);await panel.getByRole('spinbutton',{name:'批量方案数值',exact:true}).fill(i<4?(c.field==='VISCOSITY'?'2':'1.02'):'0.5');await panel.getByRole('button',{name:'加入方案清单',exact:true}).click()
+ };await expect(panel.getByLabel('待计算方案清单',{exact:true}).locator('tbody tr')).toHaveCount(7);await expect(panel.getByRole('button',{name:'运行全部方案',exact:true})).toBeEnabled();await expect(panel.getByLabel('待计算方案清单',{exact:true})).not.toContainText('WATER_KR');expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE COMBINED FAMILY I PVT 非完整SAT图不开放组合编辑',async({page})=>{
+ const f=multiSatFamilyIPvtBrowserFixture();delete f.inspection.multiPvtContext;delete f.inspection.multiSatRelpermContext;const state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');await expect(page.getByRole('region',{name:'ECLIPSE 多区PVT调整',exact:true})).toHaveCount(0);await expect(page.getByRole('region',{name:'ECLIPSE SWOF SGOF 相渗调整',exact:true})).toHaveCount(0);expect(state.createPayloads).toHaveLength(0)
+})
+
+for(const [label,choice,value,unit] of [['pressure','参考压力','4000','psia'],['volume','水体积系数','1.0506','rb/stb'],['compressibility','水压缩性','0.00006','1/psi'],['viscosity','参考水黏度','0.8','cP'],['viscosibility','黏压系数','0.000001','1/psi']])test(`ECLIPSE MULTI WATER PVT ${label} 选区原记录与绝对新值提交`,async({page})=>{
+ const f=multiWaterPvtBrowserFixture(label),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 分区水物性调整',exact:true});await expect(panel.getByRole('button',{name:'创建分区水物性方案并计算',exact:true})).toBeDisabled();await pvtSelect(page,panel,'水物性PVT区','PVT区 2 · 7 格');const input=panel.getByRole('spinbutton',{name:'分区水物性新值',exact:true});await input.fill('0.8');await pvtSelect(page,panel,'水物性PVT区','PVT区 1 · 6 格');await expect(input).toHaveValue('');await pvtSelect(page,panel,'水物性PVT区','PVT区 2 · 7 格');await pvtSelect(page,panel,'分区水物性调整项目',choice);await expect(input).toHaveValue('');await expect(panel.getByLabel('分区水物性原记录',{exact:true}).locator('tbody tr')).toHaveCount(5);await expect(panel).toContainText(unit);await expect(page.getByRole('region',{name:'ECLIPSE 水物性调整',exact:true})).toHaveCount(0);await input.fill(value);await panel.getByRole('button',{name:'创建分区水物性方案并计算',exact:true}).click();await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload.parameters).toEqual(f.parameters);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE MULTI WATER PVT 黏度越界不创建运行',async({page})=>{
+ const f=multiWaterPvtBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 分区水物性调整',exact:true});await pvtSelect(page,panel,'水物性PVT区','PVT区 2 · 7 格');await panel.getByRole('spinbutton',{name:'分区水物性新值',exact:true}).fill('0');await panel.getByRole('button',{name:'创建分区水物性方案并计算',exact:true}).click();await expect(panel.getByRole('alert')).toContainText('大于0');expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE MULTI WATER PVT 原生水量油量井压刷新恢复',async({page})=>{
+ const f=multiWaterPvtBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.target),summary(f.baseline)],runs:[f.target,f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const check=async()=>{const panel=page.getByRole('region',{name:'ECLIPSE 分区水物性方案验收',exact:true});await expect(panel).toContainText('PVT区 2');await expect(panel).toContainText('0.4 → 0.8 cP');const table=panel.getByLabel('ECLIPSE 分区水物性井级响应',{exact:true});for(const keyword of ['WWPR','WOPR','WBHP','WGIT']){const curve=f.target.result.summary.series.find(s=>s.keyword===keyword&&(keyword==='WWPR'||keyword==='WOPR'?s.objectName==='P1':s.objectName==='I1'));await expect(table).toContainText(String(curve.points.at(-1).value))}};await check();await page.reload();await activateModel(page,'ECLIPSE演示模型');await check();expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE MULTI WATER PVT 五项绝对值加入同基线批量',async({page})=>{
+ const f=multiWaterPvtBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 批量方案',exact:true});for(const [label,value] of [['参考压力','4000'],['水体积系数','1.0506'],['水压缩性','0.00006'],['参考水黏度','0.8'],['黏压系数','0.000001']]){await pvtSelect(page,panel,'批量物性项目','分区水物性 · '+label);await pvtSelect(page,panel,'批量PVT区','PVT区 2 · 7 格');await panel.getByRole('textbox',{name:'批量方案名称',exact:true}).fill(label);await panel.getByRole('spinbutton',{name:'批量方案数值',exact:true}).fill(value);await panel.getByRole('button',{name:'加入方案清单',exact:true}).click()};const table=panel.getByLabel('待计算方案清单',{exact:true});await expect(table.locator('tbody tr')).toHaveCount(5);await expect(table).toContainText('PVT区 2');await expect(table).not.toContainText('倍');await expect(panel.getByRole('button',{name:'运行全部方案',exact:true})).toBeEnabled();expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE MULTI WATER PVT 混合单位拒绝井级差值',async({page})=>{
+ const f=multiWaterPvtBrowserFixture();f.target.result.summary.series.find(s=>s.keyword==='WBHP'&&s.objectName==='I1').unit='BARSA';await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.target),summary(f.baseline)],runs:[f.target,f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 分区水物性方案验收',exact:true});await expect(panel).toContainText('单位不一致');await expect(panel.getByLabel('ECLIPSE 分区水物性井级响应',{exact:true})).toHaveCount(0)
+})
+test('ECLIPSE MULTI WATER PVT 默认字段不开放分区水编辑',async({page})=>{
+ const f=multiWaterPvtBrowserFixture();f.inspection.multiWaterPvtContext.regions[1].recordValues[4]='1*';const state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');await expect(page.getByRole('region',{name:'ECLIPSE 分区水物性调整',exact:true})).toHaveCount(0);expect(state.createPayloads).toHaveLength(0)
+})
+
+for(const [label,choice,value,unit] of [['pressure','参考压力','4000','barsa'],['volume','水体积系数','1.02','rm3/sm3'],['compressibility','水压缩性','0.00000606','1/bar'],['viscosity','参考水黏度','1','cP'],['viscosibility','黏压系数','0.000001','1/bar']])test(`ECLIPSE MULTI PURE WATER PVT ${label} 选区原记录与绝对新值提交`,async({page})=>{
+ const f=multiPureWaterPvtBrowserFixture(label),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 分区水物性调整',exact:true});await expect(panel.getByRole('button',{name:'创建分区水物性方案并计算',exact:true})).toBeDisabled();await pvtSelect(page,panel,'水物性PVT区','PVT区 2 · 120 格');const input=panel.getByRole('spinbutton',{name:'分区水物性新值',exact:true});await input.fill('1');await pvtSelect(page,panel,'水物性PVT区','PVT区 1 · 105 格');await expect(input).toHaveValue('');await pvtSelect(page,panel,'水物性PVT区','PVT区 2 · 120 格');await pvtSelect(page,panel,'分区水物性调整项目',choice);await expect(input).toHaveValue('');await expect(panel.getByLabel('分区水物性原记录',{exact:true}).locator('tbody tr')).toHaveCount(5);await expect(panel).toContainText(unit);await expect(page.getByRole('region',{name:'ECLIPSE 水物性调整',exact:true})).toHaveCount(0);await input.fill(value);await panel.getByRole('button',{name:'创建分区水物性方案并计算',exact:true}).click();await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload.parameters).toEqual(f.parameters);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE MULTI PURE WATER PVT 黏度越界不创建运行',async({page})=>{
+ const f=multiPureWaterPvtBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 分区水物性调整',exact:true});await pvtSelect(page,panel,'水物性PVT区','PVT区 2 · 120 格');await panel.getByRole('spinbutton',{name:'分区水物性新值',exact:true}).fill('0');await panel.getByRole('button',{name:'创建分区水物性方案并计算',exact:true}).click();await expect(panel.getByRole('alert')).toContainText('大于0');expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE MULTI PURE WATER PVT 原生控水量与井压刷新恢复',async({page})=>{
+ const f=multiPureWaterPvtBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.target),summary(f.baseline)],runs:[f.target,f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const check=async()=>{const panel=page.getByRole('region',{name:'ECLIPSE 分区水物性方案验收',exact:true});await expect(panel).toContainText('PVT区 2');await expect(panel).toContainText('0.5 → 1 cP');const table=panel.getByLabel('ECLIPSE 分区水物性井级响应',{exact:true});for(const keyword of ['WWPR','WWPT','WBHP']){const curve=f.target.result.summary.series.find(s=>s.keyword===keyword&&(keyword==='WWPR'||keyword==='WWPT'?s.objectName==='P':s.objectName==='I'));await expect(table).toContainText(String(curve.points.at(-1).value))}};await check();await page.reload();await activateModel(page,'ECLIPSE演示模型');await check();expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE MULTI PURE WATER PVT 五项绝对值加入同基线批量',async({page})=>{
+ const f=multiPureWaterPvtBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 批量方案',exact:true});for(const [label,value] of [['参考压力','4000'],['水体积系数','1.02'],['水压缩性','0.00000606'],['参考水黏度','1'],['黏压系数','0.000001']]){await pvtSelect(page,panel,'批量物性项目','分区水物性 · '+label);await pvtSelect(page,panel,'批量PVT区','PVT区 2 · 120 格');await panel.getByRole('textbox',{name:'批量方案名称',exact:true}).fill(label);await panel.getByRole('spinbutton',{name:'批量方案数值',exact:true}).fill(value);await panel.getByRole('button',{name:'加入方案清单',exact:true}).click()};const table=panel.getByLabel('待计算方案清单',{exact:true});await expect(table.locator('tbody tr')).toHaveCount(5);await expect(table).toContainText('PVT区 2');await expect(table).not.toContainText('倍');await expect(panel.getByRole('button',{name:'运行全部方案',exact:true})).toBeEnabled();expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE MULTI PURE WATER PVT 混合单位拒绝井级差值',async({page})=>{
+ const f=multiPureWaterPvtBrowserFixture();f.target.result.summary.series.find(s=>s.keyword==='WBHP'&&s.objectName==='I').unit='PSIA';await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.target),summary(f.baseline)],runs:[f.target,f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 分区水物性方案验收',exact:true});await expect(panel).toContainText('单位不一致');await expect(panel.getByLabel('ECLIPSE 分区水物性井级响应',{exact:true})).toHaveCount(0)
+})
+test('ECLIPSE MULTI PURE WATER PVT 默认字段不开放分区水编辑',async({page})=>{
+ const f=multiPureWaterPvtBrowserFixture();f.inspection.multiWaterPvtContext.regions[1].recordValues[4]='1*';const state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');await expect(page.getByRole('region',{name:'ECLIPSE 分区水物性调整',exact:true})).toHaveCount(0);expect(state.createPayloads).toHaveLength(0)
+})
+
+for(const [label,choice,value,unit] of [['pressure','参考压力','4000','psia'],['volume','水体积系数','1.0506','rb/stb'],['compressibility','水压缩性','0.00006','1/psi'],['viscosity','参考水黏度','0.8','cP'],['viscosibility','黏压系数','0.000001','1/psi']])test(`ECLIPSE DEFAULT WATER THREE ${label} 选区原记录与绝对新值提交`,async({page})=>{
+ const f=waterDefaultsBrowserFixture('three',label),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 分区水物性调整',exact:true});await expect(panel.getByRole('button',{name:'创建分区水物性方案并计算',exact:true})).toBeDisabled();await pvtSelect(page,panel,'水物性PVT区','PVT区 2 · 7 格');const input=panel.getByRole('spinbutton',{name:'分区水物性新值',exact:true});await input.fill('0.8');await pvtSelect(page,panel,'水物性PVT区','PVT区 1 · 6 格');await expect(input).toHaveValue('');await pvtSelect(page,panel,'水物性PVT区','PVT区 2 · 7 格');await pvtSelect(page,panel,'分区水物性调整项目',choice);await expect(input).toHaveValue('');await expect(panel.getByLabel('分区水物性原记录',{exact:true}).locator('tbody tr')).toHaveCount(5);await expect(panel).toContainText(unit);await expect(panel.getByLabel('分区水物性原记录',{exact:true})).toContainText('官方默认，源文件省略');await expect(page.getByRole('region',{name:'ECLIPSE 水物性调整',exact:true})).toHaveCount(0);await input.fill(value);await panel.getByRole('button',{name:'创建分区水物性方案并计算',exact:true}).click();await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload.parameters).toEqual(f.parameters);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE DEFAULT WATER THREE 黏度越界不创建运行',async({page})=>{
+ const f=waterDefaultsBrowserFixture('three'),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 分区水物性调整',exact:true});await pvtSelect(page,panel,'水物性PVT区','PVT区 2 · 7 格');await panel.getByRole('spinbutton',{name:'分区水物性新值',exact:true}).fill('0');await panel.getByRole('button',{name:'创建分区水物性方案并计算',exact:true}).click();await expect(panel.getByRole('alert')).toContainText('大于0');expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE DEFAULT WATER THREE 原生水量油量井压刷新恢复',async({page})=>{
+ const f=waterDefaultsBrowserFixture('three'),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.target),summary(f.baseline)],runs:[f.target,f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const check=async()=>{const panel=page.getByRole('region',{name:'ECLIPSE 分区水物性方案验收',exact:true});await expect(panel).toContainText('PVT区 2');await expect(panel).toContainText('0.4 → 0.8 cP');const table=panel.getByLabel('ECLIPSE 分区水物性井级响应',{exact:true});for(const keyword of ['WWPR','WOPR','WBHP','WGIT']){const curve=f.target.result.summary.series.find(s=>s.keyword===keyword&&(keyword==='WWPR'||keyword==='WOPR'?s.objectName==='P1':s.objectName==='I1'));await expect(table).toContainText(String(curve.points.at(-1).value))}};await check();await page.reload();await activateModel(page,'ECLIPSE演示模型');await check();expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE DEFAULT WATER THREE 五项绝对值加入同基线批量',async({page})=>{
+ const f=waterDefaultsBrowserFixture('three'),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 批量方案',exact:true});for(const [label,value] of [['参考压力','4000'],['水体积系数','1.0506'],['水压缩性','0.00006'],['参考水黏度','0.8'],['黏压系数','0.000001']]){await pvtSelect(page,panel,'批量物性项目','分区水物性 · '+label);await pvtSelect(page,panel,'批量PVT区','PVT区 2 · 7 格');await panel.getByRole('textbox',{name:'批量方案名称',exact:true}).fill(label);await panel.getByRole('spinbutton',{name:'批量方案数值',exact:true}).fill(value);await panel.getByRole('button',{name:'加入方案清单',exact:true}).click()};const table=panel.getByLabel('待计算方案清单',{exact:true});await expect(table.locator('tbody tr')).toHaveCount(5);await expect(table).toContainText('PVT区 2');await expect(table).not.toContainText('倍');await expect(panel.getByRole('button',{name:'运行全部方案',exact:true})).toBeEnabled();expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE DEFAULT WATER THREE 混合单位拒绝井级差值',async({page})=>{
+ const f=waterDefaultsBrowserFixture('three');f.target.result.summary.series.find(s=>s.keyword==='WBHP'&&s.objectName==='I1').unit='BARSA';await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.target),summary(f.baseline)],runs:[f.target,f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 分区水物性方案验收',exact:true});await expect(panel).toContainText('单位不一致');await expect(panel.getByLabel('ECLIPSE 分区水物性井级响应',{exact:true})).toHaveCount(0)
+})
+test('ECLIPSE DEFAULT WATER THREE 星号默认字段不开放分区水编辑',async({page})=>{
+ const f=waterDefaultsBrowserFixture('three');f.inspection.multiWaterPvtContext.regions[1].recordValues[4]='1*';const state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');await expect(page.getByRole('region',{name:'ECLIPSE 分区水物性调整',exact:true})).toHaveCount(0);expect(state.createPayloads).toHaveLength(0)
+})
+
+for(const [label,choice,value,unit] of [['pressure','参考压力','4000','barsa'],['volume','水体积系数','1.02','rm3/sm3'],['compressibility','水压缩性','0.00000606','1/bar'],['viscosity','参考水黏度','1','cP'],['viscosibility','黏压系数','0.000001','1/bar']])test(`ECLIPSE DEFAULT WATER PURE ${label} 选区原记录与绝对新值提交`,async({page})=>{
+ const f=waterDefaultsBrowserFixture('pure',label),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 分区水物性调整',exact:true});await expect(panel.getByRole('button',{name:'创建分区水物性方案并计算',exact:true})).toBeDisabled();await pvtSelect(page,panel,'水物性PVT区','PVT区 2 · 120 格');const input=panel.getByRole('spinbutton',{name:'分区水物性新值',exact:true});await input.fill('1');await pvtSelect(page,panel,'水物性PVT区','PVT区 1 · 105 格');await expect(input).toHaveValue('');await pvtSelect(page,panel,'水物性PVT区','PVT区 2 · 120 格');await pvtSelect(page,panel,'分区水物性调整项目',choice);await expect(input).toHaveValue('');await expect(panel.getByLabel('分区水物性原记录',{exact:true}).locator('tbody tr')).toHaveCount(5);await expect(panel).toContainText(unit);await expect(panel.getByLabel('分区水物性原记录',{exact:true})).toContainText('官方默认，源文件省略');await expect(page.getByRole('region',{name:'ECLIPSE 水物性调整',exact:true})).toHaveCount(0);await input.fill(value);await panel.getByRole('button',{name:'创建分区水物性方案并计算',exact:true}).click();await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload.parameters).toEqual(f.parameters);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE DEFAULT WATER PURE 黏度越界不创建运行',async({page})=>{
+ const f=waterDefaultsBrowserFixture('pure'),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 分区水物性调整',exact:true});await pvtSelect(page,panel,'水物性PVT区','PVT区 2 · 120 格');await panel.getByRole('spinbutton',{name:'分区水物性新值',exact:true}).fill('0');await panel.getByRole('button',{name:'创建分区水物性方案并计算',exact:true}).click();await expect(panel.getByRole('alert')).toContainText('大于0');expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE DEFAULT WATER PURE 原生控水量与井压刷新恢复',async({page})=>{
+ const f=waterDefaultsBrowserFixture('pure'),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.target),summary(f.baseline)],runs:[f.target,f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const check=async()=>{const panel=page.getByRole('region',{name:'ECLIPSE 分区水物性方案验收',exact:true});await expect(panel).toContainText('PVT区 2');await expect(panel).toContainText('0.5 → 1 cP');const table=panel.getByLabel('ECLIPSE 分区水物性井级响应',{exact:true});for(const keyword of ['WWPR','WWPT','WBHP']){const curve=f.target.result.summary.series.find(s=>s.keyword===keyword&&(keyword==='WWPR'||keyword==='WWPT'?s.objectName==='P':s.objectName==='I'));await expect(table).toContainText(String(curve.points.at(-1).value))}};await check();await page.reload();await activateModel(page,'ECLIPSE演示模型');await check();expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE DEFAULT WATER PURE 五项绝对值加入同基线批量',async({page})=>{
+ const f=waterDefaultsBrowserFixture('pure'),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 批量方案',exact:true});for(const [label,value] of [['参考压力','4000'],['水体积系数','1.02'],['水压缩性','0.00000606'],['参考水黏度','1'],['黏压系数','0.000001']]){await pvtSelect(page,panel,'批量物性项目','分区水物性 · '+label);await pvtSelect(page,panel,'批量PVT区','PVT区 2 · 120 格');await panel.getByRole('textbox',{name:'批量方案名称',exact:true}).fill(label);await panel.getByRole('spinbutton',{name:'批量方案数值',exact:true}).fill(value);await panel.getByRole('button',{name:'加入方案清单',exact:true}).click()};const table=panel.getByLabel('待计算方案清单',{exact:true});await expect(table.locator('tbody tr')).toHaveCount(5);await expect(table).toContainText('PVT区 2');await expect(table).not.toContainText('倍');await expect(panel.getByRole('button',{name:'运行全部方案',exact:true})).toBeEnabled();expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE DEFAULT WATER PURE 混合单位拒绝井级差值',async({page})=>{
+ const f=waterDefaultsBrowserFixture('pure');f.target.result.summary.series.find(s=>s.keyword==='WBHP'&&s.objectName==='I').unit='PSIA';await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.target),summary(f.baseline)],runs:[f.target,f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 分区水物性方案验收',exact:true});await expect(panel).toContainText('单位不一致');await expect(panel.getByLabel('ECLIPSE 分区水物性井级响应',{exact:true})).toHaveCount(0)
+})
+test('ECLIPSE DEFAULT WATER PURE 星号默认字段不开放分区水编辑',async({page})=>{
+ const f=waterDefaultsBrowserFixture('pure');f.inspection.multiWaterPvtContext.regions[1].recordValues[4]='1*';const state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');await expect(page.getByRole('region',{name:'ECLIPSE 分区水物性调整',exact:true})).toHaveCount(0);expect(state.createPayloads).toHaveLength(0)
+})
+
+for(const [label,fluid,choice,value] of [['viscosity',true,'油黏度','2'],['volume',true,'油体积系数 Bo','1.02'],['water-kr',false,'水相 Krw · SWFN','0.5'],['gas-kr',false,'气相 Krg · SGFN','0.5'],['oil-kr',false,'油相 Krow/Krog · SOF3两列联动','0.5']])test(`ECLIPSE COMBINED SAT PVTO ${label} 两图选区与完整原表提交`,async({page})=>{
+ const f=multiSatPvtoBrowserFixture(label),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const sat=page.getByRole('region',{name:'ECLIPSE 多区三表相渗调整',exact:true}),pvt=page.getByRole('region',{name:'ECLIPSE 多区含溶解气油物性调整',exact:true});await expect(sat).toContainText('本面板按岩性SAT区');await expect(pvt).toContainText('本面板按流体PVT/EQL区');const panel=fluid?pvt:sat;await pvtSelect(page,panel,fluid?'PVTO流体区':'三表相渗SAT区',fluid?'PVT/EQL区 2 · 150 格':'SAT区 2 · 150 格');const input=panel.getByRole('spinbutton',{name:fluid?'分区PVTO物性乘数':'三表相渗乘数',exact:true});await pvtSelect(page,panel,fluid?'调整分区含溶解气油物性':'三表相渗调整项目',fluid?(label==='viscosity'?'油体积系数 Bo':'油黏度'):(label==='water-kr'?'气相 Krg · SGFN':'水相 Krw · SWFN'));await input.fill('2');await pvtSelect(page,panel,fluid?'调整分区含溶解气油物性':'三表相渗调整项目',choice);await expect(input).toHaveValue('');await input.fill(value);if(!fluid)for(const [keyword,rows] of [['SWFN',2],['SGFN',14],['SOF3',14]])await expect(panel.getByLabel(`ECLIPSE 分区${keyword}原表与目标`,{exact:true}).locator('tbody tr')).toHaveCount(rows);await panel.getByRole('button',{name:fluid?'创建分区含溶解气油物性方案并计算':'创建分区三表相渗方案并计算',exact:true}).click();await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload.parameters).toEqual(f.parameters);expect(state.unexpectedRequests).toEqual([])
+})
+for(const [label,fluid] of [['volume',true],['oil-kr',false]])test(`ECLIPSE COMBINED SAT PVTO ${label} 实际油气压力刷新恢复`,async({page})=>{
+ const f=multiSatPvtoBrowserFixture(label),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.target),summary(f.baseline)],runs:[f.target,f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const check=async()=>{const panel=page.getByRole('region',{name:fluid?'ECLIPSE 分区PVTO方案验收':'ECLIPSE 分区三表相渗方案验收',exact:true});await expect(panel).toContainText(fluid?'PVT/EQL区 2':'SAT区 2');const table=panel.getByLabel(fluid?'ECLIPSE 分区PVTO井级响应':'ECLIPSE 分区三表相渗井级响应',{exact:true});for(const keyword of ['WOPR','WGIT','WBHP']){const curve=f.target.result.summary.series.find(s=>s.keyword===keyword&&(keyword==='WOPR'?s.objectName==='PRODUCER':s.objectName==='INJECTOR'));await expect(table).toContainText(String(curve.points.at(-1).value))}};await check();await page.reload();await activateModel(page,'ECLIPSE演示模型');await check();expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE COMBINED SAT PVTO 五项批量跨类别重新选区',async({page})=>{
+ const f=multiSatPvtoBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 批量方案',exact:true});for(const [index,label,value] of [[0,'分区含溶解气原油黏度乘数','2'],[1,'分区含溶解气原油体积系数 Bo 乘数','1.02'],[2,'分区 水相 Krw · SWFN 乘数','0.5'],[3,'分区 气相 Krg · SGFN 乘数','0.5'],[4,'分区 油相 Krow/Krog · SOF3两列联动 乘数','0.5']]){await pvtSelect(page,panel,'批量物性项目',label);if(index===2){await panel.getByRole('textbox',{name:'批量方案名称',exact:true}).fill('还未选SAT区');await panel.getByRole('spinbutton',{name:'批量方案数值',exact:true}).fill(value);await panel.getByRole('button',{name:'加入方案清单',exact:true}).click();await expect(panel.getByRole('alert')).toContainText('SAT区')};await pvtSelect(page,panel,index<2?'批量PVT区':'批量SAT区',index<2?'PVT区 2 · 150 格':'SAT区 2 · 150 格');await panel.getByRole('textbox',{name:'批量方案名称',exact:true}).fill(label);await panel.getByRole('spinbutton',{name:'批量方案数值',exact:true}).fill(value);await panel.getByRole('button',{name:'加入方案清单',exact:true}).click()};await expect(panel.getByLabel('待计算方案清单',{exact:true}).locator('tbody tr')).toHaveCount(5);await expect(panel.getByRole('button',{name:'运行全部方案',exact:true})).toBeEnabled();expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE COMBINED SAT PVTO 混合压力单位拒绝差值',async({page})=>{
+ const f=multiSatPvtoBrowserFixture();f.target.result.summary.series.find(s=>s.keyword==='WBHP'&&s.objectName==='INJECTOR').unit='BARSA';await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.target),summary(f.baseline)],runs:[f.target,f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 分区PVTO方案验收',exact:true});await expect(panel).toContainText('单位不一致');await expect(panel.getByLabel('ECLIPSE 分区PVTO井级响应',{exact:true})).toHaveCount(0)
+})
+test('ECLIPSE COMBINED SAT PVTO 缺少任一完整区域源不开放组合编辑',async({page})=>{
+ const f=multiSatPvtoBrowserFixture();delete f.inspection.multiLiveOilPvtContext;delete f.inspection.multiSatRelpermContext;const state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');await expect(page.getByRole('region',{name:'ECLIPSE 多区含溶解气油物性调整',exact:true})).toHaveCount(0);await expect(page.getByRole('region',{name:'ECLIPSE 多区三表相渗调整',exact:true})).toHaveCount(0);expect(state.createPayloads).toHaveLength(0)
+})
+
+for(const [label,fluid,choice,value] of [['viscosity',true,'气黏度','2'],['volume',true,'气体积系数 Bg','1.02'],['water-kr',false,'水相 Krw · SWFN','0.5'],['gas-kr',false,'气相 Krg · SGFN','0.5'],['oil-kr',false,'油相 Krow/Krog · SOF3两列联动','0.5']])test(`ECLIPSE COMBINED SAT PVTG ${label} 两图选区与完整原表提交`,async({page})=>{
+ const f=multiSatPvtgBrowserFixture(label),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const sat=page.getByRole('region',{name:'ECLIPSE 多区三表相渗调整',exact:true}),pvt=page.getByRole('region',{name:'ECLIPSE 多区湿气物性调整',exact:true});await expect(sat).toContainText('本面板按岩性SAT区');await expect(pvt).toContainText('本面板按流体PVT/EQL区');const panel=fluid?pvt:sat;await pvtSelect(page,panel,fluid?'PVTG流体区':'三表相渗SAT区',fluid?'PVT/EQL区 2 · 81 格':'SAT区 2 · 90 格');const input=panel.getByRole('spinbutton',{name:fluid?'分区PVTG物性乘数':'三表相渗乘数',exact:true});await pvtSelect(page,panel,fluid?'调整分区湿气物性':'三表相渗调整项目',fluid?(label==='viscosity'?'气体积系数 Bg':'气黏度'):(label==='water-kr'?'气相 Krg · SGFN':'水相 Krw · SWFN'));await input.fill('2');await pvtSelect(page,panel,fluid?'调整分区湿气物性':'三表相渗调整项目',choice);await expect(input).toHaveValue('');await input.fill(value);if(fluid){await expect(panel.getByLabel('ECLIPSE 分区PVTG分支与目标预览',{exact:true}).locator('tbody tr')).toHaveCount(29);await expect(panel.getByLabel('ECLIPSE 分区PVTG原油表',{exact:true}).locator('tbody tr')).toHaveCount(11)};if(!fluid)for(const [keyword,rows] of [['SWFN',3],['SGFN',4],['SOF3',3]])await expect(panel.getByLabel(`ECLIPSE 分区${keyword}原表与目标`,{exact:true}).locator('tbody tr')).toHaveCount(rows);await panel.getByRole('button',{name:fluid?'创建分区湿气物性方案并计算':'创建分区三表相渗方案并计算',exact:true}).click();await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload.parameters).toEqual(f.parameters);expect(state.unexpectedRequests).toEqual([])
+})
+for(const [label,fluid] of [['volume',true],['oil-kr',false]])test(`ECLIPSE COMBINED SAT PVTG ${label} 实际油气压力刷新恢复`,async({page})=>{
+ const f=multiSatPvtgBrowserFixture(label),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.target),summary(f.baseline)],runs:[f.target,f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const check=async()=>{const panel=page.getByRole('region',{name:fluid?'ECLIPSE 分区PVTG方案验收':'ECLIPSE 分区三表相渗方案验收',exact:true});await expect(panel).toContainText(fluid?'PVT/EQL区 2':'SAT区 2');const table=panel.getByLabel(fluid?'ECLIPSE 分区PVTG井级响应':'ECLIPSE 分区三表相渗井级响应',{exact:true});for(const keyword of ['WOPR','WGPR','WBHP']){const curve=f.target.result.summary.series.find(s=>s.keyword===keyword&&s.objectName==='PRODUCER');await expect(table).toContainText(String(curve.points.at(-1).value))}};await check();await page.reload();await activateModel(page,'ECLIPSE演示模型');await check();expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE COMBINED SAT PVTG 五项批量跨类别重新选区',async({page})=>{
+ const f=multiSatPvtgBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 批量方案',exact:true});for(const [index,label,value] of [[0,'分区湿气黏度乘数','2'],[1,'分区湿气体积系数 Bg 乘数','1.02'],[2,'分区 水相 Krw · SWFN 乘数','0.5'],[3,'分区 气相 Krg · SGFN 乘数','0.5'],[4,'分区 油相 Krow/Krog · SOF3两列联动 乘数','0.5']]){await pvtSelect(page,panel,'批量物性项目',label);if(index===2){await panel.getByRole('textbox',{name:'批量方案名称',exact:true}).fill('还未选SAT区');await panel.getByRole('spinbutton',{name:'批量方案数值',exact:true}).fill(value);await panel.getByRole('button',{name:'加入方案清单',exact:true}).click();await expect(panel.getByRole('alert')).toContainText('SAT区')};await pvtSelect(page,panel,index<2?'批量PVT区':'批量SAT区',index<2?'PVT区 2 · 81 格':'SAT区 2 · 90 格');await panel.getByRole('textbox',{name:'批量方案名称',exact:true}).fill(label);await panel.getByRole('spinbutton',{name:'批量方案数值',exact:true}).fill(value);await panel.getByRole('button',{name:'加入方案清单',exact:true}).click()};await expect(panel.getByLabel('待计算方案清单',{exact:true}).locator('tbody tr')).toHaveCount(5);await expect(panel.getByRole('button',{name:'运行全部方案',exact:true})).toBeEnabled();expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE COMBINED SAT PVTG 混合压力单位拒绝差值',async({page})=>{
+ const f=multiSatPvtgBrowserFixture();f.target.result.summary.series.find(s=>s.keyword==='WBHP'&&s.objectName==='PRODUCER').unit='PSIA';await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.target),summary(f.baseline)],runs:[f.target,f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 分区PVTG方案验收',exact:true});await expect(panel).toContainText('单位不一致');await expect(panel.getByLabel('ECLIPSE 分区PVTG井级响应',{exact:true})).toHaveCount(0)
+})
+test('ECLIPSE COMBINED SAT PVTG 缺少任一完整区域源不开放组合编辑',async({page})=>{
+ const f=multiSatPvtgBrowserFixture();delete f.inspection.multiWetGasPvtContext;delete f.inspection.multiSatRelpermContext;const state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');await expect(page.getByRole('region',{name:'ECLIPSE 多区湿气物性调整',exact:true})).toHaveCount(0);await expect(page.getByRole('region',{name:'ECLIPSE 多区三表相渗调整',exact:true})).toHaveCount(0);expect(state.createPayloads).toHaveLength(0)
+})
+
+for(const [label,fluid,choice,value] of [['viscosity',true,'气黏度','2'],['volume',true,'气体积系数 Bg','1.02'],['water-kr',false,'水相 Krw · SWOF','0.5'],['gas-kr',false,'气相 Krg · SGOF','0.5'],['oil-kr',false,'油相 Krow/Krog · 两表联动','0.5']])test(`ECLIPSE COMBINED FAMILY I PVTG ${label} 两图选区与完整原表提交`,async({page})=>{
+ const f=multiSatFamilyIPvtgBrowserFixture(label),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const sat=page.getByRole('region',{name:'ECLIPSE SWOF SGOF 相渗调整',exact:true}),pvt=page.getByRole('region',{name:'ECLIPSE 多区湿气物性调整',exact:true});await expect(sat).toContainText('本面板按岩性SAT区');await expect(pvt).toContainText('本面板按流体PVT/EQL区');const panel=fluid?pvt:sat;await pvtSelect(page,panel,fluid?'PVTG流体区':'相渗SAT区',fluid?'PVT/EQL区 2 · 81 格':'SAT区 2 · 90 格');const input=panel.getByRole('spinbutton',{name:fluid?'分区PVTG物性乘数':'两表相渗乘数',exact:true});await pvtSelect(page,panel,fluid?'调整分区湿气物性':'两表相渗调整项目',fluid?(label==='viscosity'?'气体积系数 Bg':'气黏度'):(label==='water-kr'?'气相 Krg · SGOF':'水相 Krw · SWOF'));await input.fill('2');await pvtSelect(page,panel,fluid?'调整分区湿气物性':'两表相渗调整项目',choice);await expect(input).toHaveValue('');await input.fill(value);if(fluid){await expect(panel.getByLabel('ECLIPSE 分区PVTG分支与目标预览',{exact:true}).locator('tbody tr')).toHaveCount(29);await expect(panel.getByLabel('ECLIPSE 分区PVTG原油表',{exact:true}).locator('tbody tr')).toHaveCount(11)};if(!fluid)for(const [keyword,rows] of [['SWOF',4],['SGOF',5]])await expect(panel.getByLabel(`ECLIPSE ${keyword} 原表与目标`,{exact:true}).locator('tbody tr')).toHaveCount(rows);await panel.getByRole('button',{name:fluid?'创建分区湿气物性方案并计算':'创建两表相渗方案并计算',exact:true}).click();await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload.parameters).toEqual(f.parameters);expect(state.unexpectedRequests).toEqual([])
+})
+for(const [label,fluid] of [['volume',true],['oil-kr',false]])test(`ECLIPSE COMBINED FAMILY I PVTG ${label} 实际油气压力刷新恢复`,async({page})=>{
+ const f=multiSatFamilyIPvtgBrowserFixture(label),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.target),summary(f.baseline)],runs:[f.target,f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const check=async()=>{const panel=page.getByRole('region',{name:fluid?'ECLIPSE 分区PVTG方案验收':'ECLIPSE 两表相渗方案验收',exact:true});await expect(panel).toContainText(fluid?'PVT/EQL区 2':'SAT区 2');const table=panel.getByLabel(fluid?'ECLIPSE 分区PVTG井级响应':'ECLIPSE 两表相渗井级响应',{exact:true});for(const keyword of ['WOPR','WGPR','WBHP']){const curve=f.target.result.summary.series.find(s=>s.keyword===keyword&&s.objectName==='PRODUCER');await expect(table).toContainText(String(curve.points.at(-1).value))}};await check();await page.reload();await activateModel(page,'ECLIPSE演示模型');await check();expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE COMBINED FAMILY I PVTG 五项批量跨类别重新选区',async({page})=>{
+ const f=multiSatFamilyIPvtgBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 批量方案',exact:true});for(const [index,label,value] of [[0,'分区湿气黏度乘数','2'],[1,'分区湿气体积系数 Bg 乘数','1.02'],[2,'分区 水相 Krw · SWOF 乘数','0.5'],[3,'分区 气相 Krg · SGOF 乘数','0.5'],[4,'分区 油相 Krow/Krog · 两表联动 乘数','0.5']]){await pvtSelect(page,panel,'批量物性项目',label);if(index===2){await panel.getByRole('textbox',{name:'批量方案名称',exact:true}).fill('还未选SAT区');await panel.getByRole('spinbutton',{name:'批量方案数值',exact:true}).fill(value);await panel.getByRole('button',{name:'加入方案清单',exact:true}).click();await expect(panel.getByRole('alert')).toContainText('SAT区')};await pvtSelect(page,panel,index<2?'批量PVT区':'批量SAT区',index<2?'PVT区 2 · 81 格':'SAT区 2 · 90 格');await panel.getByRole('textbox',{name:'批量方案名称',exact:true}).fill(label);await panel.getByRole('spinbutton',{name:'批量方案数值',exact:true}).fill(value);await panel.getByRole('button',{name:'加入方案清单',exact:true}).click()};await expect(panel.getByLabel('待计算方案清单',{exact:true}).locator('tbody tr')).toHaveCount(5);await expect(panel.getByRole('button',{name:'运行全部方案',exact:true})).toBeEnabled();expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE COMBINED FAMILY I PVTG 混合压力单位拒绝差值',async({page})=>{
+ const f=multiSatFamilyIPvtgBrowserFixture();f.target.result.summary.series.find(s=>s.keyword==='WBHP'&&s.objectName==='PRODUCER').unit='PSIA';await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.target),summary(f.baseline)],runs:[f.target,f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 分区PVTG方案验收',exact:true});await expect(panel).toContainText('单位不一致');await expect(panel.getByLabel('ECLIPSE 分区PVTG井级响应',{exact:true})).toHaveCount(0)
+})
+test('ECLIPSE COMBINED FAMILY I PVTG 缺少任一完整区域源不开放组合编辑',async({page})=>{
+ const f=multiSatFamilyIPvtgBrowserFixture();delete f.inspection.multiWetGasPvtContext;delete f.inspection.multiSatRelpermContext;const state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');await expect(page.getByRole('region',{name:'ECLIPSE 多区湿气物性调整',exact:true})).toHaveCount(0);await expect(page.getByRole('region',{name:'ECLIPSE SWOF SGOF 相渗调整',exact:true})).toHaveCount(0);expect(state.createPayloads).toHaveLength(0)
+})
+
+for(const [label,fluid,choice,value] of [['viscosity',true,'油黏度','2'],['volume',true,'油体积系数 Bo','1.02'],['water-kr',false,'水相 Krw · SWOF','0.5'],['gas-kr',false,'气相 Krg · SGOF','0.5'],['oil-kr',false,'油相 Krow/Krog · 两表联动','0.5']])test(`ECLIPSE COMBINED FAMILY I PVTO ${label} 两图选区与完整原表提交`,async({page})=>{
+ const f=multiSatFamilyIPvtoBrowserFixture(label),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const sat=page.getByRole('region',{name:'ECLIPSE SWOF SGOF 相渗调整',exact:true}),pvt=page.getByRole('region',{name:'ECLIPSE 多区含溶解气油物性调整',exact:true});await expect(sat).toContainText('本面板按岩性SAT区');await expect(pvt).toContainText('本面板按流体PVT/EQL区');const panel=fluid?pvt:sat;await pvtSelect(page,panel,fluid?'PVTO流体区':'相渗SAT区',fluid?'PVT/EQL区 2 · 150 格':'SAT区 2 · 150 格');const input=panel.getByRole('spinbutton',{name:fluid?'分区PVTO物性乘数':'两表相渗乘数',exact:true});await pvtSelect(page,panel,fluid?'调整分区含溶解气油物性':'两表相渗调整项目',fluid?(label==='viscosity'?'油体积系数 Bo':'油黏度'):(label==='water-kr'?'气相 Krg · SGOF':'水相 Krw · SWOF'));await input.fill('2');await pvtSelect(page,panel,fluid?'调整分区含溶解气油物性':'两表相渗调整项目',choice);await expect(input).toHaveValue('');await input.fill(value);if(fluid){await expect(panel.getByLabel('ECLIPSE 分区PVTO分支与目标预览',{exact:true}).locator('tbody tr')).toHaveCount(12);await expect(panel.getByLabel('ECLIPSE 分区PVTO原气表',{exact:true}).locator('tbody tr')).toHaveCount(10)};if(!fluid)for(const [keyword,rows] of [['SWOF',14],['SGOF',15]])await expect(panel.getByLabel(`ECLIPSE ${keyword} 原表与目标`,{exact:true}).locator('tbody tr')).toHaveCount(rows);await panel.getByRole('button',{name:fluid?'创建分区含溶解气油物性方案并计算':'创建两表相渗方案并计算',exact:true}).click();await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload.parameters).toEqual(f.parameters);expect(state.unexpectedRequests).toEqual([])
+})
+for(const [label,fluid] of [['volume',true],['water-kr',false]])test(`ECLIPSE COMBINED FAMILY I PVTO ${label} 实际油气压力刷新恢复`,async({page})=>{
+ const f=multiSatFamilyIPvtoBrowserFixture(label),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.target),summary(f.baseline)],runs:[f.target,f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const check=async()=>{const panel=page.getByRole('region',{name:fluid?'ECLIPSE 分区PVTO方案验收':'ECLIPSE 两表相渗方案验收',exact:true});await expect(panel).toContainText(fluid?'PVT/EQL区 2':'SAT区 2');const table=panel.getByLabel(fluid?'ECLIPSE 分区PVTO井级响应':'ECLIPSE 两表相渗井级响应',{exact:true});for(const keyword of ['WOPR','WGIT','WBHP']){const curve=f.target.result.summary.series.find(s=>s.keyword===keyword&&(keyword==='WOPR'?s.objectName==='PRODUCER':s.objectName==='INJECTOR'));await expect(table).toContainText(String(curve.points.at(-1).value))}};await check();await page.reload();await activateModel(page,'ECLIPSE演示模型');await check();expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE COMBINED FAMILY I PVTO 五项批量跨类别重新选区',async({page})=>{
+ const f=multiSatFamilyIPvtoBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 批量方案',exact:true});for(const [index,label,value] of [[0,'分区含溶解气原油黏度乘数','2'],[1,'分区含溶解气原油体积系数 Bo 乘数','1.02'],[2,'分区 水相 Krw · SWOF 乘数','0.5'],[3,'分区 气相 Krg · SGOF 乘数','0.5'],[4,'分区 油相 Krow/Krog · 两表联动 乘数','0.5']]){await pvtSelect(page,panel,'批量物性项目',label);if(index===2){await panel.getByRole('textbox',{name:'批量方案名称',exact:true}).fill('还未选SAT区');await panel.getByRole('spinbutton',{name:'批量方案数值',exact:true}).fill(value);await panel.getByRole('button',{name:'加入方案清单',exact:true}).click();await expect(panel.getByRole('alert')).toContainText('SAT区')};await pvtSelect(page,panel,index<2?'批量PVT区':'批量SAT区',index<2?'PVT区 2 · 150 格':'SAT区 2 · 150 格');await panel.getByRole('textbox',{name:'批量方案名称',exact:true}).fill(label);await panel.getByRole('spinbutton',{name:'批量方案数值',exact:true}).fill(value);await panel.getByRole('button',{name:'加入方案清单',exact:true}).click()};await expect(panel.getByLabel('待计算方案清单',{exact:true}).locator('tbody tr')).toHaveCount(5);await expect(panel.getByRole('button',{name:'运行全部方案',exact:true})).toBeEnabled();expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE COMBINED FAMILY I PVTO 混合压力单位拒绝差值',async({page})=>{
+ const f=multiSatFamilyIPvtoBrowserFixture();f.target.result.summary.series.find(s=>s.keyword==='WBHP'&&s.objectName==='INJECTOR').unit='BARSA';await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.target),summary(f.baseline)],runs:[f.target,f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 分区PVTO方案验收',exact:true});await expect(panel).toContainText('单位不一致');await expect(panel.getByLabel('ECLIPSE 分区PVTO井级响应',{exact:true})).toHaveCount(0)
+})
+test('ECLIPSE COMBINED FAMILY I PVTO 缺少任一完整区域源不开放组合编辑',async({page})=>{
+ const f=multiSatFamilyIPvtoBrowserFixture();delete f.inspection.multiLiveOilPvtContext;delete f.inspection.multiSatRelpermContext;const state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');await expect(page.getByRole('region',{name:'ECLIPSE 多区含溶解气油物性调整',exact:true})).toHaveCount(0);await expect(page.getByRole('region',{name:'ECLIPSE SWOF SGOF 相渗调整',exact:true})).toHaveCount(0);expect(state.createPayloads).toHaveLength(0)
+})
+
+for(const [label,choice,value,unit] of [['pressure','参考压力','4000','psia'],['volume','水体积系数','1.0506','rb/stb'],['compressibility','水压缩性','0.00006','1/psi'],['viscosity','参考水黏度','0.8','cP'],['viscosibility','黏压系数','0.000001','1/psi']])test(`ECLIPSE STAR WATER THREE ${label} 选区原记录与绝对新值提交`,async({page})=>{
+ const f=waterStarsBrowserFixture('three',label),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 分区水物性调整',exact:true});await expect(panel.getByRole('button',{name:'创建分区水物性方案并计算',exact:true})).toBeDisabled();await pvtSelect(page,panel,'水物性PVT区','PVT区 2 · 7 格');const input=panel.getByRole('spinbutton',{name:'分区水物性新值',exact:true});await input.fill('0.8');await pvtSelect(page,panel,'水物性PVT区','PVT区 1 · 6 格');await expect(input).toHaveValue('');await pvtSelect(page,panel,'水物性PVT区','PVT区 2 · 7 格');await pvtSelect(page,panel,'分区水物性调整项目',choice);await expect(input).toHaveValue('');await expect(panel.getByLabel('分区水物性原记录',{exact:true}).locator('tbody tr')).toHaveCount(5);await expect(panel).toContainText(unit);await expect(panel.getByLabel('分区水物性原记录',{exact:true})).toContainText('官方默认，源记录1*');await expect(page.getByRole('region',{name:'ECLIPSE 水物性调整',exact:true})).toHaveCount(0);await input.fill(value);await panel.getByRole('button',{name:'创建分区水物性方案并计算',exact:true}).click();await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload.parameters).toEqual(f.parameters);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE STAR WATER THREE 黏度越界不创建运行',async({page})=>{
+ const f=waterStarsBrowserFixture('three'),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 分区水物性调整',exact:true});await pvtSelect(page,panel,'水物性PVT区','PVT区 2 · 7 格');await panel.getByRole('spinbutton',{name:'分区水物性新值',exact:true}).fill('0');await panel.getByRole('button',{name:'创建分区水物性方案并计算',exact:true}).click();await expect(panel.getByRole('alert')).toContainText('大于0');expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE STAR WATER THREE 原生水量油量井压刷新恢复',async({page})=>{
+ const f=waterStarsBrowserFixture('three'),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.target),summary(f.baseline)],runs:[f.target,f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const check=async()=>{const panel=page.getByRole('region',{name:'ECLIPSE 分区水物性方案验收',exact:true});await expect(panel).toContainText('PVT区 2');await expect(panel).toContainText('0.4 → 0.8 cP');const table=panel.getByLabel('ECLIPSE 分区水物性井级响应',{exact:true});for(const keyword of ['WWPR','WOPR','WBHP','WGIT']){const curve=f.target.result.summary.series.find(s=>s.keyword===keyword&&(keyword==='WWPR'||keyword==='WOPR'?s.objectName==='P1':s.objectName==='I1'));await expect(table).toContainText(String(curve.points.at(-1).value))}};await check();await page.reload();await activateModel(page,'ECLIPSE演示模型');await check();expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE STAR WATER THREE 五项绝对值加入同基线批量',async({page})=>{
+ const f=waterStarsBrowserFixture('three'),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 批量方案',exact:true});for(const [label,value] of [['参考压力','4000'],['水体积系数','1.0506'],['水压缩性','0.00006'],['参考水黏度','0.8'],['黏压系数','0.000001']]){await pvtSelect(page,panel,'批量物性项目','分区水物性 · '+label);await pvtSelect(page,panel,'批量PVT区','PVT区 2 · 7 格');await panel.getByRole('textbox',{name:'批量方案名称',exact:true}).fill(label);await panel.getByRole('spinbutton',{name:'批量方案数值',exact:true}).fill(value);await panel.getByRole('button',{name:'加入方案清单',exact:true}).click()};const table=panel.getByLabel('待计算方案清单',{exact:true});await expect(table.locator('tbody tr')).toHaveCount(5);await expect(table).toContainText('PVT区 2');await expect(table).not.toContainText('倍');await expect(panel.getByRole('button',{name:'运行全部方案',exact:true})).toBeEnabled();expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE STAR WATER THREE 混合单位拒绝井级差值',async({page})=>{
+ const f=waterStarsBrowserFixture('three');f.target.result.summary.series.find(s=>s.keyword==='WBHP'&&s.objectName==='I1').unit='BARSA';await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.target),summary(f.baseline)],runs:[f.target,f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 分区水物性方案验收',exact:true});await expect(panel).toContainText('单位不一致');await expect(panel.getByLabel('ECLIPSE 分区水物性井级响应',{exact:true})).toHaveCount(0)
+})
+test('ECLIPSE STAR WATER THREE 其它星号及缺项不开放分区水编辑',async({page})=>{
+ const f=waterStarsBrowserFixture('three');f.inspection.multiWaterPvtContext.regions[1].recordValues[4]='2*';const state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');await expect(page.getByRole('region',{name:'ECLIPSE 分区水物性调整',exact:true})).toHaveCount(0);expect(state.createPayloads).toHaveLength(0)
+})
+
+for(const [label,choice,value,unit] of [['pressure','参考压力','4000','barsa'],['volume','水体积系数','1.02','rm3/sm3'],['compressibility','水压缩性','0.00000606','1/bar'],['viscosity','参考水黏度','1','cP'],['viscosibility','黏压系数','0.000001','1/bar']])test(`ECLIPSE STAR WATER PURE ${label} 选区原记录与绝对新值提交`,async({page})=>{
+ const f=waterStarsBrowserFixture('pure',label),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 分区水物性调整',exact:true});await expect(panel.getByRole('button',{name:'创建分区水物性方案并计算',exact:true})).toBeDisabled();await pvtSelect(page,panel,'水物性PVT区','PVT区 2 · 120 格');const input=panel.getByRole('spinbutton',{name:'分区水物性新值',exact:true});await input.fill('1');await pvtSelect(page,panel,'水物性PVT区','PVT区 1 · 105 格');await expect(input).toHaveValue('');await pvtSelect(page,panel,'水物性PVT区','PVT区 2 · 120 格');await pvtSelect(page,panel,'分区水物性调整项目',choice);await expect(input).toHaveValue('');await expect(panel.getByLabel('分区水物性原记录',{exact:true}).locator('tbody tr')).toHaveCount(5);await expect(panel).toContainText(unit);await expect(panel.getByLabel('分区水物性原记录',{exact:true})).toContainText('官方默认，源记录1*');await expect(page.getByRole('region',{name:'ECLIPSE 水物性调整',exact:true})).toHaveCount(0);await input.fill(value);await panel.getByRole('button',{name:'创建分区水物性方案并计算',exact:true}).click();await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload.parameters).toEqual(f.parameters);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE STAR WATER PURE 黏度越界不创建运行',async({page})=>{
+ const f=waterStarsBrowserFixture('pure'),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 分区水物性调整',exact:true});await pvtSelect(page,panel,'水物性PVT区','PVT区 2 · 120 格');await panel.getByRole('spinbutton',{name:'分区水物性新值',exact:true}).fill('0');await panel.getByRole('button',{name:'创建分区水物性方案并计算',exact:true}).click();await expect(panel.getByRole('alert')).toContainText('大于0');expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE STAR WATER PURE 原生控水量与井压刷新恢复',async({page})=>{
+ const f=waterStarsBrowserFixture('pure'),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.target),summary(f.baseline)],runs:[f.target,f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const check=async()=>{const panel=page.getByRole('region',{name:'ECLIPSE 分区水物性方案验收',exact:true});await expect(panel).toContainText('PVT区 2');await expect(panel).toContainText('0.5 → 1 cP');const table=panel.getByLabel('ECLIPSE 分区水物性井级响应',{exact:true});for(const keyword of ['WWPR','WWPT','WBHP']){const curve=f.target.result.summary.series.find(s=>s.keyword===keyword&&(keyword==='WWPR'||keyword==='WWPT'?s.objectName==='P':s.objectName==='I'));await expect(table).toContainText(String(curve.points.at(-1).value))}};await check();await page.reload();await activateModel(page,'ECLIPSE演示模型');await check();expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE STAR WATER PURE 五项绝对值加入同基线批量',async({page})=>{
+ const f=waterStarsBrowserFixture('pure'),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 批量方案',exact:true});for(const [label,value] of [['参考压力','4000'],['水体积系数','1.02'],['水压缩性','0.00000606'],['参考水黏度','1'],['黏压系数','0.000001']]){await pvtSelect(page,panel,'批量物性项目','分区水物性 · '+label);await pvtSelect(page,panel,'批量PVT区','PVT区 2 · 120 格');await panel.getByRole('textbox',{name:'批量方案名称',exact:true}).fill(label);await panel.getByRole('spinbutton',{name:'批量方案数值',exact:true}).fill(value);await panel.getByRole('button',{name:'加入方案清单',exact:true}).click()};const table=panel.getByLabel('待计算方案清单',{exact:true});await expect(table.locator('tbody tr')).toHaveCount(5);await expect(table).toContainText('PVT区 2');await expect(table).not.toContainText('倍');await expect(panel.getByRole('button',{name:'运行全部方案',exact:true})).toBeEnabled();expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE STAR WATER PURE 混合单位拒绝井级差值',async({page})=>{
+ const f=waterStarsBrowserFixture('pure');f.target.result.summary.series.find(s=>s.keyword==='WBHP'&&s.objectName==='I').unit='PSIA';await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.target),summary(f.baseline)],runs:[f.target,f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'ECLIPSE 分区水物性方案验收',exact:true});await expect(panel).toContainText('单位不一致');await expect(panel.getByLabel('ECLIPSE 分区水物性井级响应',{exact:true})).toHaveCount(0)
+})
+test('ECLIPSE STAR WATER PURE 其它星号及缺项不开放分区水编辑',async({page})=>{
+ const f=waterStarsBrowserFixture('pure');f.inspection.multiWaterPvtContext.regions[1].recordValues[4]='2*';const state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]});await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');await expect(page.getByRole('region',{name:'ECLIPSE 分区水物性调整',exact:true})).toHaveCount(0);expect(state.createPayloads).toHaveLength(0)
+})
+
+
+import { includeProductionBrowserFixture } from '../fixtures/eclipseIncludeProduction.js'
+
+test('ECLIPSE INCLUDE ORAT 子文件来源与换井后记录绑定提交', async ({page}) => {
+  const f=includeProductionBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]})
+  await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型')
+  const panel=page.getByRole('region',{name:'ECLIPSE WCONPROD 预测初始段方案'})
+  await panel.getByText('创建开井产油目标方案（可下载工程）',{exact:true}).click()
+  await expect(panel).toContainText(`来源：${f.parameters.sourceFile}:${f.parameters.lineNumber}`)
+  await expect(panel).toContainText('原产油目标：20000 STB/day')
+  const select=panel.getByRole('combobox',{name:'ECLIPSE WCONPROD 方案井'})
+  await select.focus();await select.press('ArrowDown');await page.getByRole('option',{name:'PRODUCR2',exact:true}).click()
+  const other=f.inspection.packageProductionTargetContext.targets.find(t=>t.well==='PRODUCR2')
+  await expect(panel).toContainText(`来源：${other.sourceFile}:${other.lineNumber}`)
+  await select.focus();await select.press('ArrowDown');await page.getByRole('option',{name:'PRODUCR1',exact:true}).click()
+  await panel.getByRole('spinbutton',{name:'ECLIPSE WCONPROD ORAT 目标值'}).fill('10000')
+  await page.getByRole('button',{name:'运行',exact:true}).click()
+  await expect.poll(()=>state.createPayloads.length).toBe(1)
+  expect(state.createPayloads[0].payload.parameters).toEqual(f.parameters)
+  expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE INCLUDE ORAT 原目标不改变时不创建运行', async ({page}) => {
+  const f=includeProductionBrowserFixture(),state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]})
+  await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型')
+  const panel=page.getByRole('region',{name:'ECLIPSE WCONPROD 预测初始段方案'})
+  await panel.getByText('创建开井产油目标方案（可下载工程）',{exact:true}).click()
+  await panel.getByRole('spinbutton',{name:'ECLIPSE WCONPROD ORAT 目标值'}).fill('20000')
+  await page.getByRole('button',{name:'运行',exact:true}).click()
+  await expect(page.getByText('请选择有效初始开井记录、成功基线和不同于原值的正数产油目标',{exact:true})).toBeVisible()
+  expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+for(const fault of ['hash','line','duplicate','unit','missing-context'])test(`ECLIPSE INCLUDE ORAT ${fault} 不开放初始目标编辑`,async({page})=>{
+  const f=includeProductionBrowserFixture()
+  if(fault==='hash')f.inspection.packageProductionTargetContext.targets[0].sourceSha256='0'.repeat(64)
+  if(fault==='line')f.inspection.packageProductionTargetContext.targets[0].lineNumber++
+  if(fault==='duplicate')f.inspection.packageProductionTargetContext.targets.push(structuredClone(f.inspection.packageProductionTargetContext.targets[0]))
+  if(fault==='unit')f.inspection.unitSystem='METRIC'
+  if(fault==='missing-context')delete f.inspection.packageProductionTargetContext
+  const state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline]})
+  await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型')
+  await expect(page.getByText('创建开井产油目标方案（可下载工程）',{exact:true})).toHaveCount(0)
+  expect(state.createPayloads).toHaveLength(0);expect(state.unexpectedRequests).toEqual([])
+})
+for(const wrongUnit of [false,true])test(`ECLIPSE INCLUDE ORAT ${wrongUnit?'混合单位拒绝差值':'实际原生产油差值与刷新恢复'}`,async({page})=>{
+  const f=includeProductionBrowserFixture()
+  if(wrongUnit)for(const s of f.target.result.summary.series)if(s.keyword==='WOPR'&&s.objectName==='PRODUCR1')s.unit='SM3/DAY'
+  const state=await installMockBackend(page,{eclipseInspection:f.inspection,eclipseHistory:[summary(f.target),summary(f.baseline)],runs:[f.target,f.baseline]})
+  await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型')
+  const panel=page.getByRole('region',{name:'ECLIPSE Schedule 方案验收'})
+  const check=async()=>{await expect(panel).toContainText('开井产油目标方案');await expect(panel).toContainText('20000 STB/day');await expect(panel).toContainText('10000 STB/day');await expect(panel).toContainText(wrongUnit?'缺少可对齐目标井流量':'检测到目标井产油率差异')}
+  await check();await page.reload();await activateModel(page,'ECLIPSE演示模型');await check()
+  expect(state.unexpectedRequests).toEqual([])
+})
+
+
+test('ECLIPSE 二进制历史缺少报告目录不开放手填或提交', async ({ page }) => {
+  const f = binaryRestartForecastFixture()
+  f.history.artifacts = f.history.artifacts.filter(a => a.name !== 'eclipse-restart-catalog.json')
+  const state = await installMockBackend(page, { eclipseInspection: f.inspection, eclipseHistory: [summary(f.history)], runs: [f.history] })
+  await openWorkspace(page); await activateModel(page, 'ECLIPSE演示模型')
+  const editor = page.getByRole('region', { name: 'ECLIPSE 历史重启预测方案', exact: true })
+  await editor.getByText('创建历史重启预测方案', { exact: true }).click()
+  await expect(editor).toContainText('二进制重启状态缺少已核准报告目录')
+  await expect(editor.getByRole('spinbutton')).toHaveCount(0)
+  await page.getByRole('button', { name: '运行', exact: true }).click()
+  await expect(page.getByTestId('run-feedback')).toContainText('请等待历史目录核对完成')
+  expect(state.createPayloads).toHaveLength(0)
+  expect(state.unexpectedRequests).toEqual([])
+})
+
+
+test('ECLIPSE INCLUDE 阶段方案显示物理来源并提交两井三日期', async ({ page }) => {
+  const f = includeControlPlanFixture()
+  const state = await installMockBackend(page, { eclipseInspection: f.inspection, eclipseHistory: [summary(f.baseline)], runs: [f.baseline] })
+  await openWorkspace(page); await activateModel(page, 'ECLIPSE演示模型')
+  await page.getByRole('tab', { name: 'DATA 检查' }).click()
+  await expect(page.getByRole('heading', { name: '已有分阶段产油目标', exact: true })).toBeVisible()
+  await page.getByRole('tab', { name: 'ECLIPSE 结果' }).click()
+  await page.getByText('制定多井分阶段产油目标', { exact: true }).click()
+  const panel = page.getByRole('region', { name: 'ECLIPSE 分阶段产油目标方案', exact: true })
+  for (const e of f.parameters.edits) {
+    await expect(panel).toContainText(e.sourceFile)
+    await panel.getByRole('spinbutton', { name: `ECLIPSE 阶段目标 ${e.well} ${e.date}`, exact: true }).fill(String(e.targetOilRate))
+  }
+  await page.getByRole('button', { name: '运行', exact: true }).click()
+  await expect.poll(() => state.createPayloads.length).toBe(1)
+  expect(state.createPayloads[0].payload.parameters).toEqual(f.parameters)
+  expect(state.unexpectedRequests).toEqual([])
+})
+for (const label of ['target', 'limited']) test(`ECLIPSE INCLUDE 阶段 ${label} 原生响应和刷新恢复`, async ({ page }) => {
+  const f = includeControlPlanFixture(), run = f[label]
+  const state = await installMockBackend(page, { eclipseInspection: f.inspection, eclipseHistory: [summary(run), summary(f.baseline)], runs: [run, f.baseline] })
+  await openWorkspace(page); await activateModel(page, 'ECLIPSE演示模型')
+  const check = async () => {
+    const panel = page.getByRole('region', { name: 'ECLIPSE Schedule 方案验收', exact: true })
+    await expect(panel).toContainText('多井分阶段产油目标验收')
+    await expect(panel).toContainText(label === 'target' ? '分阶段目标达标，已核对后续覆盖与井压力' : '分阶段目标未达标：井已触及原 BHP 下限')
+    const edits = panel.getByLabel('ECLIPSE 阶段修改逐项核对', { exact: true })
+    await expect(edits).toContainText('PRODUCR1'); await expect(edits).toContainText('PRODUCR2')
+    await expect(panel.getByLabel('ECLIPSE 阶段目标与实际井响应', { exact: true })).toContainText('2500')
+  }
+  await check(); await page.reload(); await activateModel(page, 'ECLIPSE演示模型'); await check()
+  expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE INCLUDE 损坏阶段来源不开放计划编辑', async ({ page }) => {
+  const f = includeControlPlanFixture(); f.inspection.packageProductionControlPlanContext.records[4].sourceSha256 = '0'.repeat(64)
+  const state = await installMockBackend(page, { eclipseInspection: f.inspection, eclipseHistory: [summary(f.baseline)], runs: [f.baseline] })
+  await openWorkspace(page); await activateModel(page, 'ECLIPSE演示模型')
+  await expect(page.getByRole('region', { name: 'ECLIPSE 分阶段产油目标方案', exact: true })).toHaveCount(0)
+  expect(state.createPayloads).toHaveLength(0)
+})
+test('ECLIPSE INCLUDE 未修改阶段不能伪造新方案运行', async ({ page }) => {
+  const f = includeControlPlanFixture()
+  const state = await installMockBackend(page, { eclipseInspection: f.inspection, eclipseHistory: [summary(f.baseline)], runs: [f.baseline] })
+  await openWorkspace(page); await activateModel(page, 'ECLIPSE演示模型')
+  await page.getByText('制定多井分阶段产油目标', { exact: true }).click()
+  await page.getByRole('button', { name: '运行', exact: true }).click()
+  await expect(page.getByTestId('run-feedback')).toHaveText('请选择同版本成功基线，并修改 1–24 条已有产油目标；新值必须为不同于原值的正数')
+  expect(state.createPayloads).toHaveLength(0)
+})
+test('ECLIPSE INCLUDE 切换模型清除尚未提交的阶段目标', async ({ page }) => {
+  const f = includeControlPlanFixture()
+  const state = await installMockBackend(page, { eclipseInspection: f.inspection, eclipseHistory: [summary(f.baseline)], runs: [f.baseline] })
+  await openWorkspace(page); await activateModel(page, 'ECLIPSE演示模型')
+  await page.getByText('制定多井分阶段产油目标', { exact: true }).click()
+  const label = `ECLIPSE 阶段目标 ${f.parameters.edits[0].well} ${f.parameters.edits[0].date}`
+  await page.getByRole('spinbutton', { name: label, exact: true }).fill('250')
+  await activateModel(page, '井筒演示模型'); await activateModel(page, 'ECLIPSE演示模型')
+  await page.getByText('制定多井分阶段产油目标', { exact: true }).click()
+  await expect.poll(async () => Number(await page.getByRole('spinbutton', { name: label, exact: true }).inputValue())).toBe(500)
+  expect(state.createPayloads).toHaveLength(0)
+})
+
+
+test('ECLIPSE INCLUDE 原生部分成功显示原问题而不标成完整成功', async ({ page }) => {
+  const f = includeControlPlanFixture()
+  const state = await installMockBackend(page, { eclipseInspection: f.inspection, eclipseHistory: [summary(f.partial), summary(f.baseline)], runs: [f.partial, f.baseline] })
+  await openWorkspace(page); await activateModel(page, 'ECLIPSE演示模型')
+  await expect(page.getByText('部分成功', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('本次 ECLIPSE 已产出可读取结果，但 ECLEND 记录 1 个 Problems；请先查看下方诊断后再用于工程决策。', { exact: true })).toBeVisible()
+  const panel = page.getByRole('region', { name: 'ECLIPSE Schedule 方案验收', exact: true })
+  await expect(panel).not.toContainText('分阶段目标达标，已核对后续覆盖与井压力')
+  await page.locator('details.diagnostic-details > summary').click()
+  await expect(page.getByText(/NON-LINEAR\s+EQUATION\s+CONVERGENCE\s+FAILURE/).first()).toBeVisible()
+  expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE INCLUDE 从结果下载完整六文件工程字节保持一致', async ({ page }) => {
+  const f = includeControlPlanFixture()
+  const state = await installMockBackend(page, { eclipseInspection: f.inspection, eclipseHistory: [summary(f.target), summary(f.baseline)], runs: [f.target, f.baseline], artifactPayloads: f.artifactPayloads })
+  await openWorkspace(page); await activateModel(page, 'ECLIPSE演示模型')
+  const audit = page.locator('details.eclipse-audit')
+  await audit.locator('summary').click()
+  const downloading = page.waitForEvent('download')
+  await audit.locator('.el-table__row').filter({ hasText: 'eclipse-schedule-applied-package.zip' }).getByRole('button', { name: '下载', exact: true }).click()
+  const download = await downloading
+  expect(download.suggestedFilename()).toBe('eclipse-schedule-applied-package.zip')
+  const chunks = [], stream = await download.createReadStream()
+  for await (const chunk of stream) chunks.push(chunk)
+  expect(Buffer.concat(chunks)).toEqual(f.packageBytes)
+  expect(state.downloadRequests).toEqual([{ runId: 9772, artifactId: 97721 }])
+  expect(state.unexpectedRequests).toEqual([])
+})
+
+test('ECLIPSE WATER PLAN 阶段方案显示物理来源并提交两井三日期', async ({ page }) => {
+  const f = waterInjectionPlanFixture()
+  const state = await installMockBackend(page, { eclipseInspection: f.inspection, eclipseHistory: [summary(f.baseline)], runs: [f.baseline] })
+  await openWorkspace(page); await activateModel(page, 'ECLIPSE演示模型')
+  await page.getByRole('tab', { name: 'DATA 检查' }).click()
+  await expect(page.getByRole('heading', { name: '已有分阶段注水目标', exact: true })).toBeVisible()
+  await page.getByRole('tab', { name: 'ECLIPSE 结果' }).click()
+  await page.getByText('制定多井分阶段注水目标', { exact: true }).click()
+  const panel = page.getByRole('region', { name: 'ECLIPSE 分阶段注水目标方案', exact: true })
+  for (const e of f.parameters.edits) {
+    await expect(panel).toContainText(e.sourceFile)
+    await panel.getByRole('spinbutton', { name: `ECLIPSE 调注阶段目标 ${e.well} ${e.date}`, exact: true }).fill(String(e.targetInjectionRate))
+  }
+  await page.getByRole('button', { name: '运行', exact: true }).click()
+  await expect.poll(() => state.createPayloads.length).toBe(1)
+  expect(state.createPayloads[0].payload.parameters).toEqual(f.parameters)
+  expect(state.unexpectedRequests).toEqual([])
+})
+for (const label of ['target', 'limited']) test(`ECLIPSE WATER PLAN 阶段 ${label} 原生响应和刷新恢复`, async ({ page }) => {
+  const f = waterInjectionPlanFixture(), run = f[label]
+  const state = await installMockBackend(page, { eclipseInspection: f.inspection, eclipseHistory: [summary(run), summary(f.baseline)], runs: [run, f.baseline] })
+  await openWorkspace(page); await activateModel(page, 'ECLIPSE演示模型')
+  const check = async () => {
+    const panel = page.getByRole('region', { name: 'ECLIPSE Schedule 方案验收', exact: true })
+    await expect(panel).toContainText('多井分阶段注水目标验收')
+    await expect(panel).toContainText(label === 'target' ? '分阶段注水目标达标，已核对后续覆盖与井压力' : '分阶段注水目标未达标：井已触及原 BHP 上限')
+    const edits = panel.getByLabel('ECLIPSE 调注阶段修改逐项核对', { exact: true })
+    await expect(edits).toContainText('INJECTR5'); await expect(edits).toContainText('INJECTR6')
+    await expect(panel.getByLabel('ECLIPSE 调注阶段目标与实际井响应', { exact: true })).toContainText('6000')
+  }
+  await check(); await page.reload(); await activateModel(page, 'ECLIPSE演示模型'); await check()
+  expect(state.unexpectedRequests).toEqual([])
+})
+test('ECLIPSE WATER PLAN 损坏阶段来源不开放计划编辑', async ({ page }) => {
+  const f = waterInjectionPlanFixture(); f.inspection.waterInjectionControlPlanContext.records[2].sourceSha256 = '0'.repeat(64)
+  const state = await installMockBackend(page, { eclipseInspection: f.inspection, eclipseHistory: [summary(f.baseline)], runs: [f.baseline] })
+  await openWorkspace(page); await activateModel(page, 'ECLIPSE演示模型')
+  await expect(page.getByRole('region', { name: 'ECLIPSE 分阶段注水目标方案', exact: true })).toHaveCount(0)
+  expect(state.createPayloads).toHaveLength(0)
+})
+test('ECLIPSE WATER PLAN 未修改阶段不能伪造新方案运行', async ({ page }) => {
+  const f = waterInjectionPlanFixture()
+  const state = await installMockBackend(page, { eclipseInspection: f.inspection, eclipseHistory: [summary(f.baseline)], runs: [f.baseline] })
+  await openWorkspace(page); await activateModel(page, 'ECLIPSE演示模型')
+  await page.getByText('制定多井分阶段注水目标', { exact: true }).click()
+  await page.getByRole('button', { name: '运行', exact: true }).click()
+  await expect(page.getByTestId('run-feedback')).toHaveText('请选择同版本成功基线，并修改 1–24 条已有注水目标；新值必须为不同于原值的正数')
+  expect(state.createPayloads).toHaveLength(0)
+})
+test('ECLIPSE WATER PLAN 切换模型清除尚未提交的阶段目标', async ({ page }) => {
+  const f = waterInjectionPlanFixture()
+  const state = await installMockBackend(page, { eclipseInspection: f.inspection, eclipseHistory: [summary(f.baseline)], runs: [f.baseline] })
+  await openWorkspace(page); await activateModel(page, 'ECLIPSE演示模型')
+  await page.getByText('制定多井分阶段注水目标', { exact: true }).click()
+  const label = `ECLIPSE 调注阶段目标 ${f.parameters.edits[0].well} ${f.parameters.edits[0].date}`
+  await page.getByRole('spinbutton', { name: label, exact: true }).fill('0.5')
+  await activateModel(page, '井筒演示模型'); await activateModel(page, 'ECLIPSE演示模型')
+  await page.getByText('制定多井分阶段注水目标', { exact: true }).click()
+  await expect.poll(async () => Number(await page.getByRole('spinbutton', { name: label, exact: true }).inputValue())).toBe(1)
+  expect(state.createPayloads).toHaveLength(0)
+})
+
+
+
+test('ECLIPSE WATER PLAN 从结果下载完整六文件工程字节保持一致', async ({ page }) => {
+  const f = waterInjectionPlanFixture()
+  const state = await installMockBackend(page, { eclipseInspection: f.inspection, eclipseHistory: [summary(f.target), summary(f.baseline)], runs: [f.target, f.baseline], artifactPayloads: f.artifactPayloads })
+  await openWorkspace(page); await activateModel(page, 'ECLIPSE演示模型')
+  const audit = page.locator('details.eclipse-audit')
+  await audit.locator('summary').click()
+  const downloading = page.waitForEvent('download')
+  await audit.locator('.el-table__row').filter({ hasText: 'eclipse-schedule-applied-package.zip' }).getByRole('button', { name: '下载', exact: true }).click()
+  const download = await downloading
+  expect(download.suggestedFilename()).toBe('eclipse-schedule-applied-package.zip')
+  const chunks = [], stream = await download.createReadStream()
+  for await (const chunk of stream) chunks.push(chunk)
+  expect(Buffer.concat(chunks)).toEqual(f.packageBytes)
+  expect(state.downloadRequests).toEqual([{ runId: 9882, artifactId: 98821 }])
+  expect(state.unexpectedRequests).toEqual([])
+})
+
+async function openCompositionalTarget(page, name = 'baseline') {
+  const f = compositionalProductionFixture(), caps = availableCapabilities(); caps.eclipse300 = { ...caps.eclipse100 };
+  const chosen = f[name], history = name === 'baseline' ? [summary(f.baseline)] : [summary(chosen), summary(f.baseline)];
+  const state = await installMockBackend(page, { eclipseModelKind: 'eclipse_300', eclipseInspection: f.inspection, eclipseHistory: history,
+    runs: [f.baseline, f.target, f.high], capabilities: caps });
+  await openWorkspace(page); await activateModel(page, 'ECLIPSE演示模型');
+  return { f, state };
+}
+test('E300 GRAT 官方原始井控编辑提交专用参数并保持原压力下限', async ({ page }) => {
+  const { f, state } = await openCompositionalTarget(page);
+  const panel = page.getByRole('region', { name: 'E300产气目标编辑', exact: true });
+  await panel.locator('.el-select').click(); await page.getByRole('option', { name: 'P', exact: true }).click();
+  await expect(panel).toContainText('6200 Mscf/day'); await expect(panel).toContainText('BHP下限 500 psia'); await expect(panel).toContainText('SPE3_GASCOND.DATA:430');
+  await panel.getByRole('spinbutton').fill('4500'); await panel.getByRole('button', { name: '修改产气目标并真实重算' }).click();
+  await expect.poll(() => state.createPayloads.length).toBe(1);
+  expect(state.createPayloads[0].payload).toEqual({ study: null, runType: 'eclipse', parameters: f.parameters });
+  expect(state.unexpectedRequests).toEqual([]);
+});
+test('E300 GRAT 原值不变时阻止创建新运行', async ({ page }) => {
+  const { state } = await openCompositionalTarget(page), panel = page.getByRole('region', { name: 'E300产气目标编辑', exact: true });
+  await panel.locator('.el-select').click(); await page.getByRole('option', { name: 'P', exact: true }).click();
+  await panel.getByRole('spinbutton').fill('6200'); await panel.getByRole('button', { name: '修改产气目标并真实重算' }).click();
+  await expect(panel).toContainText('新产气目标必须为不同于原值的正数'); expect(state.createPayloads).toHaveLength(0);
+});
+for (const [name, message] of [['target', '产气目标已达到，实际井压与基线响应已核对'], ['high', '部分时刻触及原BHP下限，实际产气低于目标']]) {
+ test(`E300 GRAT ${name}完整原生曲线及压力受限结果刷新保持`, async ({ page }) => {
+  const { state } = await openCompositionalTarget(page, name), panel = page.getByRole('region', { name: 'E300产气目标方案验收', exact: true });
+  await expect(panel).toContainText(message); await expect(panel).toContainText(name === 'target' ? '全部125个实际时刻' : '全部168个实际时刻');
+  await expect(panel).toContainText(name === 'target' ? '压力受限0点' : '压力受限15点');
+  await expect(page.getByRole('region', { name: 'E300产气目标编辑', exact: true })).toHaveCount(0);
+  await page.reload(); await activateModel(page, 'ECLIPSE演示模型'); await expect(panel).toContainText(message);
+  expect(state.unexpectedRequests).toEqual([]);
+ });
+}
+test('E300 GRAT 外版本基线不能形成方案已验证结论', async ({ page }) => {
+  const f = compositionalProductionFixture(), caps = availableCapabilities(); caps.eclipse300 = { ...caps.eclipse100 }; f.baseline.modelVersionId = 999;
+  await installMockBackend(page, { eclipseModelKind: 'eclipse_300', eclipseInspection: f.inspection,
+    eclipseHistory: [summary(f.target)], runs: [f.target, f.baseline], capabilities: caps });
+  await openWorkspace(page); await activateModel(page, 'ECLIPSE演示模型');
+  const panel = page.getByRole('region', { name: 'E300产气目标方案验收', exact: true });
+  await expect(panel).toContainText('基线来源或完整结果核对未通过'); await expect(panel.getByLabel('E300产气目标实际响应', { exact: true })).toHaveCount(0);
+});
+test('E300 GRAT 切换模型不展示迟到的基线结果', async ({ page }) => {
+  const f = compositionalProductionFixture(), caps = availableCapabilities(); caps.eclipse300 = { ...caps.eclipse100 };
+  const state = await installMockBackend(page, { eclipseModelKind: 'eclipse_300', eclipseInspection: f.inspection,
+    eclipseHistory: [summary(f.target)], runs: [f.target, f.baseline], capabilities: caps, heldRunId: 9891 });
+  state.heldRunId = 9891;
+  await openWorkspace(page); await activateModel(page, 'ECLIPSE演示模型'); await expect.poll(() => typeof state.releaseHeldRun).toBe('function');
+  await activateModel(page, '井筒演示模型'); state.releaseHeldRun();
+  await expect(page.getByRole('region', { name: 'E300产气目标方案验收', exact: true })).toHaveCount(0);
+});
+
+async function openThermalInjection(page, kind = 'official', name = 'baseline') {
+ const f=thermalInjectionFixture(kind),caps=availableCapabilities();caps.eclipse300={...caps.eclipse100};
+ const state=await installMockBackend(page,{eclipseModelKind:'eclipse_300',eclipseInspection:f.inspection,
+  eclipseHistory:name==='baseline'?[summary(f.baseline)]:[summary(f[name]),summary(f.baseline)],runs:[f.baseline,f.quality,f.temperature],capabilities:caps});
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');return {f,state};
+}
+for(const [field,label,value] of [['quality','蒸汽干度','0.5'],['temperature','注入温度','400']]){
+ test(`E300 THERMAL INJECTION ${field}官方模型提交对应单字段并保留原限压注入量`,async({page})=>{
+  const {f,state}=await openThermalInjection(page),panel=page.getByRole('region',{name:'E300热采注汽参数编辑',exact:true});
+  await panel.locator('.el-select').filter({has:page.getByRole('combobox',{name:'E300热采注入井'})}).click();await page.getByRole('option',{name:'I',exact:true}).click();
+  if(field==='temperature'){await panel.locator('.el-select').filter({has:page.getByRole('combobox',{name:'E300热采修改项目'})}).click();await page.getByRole('option',{name:label,exact:true}).click();}
+  await expect(panel).toContainText('37.5 STB/day');await expect(panel).toContainText('BHP上限 1000 psia');await expect(panel).toContainText('THERM3.DATA:433');
+  await panel.getByRole('spinbutton').fill(value);await panel.getByRole('button',{name:'修改注汽参数并真实重算'}).click();
+  await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload).toEqual({study:null,runType:'eclipse',parameters:f[field+'Parameters']});expect(state.unexpectedRequests).toEqual([]);
+ });
+}
+test('E300 THERMAL INJECTION 不变或越界的干度不能创建运行',async({page})=>{
+ const {state}=await openThermalInjection(page),panel=page.getByRole('region',{name:'E300热采注汽参数编辑',exact:true});
+ await panel.locator('.el-select').filter({has:page.getByRole('combobox',{name:'E300热采注入井'})}).click();await page.getByRole('option',{name:'I',exact:true}).click();
+ for(const value of ['0.7','1.01']){await panel.getByRole('spinbutton').fill(value);await panel.getByRole('button',{name:'修改注汽参数并真实重算'}).click();await expect(panel).toContainText('新值须不同于原值');}
+ expect(state.createPayloads).toHaveLength(0);
+});
+test('E300 THERMAL INJECTION 切换温度项目必须清空旧干度数值',async({page})=>{
+ const {state}=await openThermalInjection(page),panel=page.getByRole('region',{name:'E300热采注汽参数编辑',exact:true});
+ await panel.locator('.el-select').filter({has:page.getByRole('combobox',{name:'E300热采注入井'})}).click();await page.getByRole('option',{name:'I',exact:true}).click();
+ await panel.getByRole('spinbutton').fill('0.5');await panel.locator('.el-select').filter({has:page.getByRole('combobox',{name:'E300热采修改项目'})}).click();await page.getByRole('option',{name:'注入温度',exact:true}).click();
+ await expect(panel.getByRole('spinbutton')).toHaveValue('');await expect(panel.getByRole('button',{name:'修改注汽参数并真实重算'})).toBeDisabled();expect(state.createPayloads).toHaveLength(0);
+});
+for(const kind of ['official','output'])for(const name of ['quality','temperature']){
+ test(`E300 THERMAL INJECTION ${kind} ${name}完整原生响应与刷新恢复`,async({page})=>{
+  const {state}=await openThermalInjection(page,kind,name),panel=page.getByRole('region',{name:'E300热采注汽方案验收',exact:true});
+  await expect(panel).toContainText('注汽输入已修改，实际井压与热损失响应已核对');await expect(panel).toContainText('输入温度用于定义焓，不等于实际井温');
+  await expect(panel.getByLabel('E300注汽方案末次实际指标',{exact:true})).toContainText('全场热损失率');
+  if(kind==='official')await expect(panel).toContainText('原工程未请求注入井WTEMP');else await expect(panel.getByLabel('E300注汽方案末次实际指标',{exact:true})).toContainText('注入井实际井温');
+  await expect(page.getByRole('region',{name:'E300热采注汽参数编辑',exact:true})).toHaveCount(0);
+  await page.reload();await activateModel(page,'ECLIPSE演示模型');await expect(panel).toContainText('实际井压与热损失响应已核对');expect(state.unexpectedRequests).toEqual([]);
+ });
+}
+test('E300 THERMAL INJECTION 外版本基线不产生已核准结论',async({page})=>{
+ const f=thermalInjectionFixture(),caps=availableCapabilities();caps.eclipse300={...caps.eclipse100};f.baseline.modelVersionId=999;
+ await installMockBackend(page,{eclipseModelKind:'eclipse_300',eclipseInspection:f.inspection,eclipseHistory:[summary(f.quality)],runs:[f.quality,f.baseline],capabilities:caps});
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'E300热采注汽方案验收',exact:true});
+ await expect(panel).toContainText('热采基线来源或完整结果核对未通过');await expect(panel.getByLabel('E300注汽方案末次实际指标',{exact:true})).toHaveCount(0);
+});
+test('E300 THERMAL INJECTION 切换模型不展示迟到的热采基线',async({page})=>{
+ const f=thermalInjectionFixture(),caps=availableCapabilities();caps.eclipse300={...caps.eclipse100};
+ const state=await installMockBackend(page,{eclipseModelKind:'eclipse_300',eclipseInspection:f.inspection,eclipseHistory:[summary(f.quality)],runs:[f.quality,f.baseline],capabilities:caps});state.heldRunId=f.baseline.id;
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');await expect.poll(()=>typeof state.releaseHeldRun).toBe('function');
+ await activateModel(page,'井筒演示模型');state.releaseHeldRun();await expect(page.getByRole('region',{name:'E300热采注汽方案验收',exact:true})).toHaveCount(0);
+});
+
+async function openThermalControl(page, kind = 'official', name = 'baseline', mutate = () => {}) {
+ const f=thermalControlFixture(kind),caps=availableCapabilities();caps.eclipse300={...caps.eclipse100};mutate(f);
+ const state=await installMockBackend(page,{eclipseModelKind:'eclipse_300',eclipseInspection:f.inspection,
+  eclipseHistory:name==='baseline'?[summary(f.baseline)]:[summary(f[name]),summary(f.baseline)],runs:[f.baseline,f.rate,f.pressure],capabilities:caps});
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');return {f,state};
+}
+for(const [name,label,value] of [['rate','地面注入目标','25'],['pressure','注入BHP上限','700']]){
+ test(`E300 THERMAL CONTROL ${name}选择WCONINJE参数提交独立版本并清空旧值`,async({page})=>{
+  const {f,state}=await openThermalControl(page),panel=page.getByRole('region',{name:'E300热采注汽参数编辑',exact:true});
+  await panel.locator('.el-select').filter({has:page.getByRole('combobox',{name:'E300热采注入井'})}).click();await page.getByRole('option',{name:'I',exact:true}).click();
+  await panel.getByRole('spinbutton').fill('0.5');
+  await panel.locator('.el-select').filter({has:page.getByRole('combobox',{name:'E300热采修改项目'})}).click();await page.getByRole('option',{name:label,exact:true}).click();
+  await expect(panel.getByRole('spinbutton')).toHaveValue('');await expect(panel).toContainText('THERM3.DATA:429');
+  await panel.getByRole('spinbutton').fill(value);await panel.getByRole('button',{name:'修改注汽参数并真实重算'}).click();
+  await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload).toEqual({study:null,runType:'eclipse',parameters:f[name+'Parameters']});expect(state.unexpectedRequests).toEqual([]);
+ });
+}
+for(const kind of ['official','output'])for(const name of ['rate','pressure']){
+ test(`E300 THERMAL CONTROL ${kind} ${name}原生实际量与限压响应刷新恢复`,async({page})=>{
+  const {state}=await openThermalControl(page,kind,name),panel=page.getByRole('region',{name:'E300热采注汽方案验收',exact:true});
+  await expect(panel).toContainText('注汽输入已修改，实际井压与热损失响应已核对');
+  await expect(panel.getByLabel('E300注汽方案末次实际指标',{exact:true})).toContainText('实际累计地面注入量');
+  if(name==='pressure'){
+   await expect(panel).toContainText('本方案BHP上限 700 PSIA');await expect(panel).toContainText('触及本方案注入压力上限');
+   await expect(panel.getByLabel('E300注汽方案末次实际指标',{exact:true})).toContainText('27.918764114379883');
+   await expect(panel.getByLabel('E300注汽方案末次实际指标',{exact:true})).toContainText('135293.03125');
+  }else{await expect(panel).toContainText('本方案BHP上限 1000 PSIA');await expect(panel).toContainText('地面注入目标 25 STB/day');}
+  await page.reload();await activateModel(page,'ECLIPSE演示模型');await expect(panel).toContainText('实际井压与热损失响应已核对');expect(state.unexpectedRequests).toEqual([]);
+ });
+}
+test('E300 THERMAL CONTROL 原干度版本伪装控制参数不会得到方案结论',async({page})=>{
+ await openThermalControl(page,'official','pressure',f=>{f.pressure.parameters.schemaVersion='eclipse-thermal-injection-parameters/1'});
+ await expect(page.getByRole('region',{name:'E300热采注汽方案验收',exact:true})).toHaveCount(0);
+});
+test('E300 THERMAL CONTROL 部分成功保留实际结果但不能显示完整通过',async({page})=>{
+ await openThermalControl(page,'official','pressure',f=>{f.pressure.resultContract='VALID_PARTIAL';f.pressure.result.resultContract='VALID_PARTIAL';f.pressure.result.eclEnd.problems=1});
+ const panel=page.getByRole('region',{name:'E300热采注汽方案验收',exact:true});await expect(panel).toContainText('部分成功，不能判定完整方案通过');
+});
+
+async function openCompositionalPressure(page, name='baseline', mutate=()=>{}) {
+ const f=compositionalPressureFixture(),caps=availableCapabilities();caps.eclipse300={...caps.eclipse100};mutate(f);
+ const state=await installMockBackend(page,{eclipseModelKind:'eclipse_300',eclipseInspection:f.inspection,eclipseHistory:name==='baseline'?[summary(f.baseline)]:[summary(f.pressure),summary(f.baseline)],runs:[f.baseline,f.pressure],capabilities:caps});
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');return {f,state};
+}
+test('E300 PRODUCER BHP 官方单字段压力修改绑定433行并保留6200产气目标',async({page})=>{
+ const {f,state}=await openCompositionalPressure(page),panel=page.getByRole('region',{name:'E300生产BHP下限编辑',exact:true});
+ await panel.locator('.el-select').click();await page.getByRole('option',{name:'P',exact:true}).click();
+ await expect(panel).toContainText('SPE3_GASCOND.DATA:433');await expect(panel).toContainText('保留产气目标 6200 Mscf/day');
+ await panel.getByRole('spinbutton').fill('1500');await panel.getByRole('button',{name:'修改生产BHP下限并真实重算'}).click();
+ await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload).toEqual({study:null,runType:'eclipse',parameters:f.parameters});expect(state.unexpectedRequests).toEqual([]);
+});
+test('E300 PRODUCER BHP 原值和零值不会创建计算',async({page})=>{
+ const {state}=await openCompositionalPressure(page),panel=page.getByRole('region',{name:'E300生产BHP下限编辑',exact:true});
+ await panel.locator('.el-select').click();await page.getByRole('option',{name:'P',exact:true}).click();
+ for(const v of ['500','0']){await panel.getByRole('spinbutton').fill(v);await panel.getByRole('button',{name:'修改生产BHP下限并真实重算'}).click();await expect(panel).toContainText('新BHP下限须不同于原值');}
+ expect(state.createPayloads).toHaveLength(0);
+});
+test('E300 PRODUCER BHP 切换模型清除压力草案',async({page})=>{
+ const {state}=await openCompositionalPressure(page),panel=page.getByRole('region',{name:'E300生产BHP下限编辑',exact:true});
+ await panel.locator('.el-select').click();await page.getByRole('option',{name:'P',exact:true}).click();await panel.getByRole('spinbutton').fill('1500');
+ await activateModel(page,'井筒演示模型');await expect(panel).toHaveCount(0);await activateModel(page,'ECLIPSE演示模型');
+ await expect(panel.getByRole('spinbutton')).toHaveCount(0);expect(state.createPayloads).toHaveLength(0);
+});
+test('E300 PRODUCER BHP 原生限产结果完整显示且刷新恢复',async({page})=>{
+ const {state}=await openCompositionalPressure(page,'pressure'),panel=page.getByRole('region',{name:'E300生产压力方案验收',exact:true});
+ await expect(panel).toContainText('新BHP下限与实际产气、井压响应已核对');await expect(panel).toContainText('压力受限14点');await expect(panel).toContainText('4.9881815910339355');
+ await expect(panel).toContainText('原生WGPT累计产气 30567840 MSCF');await expect(panel).toContainText('本方案BHP下限 1500 PSIA');
+ await expect(page.getByRole('region',{name:'E300生产BHP下限编辑',exact:true})).toHaveCount(0);
+ await page.reload();await activateModel(page,'ECLIPSE演示模型');await expect(panel).toContainText('压力受限14点');expect(state.unexpectedRequests).toEqual([]);
+});
+test('E300 PRODUCER BHP 其它版本基线不能得到核准结论',async({page})=>{
+ await openCompositionalPressure(page,'pressure',f=>{f.baseline.modelVersionId=999});const panel=page.getByRole('region',{name:'E300生产压力方案验收',exact:true});
+ await expect(panel).toContainText('生产压力方案的基线来源或完整结果核对未通过');await expect(panel.getByLabel('E300生产压力实际响应',{exact:true})).toHaveCount(0);
+});
+test('E300 PRODUCER BHP 部分成功不能判为完整压力方案通过',async({page})=>{
+ await openCompositionalPressure(page,'pressure',f=>{f.pressure.resultContract='VALID_PARTIAL';f.pressure.result.resultContract='VALID_PARTIAL';f.pressure.result.eclEnd.problems=1});
+ await expect(page.getByRole('region',{name:'E300生产压力方案验收',exact:true})).toContainText('部分成功，不能判定完整压力方案通过');
+});
+test('E300 PRODUCER BHP 实际压力低于新下限不能显示核准',async({page})=>{
+ await openCompositionalPressure(page,'pressure',f=>{f.pressure.result.summary.series.find(s=>s.keyword==='WBHP'&&s.objectName==='P').points[0].value=1499});
+ await expect(page.getByRole('region',{name:'E300生产压力方案验收',exact:true})).toContainText('实际井压或产气超出方案约束');
+});
+test('E300 PRODUCER BHP 迟到的基线不恢复已切换的旧模型',async({page})=>{
+ const f=compositionalPressureFixture(),caps=availableCapabilities();caps.eclipse300={...caps.eclipse100};
+ const state=await installMockBackend(page,{eclipseModelKind:'eclipse_300',eclipseInspection:f.inspection,eclipseHistory:[summary(f.pressure)],runs:[f.baseline,f.pressure],capabilities:caps});state.heldRunId=f.baseline.id;
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');await expect.poll(()=>typeof state.releaseHeldRun).toBe('function');
+ await activateModel(page,'井筒演示模型');state.releaseHeldRun();await expect(page.getByRole('region',{name:'E300生产压力方案验收',exact:true})).toHaveCount(0);
+});
+
+test('E300 PRODUCER BHP 新下限未触及仍显示真实6200与原生井压',async({page})=>{
+ const f=compositionalPressureInactiveFixture(),caps=availableCapabilities();caps.eclipse300={...caps.eclipse100};
+ const state=await installMockBackend(page,{eclipseModelKind:'eclipse_300',eclipseInspection:f.inspection,eclipseHistory:[summary(f.pressure)],runs:[f.baseline,f.pressure],capabilities:caps});
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');const panel=page.getByRole('region',{name:'E300生产压力方案验收',exact:true});
+ await expect(panel).toContainText('新BHP下限未触及，实际产气仍达到原目标');await expect(panel).toContainText('压力受限0点，共有时刻响应0点');await expect(panel).toContainText('实际产气 6200 MSCF/DAY');await expect(panel).toContainText('1031.34814453125 PSIA');
+ await page.reload();await activateModel(page,'ECLIPSE演示模型');await expect(panel).toContainText('新BHP下限未触及');expect(state.unexpectedRequests).toEqual([]);
+});
+
+async function openCompositionalReinjection(page,name='baseline',mutate=()=>{}){
+ const f=compositionalReinjectionFixture(),caps=availableCapabilities();caps.eclipse300={...caps.eclipse100};mutate(f);
+ const state=await installMockBackend(page,{eclipseModelKind:'eclipse_300',eclipseInspection:f.inspection,eclipseHistory:name==='baseline'?[summary(f.baseline)]:[summary(f.half),summary(f.baseline)],runs:[f.baseline,f.half],capabilities:caps});
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');return {f,state};
+}
+test('E300 REIN 官方FIELD回注比例按450行提交且保留销售与关井',async({page})=>{
+ const {f,state}=await openCompositionalReinjection(page),panel=page.getByRole('region',{name:'E300可用气回注比例编辑',exact:true});
+ await expect(panel).toContainText('1500 Mscf/day');await expect(panel).toContainText('第3650天关井计划');await expect(panel).toContainText('SPE3_GASCOND.DATA:450');
+ await panel.getByRole('spinbutton').fill('0.5');await panel.getByRole('button',{name:'修改回注比例并真实重算'}).click();
+ await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload).toEqual({study:null,runType:'eclipse',parameters:f.parameters});expect(state.unexpectedRequests).toEqual([]);
+});
+test('E300 REIN 原值与越界值不会创建运行',async({page})=>{
+ const {state}=await openCompositionalReinjection(page),panel=page.getByRole('region',{name:'E300可用气回注比例编辑',exact:true});
+ for(const value of ['1','-0.1','1.01']){await panel.getByRole('spinbutton').fill(value);await panel.getByRole('button',{name:'修改回注比例并真实重算'}).click();await expect(panel).toContainText('新比例须为0–1之间且不同于原值');}
+ expect(state.createPayloads).toHaveLength(0);
+});
+test('E300 REIN 数字零不会被按钮误判为空值',async({page})=>{
+ const {f,state}=await openCompositionalReinjection(page),panel=page.getByRole('region',{name:'E300可用气回注比例编辑',exact:true});
+ await panel.getByRole('spinbutton').fill('0');await expect(panel.getByRole('button',{name:'修改回注比例并真实重算'})).toBeEnabled();await panel.getByRole('button',{name:'修改回注比例并真实重算'}).click();
+ await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload.parameters).toEqual({...f.parameters,targetFraction:0});
+});
+test('E300 REIN 切换模型清空比例草案',async({page})=>{
+ const {state}=await openCompositionalReinjection(page),panel=page.getByRole('region',{name:'E300可用气回注比例编辑',exact:true});
+ await panel.getByRole('spinbutton').fill('0.5');await activateModel(page,'井筒演示模型');await expect(panel).toHaveCount(0);await activateModel(page,'ECLIPSE演示模型');
+ await expect(panel.getByRole('spinbutton')).toHaveValue('');expect(state.createPayloads).toHaveLength(0);
+});
+test('E300 REIN 真实2350净回注与原计划关井和累计量刷新恢复',async({page})=>{
+ const {state}=await openCompositionalReinjection(page,'half'),panel=page.getByRole('region',{name:'E300回注比例方案验收',exact:true});
+ await expect(panel).toContainText('回注比例已修改，按可用气和原关井计划核对通过');await expect(panel).toContainText('17155000 → 8577500 MSCF');
+ const table=panel.getByLabel('E300回注比例实际响应',{exact:true});await expect(table.locator('tbody tr').first()).toContainText('4700');await expect(table.locator('tbody tr').first()).toContainText('2350');await expect(table).toContainText('原计划关井');
+ await expect(panel).toContainText('31.043663024902344');await expect(page.getByRole('region',{name:'E300可用气回注比例编辑',exact:true})).toHaveCount(0);
+ await page.reload();await activateModel(page,'ECLIPSE演示模型');await expect(panel).toContainText('按可用气和原关井计划核对通过');expect(state.unexpectedRequests).toEqual([]);
+});
+test('E300 REIN 外版本基线不能形成核准结果',async({page})=>{
+ await openCompositionalReinjection(page,'half',f=>{f.baseline.modelVersionId=999});const panel=page.getByRole('region',{name:'E300回注比例方案验收',exact:true});
+ await expect(panel).toContainText('回注方案的基线来源或完整结果核对未通过');await expect(panel.getByLabel('E300回注比例实际响应',{exact:true})).toHaveCount(0);
+});
+test('E300 REIN 部分成功保留原生输出但不判完整通过',async({page})=>{
+ await openCompositionalReinjection(page,'half',f=>{f.half.status='PARTIAL_SUCCEEDED';f.half.resultContract='VALID_PARTIAL';f.half.result.resultContract='VALID_PARTIAL';f.half.result.eclEnd.problems=1});
+ await expect(page.getByRole('region',{name:'E300回注比例方案验收',exact:true})).toContainText('部分成功，不能判定完整回注方案通过');
+});
+test('E300 REIN 错误气体率单位不显示核准',async({page})=>{
+ await openCompositionalReinjection(page,'half',f=>{f.half.result.summary.series.find(s=>s.keyword==='FGIR'&&s.objectName===null).unit='STB/DAY'});
+ await expect(page.getByRole('region',{name:'E300回注比例方案验收',exact:true})).toContainText('缺少唯一且同源');
+});
+test('E300 REIN 原关井后出现非零注入必须报警',async({page})=>{
+ await openCompositionalReinjection(page,'half',f=>{for(const s of f.half.result.summary.series.filter(s=>s.keyword==='FGIR'&&s.objectName===null||s.keyword==='WGIR'&&s.objectName==='I'))s.points.at(-1).value=1});
+ await expect(page.getByRole('region',{name:'E300回注比例方案验收',exact:true})).toContainText('实际回注、井压或原关井状态不符合约束');
+});
+test('E300 REIN 迟到基线不能恢复已离开的模型',async({page})=>{
+ const f=compositionalReinjectionFixture(),caps=availableCapabilities();caps.eclipse300={...caps.eclipse100};
+ const state=await installMockBackend(page,{eclipseModelKind:'eclipse_300',eclipseInspection:f.inspection,eclipseHistory:[summary(f.half)],runs:[f.baseline,f.half],capabilities:caps});state.heldRunId=f.baseline.id;
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');await expect.poll(()=>typeof state.releaseHeldRun).toBe('function');await activateModel(page,'井筒演示模型');state.releaseHeldRun();
+ await expect(page.getByRole('region',{name:'E300回注比例方案验收',exact:true})).toHaveCount(0);
+});
+for(const kind of ['gas','pressure'])test(`E300 REIN version16仍可提交原${kind}独立方案`,async({page})=>{
+ const {state}=await openCompositionalReinjection(page),pressure=kind==='pressure',panel=page.getByRole('region',{name:pressure?'E300生产BHP下限编辑':'E300产气目标编辑',exact:true});
+ await panel.locator('.el-select').click();await page.getByRole('option',{name:'P',exact:true}).click();await panel.getByRole('spinbutton').fill(pressure?'1500':'4500');
+ await panel.getByRole('button',{name:pressure?'修改生产BHP下限并真实重算':'修改产气目标并真实重算'}).click();await expect.poll(()=>state.createPayloads.length).toBe(1);
+ expect(state.createPayloads[0].payload.parameters.schemaVersion).toBe(pressure?'eclipse-compositional-pressure-parameters/1':'eclipse-compositional-production-parameters/1');expect(state.createPayloads[0].payload.parameters.baselineRunId).toBe(9921);expect(state.unexpectedRequests).toEqual([]);
+});
+
+async function openCompositionalGasSales(page,selected='baseline',kind='normal',mutate=()=>{}) {
+ const f=compositionalGasSalesFixture(kind),caps=availableCapabilities();caps.eclipse300={...caps.eclipse100};mutate(f);
+ const state=await installMockBackend(page,{eclipseModelKind:'eclipse_300',eclipseInspection:f.inspection,eclipseHistory:selected==='baseline'?[summary(f.baseline)]:[summary(f.sales),summary(f.baseline)],runs:[f.baseline,f.sales],capabilities:caps});
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');return {f,state};
+}
+test('E300 SALES 官方固定需求按439行提交并保留回注比例及关井',async({page})=>{
+ const {f,state}=await openCompositionalGasSales(page),panel=page.getByRole('region',{name:'E300固定销售目标编辑',exact:true});
+ await expect(panel).toContainText('1500 Mscf/day');await expect(panel).toContainText('第3650天关井计划');await expect(panel).toContainText('SPE3_GASCOND.DATA:439');
+ await panel.getByRole('spinbutton').fill('3000');await panel.getByRole('button',{name:'修改销售目标并真实重算'}).click();
+ await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload).toEqual({study:null,runType:'eclipse',parameters:f.parameters});expect(state.unexpectedRequests).toEqual([]);
+});
+test('E300 SALES 原值和越界需求不创建运行',async({page})=>{
+ const {state}=await openCompositionalGasSales(page),panel=page.getByRole('region',{name:'E300固定销售目标编辑',exact:true});
+ for(const value of ['1500','-1','100000001']){await panel.getByRole('spinbutton').fill(value);await panel.getByRole('button',{name:'修改销售目标并真实重算'}).click();await expect(panel).toContainText('新销售目标须为0–100000000之间且不同于原值');}
+ expect(state.createPayloads).toHaveLength(0);
+});
+test('E300 SALES 零需求作为数字提交而非空值',async({page})=>{
+ const {f,state}=await openCompositionalGasSales(page),panel=page.getByRole('region',{name:'E300固定销售目标编辑',exact:true});
+ await panel.getByRole('spinbutton').fill('0');await panel.getByRole('button',{name:'修改销售目标并真实重算'}).click();
+ await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload.parameters).toEqual({...f.parameters,targetSalesTarget:0});
+});
+test('E300 SALES 切换模型清空固定需求草案',async({page})=>{
+ const {state}=await openCompositionalGasSales(page),panel=page.getByRole('region',{name:'E300固定销售目标编辑',exact:true});
+ await panel.getByRole('spinbutton').fill('3000');await activateModel(page,'井筒演示模型');await expect(panel).toHaveCount(0);await activateModel(page,'ECLIPSE演示模型');
+ await expect(panel.getByRole('spinbutton')).toHaveValue('');expect(state.createPayloads).toHaveLength(0);
+});
+for(const kind of ['normal','unavailable'])test(`E300 SALES ${kind}原生净回注及累计残余刷新保持`,async({page})=>{
+ const {state}=await openCompositionalGasSales(page,'sales',kind),panel=page.getByRole('region',{name:'E300销售目标方案验收',exact:true});
+ await expect(panel).toContainText('销售目标已修改，按可用气和原关井计划核对通过');await expect(panel).toContainText(kind==='normal'?'17155000 → 11680000 MSCF':'0.0017000738298520446');
+ const table=panel.getByLabel('E300销售目标实际响应',{exact:true});await expect(table).toContainText(kind==='normal'?'3200':'没有可用气');await expect(panel).toContainText('销售需求不是实际售气量');
+ await page.reload();await activateModel(page,'ECLIPSE演示模型');await expect(panel).toContainText('销售目标已修改，按可用气和原关井计划核对通过');expect(state.unexpectedRequests).toEqual([]);
+});
+test('E300 SALES 外版本基线不能形成核准结果',async({page})=>{
+ await openCompositionalGasSales(page,'sales','normal',f=>{f.baseline.modelVersionId=999});const panel=page.getByRole('region',{name:'E300销售目标方案验收',exact:true});
+ await expect(panel).toContainText('销售目标方案的基线来源或完整结果核对未通过');await expect(panel.getByLabel('E300销售目标实际响应',{exact:true})).toHaveCount(0);
+});
+test('E300 SALES 部分成功不判完整销售方案通过',async({page})=>{
+ await openCompositionalGasSales(page,'sales','normal',f=>{f.sales.status='PARTIAL_SUCCEEDED';f.sales.resultContract='VALID_PARTIAL';f.sales.result.resultContract='VALID_PARTIAL';f.sales.result.eclEnd.problems=1});
+ await expect(page.getByRole('region',{name:'E300销售目标方案验收',exact:true})).toContainText('部分成功，不能判定完整销售目标方案通过');
+});
+test('E300 SALES 错误单位不显示核准',async({page})=>{
+ await openCompositionalGasSales(page,'sales','normal',f=>{f.sales.result.summary.series.find(s=>s.keyword==='FGIR'&&s.objectName===null).unit='SM3/DAY'});
+ await expect(page.getByRole('region',{name:'E300销售目标方案验收',exact:true})).toContainText('缺少唯一且同源');
+});
+test('E300 SALES 关井后实际注入不为零必须报警',async({page})=>{
+ await openCompositionalGasSales(page,'sales','normal',f=>{for(const s of f.sales.result.summary.series.filter(s=>s.keyword==='FGIR'&&s.objectName===null||s.keyword==='WGIR'&&s.objectName==='I'))s.points.at(-1).value=1});
+ await expect(page.getByRole('region',{name:'E300销售目标方案验收',exact:true})).toContainText('实际回注、井压或原关井状态不符合约束');
+});
+test('E300 SALES 迟到基线不能恢复旧模型结果',async({page})=>{
+ const f=compositionalGasSalesFixture(),caps=availableCapabilities();caps.eclipse300={...caps.eclipse100};
+ const state=await installMockBackend(page,{eclipseModelKind:'eclipse_300',eclipseInspection:f.inspection,eclipseHistory:[summary(f.sales)],runs:[f.baseline,f.sales],capabilities:caps});state.heldRunId=f.baseline.id;
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');await expect.poll(()=>typeof state.releaseHeldRun).toBe('function');await activateModel(page,'井筒演示模型');state.releaseHeldRun();
+ await expect(page.getByRole('region',{name:'E300销售目标方案验收',exact:true})).toHaveCount(0);
+});
+
+async function openCompositionalInjectionPressure(page,selected='baseline',kind='limited',mutate=()=>{}){
+ const f=compositionalInjectionPressureFixture(kind),caps=availableCapabilities();caps.eclipse300={...caps.eclipse100};mutate(f);
+ const state=await installMockBackend(page,{eclipseModelKind:'eclipse_300',eclipseInspection:f.inspection,eclipseHistory:selected==='baseline'?[summary(f.baseline)]:[summary(f.pressure),summary(f.baseline)],runs:[f.baseline,f.pressure],capabilities:caps});
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');return {f,state};
+}
+test('E300 INJECTOR BHP 精确457行提交3550上限并保留销售比例及关井',async({page})=>{
+ const {f,state}=await openCompositionalInjectionPressure(page),panel=page.getByRole('region',{name:'E300注气BHP上限编辑',exact:true});
+ await expect(panel).toContainText('4000 psia');await expect(panel).toContainText('1500 Mscf/day');await expect(panel).toContainText('SPE3_GASCOND.DATA:457');
+ await panel.getByRole('spinbutton').fill('3550');await panel.getByRole('button',{name:'修改注气BHP上限并真实重算'}).click();
+ await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload).toEqual({study:null,runType:'eclipse',parameters:f.parameters});expect(state.unexpectedRequests).toEqual([]);
+});
+test('E300 INJECTOR BHP 原值零负数及越界值不创建运行',async({page})=>{
+ const {state}=await openCompositionalInjectionPressure(page),panel=page.getByRole('region',{name:'E300注气BHP上限编辑',exact:true});
+ for(const value of ['4000','0','-1','100000001']){await panel.getByRole('spinbutton').fill(value);await panel.getByRole('button',{name:'修改注气BHP上限并真实重算'}).click();await expect(panel).toContainText('新注气BHP上限须为大于0');}
+ expect(state.createPayloads).toHaveLength(0);
+});
+test('E300 INJECTOR BHP 切换模型清空注气压力草案',async({page})=>{
+ const {state}=await openCompositionalInjectionPressure(page),panel=page.getByRole('region',{name:'E300注气BHP上限编辑',exact:true});
+ await panel.getByRole('spinbutton').fill('3550');await activateModel(page,'井筒演示模型');await expect(panel).toHaveCount(0);await activateModel(page,'ECLIPSE演示模型');
+ await expect(panel.getByRole('spinbutton')).toHaveValue('');expect(state.createPayloads).toHaveLength(0);
+});
+test('E300 INJECTOR BHP 3550四点限注和真实累计量刷新保持',async({page})=>{
+ const {state}=await openCompositionalInjectionPressure(page,'pressure'),panel=page.getByRole('region',{name:'E300注气压力方案验收',exact:true});
+ await expect(panel).toContainText('注气BHP上限已修改，实际回注与压力约束核对通过');await expect(panel).toContainText('压力受限4点');await expect(panel).toContainText('17155000 → 17144826 MSCF');
+ await expect(panel.getByLabel('E300注气压力实际响应',{exact:true})).toContainText('注入压力受限');
+ await page.reload();await activateModel(page,'ECLIPSE演示模型');await expect(panel).toContainText('压力受限4点');expect(state.unexpectedRequests).toEqual([]);
+});
+test('E300 INJECTOR BHP 3900未触限仍保留八条原始差异及重复FGOR',async({page})=>{
+ const {state}=await openCompositionalInjectionPressure(page,'pressure','inactive'),panel=page.getByRole('region',{name:'E300注气压力方案验收',exact:true});
+ await expect(panel).toContainText('新注入BHP上限未触及，所核对回注、产气与井压未变化');await expect(panel).toContainText('8条存在数值差异');
+ const raw=panel.getByLabel('E300注气压力原始向量差异',{exact:true});await expect(raw.locator('tbody tr')).toHaveCount(8);await expect(raw.getByRole('cell',{name:'FGOR',exact:true})).toHaveCount(2);
+ await page.reload();await activateModel(page,'ECLIPSE演示模型');await expect(panel).toContainText('8条存在数值差异');expect(state.unexpectedRequests).toEqual([]);
+});
+test('E300 INJECTOR BHP 外版本基线不能核准',async({page})=>{
+ await openCompositionalInjectionPressure(page,'pressure','limited',f=>{f.baseline.modelVersionId=999});const panel=page.getByRole('region',{name:'E300注气压力方案验收',exact:true});
+ await expect(panel).toContainText('注气压力方案的基线来源或完整结果核对未通过');await expect(panel.getByLabel('E300注气压力实际响应',{exact:true})).toHaveCount(0);
+});
+test('E300 INJECTOR BHP 部分成功不得显示完整核准',async({page})=>{
+ await openCompositionalInjectionPressure(page,'pressure','limited',f=>{f.pressure.status='PARTIAL_SUCCEEDED';f.pressure.resultContract='VALID_PARTIAL';f.pressure.result.resultContract='VALID_PARTIAL';f.pressure.result.eclEnd.problems=1});
+ await expect(page.getByRole('region',{name:'E300注气压力方案验收',exact:true})).toContainText('部分成功，不能判定完整注气压力方案通过');
+});
+test('E300 INJECTOR BHP 错误流量单位不核准',async({page})=>{
+ await openCompositionalInjectionPressure(page,'pressure','limited',f=>{f.pressure.result.summary.series.find(s=>s.keyword==='FGIR'&&s.objectName===null).unit='SM3/DAY'});
+ await expect(page.getByRole('region',{name:'E300注气压力方案验收',exact:true})).toContainText('缺少唯一且同源');
+});
+test('E300 INJECTOR BHP 高于新上限的实际井压必须报警',async({page})=>{
+ await openCompositionalInjectionPressure(page,'pressure','limited',f=>{f.pressure.result.summary.series.find(s=>s.keyword==='WBHP'&&s.objectName==='I').points[0].value=3560});
+ await expect(page.getByRole('region',{name:'E300注气压力方案验收',exact:true})).toContainText('实际回注、井压或原关井状态不符合约束');
+});
+test('E300 INJECTOR BHP 原关井后非零注入必须报警',async({page})=>{
+ await openCompositionalInjectionPressure(page,'pressure','limited',f=>{for(const s of f.pressure.result.summary.series.filter(s=>s.keyword==='FGIR'&&s.objectName===null||s.keyword==='WGIR'&&s.objectName==='I'))s.points.at(-1).value=1});
+ await expect(page.getByRole('region',{name:'E300注气压力方案验收',exact:true})).toContainText('实际回注、井压或原关井状态不符合约束');
+});
+test('E300 INJECTOR BHP 迟到基线不能恢复旧模型',async({page})=>{
+ const f=compositionalInjectionPressureFixture(),caps=availableCapabilities();caps.eclipse300={...caps.eclipse100};
+ const state=await installMockBackend(page,{eclipseModelKind:'eclipse_300',eclipseInspection:f.inspection,eclipseHistory:[summary(f.pressure)],runs:[f.baseline,f.pressure],capabilities:caps});state.heldRunId=f.baseline.id;
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');await expect.poll(()=>typeof state.releaseHeldRun).toBe('function');await activateModel(page,'井筒演示模型');state.releaseHeldRun();
+ await expect(page.getByRole('region',{name:'E300注气压力方案验收',exact:true})).toHaveCount(0);
+});
+for(const kind of ['sales','reinjection'])test(`E300 INJECTOR BHP 仍可提交旧${kind}独立方案`,async({page})=>{
+ const {state}=await openCompositionalInjectionPressure(page),sales=kind==='sales',panel=page.getByRole('region',{name:sales?'E300固定销售目标编辑':'E300可用气回注比例编辑',exact:true});
+ await panel.getByRole('spinbutton').fill(sales?'3000':'0.5');await panel.getByRole('button',{name:sales?'修改销售目标并真实重算':'修改回注比例并真实重算'}).click();
+ await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload.parameters.schemaVersion).toBe(sales?'eclipse-compositional-gas-sales-parameters/1':'eclipse-compositional-reinjection-parameters/1');expect(state.createPayloads[0].payload.parameters.baselineRunId).toBe(9941);
+});
+
+async function openCompositionalFluidProperty(page,selected='baseline',mutate=()=>{}){
+ const f=compositionalFluidPropertyFixture(),caps=availableCapabilities();caps.eclipse300={...caps.eclipse100};mutate(f);
+ const state=await installMockBackend(page,{eclipseModelKind:'eclipse_300',eclipseInspection:f.inspection,eclipseHistory:selected==='baseline'?[summary(f.baseline)]:[summary(f.property),summary(f.baseline)],runs:[f.baseline,f.property],capabilities:caps});
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');return {f,state};
+}
+async function selectPcritComponent(page,panel,name='C1 · #3'){
+ await panel.locator('.el-select').click();await page.getByRole('option',{name,exact:true}).click();
+}
+test('E300 PCRIT 真实九组件选择C1绑定122行与第三组分提交700',async({page})=>{
+ const {f,state}=await openCompositionalFluidProperty(page),panel=page.getByRole('region',{name:'E300组分临界压力编辑',exact:true});
+ await expect(panel.getByLabel('E300九组分原始临界压力',{exact:true}).locator('tbody tr')).toHaveCount(9);await selectPcritComponent(page,panel);
+ await expect(panel).toContainText('667.7817 psia');await expect(panel).toContainText('SPE3_GASCOND.DATA:122');
+ await panel.getByRole('spinbutton').fill('700');await panel.getByRole('button',{name:'修改组分临界压力并真实重算'}).click();
+ await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload).toEqual({study:null,runType:'eclipse',parameters:f.parameters});expect(state.unexpectedRequests).toEqual([]);
+});
+test('E300 PCRIT 原值零负数及越界值不会创建运行',async({page})=>{
+ const {state}=await openCompositionalFluidProperty(page),panel=page.getByRole('region',{name:'E300组分临界压力编辑',exact:true});await selectPcritComponent(page,panel);
+ for(const value of ['667.7817','0','-1','100000001']){await panel.getByRole('spinbutton').fill(value);await panel.getByRole('button',{name:'修改组分临界压力并真实重算'}).click();await expect(panel).toContainText('新临界压力须大于0');}
+ expect(state.createPayloads).toHaveLength(0);
+});
+test('E300 PCRIT 切换组件清空临界压力草案与原值',async({page})=>{
+ const {state}=await openCompositionalFluidProperty(page),panel=page.getByRole('region',{name:'E300组分临界压力编辑',exact:true});await selectPcritComponent(page,panel);await panel.getByRole('spinbutton').fill('700');
+ await selectPcritComponent(page,panel,'C2 · #4');await expect(panel.getByRole('spinbutton')).toHaveValue('');await expect(panel).toContainText('708.34238 psia');expect(state.createPayloads).toHaveLength(0);
+});
+test('E300 PCRIT 切换模型清空组件与输入值',async({page})=>{
+ const {state}=await openCompositionalFluidProperty(page),panel=page.getByRole('region',{name:'E300组分临界压力编辑',exact:true});await selectPcritComponent(page,panel);await panel.getByRole('spinbutton').fill('700');
+ await activateModel(page,'井筒演示模型');await expect(panel).toHaveCount(0);await activateModel(page,'ECLIPSE演示模型');await expect(panel.getByRole('spinbutton')).toHaveValue('');
+ await expect(panel.getByRole('button',{name:'修改组分临界压力并真实重算'})).toBeDisabled();expect(state.createPayloads).toHaveLength(0);
+});
+test('E300 PCRIT 原生油量压力和重复列完整展示且刷新恢复',async({page})=>{
+ const {state}=await openCompositionalFluidProperty(page,'property'),panel=page.getByRole('region',{name:'E300组分物性方案验收',exact:true});
+ await expect(panel).toContainText('组分临界压力已修改，原生结果与基线按列号对齐');await expect(panel).toContainText('完整330条原始曲线保留');
+ const table=panel.getByLabel('E300组分物性实际响应',{exact:true});await expect(table.locator('tbody tr')).toHaveCount(7);await expect(table.getByRole('cell',{name:'FOPT',exact:true})).toHaveCount(2);
+ await expect(table).toContainText('2571354.25');await expect(table).toContainText('-22248');await expect(table).toContainText('1060.57080078125');
+ await page.reload();await activateModel(page,'ECLIPSE演示模型');await expect(panel).toContainText('原生结果与基线按列号对齐');expect(state.unexpectedRequests).toEqual([]);
+});
+test('E300 PCRIT 外版本基线不形成物性核准结论',async({page})=>{
+ await openCompositionalFluidProperty(page,'property',f=>{f.baseline.modelVersionId=999});const panel=page.getByRole('region',{name:'E300组分物性方案验收',exact:true});
+ await expect(panel).toContainText('组分物性方案的基线来源或完整结果核对未通过');await expect(panel.getByLabel('E300组分物性实际响应',{exact:true})).toHaveCount(0);
+});
+test('E300 PCRIT 部分成功不冒充完整物性方案通过',async({page})=>{
+ await openCompositionalFluidProperty(page,'property',f=>{f.property.status='PARTIAL_SUCCEEDED';f.property.resultContract='VALID_PARTIAL';f.property.result.resultContract='VALID_PARTIAL';f.property.result.eclEnd.problems=1});
+ await expect(page.getByRole('region',{name:'E300组分物性方案验收',exact:true})).toContainText('部分成功，不能判定完整组分物性方案通过');
+});
+test('E300 PCRIT 错误油累计单位无法核对',async({page})=>{
+ await openCompositionalFluidProperty(page,'property',f=>{f.property.result.summary.series.find(s=>s.keyword==='FOPT'&&s.objectName===null).unit='SM3'});
+ await expect(page.getByRole('region',{name:'E300组分物性方案验收',exact:true})).toContainText('缺少同源、同单位且按独立列号匹配');
+});
+test('E300 PCRIT 结果缺末时段不能宣称完整对比',async({page})=>{
+ await openCompositionalFluidProperty(page,'property',f=>{f.property.result.summary.series.forEach(s=>s.points.pop())});
+ await expect(page.getByRole('region',{name:'E300组分物性方案验收',exact:true})).toContainText('结果未覆盖原基线全时段');
+});
+test('E300 PCRIT 迟到基线不能恢复旧模型的物性结果',async({page})=>{
+ const f=compositionalFluidPropertyFixture(),caps=availableCapabilities();caps.eclipse300={...caps.eclipse100};
+ const state=await installMockBackend(page,{eclipseModelKind:'eclipse_300',eclipseInspection:f.inspection,eclipseHistory:[summary(f.property)],runs:[f.baseline,f.property],capabilities:caps});state.heldRunId=f.baseline.id;
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');await expect.poll(()=>typeof state.releaseHeldRun).toBe('function');await activateModel(page,'井筒演示模型');state.releaseHeldRun();
+ await expect(page.getByRole('region',{name:'E300组分物性方案验收',exact:true})).toHaveCount(0);
+});
+for(const kind of ['gas','pressure','reinjection','sales','injection-pressure'])test(`E300 PCRIT version17仍可提交原${kind}独立方案`,async({page})=>{
+ const {state}=await openCompositionalFluidProperty(page);
+ const setting={gas:['E300产气目标编辑','4500','修改产气目标并真实重算','eclipse-compositional-production-parameters/1'],pressure:['E300生产BHP下限编辑','1500','修改生产BHP下限并真实重算','eclipse-compositional-pressure-parameters/1'],reinjection:['E300可用气回注比例编辑','0.5','修改回注比例并真实重算','eclipse-compositional-reinjection-parameters/1'],sales:['E300固定销售目标编辑','3000','修改销售目标并真实重算','eclipse-compositional-gas-sales-parameters/1'],'injection-pressure':['E300注气BHP上限编辑','3550','修改注气BHP上限并真实重算','eclipse-compositional-injection-pressure-parameters/1']}[kind];
+ const panel=page.getByRole('region',{name:setting[0],exact:true});if(['gas','pressure'].includes(kind)){await panel.locator('.el-select').click();await page.getByRole('option',{name:'P',exact:true}).click();}
+ await panel.getByRole('spinbutton').fill(setting[1]);await panel.getByRole('button',{name:setting[2]}).click();await expect.poll(()=>state.createPayloads.length).toBe(1);
+ expect(state.createPayloads[0].payload.parameters.schemaVersion).toBe(setting[3]);expect(state.createPayloads[0].payload.parameters.baselineRunId).toBe(9951);expect(state.unexpectedRequests).toEqual([]);
+});
+
+async function openCompositionalForecast(page,selected='history',mutate=()=>{}){
+ const f=compositionalForecastFixture(),caps=availableCapabilities();caps.eclipse300={...caps.eclipse100};mutate(f);
+ const imported=selected==='portable',chosen=f[selected];if(imported)chosen.modelVersionId=201;
+ const state=await installMockBackend(page,{eclipseModelKind:'eclipse_300',eclipseInspection:imported?f.portableInspection:f.inspection,
+  eclipseHistory:imported?[summary(chosen)]:[summary(chosen),...(selected==='history'?[]:[summary(f.history)])],
+  runs:[f.history,f.inherited,f.lower,f.portable],capabilities:caps,artifactPayloads:{[`${f.history.id}:${f.artifact.id}`]:f.catalogText}});
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');return {f,state,panel:page.getByRole('region',{name:'E300历史保存点续算',exact:true})};
+}
+test('E300 SAVE 原历史保存点3285天报告10沿原计划精确提交',async({page})=>{
+ const {f,state,panel}=await openCompositionalForecast(page);await expect(panel).toContainText('1998-12-30');await expect(panel).toContainText('报告10');
+ await panel.getByRole('button',{name:'沿原计划续算',exact:true}).click();await expect.poll(()=>state.createPayloads.length).toBe(1);
+ expect(state.createPayloads[0].payload.parameters).toEqual(f.inherited.parameters);expect(state.createPayloads[0].payload.runType).toBe('eclipse');expect(state.createPayloads[0].payload.study).toBeNull();expect(state.unexpectedRequests).toEqual([]);
+});
+test('E300 SAVE 同一历史保存点修改产气4500只提交七字段方案',async({page})=>{
+ const {f,state,panel}=await openCompositionalForecast(page);await expect(panel.getByRole('button',{name:'沿原计划续算',exact:true})).toBeEnabled();
+ await panel.getByRole('spinbutton',{name:'E300续算产气目标',exact:true}).fill('4500');await panel.getByRole('button',{name:'修改产气目标并续算',exact:true}).click();
+ await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload.parameters).toEqual(f.lower.parameters);expect(Object.keys(state.createPayloads[0].payload.parameters)).toHaveLength(7);expect(state.unexpectedRequests).toEqual([]);
+});
+for(const value of ['0','-1','6200','100000001'])test(`E300 SAVE 非法或原目标${value}不创建计算`,async({page})=>{
+ const {state,panel}=await openCompositionalForecast(page);await expect(panel.getByRole('button',{name:'沿原计划续算',exact:true})).toBeEnabled();
+ await panel.getByRole('spinbutton',{name:'E300续算产气目标',exact:true}).fill(value);await panel.getByRole('button',{name:'修改产气目标并续算',exact:true}).click();await expect(panel).toContainText('不同于原目标');expect(state.createPayloads).toHaveLength(0);
+});
+test('E300 SAVE 完整330列64实际时刻与累计2497045刷新恢复',async({page})=>{
+ const {panel}=await openCompositionalForecast(page,'lower');await expect(panel).toContainText('64个实际时刻');await expect(panel).toContainText('第3286至5475天');
+ await expect(panel.getByLabel('E300续算原生产量压力累计',{exact:true})).toContainText('2497045');await expect(panel).toContainText('完整预测时段');
+ await page.reload();await activateModel(page,'ECLIPSE演示模型');await expect(panel).toContainText('历史运行 #9961');await expect(panel).toContainText('2497045');
+});
+test('E300 SAVE 沿原计划的独立续算累计2593395保留历史起算日期',async({page})=>{
+ const {panel}=await openCompositionalForecast(page,'inherited');await expect(panel).toContainText('2593395');await expect(panel).toContainText('1990-01-01');await expect(panel).toContainText('330条曲线');
+});
+test('E300 SAVE 已修改校验目录不能恢复计算入口',async({page})=>{
+ const {state,panel}=await openCompositionalForecast(page,'history',f=>{f.catalogText+=' ';});await expect(panel).toContainText('来源、完整状态文件或校验值不匹配');await expect(panel.getByRole('button',{name:'沿原计划续算',exact:true})).toHaveCount(0);expect(state.createPayloads).toHaveLength(0);
+});
+test('E300 SAVE 另一版本历史不能作为当前预测来源',async({page})=>{
+ const {panel}=await openCompositionalForecast(page,'lower',f=>{f.history.modelVersionId=202;});await expect(panel).toContainText('来源、完整状态文件或校验值不匹配');await expect(panel).not.toContainText('完整预测时段');
+});
+test('E300 SAVE 预测部分成功缺末报告不能显示完整通过',async({page})=>{
+ const {panel}=await openCompositionalForecast(page,'lower',f=>{f.lower.status='PARTIAL_SUCCEEDED';f.lower.resultContract='VALID_PARTIAL';f.lower.result.resultContract='VALID_PARTIAL';f.lower.result.eclEnd.problems=1;for(const s of f.lower.result.summary.series)s.points.pop();});
+ await expect(panel).toContainText('预测未覆盖完整成功时段');await expect(panel).toContainText('63个实际时刻');
+});
+test('E300 SAVE 完整导入包按E300识别且不开放初始物性编辑',async({page})=>{
+ const {panel}=await openCompositionalForecast(page,'portable');await expect(panel).toContainText('导入的E300续算模型');await expect(panel).toContainText('4500 Mscf/day');await expect(panel).toContainText('64个实际时刻');
+ await expect(page.getByRole('region',{name:'E300组分临界压力编辑',exact:true})).toHaveCount(0);await expect(panel.getByRole('button',{name:'沿原计划续算',exact:true})).toHaveCount(0);await expect(panel).toContainText('完整上传到新项目');
+});
+test('E300 SAVE 导入包原生状态摘要被改时不显示组分曲线',async({page})=>{
+ await openCompositionalForecast(page,'portable',f=>{f.portableInspection.packageFiles[2].sha256='0'.repeat(64);});await expect(page.getByText('组分结果或模型来源核对未通过，请查看运行诊断；不展示合并或推算曲线。',{exact:true})).toBeVisible();await expect(page.getByRole('region',{name:'E300历史保存点续算',exact:true})).toHaveCount(0);
+});
+test('E300 SAVE 切换模型会清空旧续算产气草案',async({page})=>{
+ const {panel}=await openCompositionalForecast(page);await expect(panel.getByRole('button',{name:'沿原计划续算',exact:true})).toBeEnabled();await panel.getByRole('spinbutton',{name:'E300续算产气目标',exact:true}).fill('4500');
+ await activateModel(page,'井筒演示模型');await activateModel(page,'ECLIPSE演示模型');await expect(panel.getByRole('spinbutton',{name:'E300续算产气目标',exact:true})).toHaveValue('');
+});
+test('E300 SAVE 迟到历史不能把旧模型保存点带回页面',async({page})=>{
+ const f=compositionalForecastFixture(),caps=availableCapabilities();caps.eclipse300={...caps.eclipse100};
+ const state=await installMockBackend(page,{eclipseModelKind:'eclipse_300',eclipseInspection:f.inspection,eclipseHistory:[summary(f.lower)],runs:[f.history,f.lower],capabilities:caps,artifactPayloads:{[`${f.history.id}:${f.artifact.id}`]:f.catalogText}});state.heldRunId=f.history.id;
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');await expect.poll(()=>typeof state.releaseHeldRun).toBe('function');await activateModel(page,'井筒演示模型');state.releaseHeldRun();await expect(page.getByRole('region',{name:'E300历史保存点续算',exact:true})).toHaveCount(0);
+});
+
+async function openCompositionalTemperature(page,selected='baseline',mutate=()=>{}){
+ const f=compositionalTemperatureFixture(),caps=availableCapabilities();caps.eclipse300={...caps.eclipse100};mutate(f);
+ const state=await installMockBackend(page,{eclipseModelKind:'eclipse_300',eclipseInspection:f.inspection,eclipseHistory:selected==='baseline'?[summary(f.baseline)]:[summary(f.property),summary(f.baseline)],runs:[f.baseline,f.property],capabilities:caps});
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');return {f,state};
+}
+async function selectTcritComponent(page,panel,name='C1 · #3'){
+ await panel.locator('.el-select').click();await page.getByRole('option',{name,exact:true}).click();
+}
+test('E300 TCRIT 真实九组件选择C1绑定116行与第三组分提交350',async({page})=>{
+ const {f,state}=await openCompositionalTemperature(page),panel=page.getByRole('region',{name:'E300组分临界温度编辑',exact:true});
+ await expect(panel.getByLabel('E300九组分原始临界温度',{exact:true}).locator('tbody tr')).toHaveCount(9);await selectTcritComponent(page,panel);
+ await expect(panel).toContainText('343.08 degR');await expect(panel).toContainText('SPE3_GASCOND.DATA:116');
+ await panel.getByRole('spinbutton').fill('350');await panel.getByRole('button',{name:'修改组分临界温度并真实重算'}).click();
+ await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload).toEqual({study:null,runType:'eclipse',parameters:f.parameters});expect(state.unexpectedRequests).toEqual([]);
+});
+test('E300 TCRIT 原值零负数及越界值不会创建运行',async({page})=>{
+ const {state}=await openCompositionalTemperature(page),panel=page.getByRole('region',{name:'E300组分临界温度编辑',exact:true});await selectTcritComponent(page,panel);
+ for(const value of ['343.08','0','-1','100000001']){await panel.getByRole('spinbutton').fill(value);await panel.getByRole('button',{name:'修改组分临界温度并真实重算'}).click();await expect(panel).toContainText('新临界温度须大于0');}
+ expect(state.createPayloads).toHaveLength(0);
+});
+test('E300 TCRIT 切换组件清空临界温度草案与原值',async({page})=>{
+ const {state}=await openCompositionalTemperature(page),panel=page.getByRole('region',{name:'E300组分临界温度编辑',exact:true});await selectTcritComponent(page,panel);await panel.getByRole('spinbutton').fill('350');
+ await selectTcritComponent(page,panel,'C2 · #4');await expect(panel.getByRole('spinbutton')).toHaveValue('');await expect(panel).toContainText('549.774 degR');expect(state.createPayloads).toHaveLength(0);
+});
+test('E300 TCRIT 切换模型清空组件与输入值',async({page})=>{
+ const {state}=await openCompositionalTemperature(page),panel=page.getByRole('region',{name:'E300组分临界温度编辑',exact:true});await selectTcritComponent(page,panel);await panel.getByRole('spinbutton').fill('350');
+ await activateModel(page,'井筒演示模型');await expect(panel).toHaveCount(0);await activateModel(page,'ECLIPSE演示模型');await expect(panel.getByRole('spinbutton')).toHaveValue('');
+ await expect(panel.getByRole('button',{name:'修改组分临界温度并真实重算'})).toBeDisabled();expect(state.createPayloads).toHaveLength(0);
+});
+test('E300 TCRIT 原生油量压力和重复列完整展示且刷新恢复',async({page})=>{
+ const {state}=await openCompositionalTemperature(page,'property'),panel=page.getByRole('region',{name:'E300组分物性方案验收',exact:true});
+ await expect(panel).toContainText('组分临界温度已修改，原生结果与基线按列号对齐');await expect(panel).toContainText('完整330条原始曲线保留');
+ const table=panel.getByLabel('E300组分物性实际响应',{exact:true});await expect(table.locator('tbody tr')).toHaveCount(7);await expect(table.getByRole('cell',{name:'FOPT',exact:true})).toHaveCount(2);
+ await expect(table).toContainText('2690409.25');await expect(table).toContainText('96807');await expect(table).toContainText('1038.6485595703125');
+ await page.reload();await activateModel(page,'ECLIPSE演示模型');await expect(panel).toContainText('原生结果与基线按列号对齐');expect(state.unexpectedRequests).toEqual([]);
+});
+test('E300 TCRIT 外版本基线不形成物性核准结论',async({page})=>{
+ await openCompositionalTemperature(page,'property',f=>{f.baseline.modelVersionId=999});const panel=page.getByRole('region',{name:'E300组分物性方案验收',exact:true});
+ await expect(panel).toContainText('组分物性方案的基线来源或完整结果核对未通过');await expect(panel.getByLabel('E300组分物性实际响应',{exact:true})).toHaveCount(0);
+});
+test('E300 TCRIT 部分成功不冒充完整物性方案通过',async({page})=>{
+ await openCompositionalTemperature(page,'property',f=>{f.property.status='PARTIAL_SUCCEEDED';f.property.resultContract='VALID_PARTIAL';f.property.result.resultContract='VALID_PARTIAL';f.property.result.eclEnd.problems=1});
+ await expect(page.getByRole('region',{name:'E300组分物性方案验收',exact:true})).toContainText('部分成功，不能判定完整组分物性方案通过');
+});
+test('E300 TCRIT 错误油累计单位无法核对',async({page})=>{
+ await openCompositionalTemperature(page,'property',f=>{f.property.result.summary.series.find(s=>s.keyword==='FOPT'&&s.objectName===null).unit='SM3'});
+ await expect(page.getByRole('region',{name:'E300组分物性方案验收',exact:true})).toContainText('缺少同源、同单位且按独立列号匹配');
+});
+test('E300 TCRIT 结果缺末时段不能宣称完整对比',async({page})=>{
+ await openCompositionalTemperature(page,'property',f=>{f.property.result.summary.series.forEach(s=>s.points.pop())});
+ await expect(page.getByRole('region',{name:'E300组分物性方案验收',exact:true})).toContainText('结果未覆盖原基线全时段');
+});
+test('E300 TCRIT 迟到基线不能恢复旧模型的物性结果',async({page})=>{
+ const f=compositionalTemperatureFixture(),caps=availableCapabilities();caps.eclipse300={...caps.eclipse100};
+ const state=await installMockBackend(page,{eclipseModelKind:'eclipse_300',eclipseInspection:f.inspection,eclipseHistory:[summary(f.property)],runs:[f.baseline,f.property],capabilities:caps});state.heldRunId=f.baseline.id;
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');await expect.poll(()=>typeof state.releaseHeldRun).toBe('function');await activateModel(page,'井筒演示模型');state.releaseHeldRun();
+ await expect(page.getByRole('region',{name:'E300组分物性方案验收',exact:true})).toHaveCount(0);
+});
+for(const kind of ['gas','pressure','reinjection','sales','injection-pressure'])test(`E300 TCRIT version19仍可提交原${kind}独立方案`,async({page})=>{
+ const {state}=await openCompositionalTemperature(page);
+ const setting={gas:['E300产气目标编辑','4500','修改产气目标并真实重算','eclipse-compositional-production-parameters/1'],pressure:['E300生产BHP下限编辑','1500','修改生产BHP下限并真实重算','eclipse-compositional-pressure-parameters/1'],reinjection:['E300可用气回注比例编辑','0.5','修改回注比例并真实重算','eclipse-compositional-reinjection-parameters/1'],sales:['E300固定销售目标编辑','3000','修改销售目标并真实重算','eclipse-compositional-gas-sales-parameters/1'],'injection-pressure':['E300注气BHP上限编辑','3550','修改注气BHP上限并真实重算','eclipse-compositional-injection-pressure-parameters/1']}[kind];
+ const panel=page.getByRole('region',{name:setting[0],exact:true});if(['gas','pressure'].includes(kind)){await panel.locator('.el-select').click();await page.getByRole('option',{name:'P',exact:true}).click();}
+ await panel.getByRole('spinbutton').fill(setting[1]);await panel.getByRole('button',{name:setting[2]}).click();await expect.poll(()=>state.createPayloads.length).toBe(1);
+ expect(state.createPayloads[0].payload.parameters.schemaVersion).toBe(setting[3]);expect(state.createPayloads[0].payload.parameters.baselineRunId).toBe(9971);expect(state.unexpectedRequests).toEqual([]);
+});
+
+
+test('E300 TCRIT version19仍可独立提交PCRIT而不混用温度',async({page})=>{
+ const {state}=await openCompositionalTemperature(page),panel=page.getByRole('region',{name:'E300组分临界压力编辑',exact:true});
+ await selectPcritComponent(page,panel);await expect(panel).toContainText('667.7817 psia');await panel.getByRole('spinbutton').fill('700');
+ await panel.getByRole('button',{name:'修改组分临界压力并真实重算'}).click();await expect.poll(()=>state.createPayloads.length).toBe(1);
+ expect(state.createPayloads[0].payload.parameters).toMatchObject({schemaVersion:'eclipse-compositional-fluid-property-parameters/1',field:'PCRIT',unit:'psia',targetValue:700,baselineRunId:9971});
+});
+test('E300 TCRIT version19原历史仍可沿保存点续算',async({page})=>{
+ const {f,state,panel}=await openCompositionalForecast(page,'history',f=>{f.inspection=compositionalTemperatureFixture().inspection});
+ await expect(panel.getByRole('button',{name:'沿原计划续算',exact:true})).toBeEnabled();await panel.getByRole('button',{name:'沿原计划续算',exact:true}).click();
+ await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload.parameters).toEqual(f.inherited.parameters);
+});
+test('E300 TCRIT 缺失或错误温标不开放温度输入',async({page})=>{
+ const {state}=await openCompositionalTemperature(page,'baseline',f=>{f.inspection.compositionalTemperatureContext.records[2].unit='degF'});
+ await expect(page.getByRole('region',{name:'E300组分临界温度编辑',exact:true})).toHaveCount(0);expect(state.createPayloads).toHaveLength(0);
+});
+
+async function openCompositionalCriticalZ(page,selected='baseline',mutate=()=>{}){
+ const f=compositionalCriticalZFixture(),caps=availableCapabilities();caps.eclipse300={...caps.eclipse100};mutate(f);
+ const state=await installMockBackend(page,{eclipseModelKind:'eclipse_300',eclipseInspection:f.inspection,eclipseHistory:selected==='baseline'?[summary(f.baseline)]:[summary(f.property),summary(f.baseline)],runs:[f.baseline,f.property],capabilities:caps});
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');return {f,state};
+}
+async function selectZcritComponent(page,panel,name='C1 · #3'){
+ await panel.locator('.el-select').click();await page.getByRole('option',{name,exact:true}).click();
+}
+test('E300 ZCRIT 真实九组件选择C1绑定128行与第三组分提交0.3',async({page})=>{
+ const {f,state}=await openCompositionalCriticalZ(page),panel=page.getByRole('region',{name:'E300组分临界Z因子编辑',exact:true});
+ await expect(panel.getByLabel('E300九组分原始临界Z因子',{exact:true}).locator('tbody tr')).toHaveCount(9);await selectZcritComponent(page,panel);
+ await expect(panel).toContainText('0.28473 dimensionless');await expect(panel).toContainText('SPE3_GASCOND.DATA:128');
+ await panel.getByRole('spinbutton').fill('0.3');await panel.getByRole('button',{name:'修改组分临界Z因子并真实重算'}).click();
+ await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload).toEqual({study:null,runType:'eclipse',parameters:f.parameters});expect(state.unexpectedRequests).toEqual([]);
+});
+test('E300 ZCRIT 原值零负数及越界值不会创建运行',async({page})=>{
+ const {state}=await openCompositionalCriticalZ(page),panel=page.getByRole('region',{name:'E300组分临界Z因子编辑',exact:true});await selectZcritComponent(page,panel);
+ for(const value of ['0.28473','0','-1','100000001']){await panel.getByRole('spinbutton').fill(value);await panel.getByRole('button',{name:'修改组分临界Z因子并真实重算'}).click();await expect(panel).toContainText('新临界Z因子须大于0');}
+ expect(state.createPayloads).toHaveLength(0);
+});
+test('E300 ZCRIT 切换组件清空临界Z因子草案与原值',async({page})=>{
+ const {state}=await openCompositionalCriticalZ(page),panel=page.getByRole('region',{name:'E300组分临界Z因子编辑',exact:true});await selectZcritComponent(page,panel);await panel.getByRole('spinbutton').fill('0.3');
+ await selectZcritComponent(page,panel,'C2 · #4');await expect(panel.getByRole('spinbutton')).toHaveValue('');await expect(panel).toContainText('0.28463 dimensionless');expect(state.createPayloads).toHaveLength(0);
+});
+test('E300 ZCRIT 切换模型清空组件与输入值',async({page})=>{
+ const {state}=await openCompositionalCriticalZ(page),panel=page.getByRole('region',{name:'E300组分临界Z因子编辑',exact:true});await selectZcritComponent(page,panel);await panel.getByRole('spinbutton').fill('0.3');
+ await activateModel(page,'井筒演示模型');await expect(panel).toHaveCount(0);await activateModel(page,'ECLIPSE演示模型');await expect(panel.getByRole('spinbutton')).toHaveValue('');
+ await expect(panel.getByRole('button',{name:'修改组分临界Z因子并真实重算'})).toBeDisabled();expect(state.createPayloads).toHaveLength(0);
+});
+test('E300 ZCRIT 原生油量压力和重复列完整展示且刷新恢复',async({page})=>{
+ const {state}=await openCompositionalCriticalZ(page,'property'),panel=page.getByRole('region',{name:'E300组分物性方案验收',exact:true});
+ await expect(panel).toContainText('组分临界Z因子已修改，原生结果与基线按列号对齐');await expect(panel).toContainText('完整330条原始曲线保留');
+ const table=panel.getByLabel('E300组分物性实际响应',{exact:true});await expect(table.locator('tbody tr')).toHaveCount(7);await expect(table.getByRole('cell',{name:'FOPT',exact:true})).toHaveCount(2);
+ await expect(table).toContainText('2594075');await expect(table).toContainText('472.75');await expect(table).toContainText('1030.931884765625');
+ await page.reload();await activateModel(page,'ECLIPSE演示模型');await expect(panel).toContainText('原生结果与基线按列号对齐');expect(state.unexpectedRequests).toEqual([]);
+});
+test('E300 ZCRIT 外版本基线不形成物性核准结论',async({page})=>{
+ await openCompositionalCriticalZ(page,'property',f=>{f.baseline.modelVersionId=999});const panel=page.getByRole('region',{name:'E300组分物性方案验收',exact:true});
+ await expect(panel).toContainText('组分物性方案的基线来源或完整结果核对未通过');await expect(panel.getByLabel('E300组分物性实际响应',{exact:true})).toHaveCount(0);
+});
+test('E300 ZCRIT 部分成功不冒充完整物性方案通过',async({page})=>{
+ await openCompositionalCriticalZ(page,'property',f=>{f.property.status='PARTIAL_SUCCEEDED';f.property.resultContract='VALID_PARTIAL';f.property.result.resultContract='VALID_PARTIAL';f.property.result.eclEnd.problems=1});
+ await expect(page.getByRole('region',{name:'E300组分物性方案验收',exact:true})).toContainText('部分成功，不能判定完整组分物性方案通过');
+});
+test('E300 ZCRIT 错误油累计单位无法核对',async({page})=>{
+ await openCompositionalCriticalZ(page,'property',f=>{f.property.result.summary.series.find(s=>s.keyword==='FOPT'&&s.objectName===null).unit='SM3'});
+ await expect(page.getByRole('region',{name:'E300组分物性方案验收',exact:true})).toContainText('缺少同源、同单位且按独立列号匹配');
+});
+test('E300 ZCRIT 结果缺末时段不能宣称完整对比',async({page})=>{
+ await openCompositionalCriticalZ(page,'property',f=>{f.property.result.summary.series.forEach(s=>s.points.pop())});
+ await expect(page.getByRole('region',{name:'E300组分物性方案验收',exact:true})).toContainText('结果未覆盖原基线全时段');
+});
+test('E300 ZCRIT 迟到基线不能恢复旧模型的物性结果',async({page})=>{
+ const f=compositionalCriticalZFixture(),caps=availableCapabilities();caps.eclipse300={...caps.eclipse100};
+ const state=await installMockBackend(page,{eclipseModelKind:'eclipse_300',eclipseInspection:f.inspection,eclipseHistory:[summary(f.property)],runs:[f.baseline,f.property],capabilities:caps});state.heldRunId=f.baseline.id;
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');await expect.poll(()=>typeof state.releaseHeldRun).toBe('function');await activateModel(page,'井筒演示模型');state.releaseHeldRun();
+ await expect(page.getByRole('region',{name:'E300组分物性方案验收',exact:true})).toHaveCount(0);
+});
+for(const kind of ['gas','pressure','reinjection','sales','injection-pressure'])test(`E300 ZCRIT version20仍可提交原${kind}独立方案`,async({page})=>{
+ const {state}=await openCompositionalCriticalZ(page);
+ const setting={gas:['E300产气目标编辑','4500','修改产气目标并真实重算','eclipse-compositional-production-parameters/1'],pressure:['E300生产BHP下限编辑','1500','修改生产BHP下限并真实重算','eclipse-compositional-pressure-parameters/1'],reinjection:['E300可用气回注比例编辑','0.5','修改回注比例并真实重算','eclipse-compositional-reinjection-parameters/1'],sales:['E300固定销售目标编辑','3000','修改销售目标并真实重算','eclipse-compositional-gas-sales-parameters/1'],'injection-pressure':['E300注气BHP上限编辑','3550','修改注气BHP上限并真实重算','eclipse-compositional-injection-pressure-parameters/1']}[kind];
+ const panel=page.getByRole('region',{name:setting[0],exact:true});if(['gas','pressure'].includes(kind)){await panel.locator('.el-select').click();await page.getByRole('option',{name:'P',exact:true}).click();}
+ await panel.getByRole('spinbutton').fill(setting[1]);await panel.getByRole('button',{name:setting[2]}).click();await expect.poll(()=>state.createPayloads.length).toBe(1);
+ expect(state.createPayloads[0].payload.parameters.schemaVersion).toBe(setting[3]);expect(state.createPayloads[0].payload.parameters.baselineRunId).toBe(9981);expect(state.unexpectedRequests).toEqual([]);
+});
+
+
+test('E300 ZCRIT version20仍可独立提交PCRIT而不混用Z因子',async({page})=>{
+ const {state}=await openCompositionalCriticalZ(page),panel=page.getByRole('region',{name:'E300组分临界压力编辑',exact:true});
+ await selectPcritComponent(page,panel);await expect(panel).toContainText('667.7817 psia');await panel.getByRole('spinbutton').fill('700');
+ await panel.getByRole('button',{name:'修改组分临界压力并真实重算'}).click();await expect.poll(()=>state.createPayloads.length).toBe(1);
+ expect(state.createPayloads[0].payload.parameters).toMatchObject({schemaVersion:'eclipse-compositional-fluid-property-parameters/1',field:'PCRIT',unit:'psia',targetValue:700,baselineRunId:9981});
+});
+test('E300 ZCRIT version20原历史仍可沿保存点续算',async({page})=>{
+ const {f,state,panel}=await openCompositionalForecast(page,'history',f=>{f.inspection=compositionalCriticalZFixture().inspection});
+ await expect(panel.getByRole('button',{name:'沿原计划续算',exact:true})).toBeEnabled();await panel.getByRole('button',{name:'沿原计划续算',exact:true}).click();
+ await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload.parameters).toEqual(f.inherited.parameters);
+});
+test('E300 ZCRIT 缺失或错误单位不开放Z因子输入',async({page})=>{
+ const {state}=await openCompositionalCriticalZ(page,'baseline',f=>{f.inspection.compositionalTemperatureContext.records[2].unit='degF'});
+ await expect(page.getByRole('region',{name:'E300组分临界Z因子编辑',exact:true})).toHaveCount(0);expect(state.createPayloads).toHaveLength(0);
+});
+
+async function openCompositionalAcentricFactor(page,selected='baseline',mutate=()=>{}){
+ const f=compositionalAcentricFactorFixture(),caps=availableCapabilities();caps.eclipse300={...caps.eclipse100};mutate(f);
+ const state=await installMockBackend(page,{eclipseModelKind:'eclipse_300',eclipseInspection:f.inspection,eclipseHistory:selected==='baseline'?[summary(f.baseline)]:[summary(f.property),summary(f.baseline)],runs:[f.baseline,f.property],capabilities:caps});
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');return {f,state};
+}
+async function selectAcfComponent(page,panel,name='C1 · #3'){
+ await panel.locator('.el-select').click();await page.getByRole('option',{name,exact:true}).click();
+}
+test('E300 ACF 真实九组件选择C1绑定134行与第三组分提交0.03',async({page})=>{
+ const {f,state}=await openCompositionalAcentricFactor(page),panel=page.getByRole('region',{name:'E300组分偏心因子编辑',exact:true});
+ await expect(panel.getByLabel('E300九组分原始偏心因子',{exact:true}).locator('tbody tr')).toHaveCount(9);await selectAcfComponent(page,panel);
+ await expect(panel).toContainText('0.013 dimensionless');await expect(panel).toContainText('SPE3_GASCOND.DATA:134');
+ await panel.getByRole('spinbutton').fill('0.03');await panel.getByRole('button',{name:'修改组分偏心因子并真实重算'}).click();
+ await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload).toEqual({study:null,runType:'eclipse',parameters:f.parameters});expect(state.unexpectedRequests).toEqual([]);
+});
+test('E300 ACF 原值及正负越界值不会创建运行',async({page})=>{
+ const {state}=await openCompositionalAcentricFactor(page),panel=page.getByRole('region',{name:'E300组分偏心因子编辑',exact:true});await selectAcfComponent(page,panel);
+ for(const value of ['0.013','100000001','-100000001']){await panel.getByRole('spinbutton').fill(value);await panel.getByRole('button',{name:'修改组分偏心因子并真实重算'}).click();await expect(panel).toContainText('新偏心因子须为有限数值');}
+ expect(state.createPayloads).toHaveLength(0);
+});
+test('E300 ACF 切换组件清空偏心因子草案与原值',async({page})=>{
+ const {state}=await openCompositionalAcentricFactor(page),panel=page.getByRole('region',{name:'E300组分偏心因子编辑',exact:true});await selectAcfComponent(page,panel);await panel.getByRole('spinbutton').fill('0.03');
+ await selectAcfComponent(page,panel,'C2 · #4');await expect(panel.getByRole('spinbutton')).toHaveValue('');await expect(panel).toContainText('0.0986 dimensionless');expect(state.createPayloads).toHaveLength(0);
+});
+test('E300 ACF 切换模型清空组件与输入值',async({page})=>{
+ const {state}=await openCompositionalAcentricFactor(page),panel=page.getByRole('region',{name:'E300组分偏心因子编辑',exact:true});await selectAcfComponent(page,panel);await panel.getByRole('spinbutton').fill('0.03');
+ await activateModel(page,'井筒演示模型');await expect(panel).toHaveCount(0);await activateModel(page,'ECLIPSE演示模型');await expect(panel.getByRole('spinbutton')).toHaveValue('');
+ await expect(panel.getByRole('button',{name:'修改组分偏心因子并真实重算'})).toBeDisabled();expect(state.createPayloads).toHaveLength(0);
+});
+test('E300 ACF 原生油量压力和重复列完整展示且刷新恢复',async({page})=>{
+ const {state}=await openCompositionalAcentricFactor(page,'property'),panel=page.getByRole('region',{name:'E300组分物性方案验收',exact:true});
+ await expect(panel).toContainText('组分偏心因子已修改，原生结果与基线按列号对齐');await expect(panel).toContainText('完整330条原始曲线保留');
+ const table=panel.getByLabel('E300组分物性实际响应',{exact:true});await expect(table.locator('tbody tr')).toHaveCount(7);await expect(table.getByRole('cell',{name:'FOPT',exact:true})).toHaveCount(2);
+ await expect(table).toContainText('2514726.75');await expect(table).toContainText('-78875.5');await expect(table).toContainText('1011.1925659179688');
+ await page.reload();await activateModel(page,'ECLIPSE演示模型');await expect(panel).toContainText('原生结果与基线按列号对齐');expect(state.unexpectedRequests).toEqual([]);
+});
+test('E300 ACF 外版本基线不形成物性核准结论',async({page})=>{
+ await openCompositionalAcentricFactor(page,'property',f=>{f.baseline.modelVersionId=999});const panel=page.getByRole('region',{name:'E300组分物性方案验收',exact:true});
+ await expect(panel).toContainText('组分物性方案的基线来源或完整结果核对未通过');await expect(panel.getByLabel('E300组分物性实际响应',{exact:true})).toHaveCount(0);
+});
+test('E300 ACF 部分成功不冒充完整物性方案通过',async({page})=>{
+ await openCompositionalAcentricFactor(page,'property',f=>{f.property.status='PARTIAL_SUCCEEDED';f.property.resultContract='VALID_PARTIAL';f.property.result.resultContract='VALID_PARTIAL';f.property.result.eclEnd.problems=1});
+ await expect(page.getByRole('region',{name:'E300组分物性方案验收',exact:true})).toContainText('部分成功，不能判定完整组分物性方案通过');
+});
+test('E300 ACF 错误油累计单位无法核对',async({page})=>{
+ await openCompositionalAcentricFactor(page,'property',f=>{f.property.result.summary.series.find(s=>s.keyword==='FOPT'&&s.objectName===null).unit='SM3'});
+ await expect(page.getByRole('region',{name:'E300组分物性方案验收',exact:true})).toContainText('缺少同源、同单位且按独立列号匹配');
+});
+test('E300 ACF 结果缺末时段不能宣称完整对比',async({page})=>{
+ await openCompositionalAcentricFactor(page,'property',f=>{f.property.result.summary.series.forEach(s=>s.points.pop())});
+ await expect(page.getByRole('region',{name:'E300组分物性方案验收',exact:true})).toContainText('结果未覆盖原基线全时段');
+});
+test('E300 ACF 迟到基线不能恢复旧模型的物性结果',async({page})=>{
+ const f=compositionalAcentricFactorFixture(),caps=availableCapabilities();caps.eclipse300={...caps.eclipse100};
+ const state=await installMockBackend(page,{eclipseModelKind:'eclipse_300',eclipseInspection:f.inspection,eclipseHistory:[summary(f.property)],runs:[f.baseline,f.property],capabilities:caps});state.heldRunId=f.baseline.id;
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');await expect.poll(()=>typeof state.releaseHeldRun).toBe('function');await activateModel(page,'井筒演示模型');state.releaseHeldRun();
+ await expect(page.getByRole('region',{name:'E300组分物性方案验收',exact:true})).toHaveCount(0);
+});
+for(const kind of ['gas','pressure','reinjection','sales','injection-pressure'])test(`E300 ACF version21仍可提交原${kind}独立方案`,async({page})=>{
+ const {state}=await openCompositionalAcentricFactor(page);
+ const setting={gas:['E300产气目标编辑','4500','修改产气目标并真实重算','eclipse-compositional-production-parameters/1'],pressure:['E300生产BHP下限编辑','1500','修改生产BHP下限并真实重算','eclipse-compositional-pressure-parameters/1'],reinjection:['E300可用气回注比例编辑','0.5','修改回注比例并真实重算','eclipse-compositional-reinjection-parameters/1'],sales:['E300固定销售目标编辑','3000','修改销售目标并真实重算','eclipse-compositional-gas-sales-parameters/1'],'injection-pressure':['E300注气BHP上限编辑','3550','修改注气BHP上限并真实重算','eclipse-compositional-injection-pressure-parameters/1']}[kind];
+ const panel=page.getByRole('region',{name:setting[0],exact:true});if(['gas','pressure'].includes(kind)){await panel.locator('.el-select').click();await page.getByRole('option',{name:'P',exact:true}).click();}
+ await panel.getByRole('spinbutton').fill(setting[1]);await panel.getByRole('button',{name:setting[2]}).click();await expect.poll(()=>state.createPayloads.length).toBe(1);
+ expect(state.createPayloads[0].payload.parameters.schemaVersion).toBe(setting[3]);expect(state.createPayloads[0].payload.parameters.baselineRunId).toBe(9991);expect(state.unexpectedRequests).toEqual([]);
+});
+
+
+test('E300 ACF version21仍可独立提交PCRIT而不混用偏心因子',async({page})=>{
+ const {state}=await openCompositionalAcentricFactor(page),panel=page.getByRole('region',{name:'E300组分临界压力编辑',exact:true});
+ await selectPcritComponent(page,panel);await expect(panel).toContainText('667.7817 psia');await panel.getByRole('spinbutton').fill('700');
+ await panel.getByRole('button',{name:'修改组分临界压力并真实重算'}).click();await expect.poll(()=>state.createPayloads.length).toBe(1);
+ expect(state.createPayloads[0].payload.parameters).toMatchObject({schemaVersion:'eclipse-compositional-fluid-property-parameters/1',field:'PCRIT',unit:'psia',targetValue:700,baselineRunId:9991});
+});
+test('E300 ACF version21原历史仍可沿保存点续算',async({page})=>{
+ const {f,state,panel}=await openCompositionalForecast(page,'history',f=>{f.inspection=compositionalAcentricFactorFixture().inspection});
+ await expect(panel.getByRole('button',{name:'沿原计划续算',exact:true})).toBeEnabled();await panel.getByRole('button',{name:'沿原计划续算',exact:true}).click();
+ await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload.parameters).toEqual(f.inherited.parameters);
+});
+test('E300 ACF 缺失或错误单位不开放偏心因子输入',async({page})=>{
+ const {state}=await openCompositionalAcentricFactor(page,'baseline',f=>{f.inspection.compositionalTemperatureContext.records[2].unit='degF'});
+ await expect(page.getByRole('region',{name:'E300组分偏心因子编辑',exact:true})).toHaveCount(0);expect(state.createPayloads).toHaveLength(0);
+});
+
+for(const v of ['0','-0.01'])test(`E300 ACF ${v}有效并按数字提交`,async({page})=>{
+ const {state}=await openCompositionalAcentricFactor(page),panel=page.getByRole('region',{name:'E300组分偏心因子编辑',exact:true});
+ await selectAcfComponent(page,panel);await panel.getByRole('spinbutton').fill(v);await panel.getByRole('button',{name:'修改组分偏心因子并真实重算'}).click();
+ await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload.parameters).toMatchObject({field:'ACF',unit:'dimensionless',targetValue:Number(v)});
+})
+for(const [field,label,value,unit] of [['TCRIT','临界温度','350','degR'],['ZCRIT','临界Z因子','0.3','dimensionless']])test(`E300 ACF version21仍可独立提交${field}`,async({page})=>{
+ const {state}=await openCompositionalAcentricFactor(page),panel=page.getByRole('region',{name:`E300组分${label}编辑`,exact:true});
+ await selectAcfComponent(page,panel);await panel.getByRole('spinbutton').fill(value);await panel.getByRole('button',{name:`修改组分${label}并真实重算`}).click();
+ await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload.parameters).toMatchObject({field,unit,targetValue:Number(value)});
+})
+
+async function openEosProperties(page,field='MW',selected='baseline',mutate=()=>{}){
+ const f=compositionalEosPropertyFixture(field),caps=availableCapabilities();caps.eclipse300={...caps.eclipse100};mutate(f)
+ const state=await installMockBackend(page,{eclipseModelKind:'eclipse_300',eclipseInspection:f.inspection,eclipseHistory:selected==='baseline'?[summary(f.baseline)]:[summary(f.property),summary(f.baseline)],runs:[f.baseline,f.property],capabilities:caps})
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');return {f,state,panel:page.getByRole('region',{name:`E300组分${f.c.name}编辑`,exact:true})}
+}
+for(const c of eosPropertyCases){
+ test(`E300 EOS ${c.field}选择C1提交精确物性和原值单位`,async({page})=>{
+  const {f,state,panel}=await openEosProperties(page,c.field);await expect(panel.getByLabel(`E300九组分原始${c.name}`,{exact:true}).locator('tbody tr')).toHaveCount(9)
+  await selectAcfComponent(page,panel);await expect(panel).toContainText(`${c.original} ${c.unit}`);await expect(panel).toContainText(`SPE3_GASCOND.DATA:${c.line}`)
+  await panel.getByRole('spinbutton').fill(String(c.target));await panel.getByRole('button',{name:`修改组分${c.name}并真实重算`}).click();await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload.parameters).toEqual(f.parameters);expect(state.unexpectedRequests).toEqual([])
+ })
+ test(`E300 EOS ${c.field}拒绝零负数原值并不创建计算`,async({page})=>{
+  const {state,panel}=await openEosProperties(page,c.field);await selectAcfComponent(page,panel)
+  for(const value of ['0','-1',String(c.original)]){await panel.getByRole('spinbutton').fill(value);await panel.getByRole('button',{name:`修改组分${c.name}并真实重算`}).click();await expect(panel).toContainText(`新${c.name}须大于0`)}expect(state.createPayloads).toHaveLength(0)
+ })
+ test(`E300 EOS ${c.field}真实产油差值与刷新恢复`,async({page})=>{
+  await openEosProperties(page,c.field,'property');const panel=page.getByRole('region',{name:'E300组分物性方案验收',exact:true});await expect(panel).toContainText(`组分${c.name}已修改，原生结果与基线按列号对齐`)
+  const table=panel.getByLabel('E300组分物性实际响应',{exact:true});await expect(table.locator('tbody tr')).toHaveCount(7);await expect(table.getByRole('cell',{name:'FOPT',exact:true})).toHaveCount(2);await expect(table).toContainText(String(c.oil));await expect(table).toContainText(String(c.difference))
+  await page.reload();await activateModel(page,'ECLIPSE演示模型');await expect(panel).toContainText(`${c.field} · 第3组分`)
+ })
+ test(`E300 EOS ${c.field}切换组分及模型清除草案`,async({page})=>{
+  const {panel}=await openEosProperties(page,c.field);await selectAcfComponent(page,panel);await panel.getByRole('spinbutton').fill(String(c.target));await selectAcfComponent(page,panel,'C2 · #4');await expect(panel.getByRole('spinbutton')).toHaveValue('')
+  await activateModel(page,'井筒演示模型');await activateModel(page,'ECLIPSE演示模型');await expect(panel.getByRole('spinbutton')).toHaveValue('');await expect(panel.getByRole('button',{name:`修改组分${c.name}并真实重算`})).toBeDisabled()
+ })
+}
+for(const [field,name,value] of [['PCRIT','临界压力','700'],['TCRIT','临界温度','350'],['ZCRIT','临界Z因子','0.3'],['ACF','偏心因子','-0.01']])test(`E300 EOS version22保留原${field}独立输入`,async({page})=>{
+ const {state}=await openEosProperties(page),panel=page.getByRole('region',{name:`E300组分${name}编辑`,exact:true});await selectAcfComponent(page,panel);await panel.getByRole('spinbutton').fill(value);await panel.getByRole('button',{name:`修改组分${name}并真实重算`}).click();await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload.parameters).toMatchObject({field,targetValue:Number(value)})
+})
+test('E300 EOS version22保留完整历史保存点续算',async({page})=>{
+ const {f,state,panel}=await openCompositionalForecast(page,'history',f=>{f.inspection=compositionalEosPropertyFixture().inspection});await expect(panel.getByRole('button',{name:'沿原计划续算',exact:true})).toBeEnabled();await panel.getByRole('button',{name:'沿原计划续算',exact:true}).click();await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload.parameters).toEqual(f.inherited.parameters)
+})
+test('E300 EOS缺失或错误单位的物性不开放编辑',async({page})=>{
+ const {state,panel}=await openEosProperties(page,'MW','baseline',f=>{f.inspection.compositionalEosPropertyContexts[0].records[2].unit='dimensionless'});await expect(panel).toHaveCount(0);expect(state.createPayloads).toHaveLength(0)
+})
+
+async function openCompositionalBatch(page,{complete=false,lose=false,reject=false,mutate=()=>{}}={}){
+ const f=compositionalBatchFixture();mutate(f);const record={id:f.batch.id,modelVersionId:f.batch.modelVersionId,baselineRunId:f.baseline.id,name:f.batch.name,status:f.batch.status,caseCount:4},records=complete?[record]:[],submitted=[]
+ const caps=availableCapabilities();caps.eclipse300={...caps.eclipse100}
+ const state=await installMockBackend(page,{eclipseModelKind:'eclipse_300',eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline,...f.batch.members.map(m=>m.run)],eclipseBatches:records,capabilities:caps})
+ await page.route('**/api/software-integration/**',async route=>{
+  const path=new URL(route.request().url()).pathname,method=route.request().method()
+  if(path.endsWith('/model-versions/201/eclipse-batches')&&method==='POST'){
+   submitted.push(route.request().postDataJSON());if(reject)return route.fulfill({status:400,json:{code:400,message:'第二项来源核对失败'}})
+   if(!records.length)records.push(record);if(lose&&submitted.length===1)return route.abort('failed');return route.fulfill({status:201,json:{code:201,data:f.batch}})
+  }
+  if(path.endsWith('/eclipse-batches/'+f.batch.id)&&method==='GET')return route.fulfill({json:response(f.batch)})
+  return route.fallback()
+ })
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');return {f,submitted,state,panel:page.getByRole('region',{name:'ECLIPSE 批量方案',exact:true})}
+}
+async function addCompositionalBatchCase(page,panel,field,name,value,component='C1 · #3'){
+ const labels={PCRIT:'临界压力',TCRIT:'临界温度',ZCRIT:'临界Z因子',ACF:'偏心因子',MW:'分子量',OMEGAA:'Ωa系数',OMEGAB:'Ωb系数'}
+ await panel.locator('.el-select').first().locator('.el-select__placeholder').click();await page.getByRole('option',{name:`组分${labels[field]} · ${field}`,exact:true}).click()
+ await panel.locator('.el-select').nth(1).locator('.el-select__placeholder').click();await page.getByRole('option',{name:component,exact:true}).click()
+ await panel.getByRole('textbox',{name:'批量方案名称',exact:true}).fill(name);await panel.getByRole('spinbutton',{name:'批量方案数值',exact:true}).fill(value);await panel.getByRole('button',{name:'加入方案清单',exact:true}).click()
+}
+async function draftCompositionalBatch(page,panel){
+ await panel.getByRole('textbox',{name:'批量任务名称',exact:true}).fill('组分物性敏感性')
+ for(const [field,value] of [['ACF','0.03'],['MW','17'],['OMEGAA','0.54'],['OMEGAB','0.078']])await addCompositionalBatchCase(page,panel,field,'C1 '+field,value)
+}
+test('E300 批量方案 四项独立物性精确提交且保留原始列号',async({page})=>{
+ const {f,state,panel,submitted}=await openCompositionalBatch(page);await draftCompositionalBatch(page,panel);await expect(panel.getByLabel('待计算方案清单',{exact:true}).locator('tbody tr')).toHaveCount(4)
+ await panel.getByRole('button',{name:'运行全部方案',exact:true}).click();await expect.poll(()=>submitted.length).toBe(1);expect(submitted[0].cases).toEqual(f.cases);expect(submitted[0].baselineRunId).toBe(f.baseline.id)
+ await expect(panel.getByLabel('批量方案结果对比',{exact:true}).locator('tbody tr')).toHaveCount(28);await expect(panel).toContainText('原始列（从1计）');expect(state.unexpectedRequests).toEqual([])
+})
+test('E300 批量方案 重复参数不追加到清单也不创建计算',async({page})=>{
+ const {panel,submitted}=await openCompositionalBatch(page);await draftCompositionalBatch(page,panel);await addCompositionalBatchCase(page,panel,'ACF','换名的同方案','0.03');await expect(panel).toContainText('方案名称或计算参数重复');await expect(panel.getByLabel('待计算方案清单',{exact:true}).locator('tbody tr')).toHaveCount(4);expect(submitted).toHaveLength(0)
+})
+test('E300 批量方案 ACF零值可加入而MW零值拒绝',async({page})=>{
+ const {panel,submitted}=await openCompositionalBatch(page);await addCompositionalBatchCase(page,panel,'ACF','ACF零值','0');await expect(panel.getByLabel('待计算方案清单',{exact:true}).locator('tbody tr')).toHaveCount(1)
+ await addCompositionalBatchCase(page,panel,'MW','MW无效零值','0');await expect(panel).toContainText('ACF允许零和负值');await expect(panel.getByLabel('待计算方案清单',{exact:true}).locator('tbody tr')).toHaveCount(1);expect(submitted).toHaveLength(0)
+})
+test('E300 批量方案 切换组分与模型清空旧输入和草案',async({page})=>{
+ const {panel,submitted}=await openCompositionalBatch(page);await addCompositionalBatchCase(page,panel,'MW','C1 MW','17');await panel.getByRole('spinbutton',{name:'批量方案数值',exact:true}).fill('18')
+ await panel.locator('.el-select').nth(1).locator('.el-select__placeholder').click();await page.getByRole('option',{name:'C2 · #4',exact:true}).click();await expect(panel.getByRole('spinbutton',{name:'批量方案数值',exact:true})).toHaveValue('');await expect(panel).toContainText('30.07 lb/lb-M')
+ await activateModel(page,'井筒演示模型');await activateModel(page,'ECLIPSE演示模型');await expect(panel.getByLabel('待计算方案清单',{exact:true}).locator('tbody tr')).toHaveCount(0);expect(submitted).toHaveLength(0)
+})
+test('E300 批量方案 四个真实累计量及重复FOPT刷新恢复',async({page})=>{
+ const {panel}=await openCompositionalBatch(page,{complete:true});const table=panel.getByLabel('批量方案结果对比',{exact:true});await expect(table.locator('tbody tr')).toHaveCount(28);await expect(table.getByRole('cell',{name:'FOPT',exact:true})).toHaveCount(8)
+ for(const value of ['2514726.75','2591593','2624349.5','2586853.75'])await expect(table).toContainText(value)
+ await page.reload();await activateModel(page,'ECLIPSE演示模型');await expect(table.locator('tbody tr')).toHaveCount(28);await expect(table).toContainText('2514726.75')
+})
+test('E300 批量方案 失败和部分成功成员不补成成功曲线',async({page})=>{
+ const {panel}=await openCompositionalBatch(page,{complete:true,mutate:f=>{f.batch.status='PARTIAL_SUCCEEDED';f.batch.members[0].run.status='FAILED';f.batch.members[1].run.status='PARTIAL_SUCCEEDED';f.batch.members[1].run.resultContract='VALID_PARTIAL'}})
+ const table=panel.getByLabel('批量方案结果对比',{exact:true});await expect(table.locator('tbody tr')).toHaveCount(14);await expect(table).not.toContainText('2514726.75');await expect(table).not.toContainText('2591593');await expect(panel).toContainText('部分完成')
+})
+test('E300 批量方案 查看子运行进入对应物性结果与下载入口',async({page})=>{
+ const {panel,state}=await openCompositionalBatch(page,{complete:true});await panel.getByLabel('批量计算进度',{exact:true}).locator('tbody tr').first().getByRole('button',{name:'查看运行与下载模型',exact:true}).click();await expect(page.getByRole('region',{name:'E300组分物性方案验收',exact:true})).toContainText('ACF · 第3组分');expect(state.unexpectedRequests).toEqual([])
+})
+test('E300 批量方案 丢失响应后刷新重试沿用原提交标识',async({page})=>{
+ const {panel,submitted}=await openCompositionalBatch(page,{lose:true});await draftCompositionalBatch(page,panel);await panel.getByRole('button',{name:'运行全部方案',exact:true}).click();await expect(panel).toContainText('上次提交尚未确认')
+ await page.reload();await activateModel(page,'ECLIPSE演示模型');await panel.getByRole('button',{name:'重试原批量提交',exact:true}).click();await expect.poll(()=>submitted.length).toBe(2);expect(submitted[1]).toEqual(submitted[0]);await expect(panel).not.toContainText('上次提交尚未确认')
+})
+test('E300 批量方案 拒绝请求不显示成功批次并允许修正',async({page})=>{
+ const {panel,submitted}=await openCompositionalBatch(page,{reject:true});await draftCompositionalBatch(page,panel);await panel.getByRole('button',{name:'运行全部方案',exact:true}).click();await expect.poll(()=>submitted.length).toBe(1);await expect(panel).not.toContainText('上次提交尚未确认');await expect(panel.getByLabel('批量计算进度',{exact:true})).toHaveCount(0);await expect(panel.getByRole('button',{name:'运行全部方案',exact:true})).toBeEnabled()
+})
+
+async function openCompositionalHistory(page,{existing=true,reject=false,mutate=()=>{}}={}){
+ const f=compositionalHistoryFixture();mutate(f);f.dataset.metadata.sourceSha256=createHash('sha256').update(f.dataset.csv).digest('hex');const records=existing?[f.dataset.metadata]:[],submitted=[]
+ const caps=availableCapabilities();caps.eclipse300={...caps.eclipse100}
+ const state=await installMockBackend(page,{eclipseModelKind:'eclipse_300',eclipseInspection:f.inspection,eclipseHistory:[summary(f.baseline)],runs:[f.baseline,...f.batch.members.map(m=>m.run)],capabilities:caps,eclipseHistoryDatasets:records,eclipseBatches:[{id:f.batch.id,modelVersionId:f.baseline.modelVersionId,baselineRunId:f.baseline.id,name:f.batch.name,status:f.batch.status,caseCount:4}]})
+ await page.route('**/api/software-integration/**',async route=>{
+  const url=new URL(route.request().url()),path=url.pathname,method=route.request().method()
+  if(path.endsWith('/model-versions/201/eclipse-history-datasets')&&method==='POST'){submitted.push(route.request().postDataJSON());if(reject)return route.fulfill({status:400,json:{code:400,message:'原始列号与指标不一致'}});if(!records.length)records.push(f.dataset.metadata);return route.fulfill({status:201,json:{code:201,data:f.dataset}})}
+  if(path.endsWith('/eclipse-history-datasets/'+f.dataset.metadata.id)&&method==='GET')return route.fulfill({json:response(f.dataset)})
+  if(path.endsWith('/eclipse-history-datasets/'+f.dataset.metadata.id+'/comparison')){const id=Number(url.searchParams.get('runId')),run=[f.baseline,...f.batch.members.map(m=>m.run)].find(r=>r.id===id);return route.fulfill({json:response(f.evaluate(run))})}
+  if(path.endsWith('/eclipse-batches/'+f.batch.id)&&method==='GET')return route.fulfill({json:response(f.batch)})
+  return route.fallback()
+ })
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');return{f,submitted,state,panel:page.getByRole('region',{name:'ECLIPSE 历史实测校核',exact:true})}
+}
+test('E300 历史校核 原始列CSV精确导入并保留两条FOPT',async({page})=>{
+ const {f,panel,submitted,state}=await openCompositionalHistory(page,{existing:false});await panel.getByRole('textbox',{name:'实测数据名称',exact:true}).fill(f.dataset.metadata.name);await panel.getByLabel('历史实测 CSV 文件',{exact:true}).setInputFiles({name:f.dataset.metadata.sourceFile,mimeType:'text/csv',buffer:Buffer.from(f.dataset.csv)});await panel.getByRole('button',{name:'导入并校核',exact:true}).click();await expect.poll(()=>submitted.length).toBe(1);expect(submitted[0].csv).toBe(f.dataset.csv);expect(submitted[0].baselineRunId).toBe(f.baseline.id);const table=panel.getByLabel('历史拟合指标',{exact:true});await expect(table.locator('tbody tr')).toHaveCount(2);await expect(table.getByRole('cell',{name:'FOPT',exact:true})).toHaveCount(2);await expect(table).toContainText('原始列（从1计）');expect(state.unexpectedRequests).toEqual([])
+})
+test('E300 历史校核 原始列身份刷新后仍然保留',async({page})=>{
+ const {f,panel}=await openCompositionalHistory(page);await expect(panel.getByLabel('历史拟合指标',{exact:true}).locator('tbody tr')).toHaveCount(2);await page.reload();await activateModel(page,'ECLIPSE演示模型');await expect(panel.getByLabel('历史拟合指标',{exact:true}).locator('tbody tr')).toHaveCount(2);await expect(panel).toContainText('运行 #'+f.baseline.id)
+})
+test('E300 历史校核 批量排名按选中原始列分别计算',async({page})=>{
+ const {panel}=await openCompositionalHistory(page);const batch=panel.getByRole('region',{name:'ECLIPSE 批量历史校核',exact:true});await batch.getByRole('button',{name:'校核本批方案',exact:true}).click();await expect(batch).toContainText('按本指标 RMSE');await expect(batch).toContainText('原基线')
+})
+test('E300 历史校核 逐点下载保留列号和观察值',async({page},testInfo)=>{
+ const {panel}=await openCompositionalHistory(page);await expect(panel.getByLabel('历史拟合指标',{exact:true}).locator('tbody tr')).toHaveCount(2);const downloaded=page.waitForEvent('download');await panel.getByRole('button',{name:'导出逐点校核 CSV',exact:true}).click();const d=await downloaded,path=testInfo.outputPath('history-points.csv');await d.saveAs(path);const fs=await import('node:fs/promises');const csv=await fs.readFile(path,'utf8');expect(csv).toContain('原始列（从1计）');expect(csv.split('\r\n')).toHaveLength(5)
+})
+test('E300 历史校核 来源列错误不显示成功记录',async({page})=>{
+ const {f,panel,submitted}=await openCompositionalHistory(page,{existing:false,reject:true});await panel.getByRole('textbox',{name:'实测数据名称',exact:true}).fill('错误来源');await panel.getByLabel('历史实测 CSV 文件',{exact:true}).setInputFiles({name:'wrong.csv',mimeType:'text/csv',buffer:Buffer.from(f.dataset.csv)});await panel.getByRole('button',{name:'导入并校核',exact:true}).click();await expect.poll(()=>submitted.length).toBe(1);await expect(panel).toContainText('原始列号与指标不一致');await expect(panel.getByLabel('历史拟合指标',{exact:true})).toHaveCount(0)
+})
+
+async function openThermalStage(page,kind='official',name='baseline',mutate=()=>{}){
+ const f=thermalStageFixture(kind),caps=availableCapabilities();caps.eclipse300={...caps.eclipse100};mutate(f)
+ const runs=[f.baseline,f.rate,f.temperature],selected=f[name]
+ const state=await installMockBackend(page,{eclipseModelKind:'eclipse_300',eclipseInspection:f.inspection,eclipseHistory:name==='baseline'?[{...summary(f.baseline),parameters:f.baseline.parameters}]:[{...summary(selected),parameters:selected.parameters},{...summary(f.baseline),parameters:f.baseline.parameters}],runs,capabilities:caps})
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');return{f,state}
+}
+for(const [field,label,target,name] of [['SURFACE_INJECTION_RATE','地面注入目标','25','rate'],['INJECTION_TEMPERATURE','注入温度','400','temperature']])test(`E300 分阶段注汽 ${field}从原报告时刻精确提交`,async({page})=>{
+ const {f,state}=await openThermalStage(page),panel=page.getByRole('region',{name:'E300热采注汽参数编辑',exact:true});await panel.locator('.el-select').nth(0).click();await page.getByRole('option',{name:'I',exact:true}).click();await panel.locator('.el-select').nth(1).click();await page.getByRole('option',{name:label,exact:true}).click();await panel.locator('.el-select').nth(2).click();await expect(page.getByRole('option',{name:'第3650天报告后',exact:true})).toHaveCount(0);await page.getByRole('option',{name:'第1825天报告后',exact:true}).click();await panel.getByRole('spinbutton',{name:'E300热采注汽新值',exact:true}).fill(target);await panel.getByRole('button',{name:'修改注汽参数并真实重算',exact:true}).click();await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload.parameters).toEqual(f[name].parameters);expect(state.unexpectedRequests).toEqual([])
+})
+for(const kind of ['official','output'])for(const name of ['rate','temperature'])test(`E300 分阶段注汽 ${kind} ${name}展示前段核对与后段响应刷新恢复`,async({page})=>{
+ const {f,state}=await openThermalStage(page,kind,name),panel=page.getByRole('region',{name:'E300热采注汽方案验收',exact:true});await expect(panel).toContainText('第1825天报告后生效');await expect(panel).toContainText('与原基线一致');await expect(panel).toContainText('注汽输入已修改');await expect(panel.getByLabel('E300注汽方案实际响应明细',{exact:true})).toContainText('生效阶段');await expect(panel).toContainText(name==='rate'?'114062.5':'136875');await page.reload();await activateModel(page,'ECLIPSE演示模型');await expect(panel).toContainText('第1825天报告后生效');await expect(panel).toContainText('与原基线一致');expect(state.unexpectedRequests).toEqual([])
+})
+test('E300 分阶段注汽 切换报告时刻和模型清除旧输入',async({page})=>{
+ const {state}=await openThermalStage(page),panel=page.getByRole('region',{name:'E300热采注汽参数编辑',exact:true});await panel.locator('.el-select').nth(0).click();await page.getByRole('option',{name:'I',exact:true}).click();await panel.locator('.el-select').nth(1).click();await page.getByRole('option',{name:'地面注入目标',exact:true}).click();await panel.locator('.el-select').nth(2).click();await page.getByRole('option',{name:'第1825天报告后',exact:true}).click();await panel.getByRole('spinbutton').fill('25');await panel.locator('.el-select').nth(2).click();await page.getByRole('option',{name:'第2190天报告后',exact:true}).click();await expect(panel.getByRole('spinbutton')).toHaveValue('');await activateModel(page,'井筒演示模型');await activateModel(page,'ECLIPSE演示模型');await expect(panel.getByRole('spinbutton')).toHaveCount(0);expect(state.createPayloads).toHaveLength(0)
+})
+test('E300 分阶段注汽 前段原始物理值被改动不判验收成功',async({page})=>{
+ await openThermalStage(page,'official','rate',f=>{f.rate.result.summary.series.find(s=>s.keyword==='WOPT'&&s.objectName==='PNEAR').points[0].value+=1});const panel=page.getByRole('region',{name:'E300热采注汽方案验收',exact:true});await expect(panel).toContainText('未通过，请核对诊断');await expect(panel).not.toContainText('注汽输入已修改，实际井压与热损失响应已核对')
+})
+
+test('E300 分阶段注汽 历史记录显示生效时间与原目标',async({page})=>{
+ const {f}=await openThermalStage(page,'official','rate');await page.getByRole('tab',{name:'运行记录',exact:true}).click();const history=page.getByRole('tabpanel',{name:'运行记录',exact:true});await expect(history).toContainText('第1825天报告后');await expect(history).toContainText('37.5 → 25');await expect(history).toContainText('基线 #'+f.baseline.id)
+})
+
+
+async function openForecastBranchPair(page, fault=null){
+ const f=compositionalForecastFixture(),caps=availableCapabilities();caps.eclipse300={...caps.eclipse100};
+ const history=[f.lower,f.inherited,f.history].map(r=>({...summary(r),parameters:r.parameters}));
+ if(fault==='foreign')f.inherited.modelVersionId=202;
+ const state=await installMockBackend(page,{eclipseModelKind:'eclipse_300',eclipseInspection:f.inspection,eclipseHistory:history,runs:[f.history,f.inherited,f.lower],capabilities:caps,artifactPayloads:{[`${f.history.id}:${f.artifact.id}`]:f.catalogText}});
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');
+ const panel=page.getByRole('region',{name:'ECLIPSE保存点与预测分支看板',exact:true});await expect(panel).toHaveAttribute('data-ready','true');
+ return {f,state,panel};
+}
+test('E300 FORECAST BRANCH 同一保存点双方案对比及点击分支切换运行',async({page})=>{
+ const {state,panel}=await openForecastBranchPair(page);
+ await page.locator('.el-select').filter({has:page.getByRole('combobox',{name:'E300对比预测方案',exact:true})}).click();await page.getByRole('option',{name:'#9962 · 沿原计划续算',exact:true}).click();
+ await expect(panel).toHaveAttribute('data-other-id','9962');await expect(panel.getByLabel('保存点与预测增量指标')).toContainText('-96,350');
+ await panel.getByRole('button',{name:/预测 #9962 ·/}).click();await expect(panel).toHaveAttribute('data-run-id','9962');await expect(panel).toHaveAttribute('data-other-id','');expect(state.unexpectedRequests).toEqual([]);
+});
+test('E300 FORECAST BRANCH 对比摘要与实际模型版本不同不展示错误增量',async({page})=>{
+ const {state,panel}=await openForecastBranchPair(page,'foreign');
+ await page.locator('.el-select').filter({has:page.getByRole('combobox',{name:'E300对比预测方案',exact:true})}).click();await page.getByRole('option',{name:'#9962 · 沿原计划续算',exact:true}).click();
+ await expect(page.getByRole('region',{name:'E300历史保存点续算',exact:true})).toContainText('对比预测读取失败或来源已变化');await expect(panel).toHaveAttribute('data-other-id','');expect(state.unexpectedRequests).toEqual([]);
+});
+test('E300 FORECAST BRANCH 切换模型后迟到对比不能恢复旧预测看板',async({page})=>{
+ const {state,panel}=await openForecastBranchPair(page);state.heldRunId=9962;
+ await page.locator('.el-select').filter({has:page.getByRole('combobox',{name:'E300对比预测方案',exact:true})}).click();await page.getByRole('option',{name:'#9962 · 沿原计划续算',exact:true}).click();
+ await expect.poll(()=>typeof state.releaseHeldRun).toBe('function');await activateModel(page,'井筒演示模型');state.releaseHeldRun();await expect(panel).toHaveCount(0);expect(state.unexpectedRequests).toEqual([]);
+});
+
+import { thermalPlanFixture } from '../fixtures/eclipseThermalPlan.js'
+async function openThermalPlan(page, name='baseline', mutate=()=>{}) {
+ const f=thermalPlanFixture('output'),caps=availableCapabilities();caps.eclipse300={...caps.eclipse100};mutate(f);
+ const selected=name==='baseline'?f.baseline:f.plans[name],runs=[f.baseline,...Object.values(f.plans)];
+ const state=await installMockBackend(page,{eclipseModelKind:'eclipse_300',eclipseInspection:f.inspection,eclipseHistory:(name==='baseline'?[f.baseline]:[selected,f.baseline]).map(r=>({...summary(r),parameters:r.parameters})),runs,capabilities:caps});
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');return{f,state,panel:page.getByRole('region',{name:'E300多阶段注汽计划',exact:true})};
+}
+test('E300 多阶段注汽 主控制台精确提交完整新方案',async({page})=>{
+ const {f,state,panel}=await openThermalPlan(page);
+ const choose=async(aria,label)=>{await panel.locator('.el-select').filter({has:page.getByRole('combobox',{name:aria,exact:true})}).click();await page.getByRole('listbox',{name:aria,exact:true}).getByRole('option',{name:label,exact:true}).click()};
+ await choose('多阶段注汽注入井','I');await choose('阶段2生效天数','第 2190 天后');await choose('阶段1生效天数','第 1095 天后');
+ for(const [aria,value]of [['阶段1注入目标','25'],['阶段2注入目标','25'],['阶段2输入温度','400']])await panel.getByRole('spinbutton',{name:aria,exact:true}).fill(value);
+ await panel.getByRole('button',{name:'按多阶段计划真实计算',exact:true}).click();await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload.parameters).toEqual(f.plans['two-stage'].parameters);expect(state.unexpectedRequests).toEqual([]);
+});
+test('E300 多阶段注汽 主控制台结果与刷新恢复及历史摘要',async({page})=>{
+ const {f,state,panel}=await openThermalPlan(page,'restore');await expect(panel).toContainText('阶段前结果与基线一致');await expect(panel).toContainText('109,500');
+ await page.reload();await activateModel(page,'ECLIPSE演示模型');await expect(panel).toContainText('阶段前结果与基线一致');
+ await page.getByRole('tab',{name:'运行记录',exact:true}).click();const history=page.getByRole('tabpanel',{name:'运行记录',exact:true});await expect(history).toContainText('E300多阶段注汽 I');await expect(history).toContainText('730、1825、2920');await expect(history).toContainText('基线 #'+f.baseline.id);expect(state.unexpectedRequests).toEqual([]);
+});
+test('E300 多阶段注汽 不同模型版本基线不展示错误对比',async({page})=>{
+ const {panel}=await openThermalPlan(page,'two-stage',f=>{f.baseline.modelVersionId=202});await expect(page.getByText('热采基线来源或完整结果核对未通过，无法确认方案响应。',{exact:true})).toBeVisible();await expect(panel).not.toContainText('阶段前结果与基线一致');await expect(panel.getByRole('img',{name:'多阶段实际注入和井压',exact:true})).toHaveCount(0);
+});
+
+import { thermalRockFixture } from '../fixtures/eclipseThermalRock.js'
+async function openThermalRock(page, name='baseline', mutate=()=>{}){
+ const f=thermalRockFixture('output'),caps=availableCapabilities();caps.eclipse300={...caps.eclipse100};mutate(f);
+ const selected=name==='baseline'?f.baseline:f.cases[name],runs=[f.baseline,...Object.values(f.cases)];
+ const state=await installMockBackend(page,{eclipseModelKind:'eclipse_300',eclipseInspection:f.inspection,eclipseHistory:(name==='baseline'?[f.baseline]:[selected,f.baseline]).map(r=>({...summary(r),parameters:r.parameters})),runs,capabilities:caps});
+ await openWorkspace(page);await activateModel(page,'ECLIPSE演示模型');return{f,state,panel:page.getByRole('region',{name:'E300岩石热物性与温度响应',exact:true})};
+}
+for(const [label,name,value]of [['岩石体积热容','heat-capacity','45'],['岩石与流体综合导热率','conductivity','12']])test(`E300 岩石热物性 主控制台23精确提交${name}`,async({page})=>{
+ const {f,state,panel}=await openThermalRock(page);await expect(page.getByRole('heading',{name:'ECLIPSE 300 · 蒸汽驱热采',exact:true})).toBeVisible();
+ await panel.getByRole('button',{name:new RegExp('^'+label)}).click();await panel.getByRole('spinbutton',{name:'岩石热物性新值',exact:true}).fill(value);await panel.getByRole('button',{name:'修改热物性并真实计算',exact:true}).click();
+ await expect.poll(()=>state.createPayloads.length).toBe(1);expect(state.createPayloads[0].payload.parameters).toEqual(f.cases[name].parameters);expect(state.unexpectedRequests).toEqual([]);
+});
+test('E300 岩石热物性 主控制台结果刷新及运行历史',async({page})=>{
+ const {f,state,panel}=await openThermalRock(page,'conductivity');await expect(panel).toContainText('14,966.296875');await expect(panel.locator('canvas')).toHaveCount(3);
+ await page.reload();await activateModel(page,'ECLIPSE演示模型');await expect(panel).toContainText('14,966.296875');await page.getByRole('tab',{name:'运行记录',exact:true}).click();
+ await expect(page.getByRole('tabpanel',{name:'运行记录',exact:true})).toContainText('综合导热率 · 24 → 12');expect(state.unexpectedRequests).toEqual([]);
+});
+test('E300 岩石热物性 跨版本基线不展示热物性响应',async({page})=>{
+ const {panel}=await openThermalRock(page,'heat-capacity',f=>f.baseline.modelVersionId=202);await expect(page.getByText('热采基线来源或完整结果核对未通过，无法确认方案响应。',{exact:true})).toBeVisible();await expect(panel.locator('.rock-cards article')).toHaveCount(0);
+});
+test('E300 岩石热物性 新23检查下多阶段注汽继续展示',async({page})=>{
+ const {panel,state}=await openThermalPlan(page,'restore',f=>{f.inspection=thermalRockFixture('output').inspection});await expect(panel).toContainText('阶段前结果与基线一致');await expect(panel).toContainText('109,500');expect(state.unexpectedRequests).toEqual([]);
+});

@@ -16,7 +16,7 @@ internal static class EclipseRelpermEditor
             if(row.LineNumber>lines.Length)throw Error("ROW","Relative permeability row no longer exists.");
             var line=lines[row.LineNumber-1];var raw=line.Value.Split("--",2)[0];var parts=Regex.Matches(raw,@"[^\s/]+|/",RegexOptions.CultureInvariant).ToArray();
             if(parts.Length is not(3 or 4)||parts.Length==4&&parts[^1].Value!="/"||!parts[..3].Select(m=>m.Value).SequenceEqual(row.Values))throw Error("ROW","Each source row must match its inspected line.");
-            foreach(var column in p.Keyword=="SWFN"?new[]{1}:new[]{1,2}){
+            foreach(var column in p.Keyword=="SOF3"?new[]{1,2}:new[]{1}){
                 EclipsePvtwReader.Number(row.Values[column],out var kr);var target=kr*p.Multiplier;
                 if(!double.IsFinite(target)||target<0||target>1)throw Error("VALUE","Scaled relative permeability is outside [0,1].");
                 // Keep zero endpoints byte-identical as well as numerically identical.

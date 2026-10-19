@@ -1,0 +1,204 @@
+{
+  "schemaVersion": "eclipse-data-inspection/4",
+  "caseName": "ECLIPSE_MULTI_PVTW_PURE_WATER.DATA",
+  "sections": [
+    "RUNSPEC",
+    "GRID",
+    "PROPS",
+    "REGIONS",
+    "SOLUTION",
+    "SUMMARY",
+    "SCHEDULE"
+  ],
+  "unitSystem": "METRIC",
+  "phases": [
+    "WATER"
+  ],
+  "dimensions": {
+    "nx": 15,
+    "ny": 15,
+    "nz": 1
+  },
+  "wellNames": [
+    "I",
+    "P"
+  ],
+  "scheduleTimeline": [
+    {
+      "kind": "TSTEP",
+      "steps": [
+        "10.00",
+        "10.00",
+        "10.00",
+        "10.00",
+        "10.00",
+        "10.00",
+        "10.00",
+        "10.00",
+        "10.00",
+        "10.00",
+        "10.00",
+        "10.00",
+        "10.00",
+        "10.00",
+        "10.00",
+        "25.0",
+        "25.0",
+        "25.0",
+        "25.0",
+        "25.0",
+        "25.0"
+      ],
+      "sourceFile": "ECLIPSE_MULTI_PVTW_PURE_WATER.DATA",
+      "lineNumber": 200
+    }
+  ],
+  "packageFiles": [
+    {
+      "relativePath": "ECLIPSE_MULTI_PVTW_PURE_WATER.DATA",
+      "sizeBytes": 3848,
+      "sha256": "05b2ee9036740d7966476d7cadabe86f88d3b4061d2347e64aabb4fde3d0a215"
+    }
+  ],
+  "scheduleMetadata": {
+    "wells": [
+      {
+        "name": "I",
+        "group": "G",
+        "sourceFile": "ECLIPSE_MULTI_PVTW_PURE_WATER.DATA",
+        "lineNumber": 174
+      },
+      {
+        "name": "P",
+        "group": "G",
+        "sourceFile": "ECLIPSE_MULTI_PVTW_PURE_WATER.DATA",
+        "lineNumber": 175
+      }
+    ],
+    "groups": [],
+    "records": [
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "I       ",
+          "15",
+          "15",
+          "1",
+          "1",
+          "OPEN",
+          "0",
+          ".0",
+          "1.0"
+        ],
+        "sourceFile": "ECLIPSE_MULTI_PVTW_PURE_WATER.DATA",
+        "lineNumber": 179
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "P       ",
+          "1",
+          "1",
+          "1",
+          "1",
+          "OPEN",
+          "0",
+          ".0",
+          "1.0",
+          "1000",
+          "0"
+        ],
+        "sourceFile": "ECLIPSE_MULTI_PVTW_PURE_WATER.DATA",
+        "lineNumber": 180
+      },
+      {
+        "keyword": "WCONPROD",
+        "values": [
+          "P",
+          "OPEN",
+          "WRAT",
+          "1*",
+          "1000.0"
+        ],
+        "sourceFile": "ECLIPSE_MULTI_PVTW_PURE_WATER.DATA",
+        "lineNumber": 184
+      },
+      {
+        "keyword": "WCONINJE",
+        "values": [
+          "I ",
+          "WAT",
+          "OPEN",
+          "RATE",
+          "1000.0"
+        ],
+        "sourceFile": "ECLIPSE_MULTI_PVTW_PURE_WATER.DATA",
+        "lineNumber": 188
+      }
+    ],
+    "completions": [
+      {
+        "keyword": "COMPDAT",
+        "well": "I       ",
+        "i": "15",
+        "j": "15",
+        "k1": "1",
+        "k2": "1",
+        "status": "OPEN",
+        "sourceFile": "ECLIPSE_MULTI_PVTW_PURE_WATER.DATA",
+        "lineNumber": 179
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "P       ",
+        "i": "1",
+        "j": "1",
+        "k1": "1",
+        "k2": "1",
+        "status": "OPEN",
+        "sourceFile": "ECLIPSE_MULTI_PVTW_PURE_WATER.DATA",
+        "lineNumber": 180
+      }
+    ]
+  },
+  "newWellContext": {
+    "schemaVersion": "eclipse-new-well-context/1",
+    "sourceFile": "ECLIPSE_MULTI_PVTW_PURE_WATER.DATA",
+    "insertionLine": 200,
+    "maxWells": 3,
+    "maxConnections": 10,
+    "maxGroups": 1,
+    "maxWellsPerGroup": 10
+  },
+  "multiWaterPvtContext": {
+    "schemaVersion": "eclipse-multi-water-pvt-context/1",
+    "sourceFile": "ECLIPSE_MULTI_PVTW_PURE_WATER.DATA",
+    "regionCount": 2,
+    "regions": [
+      {
+        "number": 1,
+        "cellCount": 105,
+        "lineNumber": 77,
+        "recordValues": [
+          ".0",
+          "1.0",
+          "3.03E-06",
+          ".5",
+          "0.0"
+        ]
+      },
+      {
+        "number": 2,
+        "cellCount": 120,
+        "lineNumber": 78,
+        "recordValues": [
+          ".0",
+          "1.0",
+          "3.03E-06",
+          ".5",
+          "0.0"
+        ]
+      }
+    ]
+  }
+}

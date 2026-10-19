@@ -1,0 +1,94 @@
+{
+  "schemaVersion": "eclipse-data-inspection/15",
+  "caseName": "THERM3.DATA",
+  "sections": [
+    "RUNSPEC",
+    "GRID",
+    "EDIT",
+    "PROPS",
+    "SOLUTION",
+    "SUMMARY",
+    "SCHEDULE"
+  ],
+  "unitSystem": "FIELD",
+  "phases": [
+    "OIL",
+    "WATER",
+    "GAS"
+  ],
+  "dimensions": {
+    "nx": 9,
+    "ny": 5,
+    "nz": 4
+  },
+  "wellNames": [
+    "I",
+    "PNEAR",
+    "PFAR"
+  ],
+  "scheduleTimeline": [
+    {
+      "kind": "TSTEP",
+      "steps": [
+        "365",
+        "365",
+        "365",
+        "365",
+        "365",
+        "365",
+        "365",
+        "365",
+        "365",
+        "365"
+      ],
+      "sourceFile": "THERM3.DATA",
+      "lineNumber": 450
+    }
+  ],
+  "packageFiles": [
+    {
+      "relativePath": "THERM3.DATA",
+      "sizeBytes": 10626,
+      "sha256": "1612e17b770a35181057627c4efb6bca3cccea788c53bcade751ccd45782404d"
+    }
+  ],
+  "simulation": {
+    "solver": 300,
+    "modelType": "THERMAL",
+    "componentCount": 3,
+    "componentNames": [
+      "C1",
+      "C2",
+      "HEAVY"
+    ],
+    "fluidModel": "LIVEOIL",
+    "summaryProgramIdentifier": 500
+  },
+  "thermalInjectionContext": {
+    "schemaVersion": "eclipse-thermal-injection-context/1",
+    "sourceFile": "THERM3.DATA",
+    "sourceSha256": "1612e17b770a35181057627c4efb6bca3cccea788c53bcade751ccd45782404d",
+    "sourceSizeBytes": 10626,
+    "solver": 300,
+    "componentCount": 3,
+    "componentNames": [
+      "C1",
+      "C2",
+      "HEAVY"
+    ],
+    "fluidModel": "LIVEOIL",
+    "records": [
+      {
+        "well": "I",
+        "lineNumber": 433,
+        "originalSteamQuality": 0.7,
+        "originalTemperature": 450,
+        "temperatureUnit": "degF",
+        "surfaceInjectionRate": 37.5,
+        "rateUnit": "STB/day",
+        "bhpUpperLimit": 1000,
+        "controlLineNumber": 429
+      }
+    ]
+  }
+}

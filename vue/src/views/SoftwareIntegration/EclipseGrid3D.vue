@@ -9,6 +9,7 @@ import { buildGridRegionParameters, gridRegionUnit } from './eclipseGridRegion'
 import { batchBaselineAvailable } from './eclipseBatch.js'
 import { createFieldRequestGate, snapshotField, snapshotRangeContext } from './eclipseFieldRequest'
 import { mapSurveyPointToGrid, parseEclipseDeviationSurvey, parseEclipseGridReference, surveyPlanPoints } from './eclipseDeviationSurvey'
+import { gridReportFrames, gridSeriesKey, gridValueStats, gridValueHistogram, gridValueColor, gridLegendTicks, formatGridValue, gridFieldUnit } from './eclipseGridPresentation.js'
 
 const props = defineProps({
   run: { type: Object, default: null },
@@ -16,6 +17,7 @@ const props = defineProps({
   grid: { type: Object, default: null },
   fields: { type: Array, default: () => [] },
   artifacts: { type: Array, default: () => [] },
+  unitSystem: { type: String, default: '' },
   wellCompletions: { type: Array, default: () => [] }
 })
 const emit = defineEmits(['create-grid-field-run', 'add-grid-batch-case'])
@@ -52,6 +54,10 @@ const tvdDirection = ref('')
 const deviationOverlayRuntimeError = ref('')
 const selectedSurveyWell = ref('')
 const deviationMappings = ref({})
+const displayStats = ref(null), displayBounds = ref(null), distribution = ref([]), lockedBounds = ref(null)
+const cutAxis = ref('all'), cutPosition = ref(1), wireframe = ref(true), exaggeration = ref(1), playing = ref(false)
+const visibleCells = ref(0)
+let playbackTimer
 
 let scene
 let camera
@@ -91,6 +97,26 @@ const gridFields = computed(() => props.fields.filter(field =>
 ))
 const fieldKey = field => `${field.file}:${field.keyword}:${field.dataType}:${field.timeStep ?? 'static'}:${field.segments?.[0]?.offset ?? 0}`
 const selectedField = computed(() => gridFields.value.find(field => fieldKey(field) === selectedFieldKey.value) || gridFields.value[0] || null)
+const reportFrames = computed(() => gridReportFrames(gridFields.value, selectedField.value))
+const frameIndex = computed(() => reportFrames.value.findIndex(field => fieldKey(field) === fieldKey(selectedField.value || {})))
+const displayUnit = computed(() => gridFieldUnit(selectedField.value, props.unitSystem))
+const cutLimit = computed(() => ({ i: props.grid?.nx, j: props.grid?.ny, k: props.grid?.nz }[cutAxis.value] || 1))
+const pausePlayback = () => { playing.value = false; clearTimeout(playbackTimer) }
+const setFrame = index => { if (reportFrames.value[index]) selectedFieldKey.value = fieldKey(reportFrames.value[index]) }
+const selectFrame = index => { pausePlayback(); setFrame(index) }
+const schedulePlayback = () => {
+  clearTimeout(playbackTimer)
+  if (!playing.value) return
+  if (frameIndex.value >= reportFrames.value.length - 1) { pausePlayback(); return }
+  playbackTimer = setTimeout(() => { if (playing.value && !fieldLoading.value && !loading.value) setFrame(frameIndex.value + 1) }, 1100)
+}
+const togglePlayback = () => {
+  if (playing.value) { pausePlayback(); return }
+  if (reportFrames.value.length < 2 || fieldLoading.value || loading.value) return
+  playing.value = true
+  if (frameIndex.value >= reportFrames.value.length - 1) setFrame(0)
+  else schedulePlayback()
+}
 const selectedFieldLabel = computed(() => selectedField.value
   ? `${selectedField.value.keyword} · ${selectedField.value.dataType} · ${selectedField.value.file} · 时间步 ${selectedField.value.timeStep ?? '静态'}`
   : '-')
@@ -307,6 +333,23 @@ const resetCamera = () => {
   if (!initialCameraState || !camera || !controls) return
   camera.position.copy(initialCameraState.position)
   controls.target.copy(initialCameraState.target)
+  camera.up.set(0, 1, 0)
+  controls.update()
+}
+const fitDistance = (scale = exaggeration.value, aspect = camera?.aspect || 1) => {
+  if (!geometryBounds) return (geometrySummary.value?.span || 1) * 2
+  const size = geometryBounds.getSize(new THREE.Vector3())
+  const half = THREE.MathUtils.degToRad((camera?.fov || 45) / 2)
+  return Math.max(1, Math.hypot(size.x, size.y, size.z * scale) / 2) / Math.sin(Math.min(half, Math.atan(Math.tan(half) * aspect))) * 1.12
+}
+const presetView = name => {
+  if (!camera || !controls || !initialCameraState) return
+  if (name === '立体') { resetCamera(); return }
+  const direction = { 俯视: [0, 1, 0], 正视: [0, 0, 1], 侧视: [1, 0, 0] }[name]
+  if (!direction) return
+  controls.target.copy(initialCameraState.target)
+  camera.up.set(...(name === '俯视' ? [0, 0, -1] : [0, 1, 0]))
+  camera.position.copy(controls.target).add(new THREE.Vector3(...direction).multiplyScalar(fitDistance()))
   controls.update()
 }
 
@@ -333,8 +376,7 @@ const valueForCell = cell => {
 const valueColor = (value, min, max, active) => {
   if (!active) return new THREE.Color(0xcbd5e1)
   if (typeof value !== 'number' || !Number.isFinite(value)) return new THREE.Color(0x94a3b8)
-  const ratio = max > min ? Math.max(0, Math.min(1, (value - min) / (max - min))) : 0.5
-  return new THREE.Color().setHSL(0.62 - ratio * 0.62, 0.78, 0.5)
+  return new THREE.Color(gridValueColor(value, { min, max }))
 }
 
 const addAxes = (group, span) => {
@@ -490,16 +532,21 @@ const addDeviationTrajectory = group => {
 }
 
 const renderGrid = () => {
-  if (!scene || !geometryReady.value || !cells.length) return
-  removeRenderedGrid()
+  if (!geometryReady.value || !cells.length) return
   cells.forEach(cell => { cell.value = fieldValueByIndex(cell.index) })
+  displayStats.value = gridValueStats(cells.map(cell => cell.value))
+  distribution.value = gridValueHistogram(cells.map(cell => cell.value), displayStats.value)
   const values = cells.map(cell => valueForCell(cell)).filter(value => typeof value === 'number' && Number.isFinite(value))
-  const min = values.length ? Math.min(...values) : 0
-  const max = values.length ? Math.max(...values) : 1
+  const bounds = gridValueStats(values)
+  displayBounds.value = bounds ? lockedBounds.value || { min: bounds.min, max: bounds.max } : null
+  const min = displayBounds.value?.min ?? 0, max = displayBounds.value?.max ?? 1
+  const renderCells = (showAllLayers.value ? cells : currentLayerCells.value).filter(cell => cutAxis.value === 'all' || cell[cutAxis.value] === cutPosition.value)
+  visibleCells.value = renderCells.length
+  if (!scene) return
+  removeRenderedGrid()
   const positions = []
   const colors = []
   const faceOrder = [[0, 1, 3, 2], [4, 6, 7, 5], [0, 4, 5, 1], [2, 3, 7, 6], [0, 2, 6, 4], [1, 5, 7, 3]]
-  const renderCells = showAllLayers.value ? cells : currentLayerCells.value
   const renderIndexByCell = new Map(renderCells.map((cell, index) => [cell.index, index]))
   for (const cell of renderCells) {
     const color = valueColor(valueForCell(cell), min, max, cell.k === layer.value || showAllLayers.value)
@@ -517,13 +564,16 @@ const renderGrid = () => {
   const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: showAllLayers.value ? 0.62 : 0.8, side: THREE.DoubleSide }))
   mesh.userData.renderCells = renderCells
   gridGroup = new THREE.Group()
+  gridGroup.scale.y = exaggeration.value
   gridGroup.add(mesh)
   const edgePositions = []
   const edgeOrder = [[0, 1], [1, 3], [3, 2], [2, 0], [4, 5], [5, 7], [7, 6], [6, 4], [0, 4], [1, 5], [2, 6], [3, 7]]
   for (const cell of renderCells) for (const [from, to] of edgeOrder) edgePositions.push(...cell.points[from].toArray(), ...cell.points[to].toArray())
   const edgeGeometry = new THREE.BufferGeometry()
   edgeGeometry.setAttribute('position', new THREE.Float32BufferAttribute(edgePositions, 3))
-  gridGroup.add(new THREE.LineSegments(edgeGeometry, new THREE.LineBasicMaterial({ color: 0x64748b, transparent: true, opacity: 0.32 })))
+  const edges = new THREE.LineSegments(edgeGeometry, new THREE.LineBasicMaterial({ color: 0x64748b, transparent: true, opacity: 0.32 }))
+  edges.visible = wireframe.value
+  gridGroup.add(edges)
   addWellMarkers(gridGroup)
   if (!deviationOverlayNeeds.value) addDeviationTrajectory(gridGroup)
   else deviationOverlayRuntimeError.value = ''
@@ -611,6 +661,9 @@ const initializeScene = () => {
       if (!canvasHost.value || !camera || !renderer) return
       const width = Math.max(canvasHost.value.clientWidth, 1)
       const height = Math.max(canvasHost.value.clientHeight, 1)
+      const ratio = fitDistance(exaggeration.value, width / height) / fitDistance()
+      camera.position.sub(controls.target).multiplyScalar(ratio).add(controls.target)
+      initialCameraState?.position.multiplyScalar(ratio)
       camera.aspect = width / height
       camera.updateProjectionMatrix()
       renderer.setSize(width, height)
@@ -628,6 +681,8 @@ const initializeScene = () => {
 }
 
 const loadGeometry = async () => {
+  pausePlayback(); lockedBounds.value = null; cutAxis.value = 'all'; cutPosition.value = 1
+  displayStats.value = null; displayBounds.value = null; distribution.value = []; visibleCells.value = 0
   const generation = ++loadGeneration
   const isCurrent = () => generation === loadGeneration
   const context = snapshotRangeContext(props.runId, props.artifacts)
@@ -683,7 +738,7 @@ const loadGeometry = async () => {
     geometrySummary.value = { activeCells: cells.length, span: result.span }
     geometryReady.value = true
     initialCameraState = {
-      position: new THREE.Vector3(result.span * 1.45, result.span * 1.1, result.span * 1.45),
+      position: new THREE.Vector3(1.08, .85, 1.08).normalize().multiplyScalar(fitDistance()),
       target: new THREE.Vector3(0, 0, 0)
     }
     resetCamera()
@@ -696,6 +751,7 @@ const loadGeometry = async () => {
 }
 
 const loadSelectedField = async () => {
+  clearTimeout(playbackTimer)
   const isCurrent = fieldRequests.begin()
   const field = snapshotField(selectedField.value)
   const context = snapshotRangeContext(props.runId, props.artifacts)
@@ -722,9 +778,26 @@ const loadSelectedField = async () => {
     if (!isCurrent()) return
     fieldValues.value = []
     fieldError.value = exception?.message || '场值读取失败。'
+    pausePlayback()
   } finally {
-    if (isCurrent()) fieldLoading.value = false
+    if (isCurrent()) { fieldLoading.value = false; schedulePlayback() }
   }
+}
+const toggleBounds = () => { lockedBounds.value = lockedBounds.value ? null : displayBounds.value ? { ...displayBounds.value } : null; renderGrid() }
+const exportScene = () => {
+  if (!renderer || !camera || !scene || !displayBounds.value || fieldLoading.value || loading.value) return
+  renderer.render(scene, camera)
+  const output = document.createElement('canvas'); output.width = renderer.domElement.width; output.height = renderer.domElement.height + 145
+  const ctx = output.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, output.width, output.height); ctx.drawImage(renderer.domElement, 0, 90)
+  ctx.fillStyle = '#17375b'; ctx.font = 'bold 20px sans-serif'; ctx.fillText(`ECLIPSE · ${selectedField.value.keyword} · 报告步 ${selectedField.value.timeStep ?? '静态'}`, 22, 30)
+  ctx.font = '13px sans-serif'; ctx.fillText(`Run #${props.runId} | ${selectedField.value.file} | ${displayUnit.value}`, 22, 54)
+  ctx.fillText(`纵向 ×${exaggeration.value} | ${cutAxis.value === 'all' ? showAllLayers.value ? '全部层' : `K=${layer.value}` : `${cutAxis.value.toUpperCase()}=${cutPosition.value}`} | ${draftEntries.value.length ? '含展示草案' : '原始计算场值'}`, 22, 76)
+  const gradient = ctx.createLinearGradient(22, 0, 550, 0)
+  for (let i = 0; i <= 20; i++) gradient.addColorStop(i / 20, gridValueColor(i / 20, { min: 0, max: 1 }))
+  ctx.fillStyle = gradient; ctx.fillRect(22, output.height - 38, Math.min(528, output.width - 44), 9)
+  ctx.fillStyle = '#475569'; ctx.fillText(`${formatGridValue(displayBounds.value.min)} — ${formatGridValue(displayBounds.value.max)} ${displayUnit.value}`, 22, output.height - 10)
+  const filename = `eclipse-${props.runId}-${selectedField.value.keyword}-${selectedField.value.timeStep ?? 'static'}.png`
+  output.toBlob(blob => { if (!blob) return; const url = URL.createObjectURL(blob), a = document.createElement('a'); a.href = url; a.download = filename; a.click(); setTimeout(() => URL.revokeObjectURL(url), 0) }, 'image/png')
 }
 
 const applyEdit = () => {
@@ -816,7 +889,11 @@ watch(gridFields, fields => {
 watch(() => [props.runId, props.grid, props.fields, props.artifacts], loadGeometry, { immediate: true, deep: true, flush: 'sync' })
 watch(() => props.runId, clearDeviationSurvey)
 watch(() => [selectedFieldKey.value, selectedField.value, layer.value], loadSelectedField, { deep: true, flush: 'sync' })
-watch(showAllLayers, renderGrid)
+watch(showAllLayers, value => { if (!value) cutAxis.value = 'all'; renderGrid() })
+watch(() => gridSeriesKey(selectedField.value), () => { pausePlayback(); lockedBounds.value = null }, { flush: 'sync' })
+watch(cutAxis, () => { cutPosition.value = 1; selectedCell.value = null; if (cutAxis.value !== 'all') showAllLayers.value = true; renderGrid() })
+watch([cutPosition, wireframe], renderGrid)
+watch(exaggeration, (value, old) => { if (camera && controls) { const distance = fitDistance(value); camera.position.sub(controls.target).multiplyScalar(distance / fitDistance(old)).add(controls.target); initialCameraState?.position.setLength(distance); controls.update() }; renderGrid() })
 watch(() => props.wellCompletions, renderGrid, { deep: true })
 watch([selectedSurveyWell, deviationGridReference, deviationMapUnits, tvdZeroGridZ, tvdDirection], renderGrid)
 
@@ -828,6 +905,7 @@ onMounted(() => {
   }
 })
 onBeforeUnmount(() => {
+  pausePlayback()
   loadGeneration++
   fieldRequests.dispose()
   cancelAnimationFrame(animationFrame)
@@ -846,8 +924,9 @@ onBeforeUnmount(() => {
       <div><span class="kicker">ECLIPSE EGRID</span><h3>三维几何、井轨迹定位与场值编辑</h3><p>几何与场值来自本次真实 Artifact；单格 INIT/PERMX 可绑定完整基线并真实重算，其他场值编辑仍是后处理草案。</p></div>
       <span>{{ grid.nx }} × {{ grid.ny }} × {{ grid.nz }}</span>
     </div>
+    <div class="display-metrics" aria-label="三维原始场值统计"><div><small>当前字段</small><strong>{{ selectedField?.keyword || '—' }}</strong><span>报告步 {{ selectedField?.timeStep ?? '静态' }}</span></div><div v-for="entry in [{ label: '最低原值', value: displayStats?.min }, { label: '最高原值', value: displayStats?.max }, { label: '活动格算术均值', value: displayStats?.mean }]" :key="entry.label"><small>{{ entry.label }}</small><strong>{{ formatGridValue(entry.value) }}</strong><span>{{ displayUnit }}</span></div><div><small>可见 / 活动单元</small><strong>{{ visibleCells }} / {{ geometrySummary?.activeCells ?? 0 }}</strong><span>均值非体积加权</span></div></div>
     <div class="grid-3d-controls">
-      <el-select v-model="selectedFieldKey" aria-label="ECLIPSE 三维场值字段" placeholder="选择三维场值字段" :disabled="!gridFields.length">
+      <el-select v-model="selectedFieldKey" aria-label="ECLIPSE 三维场值字段" placeholder="选择三维场值字段" :disabled="!gridFields.length" @change="pausePlayback">
         <el-option v-for="field in gridFields" :key="fieldKey(field)" :value="fieldKey(field)" :label="`${field.keyword} · ${field.file} · 时间步 ${field.timeStep ?? '静态'}`" />
       </el-select>
       <el-input-number v-model="layer" :min="1" :max="grid.nz" :step="1" controls-position="right" aria-label="ECLIPSE 三维当前层" />
@@ -856,14 +935,19 @@ onBeforeUnmount(() => {
       <el-tag v-if="geometryReady" type="success">真实几何已加载 {{ geometrySummary?.activeCells ?? 0 }} 个活动单元</el-tag>
       <el-tag v-else-if="loading" type="info">读取 EGRID 几何中</el-tag>
     </div>
+    <div v-if="reportFrames.length > 1" class="display-playback" aria-label="三维报告步播放"><el-button type="primary" :disabled="!playing && (loading || fieldLoading)" @click="togglePlayback">{{ playing ? '暂停播放' : '播放演变' }}</el-button><el-button :disabled="frameIndex <= 0 || fieldLoading" aria-label="上一个三维报告步" @click="selectFrame(frameIndex - 1)">‹</el-button><el-slider :model-value="frameIndex" :min="0" :max="reportFrames.length - 1" :disabled="loading || fieldLoading" :format-tooltip="index => `报告步 ${reportFrames[index]?.timeStep}`" aria-label="三维报告步进度" @change="selectFrame"/><el-button :disabled="frameIndex >= reportFrames.length - 1 || fieldLoading" aria-label="下一个三维报告步" @click="selectFrame(frameIndex + 1)">›</el-button><span>报告步 {{ selectedField?.timeStep }}<small>{{ frameIndex + 1 }} / {{ reportFrames.length }} · 仅真实报告，不插值</small></span></div>
+    <div class="display-tools"><div><el-button v-for="view in ['立体', '俯视', '正视', '侧视']" :key="view" size="small" @click="presetView(view)">{{ view }}</el-button></div><el-select v-model="cutAxis" aria-label="三维剖面方向"><el-option value="all" label="完整网格"/><el-option v-for="axis in ['i', 'j', 'k']" :key="axis" :value="axis" :label="`${axis.toUpperCase()} 剖面`"/></el-select><el-input-number v-if="cutAxis !== 'all'" v-model="cutPosition" :min="1" :max="cutLimit" :step="1" aria-label="三维剖面位置"/><label>纵向 <el-select v-model="exaggeration" aria-label="三维纵向放大"><el-option v-for="scale in [1, 3, 5, 10]" :key="scale" :value="scale" :label="`×${scale}`"/></el-select></label><el-checkbox v-model="wireframe">网格线</el-checkbox><el-button :disabled="!displayBounds || fieldLoading || loading" @click="exportScene">导出演示图片</el-button></div>
     <el-alert v-if="error" type="warning" :closable="false" :title="error" />
     <el-alert v-else-if="fieldError" type="warning" :closable="false" :title="fieldError" />
     <div class="grid-3d-layout">
       <div ref="canvasHost" class="grid-3d-canvas" :data-deviation-track-ready="geometryReady && !deviationOverlayNeeds && !deviationOverlayRuntimeError && mappedSurveyTrack.points.length > 1 ? 'true' : 'false'" v-loading="loading || fieldLoading">
         <div v-if="!loading && !error && !geometryReady" class="scene-empty">暂无可绘制的 EGRID 三维几何</div>
         <span class="axis-caption">X：红　Y：蓝　Z：绿　橙色：COMPDAT 完井定位</span>
+        <div class="display-context">RUN #{{ runId }} · {{ selectedField?.keyword }} · 报告步 {{ selectedField?.timeStep ?? '静态' }}<small>纵向 ×{{ exaggeration }}{{ draftEntries.length ? ' · 含展示草案' : '' }}</small></div>
+        <div v-if="displayBounds && !fieldLoading" class="display-legend" aria-label="三维数值色标"><div><strong>{{ selectedField?.keyword }} · {{ displayUnit }}</strong><button @click="toggleBounds">{{ lockedBounds ? '解除固定色标' : '固定当前色标' }}</button></div><div class="display-gradient" :style="{ background: `linear-gradient(to right, ${Array.from({ length: 21 }, (_, i) => gridValueColor(i / 20, { min: 0, max: 1 })).join(',')})` }"/><div class="display-ticks"><span v-for="(tick, index) in gridLegendTicks(displayBounds)" :key="index">{{ formatGridValue(tick) }}</span></div><small>{{ lockedBounds ? '固定范围；范围外使用端点色' : '按当前全部活动格取色' }}{{ draftEntries.length ? '（含展示草案）' : '' }}</small></div>
       </div>
       <aside class="grid-3d-inspector">
+        <div v-if="displayStats" class="inspector-block" aria-label="三维原始场值分布"><strong>活动格原值分布 · {{ displayStats.count }} 个有效值</strong><div class="display-histogram"><div v-for="bin in distribution" :key="bin.index" :style="{ height: `${Math.max(1, bin.height)}%`, background: gridValueColor((bin.low + bin.high) / 2, displayBounds) }" :title="`${bin.low}–${bin.high}：${bin.count}个`"><span>{{ bin.count }}</span></div></div><small>单元计数 · 不含展示草案</small></div>
         <div class="inspector-block"><strong>当前场值</strong><span>{{ selectedFieldLabel }}</span><small>蓝 → 红表示当前场值由低到高；“加入编辑草案”仅生成草案，PERMX 可通过下方方案真实重算。</small></div>
         <div class="inspector-block" aria-label="按 IJK 定位活动单元">
           <strong>按坐标选择网格</strong>
@@ -1001,6 +1085,8 @@ onBeforeUnmount(() => {
 </template>
 
 <style lang="scss" scoped>
+.display-metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); margin: 14px 0; border: 1px solid #dce7f3; border-radius: 10px; overflow: hidden; background: linear-gradient(110deg, #edf5ff, #fff); }.display-metrics > div { padding: 14px; border-right: 1px solid #dce7f3; }.display-metrics small, .display-metrics span { font-size: 11px; color: #7a8fa5; }.display-metrics strong { display: block; margin: 8px 0; font-size: 21px; color: #173b60; overflow-wrap: anywhere; }.display-playback { display: flex; align-items: center; gap: 12px; padding: 12px; background: #eff5fc; border-radius: 8px; margin-bottom: 12px; }.display-playback .el-slider { flex: 1; min-width: 50px; }.display-playback span { color: #254f77; font-size: 12px; }.display-playback small { display: block; margin-top: 4px; color: #8193a7; font-size: 10px; }.display-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 10px 0; }.display-tools .el-select { width: 115px; }.display-tools label { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #6b7e92; }.display-context { position: absolute; left: 18px; top: 54px; color: #426685; font-size: 12px; pointer-events: none; }.display-context small { display: block; margin-top: 7px; color: #8797aa; }.display-legend { position: absolute; left: 18px; bottom: 16px; width: min(410px, calc(100% - 36px)); box-sizing: border-box; padding: 12px; background: #ffffffed; border: 1px solid #dce7f1; border-radius: 8px; }.display-legend > div:first-child { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 11px; color: #31597d; }.display-legend button { border: 0; background: #eff5fc; color: #3874ad; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 10px; }.display-gradient { height: 9px; border-radius: 3px; margin: 10px 0 7px; }.display-ticks { display: flex; justify-content: space-between; color: #5d7993; font-size: 10px; }.display-legend > small { display: block; font-size: 9px; color: #8a9caf; margin-top: 7px; }.display-histogram { display: flex; gap: 3px; align-items: end; height: 95px; padding-top: 18px; }.display-histogram > div { flex: 1; min-width: 0; border-radius: 3px 3px 0 0; position: relative; }.display-histogram span { position: absolute; top: -16px; left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: 9px; color: #7890a6; }.eclipse-grid-3d-panel .grid-3d-layout { align-items: start; }.eclipse-grid-3d-panel .grid-3d-canvas { height: 570px; min-height: 0; border-radius: 9px; }.grid-3d-canvas :deep(canvas) { display: block; width: 100%; height: 100%; }.eclipse-grid-3d-panel .grid-3d-inspector { max-height: 572px; overflow-y: auto; }.eclipse-grid-3d-panel .inspector-block { border-radius: 7px; overflow-wrap: anywhere; }
+@media(max-width: 900px) { .display-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }.eclipse-grid-3d-panel .grid-3d-inspector { max-height: none; overflow: visible; }.eclipse-grid-3d-panel .grid-3d-canvas { height: 470px; } } @media(max-width:600px) { .display-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }.display-playback { flex-wrap: wrap; }.display-playback > span { width: 100%; }.eclipse-grid-3d-panel .grid-3d-canvas { height: 420px; } }
 .eclipse-grid-3d-panel { padding: 16px; border: 1px solid #e1e7ef; background: #fff; }.panel-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 12px; }.panel-heading h3 { margin: 3px 0 0; font-size: 15px; }.panel-heading p { margin: 4px 0 0; color: #909399; font-size: 12px; }.panel-heading > span { color: #737a84; font-size: 12px; }.kicker { color: #2b6cb3; font-size: 11px; font-weight: 700; letter-spacing: .08em; }.grid-3d-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }.grid-3d-controls .el-select { width: min(360px, 100%); }.grid-3d-layout { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 12px; }.grid-3d-canvas { position: relative; min-height: 440px; border: 1px solid #e5eaf1; background: #f8fafc; overflow: hidden; }.grid-3d-canvas canvas { display: block; width: 100%; height: 100%; }.axis-caption { position: absolute; top: 8px; left: 10px; padding: 4px 7px; color: #475569; background: rgba(255,255,255,.82); font-size: 11px; pointer-events: none; }.scene-empty { position: absolute; inset: 0; display: grid; place-items: center; color: #909399; }.grid-3d-inspector { display: flex; flex-direction: column; gap: 8px; }.inspector-block { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px solid #e5eaf1; background: #f8fafc; color: #475569; font-size: 12px; }.inspector-block strong { color: #1e293b; }.inspector-block small { color: #94a3b8; line-height: 1.5; }.selected-cell dl { display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px; margin: 0; }.selected-cell dl div { padding: 5px 6px; background: #fff; }.selected-cell dt { color: #94a3b8; font-size: 11px; }.selected-cell dd { margin: 2px 0 0; color: #1e293b; font-weight: 600; }.inspector-actions { display: flex; flex-wrap: wrap; gap: 6px; }.completion-table { margin-top: 12px; border-top: 1px solid #e5eaf1; padding-top: 12px; }.subheading { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 8px; color: #475569; font-size: 12px; }.subheading span { color: #94a3b8; }
 .deviation-import-panel { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; border-top: 1px solid #e5eaf1; padding-top: 14px; }.deviation-import-note, .deviation-coordinate-warning { margin: 0; color: #737a84; font-size: 12px; line-height: 1.6; }.deviation-import-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }.deviation-import-actions input { max-width: 100%; color: #475569; font-size: 12px; }.deviation-survey-summary { display: grid; grid-template-columns: repeat(4, minmax(110px, 1fr)); border: 1px solid #e5eaf1; }.deviation-survey-summary div { display: flex; flex-direction: column; gap: 4px; padding: 9px 11px; border-right: 1px solid #e5eaf1; background: #f8fafc; }.deviation-survey-summary div:last-child { border-right: 0; }.deviation-survey-summary span { color: #909399; font-size: 11px; }.deviation-survey-summary strong { color: #334155; font-size: 14px; }.deviation-import-panel .el-select { width: 100%; }.deviation-survey-detail { display: grid; grid-template-columns: minmax(260px, .8fr) minmax(350px, 1.2fr); gap: 12px; }.deviation-survey-detail > label { display: flex; flex-direction: column; gap: 6px; color: #606266; font-size: 12px; }.deviation-survey-detail > label .el-select { max-width: 360px; }.deviation-survey-plan { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 8px; border: 1px solid #e5eaf1; background: #faf9ff; }.deviation-survey-plan svg { width: 100%; height: 180px; }.deviation-survey-plan small { color: #737a84; font-size: 11px; }.deviation-survey-point-table { grid-column: 1 / -1; min-width: 0; }.deviation-registration { display: flex; flex-direction: column; gap: 8px; border: 1px solid #e5eaf1; padding: 10px; background: #fbfcfe; color: #475569; font-size: 12px; }.deviation-registration > strong { color: #334155; }.deviation-reference-meta { color: #64748b; overflow-wrap: anywhere; }.deviation-registration-fields { display: grid; grid-template-columns: repeat(3, minmax(180px, 1fr)); gap: 10px; }.deviation-registration-fields label { display: flex; flex-direction: column; gap: 5px; color: #606266; font-size: 11px; }.deviation-coordinate-warning { padding: 8px 10px; border-left: 3px solid #d4a017; background: #fff9e6; }
 @media (max-width: 900px) { .grid-3d-layout { grid-template-columns: 1fr; }.grid-3d-inspector { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }.grid-3d-canvas { min-height: 360px; } }

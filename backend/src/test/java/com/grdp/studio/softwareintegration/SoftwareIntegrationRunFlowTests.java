@@ -74,6 +74,7 @@ import java.io.ByteArrayOutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.security.MessageDigest;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -345,7 +346,7 @@ class SoftwareIntegrationRunFlowTests {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"eclipse-compositional-inspection.json", "eclipse-thermal-inspection.json"})
+    @ValueSource(strings = {"eclipse-compositional-inspection.json", "eclipse-thermal-inspection.json", "eclipse-compositional-reinjection-inspection.json", "eclipse-compositional-fluid-property-inspection.json"})
     void e300RequiresOwnCapabilityAndRejectsLegacyEditsBeforeCreatingRun(String resource) throws Exception {
         Seed eclipse = seed("READY", resource.contains("thermal") ? "models/eclipse/e300/THERM3.DATA" : "models/eclipse/e300/SPE3_GASCOND.DATA", "ECLIPSE_100");
         eclipse.version().setModelKind("eclipse_300");
@@ -2139,6 +2140,49 @@ class SoftwareIntegrationRunFlowTests {
         assertThat(runStore.listByVersion(eclipse.version().getId(), 100)).hasSize(before);
     }
 
+    @Test
+    void verifiedBinaryRestartForecastRejectsStaleReportsAndChangedStateWithoutCreatingRuns() throws Exception {
+        Seed eclipse = seed("READY", "models/eclipse/restart/EX5.DATA", "ECLIPSE_100");
+        try (var input = getClass().getResourceAsStream("/eclipse-binary-restart-inspection.json")) {
+            eclipse.version().setInspectionJson(objectMapper.writeValueAsString(objectMapper.readTree(input)));
+        }
+        versionMapper.updateById(eclipse.version());
+        var baselineId = runService.create(eclipse.version().getId(), request(null, "eclipse")).id();
+        var baseline = runStore.find(baselineId); baseline.setStatus("SUCCEEDED"); baseline.setResultContract("VALID_FULL"); baseline.setParametersJson("null"); runMapper.updateById(baseline);
+        ObjectNode source;
+        try (var input = getClass().getResourceAsStream("/eclipse-binary-restart-source-catalog.json")) { source = (ObjectNode)objectMapper.readTree(input); }
+        // Small published-file fixture tests the HTTP/storage binding. Commercial state proof is separate.
+        Path statePath = normalizer.resolve("artifacts/" + baselineId + "/eclipse-output-EX5.UNRST"); Files.createDirectories(statePath.getParent()); Files.writeString(statePath, "state");
+        var catalog = (ObjectNode)source.path("catalog"); var selected = ((ObjectNode)catalog.path("reports").get(80)).deepCopy();
+        selected.put("byteOffset", 0).put("sizeBytes", 5).put("sha256", sha256(statePath));
+        catalog.putArray("reports").add(selected); catalog.put("artifactSizeBytes", 5).put("artifactSha256", sha256(statePath));
+        Path catalogPath = statePath.resolveSibling("eclipse-restart-catalog.json"); Files.write(catalogPath, objectMapper.writeValueAsBytes(source));
+        for (var path : List.of(statePath, catalogPath)) {
+            var artifact = new SoftwareIntegrationArtifactEntity(); artifact.setRunId(baselineId); artifact.setArtifactName(path.getFileName().toString());
+            artifact.setArtifactType("output"); artifact.setContentType(path.equals(statePath) ? "application/octet-stream" : "application/json");
+            artifact.setStorageKey("artifacts/" + baselineId + "/" + path.getFileName()); artifact.setSizeBytes(Files.size(path)); artifact.setSha256(sha256(path));
+            artifact.setCreatedAt(LocalDateTime.now()); artifact.setExpiresAt(LocalDateTime.now().plusDays(30)); artifactMapper.insert(artifact);
+        }
+        var parameters = objectMapper.createObjectNode().put("schemaVersion", "eclipse-history-forecast-parameters/3").put("historyRunId", baselineId)
+                .put("forecastDataFile", "FOREA.DATA").put("restartArtifactName", "eclipse-output-EX5.UNRST").put("restartArtifactSha256", sha256(statePath))
+                .put("restartReport", 80).put("restartTimeDays", 2190).put("restartDate", "1975-12-31").put("physicsSha256", source.path("physicsSha256").asText());
+        var valid = request(null, "eclipse"); valid.setParameters(parameters);
+        assertThat(runService.create(eclipse.version().getId(), valid).parameters().path("schemaVersion").asText()).isEqualTo("eclipse-history-forecast-parameters/3");
+        int before = runStore.listByVersion(eclipse.version().getId(), 100).size();
+        for (var fault : new String[] {"restartReport", "restartTimeDays", "restartDate", "physicsSha256", "forecastDataFile"}) {
+            var p = parameters.deepCopy(); switch (fault) { case "restartReport" -> p.put(fault, 79); case "restartTimeDays" -> p.put(fault, 2191);
+                case "restartDate" -> p.put(fault, "1975-12-30"); case "forecastDataFile" -> p.put(fault, "OTHER.DATA"); default -> p.put(fault, "b".repeat(64)); }
+            var bad = request(null, "eclipse"); bad.setParameters(p);
+            assertThatThrownBy(() -> runService.create(eclipse.version().getId(), bad)).isInstanceOf(RunException.class)
+                    .satisfies(e -> assertThat(((RunException)e).status()).isEqualTo(HttpStatus.BAD_REQUEST));
+            assertThat(runStore.listByVersion(eclipse.version().getId(), 100)).hasSize(before);
+        }
+        Files.writeString(statePath, "other");
+        assertThatThrownBy(() -> runService.create(eclipse.version().getId(), valid)).isInstanceOf(RunException.class)
+                .satisfies(e -> assertThat(((RunException)e).status()).isEqualTo(HttpStatus.CONFLICT));
+        assertThat(runStore.listByVersion(eclipse.version().getId(), 100)).hasSize(before);
+    }
+
     private record BatchSeed(Seed seed,long baselineId,ObjectNode request) {}
     private BatchSeed eclipseBatchSeed()throws Exception {
         var seed=seed("READY","models/eclipse/batch/CASE.DATA","ECLIPSE_100");
@@ -2156,6 +2200,139 @@ class SoftwareIntegrationRunFlowTests {
         var replay=eclipseBatches.create(seed.seed().version().getId(),seed.request().deepCopy());assertThat(replay.id()).isEqualTo(batch.id());assertThat(replay.members().stream().map(m->m.run().id())).containsExactlyElementsOf(batch.members().stream().map(m->m.run().id()).toList());assertThat(runStore.listByVersion(seed.seed().version().getId(),100)).hasSize(3);
         assertThat(eclipseBatches.list(seed.seed().version().getId())).hasSize(1);assertThat(eclipseBatches.list(seed.seed().version().getId()).get(0).caseCount()).isEqualTo(2);assertThat(eclipseBatches.list(seed.seed().version().getId()).get(0).status()).isEqualTo("QUEUED");assertThat(eclipseBatches.get(batch.id()).baselineRunId()).isEqualTo(seed.baselineId());
         var conflicting=seed.request().deepCopy();conflicting.put("name","另一内容");assertThatThrownBy(()->eclipseBatches.create(seed.seed().version().getId(),conflicting)).isInstanceOf(RunException.class).satisfies(e->assertThat(((RunException)e).status()).isEqualTo(HttpStatus.CONFLICT));
+    }
+    @Test void eclipseOilVolumeAndViscosityShareBaselineButPersistDistinctTypedScenarios()throws Exception {
+        var seed=eclipseBatchSeed();var oil=(ObjectNode)seed.request().path("cases").path(0).path("parameters");oil.put("schemaVersion","eclipse-pvdo-parameters/2");oil.put("field","FORMATION_VOLUME_FACTOR");oil.put("unit","rb/stb");oil.put("multiplier",1.02);
+        var batch=eclipseBatches.create(seed.seed().version().getId(),seed.request());assertThat(batch.members()).hasSize(2);assertThat(batch.members().get(0).run().parameters().toString()).isEqualTo(oil.toString());assertThat(batch.members().get(1).run().parameters().path("schemaVersion").asText()).isEqualTo("eclipse-pvdo-parameters/1");
+        int before=runStore.listByVersion(seed.seed().version().getId(),100).size();for(String fault:new String[]{"unit","multiplier","sourceSha256","field"}){var bad=oil.deepCopy();switch(fault){case "unit"->bad.put(fault,"rm3/sm3");case "multiplier"->bad.put(fault,8);case "field"->bad.put(fault,"PRESSURE");default->bad.put(fault,"0".repeat(64));}var request=request(null,"eclipse");request.setParameters(bad);assertThatThrownBy(()->runService.create(seed.seed().version().getId(),request)).isInstanceOf(RunException.class).satisfies(e->assertThat(((RunException)e).status()).isEqualTo(HttpStatus.BAD_REQUEST));assertThat(runStore.listByVersion(seed.seed().version().getId(),100)).hasSize(before);}
+    }
+    @Test void eclipseGasVolumeAndViscosityBindDryGasSourceWithDistinctFieldUnits()throws Exception {
+        var seed=eclipseBatchSeed();var inspection=objectMapper.readTree(getClass().getResourceAsStream("/eclipse-pvdg-inspection.json"));seed.seed().version().setInspectionJson(objectMapper.writeValueAsString(inspection));versionMapper.updateById(seed.seed().version());var context=inspection.path("gasPvtContext");
+        for(int i=0;i<2;i++){var p=(ObjectNode)seed.request().path("cases").path(i).path("parameters");p.put("sourceFile",context.path("sourceFile").asText());p.put("sourceSha256",inspection.path("packageFiles").path(0).path("sha256").asText());p.set("keywordLineNumber",context.path("keywordLineNumber").deepCopy());p.set("rows",context.path("rows").deepCopy());p.put("schemaVersion",i==0?"eclipse-pvdg-parameters/2":"eclipse-pvdg-parameters/1");p.put("unit",i==0?"rb/Mscf":"cP");p.put("multiplier",i==0?1.02:2);if(i==0)p.put("field","FORMATION_VOLUME_FACTOR");}
+        var batch=eclipseBatches.create(seed.seed().version().getId(),seed.request());assertThat(batch.members()).hasSize(2);assertThat(batch.members().get(0).run().parameters().toString()).isEqualTo(seed.request().path("cases").path(0).path("parameters").toString());assertThat(batch.members().get(1).run().parameters().path("schemaVersion").asText()).isEqualTo("eclipse-pvdg-parameters/1");
+        int before=runStore.listByVersion(seed.seed().version().getId(),100).size();for(String fault:new String[]{"unit","multiplier","sourceSha256","field"}){var bad=((ObjectNode)seed.request().path("cases").path(0).path("parameters")).deepCopy();switch(fault){case "unit"->bad.put(fault,"rb/stb");case "multiplier"->bad.put(fault,101);case "field"->bad.put(fault,"PRESSURE");default->bad.put(fault,"0".repeat(64));}var request=request(null,"eclipse");request.setParameters(bad);assertThatThrownBy(()->runService.create(seed.seed().version().getId(),request)).isInstanceOf(RunException.class).satisfies(e->assertThat(((RunException)e).status()).isEqualTo(HttpStatus.BAD_REQUEST));assertThat(runStore.listByVersion(seed.seed().version().getId(),100)).hasSize(before);}
+    }
+    @Test void eclipseLiveOilBatchBindsAllBranchesAndRejectsMissingUndersaturationWithoutRuns()throws Exception {
+        var seed=eclipseBatchSeed();var inspection=objectMapper.readTree(getClass().getResourceAsStream("/eclipse-pvto-inspection.json"));seed.seed().version().setInspectionJson(objectMapper.writeValueAsString(inspection));versionMapper.updateById(seed.seed().version());var context=inspection.path("liveOilPvtContext");
+        for(int i=0;i<2;i++){var p=(ObjectNode)seed.request().path("cases").path(i).path("parameters");p.remove("rows");p.put("sourceFile",context.path("sourceFile").asText());p.put("sourceSha256",inspection.path("packageFiles").path(0).path("sha256").asText());p.set("keywordLineNumber",context.path("keywordLineNumber").deepCopy());p.set("records",context.path("records").deepCopy());p.put("schemaVersion","eclipse-pvto-parameters/1");p.put("field",i==0?"FORMATION_VOLUME_FACTOR":"VISCOSITY");p.put("unit",i==0?"rb/stb":"cP");p.put("multiplier",i==0?1.02:2);}
+        var batch=eclipseBatches.create(seed.seed().version().getId(),seed.request());assertThat(batch.members()).hasSize(2);assertThat(batch.members().get(0).run().parameters().toString()).isEqualTo(seed.request().path("cases").path(0).path("parameters").toString());
+        int before=runStore.listByVersion(seed.seed().version().getId(),100).size();for(String fault:new String[]{"unit","multiplier","sourceSha256","field","records"}){var bad=((ObjectNode)seed.request().path("cases").path(0).path("parameters")).deepCopy();switch(fault){case "unit"->bad.put(fault,"rm3/sm3");case "multiplier"->bad.put(fault,8);case "field"->bad.put(fault,"PRESSURE");case "records"->((tools.jackson.databind.node.ArrayNode)bad.path("records").path(8).path("rows")).remove(1);default->bad.put(fault,"0".repeat(64));}var request=request(null,"eclipse");request.setParameters(bad);assertThatThrownBy(()->runService.create(seed.seed().version().getId(),request)).isInstanceOf(RunException.class).satisfies(e->assertThat(((RunException)e).status()).isEqualTo(HttpStatus.BAD_REQUEST));assertThat(runStore.listByVersion(seed.seed().version().getId(),100)).hasSize(before);}
+    }
+    @Test void eclipseWetGasBatchBindsAllBranchesAndRejectsMissingHighestPressureBranchWithoutRuns()throws Exception {
+        var seed=eclipseBatchSeed();var inspection=objectMapper.readTree(getClass().getResourceAsStream("/eclipse-pvtg-inspection.json"));seed.seed().version().setInspectionJson(objectMapper.writeValueAsString(inspection));versionMapper.updateById(seed.seed().version());var context=inspection.path("wetGasPvtContext");
+        for(int i=0;i<2;i++){var p=(ObjectNode)seed.request().path("cases").path(i).path("parameters");p.remove("rows");p.put("sourceFile",context.path("sourceFile").asText());p.put("sourceSha256",inspection.path("packageFiles").path(0).path("sha256").asText());p.set("keywordLineNumber",context.path("keywordLineNumber").deepCopy());p.set("records",context.path("records").deepCopy());p.put("schemaVersion","eclipse-pvtg-parameters/1");p.put("field",i==0?"FORMATION_VOLUME_FACTOR":"VISCOSITY");p.put("unit",i==0?"rm3/sm3":"cP");p.put("multiplier",i==0?1.02:2);}
+        var batch=eclipseBatches.create(seed.seed().version().getId(),seed.request());assertThat(batch.members()).hasSize(2);assertThat(batch.members().get(0).run().parameters().toString()).isEqualTo(seed.request().path("cases").path(0).path("parameters").toString());
+        int before=runStore.listByVersion(seed.seed().version().getId(),100).size();for(String fault:new String[]{"unit","multiplier","sourceSha256","field","records"}){var bad=((ObjectNode)seed.request().path("cases").path(0).path("parameters")).deepCopy();switch(fault){case "unit"->bad.put(fault,"rb/Mscf");case "multiplier"->bad.put(fault,101);case "field"->bad.put(fault,"PRESSURE");case "records"->((tools.jackson.databind.node.ArrayNode)bad.path("records").path(12).path("rows")).removeAll();default->bad.put(fault,"0".repeat(64));}var request=request(null,"eclipse");request.setParameters(bad);assertThatThrownBy(()->runService.create(seed.seed().version().getId(),request)).isInstanceOf(RunException.class).satisfies(e->assertThat(((RunException)e).status()).isEqualTo(HttpStatus.BAD_REQUEST));assertThat(runStore.listByVersion(seed.seed().version().getId(),100)).hasSize(before);}
+    }
+    @Test void eclipseGasRelpermBatchBindsCapillaryPressureAndRejectsSourceEditsWithoutRuns()throws Exception {
+        var seed=eclipseBatchSeed();var inspection=objectMapper.readTree(getClass().getResourceAsStream("/eclipse-sgfn-inspection.json"));seed.seed().version().setInspectionJson(objectMapper.writeValueAsString(inspection));versionMapper.updateById(seed.seed().version());var context=inspection.path("relpermContext").path("tables").path(1);
+        for(int i=0;i<2;i++){var p=(ObjectNode)seed.request().path("cases").path(i).path("parameters");p.remove("field");p.put("sourceFile",inspection.path("caseName").asText());p.put("sourceSha256",inspection.path("packageFiles").path(0).path("sha256").asText());p.set("keywordLineNumber",context.path("keywordLineNumber").deepCopy());p.set("rows",context.path("rows").deepCopy());p.put("schemaVersion","eclipse-relperm-parameters/2");p.put("keyword","SGFN");p.put("unit","1");p.put("multiplier",i==0?.5:.75);}
+        var batch=eclipseBatches.create(seed.seed().version().getId(),seed.request());assertThat(batch.members()).hasSize(2);assertThat(batch.members().get(0).run().parameters().toString()).isEqualTo(seed.request().path("cases").path(0).path("parameters").toString());
+        int before=runStore.listByVersion(seed.seed().version().getId(),100).size();for(String fault:new String[]{"unit","multiplier","sourceSha256","schemaVersion","rows"}){var bad=((ObjectNode)seed.request().path("cases").path(0).path("parameters")).deepCopy();switch(fault){case "unit"->bad.put(fault,"cP");case "multiplier"->bad.put(fault,2);case "schemaVersion"->bad.put(fault,"eclipse-relperm-parameters/1");case "rows"->((tools.jackson.databind.node.ArrayNode)bad.path("rows")).removeAll();default->bad.put(fault,"0".repeat(64));}var request=request(null,"eclipse");request.setParameters(bad);assertThatThrownBy(()->runService.create(seed.seed().version().getId(),request)).isInstanceOf(RunException.class).satisfies(e->assertThat(((RunException)e).status()).isEqualTo(HttpStatus.BAD_REQUEST));assertThat(runStore.listByVersion(seed.seed().version().getId(),100)).hasSize(before);}
+    }
+    @Test void eclipseCoupledRelpermBatchBindsBothTablesAndRejectsInvalidWithoutRuns()throws Exception {
+        var seed=eclipseBatchSeed();var inspection=objectMapper.readTree(getClass().getResourceAsStream("/eclipse-coupled-relperm-inspection.json"));seed.seed().version().setInspectionJson(objectMapper.writeValueAsString(inspection));versionMapper.updateById(seed.seed().version());var context=inspection.path("coupledRelpermContext");
+        for(int i=0;i<2;i++){var p=(ObjectNode)seed.request().path("cases").path(i).path("parameters");p.remove("field");p.put("sourceFile",inspection.path("caseName").asText());p.put("sourceSha256",inspection.path("packageFiles").path(0).path("sha256").asText());p.remove("rows");p.remove("keywordLineNumber");p.set("tables",context.path("tables").deepCopy());p.put("schemaVersion","eclipse-coupled-relperm-parameters/1");p.put("field",i==0?"WATER_KR":"OIL_KR");p.put("unit","1");p.put("multiplier",i==0?.5:.75);}
+        var batch=eclipseBatches.create(seed.seed().version().getId(),seed.request());assertThat(batch.members()).hasSize(2);assertThat(batch.members().get(0).run().parameters().toString()).isEqualTo(seed.request().path("cases").path(0).path("parameters").toString());
+        int before=runStore.listByVersion(seed.seed().version().getId(),100).size();for(String fault:new String[]{"unit","multiplier","sourceSha256","schemaVersion","tables"}){var bad=((ObjectNode)seed.request().path("cases").path(0).path("parameters")).deepCopy();switch(fault){case "unit"->bad.put(fault,"cP");case "multiplier"->bad.put(fault,3);case "schemaVersion"->bad.put(fault,"eclipse-relperm-parameters/1");case "tables"->((tools.jackson.databind.node.ArrayNode)bad.path("tables")).removeAll();default->bad.put(fault,"0".repeat(64));}var request=request(null,"eclipse");request.setParameters(bad);assertThatThrownBy(()->runService.create(seed.seed().version().getId(),request)).isInstanceOf(RunException.class).satisfies(e->assertThat(((RunException)e).status()).isEqualTo(HttpStatus.BAD_REQUEST));assertThat(runStore.listByVersion(seed.seed().version().getId(),100)).hasSize(before);}
+    }
+    @Test void eclipseMultiSatRelpermBatchBindsBothTablesAndRejectsInvalidWithoutRuns()throws Exception {
+        var seed=eclipseBatchSeed();var inspection=objectMapper.readTree(getClass().getResourceAsStream("/eclipse-multi-sat-relperm-inspection.json"));seed.seed().version().setInspectionJson(objectMapper.writeValueAsString(inspection));versionMapper.updateById(seed.seed().version());var context=inspection.path("multiSatRelpermContext").path("regions").path(1);
+        for(int i=0;i<2;i++){var p=(ObjectNode)seed.request().path("cases").path(i).path("parameters");p.remove("field");p.put("sourceFile",inspection.path("caseName").asText());p.put("sourceSha256",inspection.path("packageFiles").path(0).path("sha256").asText());p.remove("rows");p.remove("keywordLineNumber");p.set("tables",context.path("tables").deepCopy());p.put("schemaVersion","eclipse-multi-sat-relperm-parameters/1");p.put("regionNumber",2);p.put("field",i==0?"WATER_KR":"OIL_KR");p.put("unit","1");p.put("multiplier",i==0?.5:.75);}
+        var batch=eclipseBatches.create(seed.seed().version().getId(),seed.request());assertThat(batch.members()).hasSize(2);assertThat(batch.members().get(0).run().parameters().toString()).isEqualTo(seed.request().path("cases").path(0).path("parameters").toString());
+        int before=runStore.listByVersion(seed.seed().version().getId(),100).size();for(String fault:new String[]{"unit","multiplier","sourceSha256","schemaVersion","tables"}){var bad=((ObjectNode)seed.request().path("cases").path(0).path("parameters")).deepCopy();switch(fault){case "unit"->bad.put(fault,"cP");case "multiplier"->bad.put(fault,3);case "schemaVersion"->bad.put(fault,"eclipse-relperm-parameters/1");case "tables"->((tools.jackson.databind.node.ArrayNode)bad.path("tables")).removeAll();default->bad.put(fault,"0".repeat(64));}var request=request(null,"eclipse");request.setParameters(bad);assertThatThrownBy(()->runService.create(seed.seed().version().getId(),request)).isInstanceOf(RunException.class).satisfies(e->assertThat(((RunException)e).status()).isEqualTo(HttpStatus.BAD_REQUEST));assertThat(runStore.listByVersion(seed.seed().version().getId(),100)).hasSize(before);}
+    }
+    @Test void eclipseMultiSatFamilyIIBatchBindsBothTablesAndRejectsInvalidWithoutRuns()throws Exception {
+        var seed=eclipseBatchSeed();var inspection=objectMapper.readTree(getClass().getResourceAsStream("/eclipse-multi-sat-family-ii-inspection.json"));seed.seed().version().setInspectionJson(objectMapper.writeValueAsString(inspection));versionMapper.updateById(seed.seed().version());var context=inspection.path("multiSatRelpermContext").path("regions").path(1);
+        for(int i=0;i<2;i++){var p=(ObjectNode)seed.request().path("cases").path(i).path("parameters");p.remove("field");p.put("sourceFile",inspection.path("caseName").asText());p.put("sourceSha256",inspection.path("packageFiles").path(0).path("sha256").asText());p.remove("rows");p.remove("keywordLineNumber");p.set("tables",context.path("tables").deepCopy());p.put("schemaVersion","eclipse-multi-sat-relperm-parameters/2");p.put("regionNumber",2);p.put("field",i==0?"WATER_KR":"OIL_KR");p.put("unit","1");p.put("multiplier",i==0?.5:.75);}
+        var batch=eclipseBatches.create(seed.seed().version().getId(),seed.request());assertThat(batch.members()).hasSize(2);assertThat(batch.members().get(0).run().parameters().toString()).isEqualTo(seed.request().path("cases").path(0).path("parameters").toString());
+        int before=runStore.listByVersion(seed.seed().version().getId(),100).size();for(String fault:new String[]{"unit","multiplier","sourceSha256","schemaVersion","tables"}){var bad=((ObjectNode)seed.request().path("cases").path(0).path("parameters")).deepCopy();switch(fault){case "unit"->bad.put(fault,"cP");case "multiplier"->bad.put(fault,3);case "schemaVersion"->bad.put(fault,"eclipse-relperm-parameters/1");case "tables"->((tools.jackson.databind.node.ArrayNode)bad.path("tables")).removeAll();default->bad.put(fault,"0".repeat(64));}var request=request(null,"eclipse");request.setParameters(bad);assertThatThrownBy(()->runService.create(seed.seed().version().getId(),request)).isInstanceOf(RunException.class).satisfies(e->assertThat(((RunException)e).status()).isEqualTo(HttpStatus.BAD_REQUEST));assertThat(runStore.listByVersion(seed.seed().version().getId(),100)).hasSize(before);}
+    }
+    @Test void eclipseMultiPvtBatchBindsBothTablesAndRejectsInvalidWithoutRuns()throws Exception {
+        var seed=eclipseBatchSeed();var inspection=objectMapper.readTree(getClass().getResourceAsStream("/eclipse-multi-pvt-inspection.json"));seed.seed().version().setInspectionJson(objectMapper.writeValueAsString(inspection));versionMapper.updateById(seed.seed().version());var context=inspection.path("multiPvtContext").path("regions").path(1);
+        for(int i=0;i<2;i++){var p=(ObjectNode)seed.request().path("cases").path(i).path("parameters");p.remove("field");p.put("sourceFile",inspection.path("caseName").asText());p.put("sourceSha256",inspection.path("packageFiles").path(0).path("sha256").asText());p.remove("rows");p.remove("keywordLineNumber");p.set("tables",context.path("tables").deepCopy());p.put("schemaVersion","eclipse-multi-pvt-parameters/1");p.put("regionNumber",2);p.put("keyword",i==0?"PVDO":"PVDG");p.put("field","VISCOSITY");p.put("unit","cP");p.put("multiplier",i==0?2:3);}
+        var batch=eclipseBatches.create(seed.seed().version().getId(),seed.request());assertThat(batch.members()).hasSize(2);assertThat(batch.members().get(0).run().parameters().toString()).isEqualTo(seed.request().path("cases").path(0).path("parameters").toString());
+        int before=runStore.listByVersion(seed.seed().version().getId(),100).size();for(String fault:new String[]{"unit","multiplier","sourceSha256","schemaVersion","tables"}){var bad=((ObjectNode)seed.request().path("cases").path(0).path("parameters")).deepCopy();switch(fault){case "unit"->bad.put(fault,"rb/stb");case "multiplier"->bad.put(fault,101);case "schemaVersion"->bad.put(fault,"eclipse-relperm-parameters/1");case "tables"->((tools.jackson.databind.node.ArrayNode)bad.path("tables")).removeAll();default->bad.put(fault,"0".repeat(64));}var request=request(null,"eclipse");request.setParameters(bad);assertThatThrownBy(()->runService.create(seed.seed().version().getId(),request)).isInstanceOf(RunException.class).satisfies(e->assertThat(((RunException)e).status()).isEqualTo(HttpStatus.BAD_REQUEST));assertThat(runStore.listByVersion(seed.seed().version().getId(),100)).hasSize(before);}
+    }
+    @Test void eclipseMultiLiveOilPvtBatchBindsBothTablesAndRejectsInvalidWithoutRuns()throws Exception {
+        var seed=eclipseBatchSeed();var inspection=objectMapper.readTree(getClass().getResourceAsStream("/eclipse-multi-pvto-inspection.json"));seed.seed().version().setInspectionJson(objectMapper.writeValueAsString(inspection));versionMapper.updateById(seed.seed().version());var context=inspection.path("multiLiveOilPvtContext").path("regions").path(1);
+        for(int i=0;i<2;i++){var p=(ObjectNode)seed.request().path("cases").path(i).path("parameters");p.remove("field");p.put("sourceFile",inspection.path("caseName").asText());p.put("sourceSha256",inspection.path("packageFiles").path(0).path("sha256").asText());p.remove("rows");p.put("keywordLineNumber",context.path("keywordLineNumber").asInt());p.set("records",context.path("records").deepCopy());p.set("gasTable",context.path("gasTable").deepCopy());p.put("schemaVersion","eclipse-multi-pvto-parameters/1");p.put("regionNumber",2);p.put("field",i==0?"VISCOSITY":"FORMATION_VOLUME_FACTOR");p.put("unit",i==0?"cP":"rb/stb");p.put("multiplier",i==0?2:1.02);}
+        var batch=eclipseBatches.create(seed.seed().version().getId(),seed.request());assertThat(batch.members()).hasSize(2);assertThat(batch.members().get(0).run().parameters().toString()).isEqualTo(seed.request().path("cases").path(0).path("parameters").toString());
+        int before=runStore.listByVersion(seed.seed().version().getId(),100).size();for(String fault:new String[]{"unit","multiplier","sourceSha256","schemaVersion","records","regionNumber"}){var bad=((ObjectNode)seed.request().path("cases").path(0).path("parameters")).deepCopy();switch(fault){case "unit"->bad.put(fault,"rb/stb");case "multiplier"->bad.put(fault,101);case "schemaVersion"->bad.put(fault,"eclipse-relperm-parameters/1");case "records"->((tools.jackson.databind.node.ArrayNode)bad.path("records")).removeAll();case "regionNumber"->bad.put(fault,1);default->bad.put(fault,"0".repeat(64));}var request=request(null,"eclipse");request.setParameters(bad);assertThatThrownBy(()->runService.create(seed.seed().version().getId(),request)).isInstanceOf(RunException.class).satisfies(e->assertThat(((RunException)e).status()).isEqualTo(HttpStatus.BAD_REQUEST));assertThat(runStore.listByVersion(seed.seed().version().getId(),100)).hasSize(before);}
+    }
+    @Test void eclipseIndependentSatPvtBatchUsesSevenCasesFromOneBaseline()throws Exception {
+        var seed=eclipseBatchSeed();var inspection=objectMapper.readTree(getClass().getResourceAsStream("/eclipse-multi-sat-pvt-inspection.json"));seed.seed().version().setInspectionJson(objectMapper.writeValueAsString(inspection));versionMapper.updateById(seed.seed().version());
+        var cases=objectMapper.createArrayNode();var template=seed.request().path("cases").path(0);
+        for(var spec:new String[][]{{"PVDO","VISCOSITY"},{"PVDO","FORMATION_VOLUME_FACTOR"},{"PVDG","VISCOSITY"},{"PVDG","FORMATION_VOLUME_FACTOR"},{"SWFN","WATER_KR"},{"SGFN","GAS_KR"},{"SOF3","OIL_KR"}}){
+            boolean fluid=spec[0].equals("PVDO")||spec[0].equals("PVDG");var child=(ObjectNode)template.deepCopy();child.put("name",spec[0]+" "+spec[1]);var p=(ObjectNode)child.path("parameters");p.remove("rows");p.remove("keywordLineNumber");p.remove("keyword");
+            p.put("schemaVersion",fluid?"eclipse-multi-pvt-parameters/1":"eclipse-multi-sat-relperm-parameters/2");p.put("regionNumber",2);p.put("sourceFile",inspection.path("caseName").asText());p.put("sourceSha256",inspection.path("packageFiles").path(0).path("sha256").asText());p.put("field",spec[1]);p.put("unit",fluid?(spec[1].equals("VISCOSITY")?"cP":spec[0].equals("PVDO")?"rb/stb":"rb/Mscf"):"1");p.put("multiplier",fluid?(spec[1].equals("VISCOSITY")?2:1.02):.5);p.set("tables",inspection.path(fluid?"multiPvtContext":"multiSatRelpermContext").path("regions").path(1).path("tables").deepCopy());if(fluid)p.put("keyword",spec[0]);cases.add(child);
+        }
+        seed.request().set("cases",cases);var batch=eclipseBatches.create(seed.seed().version().getId(),seed.request());assertThat(batch.members()).hasSize(7);
+        for(int n=0;n<7;n++)assertThat(batch.members().get(n).run().parameters().toString()).isEqualTo(cases.path(n).path("parameters").toString());
+    }
+    @Test void eclipseIndependentCoupledSatPvtBatchUsesSevenCasesFromOneBaseline()throws Exception {
+        var seed=eclipseBatchSeed();var inspection=objectMapper.readTree(getClass().getResourceAsStream("/eclipse-multi-sat-family-i-pvt-inspection.json"));seed.seed().version().setInspectionJson(objectMapper.writeValueAsString(inspection));versionMapper.updateById(seed.seed().version());
+        var cases=objectMapper.createArrayNode();var template=seed.request().path("cases").path(0);
+        for(var spec:new String[][]{{"PVDO","VISCOSITY"},{"PVDO","FORMATION_VOLUME_FACTOR"},{"PVDG","VISCOSITY"},{"PVDG","FORMATION_VOLUME_FACTOR"},{"SWOF","WATER_KR"},{"SGOF","GAS_KR"},{"SWOF","OIL_KR"}}){
+            boolean fluid=spec[0].equals("PVDO")||spec[0].equals("PVDG");var child=(ObjectNode)template.deepCopy();child.put("name",spec[0]+" "+spec[1]);var p=(ObjectNode)child.path("parameters");p.remove("rows");p.remove("keywordLineNumber");p.remove("keyword");
+            p.put("schemaVersion",fluid?"eclipse-multi-pvt-parameters/1":"eclipse-multi-sat-relperm-parameters/1");p.put("regionNumber",2);p.put("sourceFile",inspection.path("caseName").asText());p.put("sourceSha256",inspection.path("packageFiles").path(0).path("sha256").asText());p.put("field",spec[1]);p.put("unit",fluid?(spec[1].equals("VISCOSITY")?"cP":spec[0].equals("PVDO")?"rb/stb":"rb/Mscf"):"1");p.put("multiplier",fluid?(spec[1].equals("VISCOSITY")?2:1.02):.5);p.set("tables",inspection.path(fluid?"multiPvtContext":"multiSatRelpermContext").path("regions").path(1).path("tables").deepCopy());if(fluid)p.put("keyword",spec[0]);cases.add(child);
+        }
+        seed.request().set("cases",cases);var batch=eclipseBatches.create(seed.seed().version().getId(),seed.request());assertThat(batch.members()).hasSize(7);
+        for(int n=0;n<7;n++)assertThat(batch.members().get(n).run().parameters().toString()).isEqualTo(cases.path(n).path("parameters").toString());
+    }
+    @Test void eclipseMultiWetGasPvtBatchBindsBothTablesAndRejectsInvalidWithoutRuns()throws Exception {
+        var seed=eclipseBatchSeed();var inspection=objectMapper.readTree(getClass().getResourceAsStream("/eclipse-multi-pvtg-inspection.json"));seed.seed().version().setInspectionJson(objectMapper.writeValueAsString(inspection));versionMapper.updateById(seed.seed().version());var context=inspection.path("multiWetGasPvtContext").path("regions").path(1);
+        for(int i=0;i<2;i++){var p=(ObjectNode)seed.request().path("cases").path(i).path("parameters");p.remove("field");p.put("sourceFile",inspection.path("caseName").asText());p.put("sourceSha256",inspection.path("packageFiles").path(0).path("sha256").asText());p.remove("rows");p.put("keywordLineNumber",context.path("keywordLineNumber").asInt());p.set("records",context.path("records").deepCopy());p.set("oilTable",context.path("oilTable").deepCopy());p.put("schemaVersion","eclipse-multi-pvtg-parameters/1");p.put("regionNumber",2);p.put("field",i==0?"VISCOSITY":"FORMATION_VOLUME_FACTOR");p.put("unit",i==0?"cP":"rm3/sm3");p.put("multiplier",i==0?2:1.02);}
+        var batch=eclipseBatches.create(seed.seed().version().getId(),seed.request());assertThat(batch.members()).hasSize(2);assertThat(batch.members().get(0).run().parameters().toString()).isEqualTo(seed.request().path("cases").path(0).path("parameters").toString());
+        int before=runStore.listByVersion(seed.seed().version().getId(),100).size();for(String fault:new String[]{"unit","multiplier","sourceSha256","schemaVersion","records","regionNumber"}){var bad=((ObjectNode)seed.request().path("cases").path(0).path("parameters")).deepCopy();switch(fault){case "unit"->bad.put(fault,"rm3/sm3");case "multiplier"->bad.put(fault,101);case "schemaVersion"->bad.put(fault,"eclipse-relperm-parameters/1");case "records"->((tools.jackson.databind.node.ArrayNode)bad.path("records")).removeAll();case "regionNumber"->bad.put(fault,1);default->bad.put(fault,"0".repeat(64));}var request=request(null,"eclipse");request.setParameters(bad);assertThatThrownBy(()->runService.create(seed.seed().version().getId(),request)).isInstanceOf(RunException.class).satisfies(e->assertThat(((RunException)e).status()).isEqualTo(HttpStatus.BAD_REQUEST));assertThat(runStore.listByVersion(seed.seed().version().getId(),100)).hasSize(before);}
+    }
+    @Test void eclipseMultiWaterPvtBatchBindsSourceRecordAndRejectsInvalidWithoutRuns()throws Exception {
+        var seed=eclipseBatchSeed();var inspection=objectMapper.readTree(getClass().getResourceAsStream("/eclipse-multi-pvtw-inspection.json"));seed.seed().version().setInspectionJson(objectMapper.writeValueAsString(inspection));versionMapper.updateById(seed.seed().version());var region=inspection.path("multiWaterPvtContext").path("regions").path(1);
+        for(int i=0;i<2;i++){var p=objectMapper.createObjectNode();p.put("schemaVersion","eclipse-multi-pvtw-parameters/1");p.put("baselineRunId",seed.baselineId());p.put("regionNumber",2);p.put("sourceFile",inspection.path("caseName").asText());p.put("sourceSha256",inspection.path("packageFiles").path(0).path("sha256").asText());p.put("lineNumber",region.path("lineNumber").asInt());p.put("field",i==0?"VISCOSITY":"VISCOSIBILITY");p.put("unit",i==0?"cP":"1/psi");p.put("originalValue",i==0?.4:0);p.put("targetValue",i==0?.8:1e-6);p.set("recordValues",region.path("recordValues").deepCopy());((ObjectNode)seed.request().path("cases").path(i)).set("parameters",p);}
+        var batch=eclipseBatches.create(seed.seed().version().getId(),seed.request());assertThat(batch.members()).hasSize(2);assertThat(batch.members().get(0).run().parameters().toString()).isEqualTo(seed.request().path("cases").path(0).path("parameters").toString());
+        int before=runStore.listByVersion(seed.seed().version().getId(),100).size();for(String fault:new String[]{"unit","targetValue","sourceSha256","recordValues","regionNumber","lineNumber"}){var bad=((ObjectNode)seed.request().path("cases").path(0).path("parameters")).deepCopy();switch(fault){case "unit"->bad.put(fault,"1/psi");case "targetValue"->bad.put(fault,0);case "recordValues"->((tools.jackson.databind.node.ArrayNode)bad.path("recordValues")).remove(4);case "regionNumber"->bad.put(fault,1);case "lineNumber"->bad.put(fault,region.path("lineNumber").asInt()+1);default->bad.put(fault,"0".repeat(64));}var request=request(null,"eclipse");request.setParameters(bad);assertThatThrownBy(()->runService.create(seed.seed().version().getId(),request)).isInstanceOf(RunException.class).satisfies(e->assertThat(((RunException)e).status()).isEqualTo(HttpStatus.BAD_REQUEST));assertThat(runStore.listByVersion(seed.seed().version().getId(),100)).hasSize(before);}
+    }
+    @Test void eclipseMultiPureWaterPvtBatchBindsSourceRecordAndRejectsInvalidWithoutRuns()throws Exception {
+        var seed=eclipseBatchSeed();var inspection=objectMapper.readTree(getClass().getResourceAsStream("/eclipse-multi-pure-pvtw-inspection.json"));seed.seed().version().setInspectionJson(objectMapper.writeValueAsString(inspection));versionMapper.updateById(seed.seed().version());var region=inspection.path("multiWaterPvtContext").path("regions").path(1);
+        for(int i=0;i<2;i++){var p=objectMapper.createObjectNode();p.put("schemaVersion","eclipse-multi-pvtw-parameters/1");p.put("baselineRunId",seed.baselineId());p.put("regionNumber",2);p.put("sourceFile",inspection.path("caseName").asText());p.put("sourceSha256",inspection.path("packageFiles").path(0).path("sha256").asText());p.put("lineNumber",region.path("lineNumber").asInt());p.put("field",i==0?"VISCOSITY":"VISCOSIBILITY");p.put("unit",i==0?"cP":"1/bar");p.put("originalValue",i==0?.5:0);p.put("targetValue",i==0?1:1e-6);p.set("recordValues",region.path("recordValues").deepCopy());((ObjectNode)seed.request().path("cases").path(i)).set("parameters",p);}
+        var batch=eclipseBatches.create(seed.seed().version().getId(),seed.request());assertThat(batch.members()).hasSize(2);assertThat(batch.members().get(0).run().parameters().toString()).isEqualTo(seed.request().path("cases").path(0).path("parameters").toString());
+        int before=runStore.listByVersion(seed.seed().version().getId(),100).size();for(String fault:new String[]{"unit","targetValue","sourceSha256","recordValues","regionNumber","lineNumber"}){var bad=((ObjectNode)seed.request().path("cases").path(0).path("parameters")).deepCopy();switch(fault){case "unit"->bad.put(fault,"1/bar");case "targetValue"->bad.put(fault,0);case "recordValues"->((tools.jackson.databind.node.ArrayNode)bad.path("recordValues")).remove(4);case "regionNumber"->bad.put(fault,1);case "lineNumber"->bad.put(fault,region.path("lineNumber").asInt()+1);default->bad.put(fault,"0".repeat(64));}var request=request(null,"eclipse");request.setParameters(bad);assertThatThrownBy(()->runService.create(seed.seed().version().getId(),request)).isInstanceOf(RunException.class).satisfies(e->assertThat(((RunException)e).status()).isEqualTo(HttpStatus.BAD_REQUEST));assertThat(runStore.listByVersion(seed.seed().version().getId(),100)).hasSize(before);}
+    }
+    @Test void eclipseDefaultMultiWaterPvtBatchBindsOriginalTokensAndRejectsInvalidWithoutRuns()throws Exception {
+        var seed=eclipseBatchSeed();var inspection=objectMapper.readTree(getClass().getResourceAsStream("/eclipse-multi-pvtw-default-three-inspection.json"));seed.seed().version().setInspectionJson(objectMapper.writeValueAsString(inspection));versionMapper.updateById(seed.seed().version());var region=inspection.path("multiWaterPvtContext").path("regions").path(1);
+        for(int i=0;i<2;i++){var p=objectMapper.createObjectNode();p.put("schemaVersion","eclipse-multi-pvtw-parameters/2");p.put("baselineRunId",seed.baselineId());p.put("regionNumber",2);p.put("sourceFile",inspection.path("caseName").asText());p.put("sourceSha256",inspection.path("packageFiles").path(0).path("sha256").asText());p.put("lineNumber",region.path("lineNumber").asInt());p.put("field",i==0?"VISCOSITY":"VISCOSIBILITY");p.put("unit",i==0?"cP":"1/psi");p.put("originalValue",i==0?.4:0);p.put("targetValue",i==0?.8:1e-6);p.set("recordValues",region.path("recordValues").deepCopy());((ObjectNode)seed.request().path("cases").path(i)).set("parameters",p);}
+        var batch=eclipseBatches.create(seed.seed().version().getId(),seed.request());assertThat(batch.members()).hasSize(2);assertThat(batch.members().get(0).run().parameters().toString()).isEqualTo(seed.request().path("cases").path(0).path("parameters").toString());
+        int before=runStore.listByVersion(seed.seed().version().getId(),100).size();for(String fault:new String[]{"unit","targetValue","sourceSha256","recordValues","regionNumber","lineNumber"}){var bad=((ObjectNode)seed.request().path("cases").path(0).path("parameters")).deepCopy();switch(fault){case "unit"->bad.put(fault,"1/psi");case "targetValue"->bad.put(fault,0);case "recordValues"->((tools.jackson.databind.node.ArrayNode)bad.path("recordValues")).remove(3);case "regionNumber"->bad.put(fault,1);case "lineNumber"->bad.put(fault,region.path("lineNumber").asInt()+1);default->bad.put(fault,"0".repeat(64));}var request=request(null,"eclipse");request.setParameters(bad);assertThatThrownBy(()->runService.create(seed.seed().version().getId(),request)).isInstanceOf(RunException.class).satisfies(e->assertThat(((RunException)e).status()).isEqualTo(HttpStatus.BAD_REQUEST));assertThat(runStore.listByVersion(seed.seed().version().getId(),100)).hasSize(before);}
+    }
+    @Test void eclipseDefaultMultiPureWaterPvtBatchBindsOriginalTokensAndRejectsInvalidWithoutRuns()throws Exception {
+        var seed=eclipseBatchSeed();var inspection=objectMapper.readTree(getClass().getResourceAsStream("/eclipse-multi-pvtw-default-pure-inspection.json"));seed.seed().version().setInspectionJson(objectMapper.writeValueAsString(inspection));versionMapper.updateById(seed.seed().version());var region=inspection.path("multiWaterPvtContext").path("regions").path(1);
+        for(int i=0;i<2;i++){var p=objectMapper.createObjectNode();p.put("schemaVersion","eclipse-multi-pvtw-parameters/2");p.put("baselineRunId",seed.baselineId());p.put("regionNumber",2);p.put("sourceFile",inspection.path("caseName").asText());p.put("sourceSha256",inspection.path("packageFiles").path(0).path("sha256").asText());p.put("lineNumber",region.path("lineNumber").asInt());p.put("field",i==0?"VISCOSITY":"VISCOSIBILITY");p.put("unit",i==0?"cP":"1/bar");p.put("originalValue",i==0?.5:0);p.put("targetValue",i==0?1:1e-6);p.set("recordValues",region.path("recordValues").deepCopy());((ObjectNode)seed.request().path("cases").path(i)).set("parameters",p);}
+        var batch=eclipseBatches.create(seed.seed().version().getId(),seed.request());assertThat(batch.members()).hasSize(2);assertThat(batch.members().get(0).run().parameters().toString()).isEqualTo(seed.request().path("cases").path(0).path("parameters").toString());
+        int before=runStore.listByVersion(seed.seed().version().getId(),100).size();for(String fault:new String[]{"unit","targetValue","sourceSha256","recordValues","regionNumber","lineNumber"}){var bad=((ObjectNode)seed.request().path("cases").path(0).path("parameters")).deepCopy();switch(fault){case "unit"->bad.put(fault,"1/bar");case "targetValue"->bad.put(fault,0);case "recordValues"->((tools.jackson.databind.node.ArrayNode)bad.path("recordValues")).remove(3);case "regionNumber"->bad.put(fault,1);case "lineNumber"->bad.put(fault,region.path("lineNumber").asInt()+1);default->bad.put(fault,"0".repeat(64));}var request=request(null,"eclipse");request.setParameters(bad);assertThatThrownBy(()->runService.create(seed.seed().version().getId(),request)).isInstanceOf(RunException.class).satisfies(e->assertThat(((RunException)e).status()).isEqualTo(HttpStatus.BAD_REQUEST));assertThat(runStore.listByVersion(seed.seed().version().getId(),100)).hasSize(before);}
+    }
+    @Test void eclipseCombinedSatLiveOilBindsIndependentAxesAndRejectsStaleTablesWithoutRuns()throws Exception{
+        var seed=eclipseBatchSeed();var i=objectMapper.readTree(getClass().getResourceAsStream("/eclipse-multi-sat-pvto-inspection.json"));seed.seed().version().setInspectionJson(objectMapper.writeValueAsString(i));versionMapper.updateById(seed.seed().version());
+        for(int k=0;k<2;k++){boolean fluid=k==0;var r=i.path(fluid?"multiLiveOilPvtContext":"multiSatRelpermContext").path("regions").path(1);var p=objectMapper.createObjectNode();p.put("schemaVersion",fluid?"eclipse-multi-pvto-parameters/1":"eclipse-multi-sat-relperm-parameters/2");p.put("baselineRunId",seed.baselineId());p.put("regionNumber",2);p.put("sourceFile",i.path("caseName").asText());p.put("sourceSha256",i.path("packageFiles").path(0).path("sha256").asText());p.put("field",fluid?"VISCOSITY":"OIL_KR");p.put("unit",fluid?"cP":"1");p.put("multiplier",fluid?2:.5);if(fluid){p.put("keywordLineNumber",r.path("keywordLineNumber").asInt());p.set("records",r.path("records").deepCopy());p.set("gasTable",r.path("gasTable").deepCopy());}else p.set("tables",r.path("tables").deepCopy());((ObjectNode)seed.request().path("cases").path(k)).set("parameters",p);}
+        var batch=eclipseBatches.create(seed.seed().version().getId(),seed.request());assertThat(batch.members()).hasSize(2);int before=runStore.listByVersion(seed.seed().version().getId(),100).size();
+        for(int k=0;k<2;k++)for(var fault:new String[]{"regionNumber","sourceSha256","unit"}){var p=((ObjectNode)seed.request().path("cases").path(k).path("parameters")).deepCopy();if(fault.equals("regionNumber"))p.put(fault,1);else p.put(fault,fault.equals("unit")?"mD":"0".repeat(64));var r=request(null,"eclipse");r.setParameters(p);assertThatThrownBy(()->runService.create(seed.seed().version().getId(),r)).isInstanceOf(RunException.class).satisfies(e->assertThat(((RunException)e).status()).isEqualTo(HttpStatus.BAD_REQUEST));assertThat(runStore.listByVersion(seed.seed().version().getId(),100)).hasSize(before);}
+    }
+    @Test void eclipseCombinedFamilyISatLiveOilBindsIndependentAxesAndRejectsStaleTablesWithoutRuns()throws Exception{
+        var seed=eclipseBatchSeed();var i=objectMapper.readTree(getClass().getResourceAsStream("/eclipse-multi-sat-family-i-pvto-inspection.json"));seed.seed().version().setInspectionJson(objectMapper.writeValueAsString(i));versionMapper.updateById(seed.seed().version());
+        for(int k=0;k<2;k++){boolean fluid=k==0;var r=i.path(fluid?"multiLiveOilPvtContext":"multiSatRelpermContext").path("regions").path(1);var p=objectMapper.createObjectNode();p.put("schemaVersion",fluid?"eclipse-multi-pvto-parameters/1":"eclipse-multi-sat-relperm-parameters/1");p.put("baselineRunId",seed.baselineId());p.put("regionNumber",2);p.put("sourceFile",i.path("caseName").asText());p.put("sourceSha256",i.path("packageFiles").path(0).path("sha256").asText());p.put("field",fluid?"VISCOSITY":"OIL_KR");p.put("unit",fluid?"cP":"1");p.put("multiplier",fluid?2:.5);if(fluid){p.put("keywordLineNumber",r.path("keywordLineNumber").asInt());p.set("records",r.path("records").deepCopy());p.set("gasTable",r.path("gasTable").deepCopy());}else p.set("tables",r.path("tables").deepCopy());((ObjectNode)seed.request().path("cases").path(k)).set("parameters",p);}
+        var batch=eclipseBatches.create(seed.seed().version().getId(),seed.request());assertThat(batch.members()).hasSize(2);int before=runStore.listByVersion(seed.seed().version().getId(),100).size();
+        for(int k=0;k<2;k++)for(var fault:new String[]{"regionNumber","sourceSha256","unit"}){var p=((ObjectNode)seed.request().path("cases").path(k).path("parameters")).deepCopy();if(fault.equals("regionNumber"))p.put(fault,1);else p.put(fault,fault.equals("unit")?"mD":"0".repeat(64));var r=request(null,"eclipse");r.setParameters(p);assertThatThrownBy(()->runService.create(seed.seed().version().getId(),r)).isInstanceOf(RunException.class).satisfies(e->assertThat(((RunException)e).status()).isEqualTo(HttpStatus.BAD_REQUEST));assertThat(runStore.listByVersion(seed.seed().version().getId(),100)).hasSize(before);}
+    }
+    @Test void eclipseCombinedSatWetGasBindsIndependentAxesAndRejectsStaleTablesWithoutRuns()throws Exception{
+        var seed=eclipseBatchSeed();var i=objectMapper.readTree(getClass().getResourceAsStream("/eclipse-multi-sat-pvtg-inspection.json"));seed.seed().version().setInspectionJson(objectMapper.writeValueAsString(i));versionMapper.updateById(seed.seed().version());
+        for(int k=0;k<2;k++){boolean fluid=k==0;var r=i.path(fluid?"multiWetGasPvtContext":"multiSatRelpermContext").path("regions").path(1);var p=objectMapper.createObjectNode();p.put("schemaVersion",fluid?"eclipse-multi-pvtg-parameters/1":"eclipse-multi-sat-relperm-parameters/2");p.put("baselineRunId",seed.baselineId());p.put("regionNumber",2);p.put("sourceFile",i.path("caseName").asText());p.put("sourceSha256",i.path("packageFiles").path(0).path("sha256").asText());p.put("field",fluid?"VISCOSITY":"OIL_KR");p.put("unit",fluid?"cP":"1");p.put("multiplier",fluid?2:.5);if(fluid){p.put("keywordLineNumber",r.path("keywordLineNumber").asInt());p.set("records",r.path("records").deepCopy());p.set("oilTable",r.path("oilTable").deepCopy());}else p.set("tables",r.path("tables").deepCopy());((ObjectNode)seed.request().path("cases").path(k)).set("parameters",p);}
+        var batch=eclipseBatches.create(seed.seed().version().getId(),seed.request());assertThat(batch.members()).hasSize(2);int before=runStore.listByVersion(seed.seed().version().getId(),100).size();
+        for(int k=0;k<2;k++)for(var fault:new String[]{"regionNumber","sourceSha256","unit"}){var p=((ObjectNode)seed.request().path("cases").path(k).path("parameters")).deepCopy();if(fault.equals("regionNumber"))p.put(fault,1);else p.put(fault,fault.equals("unit")?"mD":"0".repeat(64));var r=request(null,"eclipse");r.setParameters(p);assertThatThrownBy(()->runService.create(seed.seed().version().getId(),r)).isInstanceOf(RunException.class).satisfies(e->assertThat(((RunException)e).status()).isEqualTo(HttpStatus.BAD_REQUEST));assertThat(runStore.listByVersion(seed.seed().version().getId(),100)).hasSize(before);}
+    }
+    @Test void eclipseCombinedFamilyISatWetGasBindsIndependentAxesAndRejectsStaleTablesWithoutRuns()throws Exception{
+        var seed=eclipseBatchSeed();var i=objectMapper.readTree(getClass().getResourceAsStream("/eclipse-multi-sat-family-i-pvtg-inspection.json"));seed.seed().version().setInspectionJson(objectMapper.writeValueAsString(i));versionMapper.updateById(seed.seed().version());
+        for(int k=0;k<2;k++){boolean fluid=k==0;var r=i.path(fluid?"multiWetGasPvtContext":"multiSatRelpermContext").path("regions").path(1);var p=objectMapper.createObjectNode();p.put("schemaVersion",fluid?"eclipse-multi-pvtg-parameters/1":"eclipse-multi-sat-relperm-parameters/1");p.put("baselineRunId",seed.baselineId());p.put("regionNumber",2);p.put("sourceFile",i.path("caseName").asText());p.put("sourceSha256",i.path("packageFiles").path(0).path("sha256").asText());p.put("field",fluid?"VISCOSITY":"OIL_KR");p.put("unit",fluid?"cP":"1");p.put("multiplier",fluid?2:.5);if(fluid){p.put("keywordLineNumber",r.path("keywordLineNumber").asInt());p.set("records",r.path("records").deepCopy());p.set("oilTable",r.path("oilTable").deepCopy());}else p.set("tables",r.path("tables").deepCopy());((ObjectNode)seed.request().path("cases").path(k)).set("parameters",p);}
+        var batch=eclipseBatches.create(seed.seed().version().getId(),seed.request());assertThat(batch.members()).hasSize(2);int before=runStore.listByVersion(seed.seed().version().getId(),100).size();
+        for(int k=0;k<2;k++)for(var fault:new String[]{"regionNumber","sourceSha256","unit"}){var p=((ObjectNode)seed.request().path("cases").path(k).path("parameters")).deepCopy();if(fault.equals("regionNumber"))p.put(fault,1);else p.put(fault,fault.equals("unit")?"mD":"0".repeat(64));var r=request(null,"eclipse");r.setParameters(p);assertThatThrownBy(()->runService.create(seed.seed().version().getId(),r)).isInstanceOf(RunException.class).satisfies(e->assertThat(((RunException)e).status()).isEqualTo(HttpStatus.BAD_REQUEST));assertThat(runStore.listByVersion(seed.seed().version().getId(),100)).hasSize(before);}
     }
     @Test void eclipseBatchLaterSourceRejectionRollsBackEarlierQueuedChildAndCollection()throws Exception {
         var seed=eclipseBatchSeed();((ObjectNode)seed.request().path("cases").path(1).path("parameters")).put("sourceSha256","0".repeat(64));
@@ -2458,5 +2635,521 @@ class SoftwareIntegrationRunFlowTests {
         private void observeTransaction() {
             transactionActiveDuringHttp |= TransactionSynchronizationManager.isActualTransactionActive();
         }
+    }    @Test void eclipseStarMultiWaterPvtBatchBindsOriginalTokensAndRejectsInvalidWithoutRuns()throws Exception {
+        var seed=eclipseBatchSeed();var inspection=objectMapper.readTree(getClass().getResourceAsStream("/eclipse-multi-water-star-inspection.json"));seed.seed().version().setInspectionJson(objectMapper.writeValueAsString(inspection));versionMapper.updateById(seed.seed().version());var region=inspection.path("multiWaterPvtContext").path("regions").path(1);
+        for(int i=0;i<2;i++){var p=objectMapper.createObjectNode();p.put("schemaVersion","eclipse-multi-pvtw-parameters/3");p.put("baselineRunId",seed.baselineId());p.put("regionNumber",2);p.put("sourceFile",inspection.path("caseName").asText());p.put("sourceSha256",inspection.path("packageFiles").path(0).path("sha256").asText());p.put("lineNumber",region.path("lineNumber").asInt());p.put("field",i==0?"VISCOSITY":"VISCOSIBILITY");p.put("unit",i==0?"cP":"1/psi");p.put("originalValue",i==0?.4:0);p.put("targetValue",i==0?.8:1e-6);p.set("recordValues",region.path("recordValues").deepCopy());((ObjectNode)seed.request().path("cases").path(i)).set("parameters",p);}
+        var batch=eclipseBatches.create(seed.seed().version().getId(),seed.request());assertThat(batch.members()).hasSize(2);assertThat(batch.members().get(0).run().parameters().toString()).isEqualTo(seed.request().path("cases").path(0).path("parameters").toString());
+        int before=runStore.listByVersion(seed.seed().version().getId(),100).size();for(String fault:new String[]{"unit","targetValue","sourceSha256","recordValues","regionNumber","lineNumber"}){var bad=((ObjectNode)seed.request().path("cases").path(0).path("parameters")).deepCopy();switch(fault){case "unit"->bad.put(fault,"1/psi");case "targetValue"->bad.put(fault,0);case "recordValues"->((tools.jackson.databind.node.ArrayNode)bad.path("recordValues")).remove(3);case "regionNumber"->bad.put(fault,1);case "lineNumber"->bad.put(fault,region.path("lineNumber").asInt()+1);default->bad.put(fault,"0".repeat(64));}var request=request(null,"eclipse");request.setParameters(bad);assertThatThrownBy(()->runService.create(seed.seed().version().getId(),request)).isInstanceOf(RunException.class).satisfies(e->assertThat(((RunException)e).status()).isEqualTo(HttpStatus.BAD_REQUEST));assertThat(runStore.listByVersion(seed.seed().version().getId(),100)).hasSize(before);}
+    }
+    @Test void eclipseStarMultiPureWaterPvtBatchBindsOriginalTokensAndRejectsInvalidWithoutRuns()throws Exception {
+        var seed=eclipseBatchSeed();var inspection=objectMapper.readTree(getClass().getResourceAsStream("/eclipse-multi-pure-water-star-inspection.json"));seed.seed().version().setInspectionJson(objectMapper.writeValueAsString(inspection));versionMapper.updateById(seed.seed().version());var region=inspection.path("multiWaterPvtContext").path("regions").path(1);
+        for(int i=0;i<2;i++){var p=objectMapper.createObjectNode();p.put("schemaVersion","eclipse-multi-pvtw-parameters/3");p.put("baselineRunId",seed.baselineId());p.put("regionNumber",2);p.put("sourceFile",inspection.path("caseName").asText());p.put("sourceSha256",inspection.path("packageFiles").path(0).path("sha256").asText());p.put("lineNumber",region.path("lineNumber").asInt());p.put("field",i==0?"VISCOSITY":"VISCOSIBILITY");p.put("unit",i==0?"cP":"1/bar");p.put("originalValue",i==0?.5:0);p.put("targetValue",i==0?1:1e-6);p.set("recordValues",region.path("recordValues").deepCopy());((ObjectNode)seed.request().path("cases").path(i)).set("parameters",p);}
+        var batch=eclipseBatches.create(seed.seed().version().getId(),seed.request());assertThat(batch.members()).hasSize(2);assertThat(batch.members().get(0).run().parameters().toString()).isEqualTo(seed.request().path("cases").path(0).path("parameters").toString());
+        int before=runStore.listByVersion(seed.seed().version().getId(),100).size();for(String fault:new String[]{"unit","targetValue","sourceSha256","recordValues","regionNumber","lineNumber"}){var bad=((ObjectNode)seed.request().path("cases").path(0).path("parameters")).deepCopy();switch(fault){case "unit"->bad.put(fault,"1/bar");case "targetValue"->bad.put(fault,0);case "recordValues"->((tools.jackson.databind.node.ArrayNode)bad.path("recordValues")).remove(3);case "regionNumber"->bad.put(fault,1);case "lineNumber"->bad.put(fault,region.path("lineNumber").asInt()+1);default->bad.put(fault,"0".repeat(64));}var request=request(null,"eclipse");request.setParameters(bad);assertThatThrownBy(()->runService.create(seed.seed().version().getId(),request)).isInstanceOf(RunException.class).satisfies(e->assertThat(((RunException)e).status()).isEqualTo(HttpStatus.BAD_REQUEST));assertThat(runStore.listByVersion(seed.seed().version().getId(),100)).hasSize(before);}
+    }
+
+    @Test void eclipseIncludeInitialProductionTargetBindsPhysicalFileAndRejectsStaleWithoutRuns() throws Exception {
+        var seed=eclipseBatchSeed();
+        var inspection=objectMapper.readTree(getClass().getResourceAsStream("/eclipse-include-production-inspection.json"));
+        seed.seed().version().setInspectionJson(objectMapper.writeValueAsString(inspection));versionMapper.updateById(seed.seed().version());
+        var t=inspection.path("packageProductionTargetContext").path("targets").path(0);
+        var good=objectMapper.createObjectNode().put("schemaVersion","eclipse-production-target-parameters/2").put("baselineRunId",seed.baselineId()).put("phase","INITIAL").put("unit","STB/day").put("targetOilRate",10000);
+        for(var key:new String[]{"well","sourceFile","sourceSha256","lineNumber","originalOilRate"})good.set(key,t.get(key));
+        var validRequest=request(null,"eclipse");validRequest.setParameters(good);
+        var accepted=runService.create(seed.seed().version().getId(),validRequest);
+        assertThat(accepted.parameters().toString()).isEqualTo(good.toString());
+        int before=runStore.listByVersion(seed.seed().version().getId(),100).size();
+        for(var key:new String[]{"sourceFile","sourceSha256","lineNumber","originalOilRate"}){
+            var bad=good.deepCopy();switch(key){case "sourceFile"->bad.put(key,"INITIAL.INC");case "lineNumber"->bad.put(key,999);case "originalOilRate"->bad.put(key,19999);default->bad.put(key,"0".repeat(64));}
+            var invalidRequest=request(null,"eclipse");invalidRequest.setParameters(bad);
+            assertThatThrownBy(()->runService.create(seed.seed().version().getId(),invalidRequest)).isInstanceOf(RunException.class).satisfies(e->assertThat(((RunException)e).status()).isEqualTo(HttpStatus.BAD_REQUEST));
+            assertThat(runStore.listByVersion(seed.seed().version().getId(),100)).hasSize(before);
+        }
+    }
+
+    @Test void eclipsePackageDatedPlanBindsExecutionOrderAndEveryPhysicalSourceBeforeCreatingRuns() throws Exception {
+        var seed = eclipseBatchSeed();
+        var inspection = objectMapper.readTree(getClass().getResourceAsStream("/eclipse-include-control-plan-inspection.json"));
+        seed.seed().version().setInspectionJson(objectMapper.writeValueAsString(inspection)); versionMapper.updateById(seed.seed().version());
+        var good = objectMapper.createObjectNode().put("schemaVersion", "eclipse-control-plan-parameters/2").put("baselineRunId", seed.baselineId());
+        var edits = good.putArray("edits");
+        for (int index : new int[] {4, 7, 8}) {
+            var record = inspection.path("packageProductionControlPlanContext").path("records").get(index); var e = edits.addObject();
+            for (var key : new String[] {"well", "sourceFile", "sourceSha256", "lineNumber", "date", "timeDays", "unit", "originalOilRate"}) e.set(key, record.get(key));
+            e.put("targetOilRate", index == 4 ? 250 : index == 7 ? 350 : 450);
+        }
+        var validRequest = request(null, "eclipse"); validRequest.setParameters(good);
+        assertThat(runService.create(seed.seed().version().getId(), validRequest).parameters().toString()).isEqualTo(good.toString());
+        int before = runStore.listByVersion(seed.seed().version().getId(), 100).size();
+        for (var fault : new String[] {"sourceFile", "sourceSha256", "lineNumber", "date", "timeDays", "originalOilRate"}) {
+            var bad = good.deepCopy(); var e = (ObjectNode)bad.path("edits").get(1);
+            switch (fault) { case "sourceFile" -> e.put(fault, "controls/YEAR1.INC"); case "lineNumber" -> e.put(fault, 999);
+                case "date" -> e.put(fault, "1984-10-19"); case "timeDays" -> e.put(fault, 731); case "originalOilRate" -> e.put(fault, 499); default -> e.put(fault, "0".repeat(64)); }
+            var invalidRequest = request(null, "eclipse"); invalidRequest.setParameters(bad);
+            assertThatThrownBy(() -> runService.create(seed.seed().version().getId(), invalidRequest)).isInstanceOf(RunException.class)
+                .satisfies(e2 -> assertThat(((RunException)e2).status()).isEqualTo(HttpStatus.BAD_REQUEST));
+            assertThat(runStore.listByVersion(seed.seed().version().getId(), 100)).hasSize(before);
+        }
+    }
+
+    @Test void eclipseDatedWaterInjectionPlanBindsThePhysicalWaterChainBeforeCreatingRuns() throws Exception {
+        var seed = eclipseBatchSeed();
+        var inspection = objectMapper.readTree(getClass().getResourceAsStream("/eclipse-water-injection-plan-inspection.json"));
+        seed.seed().version().setInspectionJson(objectMapper.writeValueAsString(inspection)); versionMapper.updateById(seed.seed().version());
+        var good = objectMapper.createObjectNode().put("schemaVersion", "eclipse-water-injection-plan-parameters/1").put("baselineRunId", seed.baselineId());
+        var edits = good.putArray("edits");
+        for (int index : new int[] {2, 5, 6}) {
+            var record = inspection.path("waterInjectionControlPlanContext").path("records").get(index); var e = edits.addObject();
+            for (var key : new String[] {"well", "sourceFile", "sourceSha256", "lineNumber", "date", "timeDays", "unit", "originalInjectionRate"}) e.set(key, record.get(key));
+            e.put("targetInjectionRate", index == 2 ? .5 : index == 5 ? .7 : .9);
+        }
+        var validRequest = request(null, "eclipse"); validRequest.setParameters(good);
+        assertThat(runService.create(seed.seed().version().getId(), validRequest).parameters().toString()).isEqualTo(good.toString());
+        int before = runStore.listByVersion(seed.seed().version().getId(), 100).size();
+        for (var fault : new String[] {"sourceFile", "sourceSha256", "lineNumber", "date", "timeDays", "originalInjectionRate"}) {
+            var bad = good.deepCopy(); var e = (ObjectNode)bad.path("edits").get(1);
+            switch (fault) { case "sourceFile" -> e.put(fault, "controls/YEAR1.INC"); case "lineNumber" -> e.put(fault, 999);
+                case "date" -> e.put(fault, "1984-10-19"); case "timeDays" -> e.put(fault, 731); case "originalInjectionRate" -> e.put(fault, .99); default -> e.put(fault, "0".repeat(64)); }
+            var invalidRequest = request(null, "eclipse"); invalidRequest.setParameters(bad);
+            assertThatThrownBy(() -> runService.create(seed.seed().version().getId(), invalidRequest)).isInstanceOf(RunException.class)
+                .satisfies(e2 -> assertThat(((RunException)e2).status()).isEqualTo(HttpStatus.BAD_REQUEST));
+            assertThat(runStore.listByVersion(seed.seed().version().getId(), 100)).hasSize(before);
+        }
+    }
+
+    @Test void e300GasTargetUsesQualifiedSourceAndRejectsStaleOrForeignRequestsBeforeRunCreation() throws Exception {
+        var seed = eclipseBatchSeed();
+        var i = objectMapper.readTree(getClass().getResourceAsStream("/eclipse-compositional-production-inspection.json"));
+        seed.seed().model().setSimulatorType("ECLIPSE_300"); modelMapper.updateById(seed.seed().model());
+        seed.seed().version().setModelKind("eclipse_300"); seed.seed().version().setOriginalName("SPE3_GASCOND.DATA");
+        seed.seed().version().setInspectionJson(objectMapper.writeValueAsString(i)); versionMapper.updateById(seed.seed().version());
+        fakeWorker.compositionalAvailable = true;
+        var c = i.path("compositionalProductionContext"); var r = c.path("records").get(0);
+        var p = objectMapper.createObjectNode().put("schemaVersion", "eclipse-compositional-production-parameters/1").put("baselineRunId", seed.baselineId()).put("targetGasRate", 4500);
+        for (var k : new String[]{"sourceFile", "sourceSha256"}) p.set(k, c.get(k));
+        for (var k : new String[]{"well", "lineNumber", "unit", "originalGasRate"}) p.set(k, r.get(k));
+        var good = request(null, "eclipse"); good.setParameters(p);
+        assertThat(runService.create(seed.seed().version().getId(), good).parameters().toString()).isEqualTo(p.toString());
+        int before = runStore.listByVersion(seed.seed().version().getId(), 100).size();
+        for (var fault : new String[]{"hash", "line", "original", "baseline", "legacy"}) {
+            var bad = p.deepCopy();
+            switch (fault) {case "hash" -> bad.put("sourceSha256", "0".repeat(64)); case "line" -> bad.put("lineNumber", 431);
+                case "original" -> bad.put("originalGasRate", 6199); case "baseline" -> bad.put("baselineRunId", 999999); default -> bad.put("schemaVersion", "eclipse-production-target-parameters/1");}
+            var req = request(null, "eclipse"); req.setParameters(bad);
+            assertThatThrownBy(() -> runService.create(seed.seed().version().getId(), req)).isInstanceOf(RunException.class);
+            assertThat(runStore.listByVersion(seed.seed().version().getId(), 100)).hasSize(before);
+        }
+    }
+
+    @Test void e300ProducerPressureUsesSeparateSourceRowAndRejectsInvalidBindingsBeforeRunCreation() throws Exception {
+        var seed = eclipseBatchSeed();
+        var i = objectMapper.readTree(getClass().getResourceAsStream("/eclipse-compositional-production-inspection.json"));
+        seed.seed().model().setSimulatorType("ECLIPSE_300"); modelMapper.updateById(seed.seed().model());
+        seed.seed().version().setModelKind("eclipse_300"); seed.seed().version().setOriginalName("SPE3_GASCOND.DATA");
+        seed.seed().version().setInspectionJson(objectMapper.writeValueAsString(i)); versionMapper.updateById(seed.seed().version());
+        fakeWorker.compositionalAvailable = true;
+        var c = i.path("compositionalProductionContext"); var r = c.path("records").get(0);
+        var p = objectMapper.createObjectNode().put("schemaVersion", "eclipse-compositional-pressure-parameters/1").put("baselineRunId", seed.baselineId()).put("targetBhpLowerLimit", 1500);
+        for (var k : new String[]{"sourceFile", "sourceSha256"}) p.set(k, c.get(k));
+        p.set("well", r.get("well")); p.set("lineNumber", r.get("bhpLineNumber")); p.put("unit", "psia"); p.set("originalBhpLowerLimit", r.get("bhpLimit"));
+        var good = request(null, "eclipse"); good.setParameters(p);
+        assertThat(runService.create(seed.seed().version().getId(), good).parameters().toString()).isEqualTo(p.toString());
+        int before = runStore.listByVersion(seed.seed().version().getId(), 100).size();
+        for (var fault : new String[]{"hash", "line", "original", "baseline", "legacy"}) {
+            var bad = p.deepCopy();
+            switch (fault) {case "hash" -> bad.put("sourceSha256", "0".repeat(64)); case "line" -> bad.put("lineNumber", r.path("lineNumber").asInt());
+                case "original" -> bad.put("originalBhpLowerLimit", 499); case "baseline" -> bad.put("baselineRunId", 999999); default -> bad.put("schemaVersion", "eclipse-compositional-production-parameters/1");}
+            var req = request(null, "eclipse"); req.setParameters(bad);
+            assertThatThrownBy(() -> runService.create(seed.seed().version().getId(), req)).isInstanceOf(RunException.class);
+            assertThat(runStore.listByVersion(seed.seed().version().getId(), 100)).hasSize(before);
+        }
+    }
+
+    @Test void e300AvailableGasReinjectionUsesExactGroupAndRejectsInvalidSourcesBeforeRunCreation() throws Exception {
+        var seed = eclipseBatchSeed();
+        var i = objectMapper.readTree(getClass().getResourceAsStream("/eclipse-compositional-reinjection-inspection.json"));
+        seed.seed().model().setSimulatorType("ECLIPSE_300"); modelMapper.updateById(seed.seed().model());
+        seed.seed().version().setModelKind("eclipse_300"); seed.seed().version().setOriginalName("SPE3_GASCOND.DATA");
+        seed.seed().version().setInspectionJson(objectMapper.writeValueAsString(i)); versionMapper.updateById(seed.seed().version());
+        fakeWorker.compositionalAvailable = true;
+        var c = i.path("compositionalReinjectionContext"); var r = c.path("records").get(0);
+        var p = objectMapper.createObjectNode().put("schemaVersion", "eclipse-compositional-reinjection-parameters/1").put("baselineRunId", seed.baselineId()).put("targetFraction", .5);
+        for (var k : new String[]{"sourceFile", "sourceSha256"}) p.set(k, c.get(k));
+        for (var k : new String[]{"group", "phase", "lineNumber", "originalFraction"}) p.set(k, r.get(k)); p.put("unit", "fraction");
+        var good = request(null, "eclipse"); good.setParameters(p);
+        assertThat(runService.create(seed.seed().version().getId(), good).parameters().toString()).isEqualTo(p.toString());
+        int before = runStore.listByVersion(seed.seed().version().getId(), 100).size();
+        for (var fault : new String[]{"hash", "line", "original", "baseline", "legacy"}) {
+            var bad = p.deepCopy();
+            switch (fault) {case "hash" -> bad.put("sourceSha256", "0".repeat(64)); case "line" -> bad.put("lineNumber", r.path("salesLineNumber").asInt());
+                case "original" -> bad.put("originalFraction", .9); case "baseline" -> bad.put("baselineRunId", 999999); default -> bad.put("schemaVersion", "eclipse-compositional-production-parameters/1");}
+            var req = request(null, "eclipse"); req.setParameters(bad);
+            assertThatThrownBy(() -> runService.create(seed.seed().version().getId(), req)).isInstanceOf(RunException.class);
+            assertThat(runStore.listByVersion(seed.seed().version().getId(), 100)).hasSize(before);
+        }
+    }
+
+    @Test void e300ConstantGasSalesUsesExactSalesRowAndRejectsInvalidSourcesBeforeRunCreation() throws Exception {
+        var seed = eclipseBatchSeed();
+        var i = objectMapper.readTree(getClass().getResourceAsStream("/eclipse-compositional-reinjection-inspection.json"));
+        seed.seed().model().setSimulatorType("ECLIPSE_300"); modelMapper.updateById(seed.seed().model());
+        seed.seed().version().setModelKind("eclipse_300"); seed.seed().version().setOriginalName("SPE3_GASCOND.DATA");
+        seed.seed().version().setInspectionJson(objectMapper.writeValueAsString(i)); versionMapper.updateById(seed.seed().version());
+        fakeWorker.compositionalAvailable = true;
+        var c = i.path("compositionalReinjectionContext"); var r = c.path("records").get(0);
+        var p = objectMapper.createObjectNode().put("schemaVersion", "eclipse-compositional-gas-sales-parameters/1").put("baselineRunId", seed.baselineId()).put("targetSalesTarget", 3000);
+        for (var k : new String[]{"sourceFile", "sourceSha256"}) p.set(k, c.get(k));
+        for (var k : new String[]{"group", "phase"}) p.set(k, r.get(k)); p.set("lineNumber", r.get("salesLineNumber")); p.set("originalSalesTarget", r.get("salesTarget")); p.put("unit", "Mscf/day");
+        var good = request(null, "eclipse"); good.setParameters(p);
+        assertThat(runService.create(seed.seed().version().getId(), good).parameters().toString()).isEqualTo(p.toString());
+        int before = runStore.listByVersion(seed.seed().version().getId(), 100).size();
+        for (var fault : new String[]{"hash", "line", "original", "baseline", "legacy"}) {
+            var bad = p.deepCopy();
+            switch (fault) {case "hash" -> bad.put("sourceSha256", "0".repeat(64)); case "line" -> bad.put("lineNumber", r.path("lineNumber").asInt());
+                case "original" -> bad.put("originalSalesTarget", 1499); case "baseline" -> bad.put("baselineRunId", 999999); default -> bad.put("schemaVersion", "eclipse-compositional-production-parameters/1");}
+            var req = request(null, "eclipse"); req.setParameters(bad);
+            assertThatThrownBy(() -> runService.create(seed.seed().version().getId(), req)).isInstanceOf(RunException.class);
+            assertThat(runStore.listByVersion(seed.seed().version().getId(), 100)).hasSize(before);
+        }
+    }
+
+    @Test void e300InjectorUpperPressureUsesExactInjectionRowAndRejectsInvalidSourcesBeforeRunCreation() throws Exception {
+        var seed = eclipseBatchSeed();
+        var i = objectMapper.readTree(getClass().getResourceAsStream("/eclipse-compositional-reinjection-inspection.json"));
+        seed.seed().model().setSimulatorType("ECLIPSE_300"); modelMapper.updateById(seed.seed().model());
+        seed.seed().version().setModelKind("eclipse_300"); seed.seed().version().setOriginalName("SPE3_GASCOND.DATA");
+        seed.seed().version().setInspectionJson(objectMapper.writeValueAsString(i)); versionMapper.updateById(seed.seed().version());
+        fakeWorker.compositionalAvailable = true;
+        var c = i.path("compositionalReinjectionContext"); var r = c.path("records").get(0);
+        var p = objectMapper.createObjectNode().put("schemaVersion", "eclipse-compositional-injection-pressure-parameters/1").put("baselineRunId", seed.baselineId()).put("targetBhpUpperLimit", 3550);
+        for (var k : new String[]{"sourceFile", "sourceSha256"}) p.set(k, c.get(k));
+        p.set("well", r.get("injectionWell")); p.set("lineNumber", r.get("injectionLineNumber")); p.set("originalBhpUpperLimit", r.get("injectionBhpUpperLimit")); p.put("unit", "psia");
+        var good = request(null, "eclipse"); good.setParameters(p);
+        assertThat(runService.create(seed.seed().version().getId(), good).parameters().toString()).isEqualTo(p.toString());
+        int before = runStore.listByVersion(seed.seed().version().getId(), 100).size();
+        for (var fault : new String[]{"hash", "line", "original", "baseline", "legacy"}) {
+            var bad = p.deepCopy();
+            switch (fault) {case "hash" -> bad.put("sourceSha256", "0".repeat(64)); case "line" -> bad.put("lineNumber", 433);
+                case "original" -> bad.put("originalBhpUpperLimit", 3999); case "baseline" -> bad.put("baselineRunId", 999999); default -> bad.put("schemaVersion", "eclipse-compositional-production-parameters/1");}
+            var req = request(null, "eclipse"); req.setParameters(bad);
+            assertThatThrownBy(() -> runService.create(seed.seed().version().getId(), req)).isInstanceOf(RunException.class);
+            assertThat(runStore.listByVersion(seed.seed().version().getId(), 100)).hasSize(before);
+        }
+    }
+
+    @Test void e300SaveForecastBindsPublishedNativeStateAndRejectsStaleRequestsWithoutCreatingRuns() throws Exception {
+        var seed = eclipseBatchSeed();
+        var inspection = objectMapper.readTree(getClass().getResourceAsStream("/eclipse-compositional-fluid-property-inspection.json"));
+        seed.seed().model().setSimulatorType("ECLIPSE_300"); modelMapper.updateById(seed.seed().model());
+        seed.seed().version().setModelKind("eclipse_300"); seed.seed().version().setOriginalName("SPE3_GASCOND.DATA");
+        seed.seed().version().setInspectionJson(objectMapper.writeValueAsString(inspection)); versionMapper.updateById(seed.seed().version());
+        fakeWorker.compositionalAvailable = true;
+        var history = runStore.find(seed.baselineId());
+        history.setParametersJson("null"); history.setResultJson(objectMapper.writeValueAsString(objectMapper.readTree(
+            getClass().getResourceAsStream("/eclipse-compositional-save-native-result.json")))); runMapper.updateById(history);
+        var catalog = objectMapper.readTree(getClass().getResourceAsStream("/eclipse-compositional-save-catalog.json"));
+        var folder = normalizer.resolve("artifacts/" + history.getId() + "/placeholder").getParent(); Files.createDirectories(folder);
+        var published = new ArrayList<Path>();
+        for (var file : catalog.path("files")) {
+            var path = folder.resolve(file.path("artifactName").asText());
+            try (var input = getClass().getResourceAsStream("/eclipse-compositional-save-files/" + file.path("name").asText())) { Files.write(path, input.readAllBytes()); }
+            published.add(path);
+        }
+        var catalogPath = folder.resolve("eclipse-compositional-save-catalog.json"); Files.write(catalogPath, objectMapper.writeValueAsBytes(catalog)); published.add(catalogPath);
+        for (var path : published) {
+            var artifact = new SoftwareIntegrationArtifactEntity(); artifact.setRunId(history.getId()); artifact.setArtifactName(path.getFileName().toString()); artifact.setArtifactType("output");
+            artifact.setContentType(path.equals(catalogPath) ? "application/json" : "application/octet-stream");
+            artifact.setStorageKey("artifacts/" + history.getId() + "/" + path.getFileName()); artifact.setSizeBytes(Files.size(path)); artifact.setSha256(sha256(path));
+            artifact.setCreatedAt(LocalDateTime.now()); artifact.setExpiresAt(LocalDateTime.now().plusDays(30)); artifactMapper.insert(artifact);
+        }
+        var p = objectMapper.createObjectNode().put("schemaVersion", "eclipse-compositional-forecast-parameters/1").put("historyRunId", history.getId())
+            .put("sourceFile", catalog.path("sourceFile").asText()).put("sourceSha256", catalog.path("sourceSha256").asText())
+            .put("saveCatalogSha256", sha256(catalogPath)).put("saveReport", 10).putNull("targetGasRate");
+        var inherited = request(null, "eclipse"); inherited.setParameters(p);
+        assertThat(runService.create(seed.seed().version().getId(), inherited).parameters().toString()).isEqualTo(p.toString());
+        var explicitNull = objectMapper.readValue(p.toString(), java.util.LinkedHashMap.class);
+        assertThat(explicitNull).containsKey("targetGasRate"); assertThat(explicitNull.get("targetGasRate")).isNull();
+        var fromHttp = request(null, "eclipse"); fromHttp.setParameters(explicitNull);
+        var inheritedHttp = runService.create(seed.seed().version().getId(), fromHttp);
+        assertThat(inheritedHttp.parameters().path("targetGasRate").isNull()).isTrue();
+        assertThat(inheritedHttp.parameters().has("targetGasRate")).isTrue();
+        var missingTarget = new java.util.LinkedHashMap<>(explicitNull); missingTarget.remove("targetGasRate");
+        var missingRequest = request(null, "eclipse"); missingRequest.setParameters(missingTarget);
+        int beforeMissing = runStore.listByVersion(seed.seed().version().getId(), 100).size();
+        assertThatThrownBy(() -> runService.create(seed.seed().version().getId(), missingRequest)).isInstanceOf(RunException.class);
+        assertThat(runStore.listByVersion(seed.seed().version().getId(), 100)).hasSize(beforeMissing);
+        p.put("targetGasRate", 4500); var changed = request(null, "eclipse"); changed.setParameters(p);
+        assertThat(runService.create(seed.seed().version().getId(), changed).parameters().toString()).isEqualTo(p.toString());
+        int before = runStore.listByVersion(seed.seed().version().getId(), 100).size();
+        for (var fault : new String[]{"history", "source", "catalog", "report", "same", "zero", "legacy"}) {
+            var bad = p.deepCopy();
+            switch (fault) {
+                case "history" -> bad.put("historyRunId", 999999); case "source" -> bad.put("sourceSha256", "0".repeat(64));
+                case "catalog" -> bad.put("saveCatalogSha256", "0".repeat(64)); case "report" -> bad.put("saveReport", 11);
+                case "same" -> bad.put("targetGasRate", 6200); case "zero" -> bad.put("targetGasRate", 0);
+                default -> bad.put("schemaVersion", "eclipse-history-forecast-parameters/3");
+            }
+            var request = request(null, "eclipse"); request.setParameters(bad);
+            assertThatThrownBy(() -> runService.create(seed.seed().version().getId(), request)).isInstanceOf(RunException.class);
+            assertThat(runStore.listByVersion(seed.seed().version().getId(), 100)).hasSize(before);
+        }
+        var statePath = folder.resolve("eclipse-output-SPE3_GASCOND.V0010"); var bytes = Files.readAllBytes(statePath); bytes[bytes.length - 1] ^= 1; Files.write(statePath, bytes);
+        assertThatThrownBy(() -> runService.create(seed.seed().version().getId(), changed)).isInstanceOf(RunException.class)
+            .satisfies(e -> assertThat(((RunException)e).status()).isEqualTo(HttpStatus.CONFLICT));
+        assertThat(runStore.listByVersion(seed.seed().version().getId(), 100)).hasSize(before);
+    }
+
+    @Test void e300ComponentCriticalPressureUsesExactFieldAndComponentSourceAndRejectsInvalidSourcesBeforeRunCreation() throws Exception {
+        var seed = eclipseBatchSeed();
+        var i = objectMapper.readTree(getClass().getResourceAsStream("/eclipse-compositional-fluid-property-inspection.json"));
+        seed.seed().model().setSimulatorType("ECLIPSE_300"); modelMapper.updateById(seed.seed().model());
+        seed.seed().version().setModelKind("eclipse_300"); seed.seed().version().setOriginalName("SPE3_GASCOND.DATA");
+        seed.seed().version().setInspectionJson(objectMapper.writeValueAsString(i)); versionMapper.updateById(seed.seed().version());
+        fakeWorker.compositionalAvailable = true;
+        var c = i.path("compositionalFluidPropertyContext"); var r = c.path("records").get(2);
+        var p = objectMapper.createObjectNode().put("schemaVersion", "eclipse-compositional-fluid-property-parameters/1").put("baselineRunId", seed.baselineId()).put("targetValue", 700);
+        for (var k : new String[]{"sourceFile", "sourceSha256"}) p.set(k, c.get(k));
+        for (var k : new String[]{"componentIndex", "componentName", "field", "lineNumber", "unit", "originalValue"}) p.set(k, r.get(k));
+        var good = request(null, "eclipse"); good.setParameters(p);
+        assertThat(runService.create(seed.seed().version().getId(), good).parameters().toString()).isEqualTo(p.toString());
+        int before = runStore.listByVersion(seed.seed().version().getId(), 100).size();
+        for (var fault : new String[]{"hash", "line", "original", "baseline", "legacy"}) {
+            var bad = p.deepCopy();
+            switch (fault) {case "hash" -> bad.put("sourceSha256", "0".repeat(64)); case "line" -> bad.put("lineNumber", 123);
+                case "original" -> bad.put("originalValue", 667); case "baseline" -> bad.put("baselineRunId", 999999); default -> bad.put("schemaVersion", "eclipse-compositional-production-parameters/1");}
+            var req = request(null, "eclipse"); req.setParameters(bad);
+            assertThatThrownBy(() -> runService.create(seed.seed().version().getId(), req)).isInstanceOf(RunException.class);
+            assertThat(runStore.listByVersion(seed.seed().version().getId(), 100)).hasSize(before);
+        }
+    }
+
+    @Test void e300ComponentCriticalTemperatureUsesRankineAndKeepsPressureAndRestartCapabilitiesAndRejectsInvalidSourcesBeforeRunCreation() throws Exception {
+        var seed = eclipseBatchSeed();
+        var i = objectMapper.readTree(getClass().getResourceAsStream("/eclipse-compositional-temperature-inspection.json"));
+        seed.seed().model().setSimulatorType("ECLIPSE_300"); modelMapper.updateById(seed.seed().model());
+        seed.seed().version().setModelKind("eclipse_300"); seed.seed().version().setOriginalName("SPE3_GASCOND.DATA");
+        seed.seed().version().setInspectionJson(objectMapper.writeValueAsString(i)); versionMapper.updateById(seed.seed().version());
+        fakeWorker.compositionalAvailable = true;
+        var c = i.path("compositionalTemperatureContext"); var r = c.path("records").get(2);
+        var p = objectMapper.createObjectNode().put("schemaVersion", "eclipse-compositional-temperature-parameters/1").put("baselineRunId", seed.baselineId()).put("targetValue", 350);
+        for (var k : new String[]{"sourceFile", "sourceSha256"}) p.set(k, c.get(k));
+        for (var k : new String[]{"componentIndex", "componentName", "field", "lineNumber", "unit", "originalValue"}) p.set(k, r.get(k));
+        var good = request(null, "eclipse"); good.setParameters(p);
+        assertThat(runService.create(seed.seed().version().getId(), good).parameters().toString()).isEqualTo(p.toString());
+        int before = runStore.listByVersion(seed.seed().version().getId(), 100).size();
+        for (var fault : new String[]{"hash", "line", "original", "baseline", "legacy"}) {
+            var bad = p.deepCopy();
+            switch (fault) {case "hash" -> bad.put("sourceSha256", "0".repeat(64)); case "line" -> bad.put("lineNumber", 122);
+                case "original" -> bad.put("originalValue", 343); case "baseline" -> bad.put("baselineRunId", 999999); default -> bad.put("schemaVersion", "eclipse-compositional-production-parameters/1");}
+            var req = request(null, "eclipse"); req.setParameters(bad);
+            assertThatThrownBy(() -> runService.create(seed.seed().version().getId(), req)).isInstanceOf(RunException.class);
+            assertThat(runStore.listByVersion(seed.seed().version().getId(), 100)).hasSize(before);
+        }
+    }
+
+    @Test void e300ComponentCriticalZUsesDimensionlessSourceAndPreservesOtherCapabilitiesAndRejectsInvalidSourcesBeforeRunCreation() throws Exception {
+        var seed = eclipseBatchSeed();
+        var i = objectMapper.readTree(getClass().getResourceAsStream("/eclipse-compositional-critical-z-inspection.json"));
+        seed.seed().model().setSimulatorType("ECLIPSE_300"); modelMapper.updateById(seed.seed().model());
+        seed.seed().version().setModelKind("eclipse_300"); seed.seed().version().setOriginalName("SPE3_GASCOND.DATA");
+        seed.seed().version().setInspectionJson(objectMapper.writeValueAsString(i)); versionMapper.updateById(seed.seed().version());
+        fakeWorker.compositionalAvailable = true;
+        var c = i.path("compositionalCriticalZContext"); var r = c.path("records").get(2);
+        var p = objectMapper.createObjectNode().put("schemaVersion", "eclipse-compositional-critical-z-parameters/1").put("baselineRunId", seed.baselineId()).put("targetValue", 0.3);
+        for (var k : new String[]{"sourceFile", "sourceSha256"}) p.set(k, c.get(k));
+        for (var k : new String[]{"componentIndex", "componentName", "field", "lineNumber", "unit", "originalValue"}) p.set(k, r.get(k));
+        var good = request(null, "eclipse"); good.setParameters(p);
+        assertThat(runService.create(seed.seed().version().getId(), good).parameters().toString()).isEqualTo(p.toString());
+        int before = runStore.listByVersion(seed.seed().version().getId(), 100).size();
+        for (var fault : new String[]{"hash", "line", "original", "baseline", "legacy"}) {
+            var bad = p.deepCopy();
+            switch (fault) {case "hash" -> bad.put("sourceSha256", "0".repeat(64)); case "line" -> bad.put("lineNumber", 122);
+                case "original" -> bad.put("originalValue", 343); case "baseline" -> bad.put("baselineRunId", 999999); default -> bad.put("schemaVersion", "eclipse-compositional-production-parameters/1");}
+            var req = request(null, "eclipse"); req.setParameters(bad);
+            assertThatThrownBy(() -> runService.create(seed.seed().version().getId(), req)).isInstanceOf(RunException.class);
+            assertThat(runStore.listByVersion(seed.seed().version().getId(), 100)).hasSize(before);
+        }
+    }
+
+    @Test void e300ComponentAcentricFactorUsesDimensionlessSourceAndPreservesOtherCapabilitiesAndRejectsInvalidSourcesBeforeRunCreation() throws Exception {
+        var seed = eclipseBatchSeed();
+        var i = objectMapper.readTree(getClass().getResourceAsStream("/eclipse-compositional-acentric-factor-inspection.json"));
+        seed.seed().model().setSimulatorType("ECLIPSE_300"); modelMapper.updateById(seed.seed().model());
+        seed.seed().version().setModelKind("eclipse_300"); seed.seed().version().setOriginalName("SPE3_GASCOND.DATA");
+        seed.seed().version().setInspectionJson(objectMapper.writeValueAsString(i)); versionMapper.updateById(seed.seed().version());
+        fakeWorker.compositionalAvailable = true;
+        var c = i.path("compositionalAcentricFactorContext"); var r = c.path("records").get(2);
+        var p = objectMapper.createObjectNode().put("schemaVersion", "eclipse-compositional-acentric-factor-parameters/1").put("baselineRunId", seed.baselineId()).put("targetValue", 0.03);
+        for (var k : new String[]{"sourceFile", "sourceSha256"}) p.set(k, c.get(k));
+        for (var k : new String[]{"componentIndex", "componentName", "field", "lineNumber", "unit", "originalValue"}) p.set(k, r.get(k));
+        var good = request(null, "eclipse"); good.setParameters(p);
+        assertThat(runService.create(seed.seed().version().getId(), good).parameters().toString()).isEqualTo(p.toString());
+        int before = runStore.listByVersion(seed.seed().version().getId(), 100).size();
+        for (var fault : new String[]{"hash", "line", "original", "baseline", "legacy"}) {
+            var bad = p.deepCopy();
+            switch (fault) {case "hash" -> bad.put("sourceSha256", "0".repeat(64)); case "line" -> bad.put("lineNumber", 122);
+                case "original" -> bad.put("originalValue", 343); case "baseline" -> bad.put("baselineRunId", 999999); default -> bad.put("schemaVersion", "eclipse-compositional-production-parameters/1");}
+            var req = request(null, "eclipse"); req.setParameters(bad);
+            assertThatThrownBy(() -> runService.create(seed.seed().version().getId(), req)).isInstanceOf(RunException.class);
+            assertThat(runStore.listByVersion(seed.seed().version().getId(), 100)).hasSize(before);
+        }
+    }
+
+    @Test void e300MolecularWeightUsesDimensionlessSourceAndPreservesOtherCapabilitiesAndRejectsInvalidSourcesBeforeRunCreation() throws Exception {
+        var seed = eclipseBatchSeed();
+        var i = objectMapper.readTree(getClass().getResourceAsStream("/eclipse-compositional-eos-inspection.json"));
+        seed.seed().model().setSimulatorType("ECLIPSE_300"); modelMapper.updateById(seed.seed().model());
+        seed.seed().version().setModelKind("eclipse_300"); seed.seed().version().setOriginalName("SPE3_GASCOND.DATA");
+        seed.seed().version().setInspectionJson(objectMapper.writeValueAsString(i)); versionMapper.updateById(seed.seed().version());
+        fakeWorker.compositionalAvailable = true;
+        var c = i.path("compositionalEosPropertyContexts").get(0); var r = c.path("records").get(2);
+        var p = objectMapper.createObjectNode().put("schemaVersion", "eclipse-compositional-eos-property-parameters/1").put("baselineRunId", seed.baselineId()).put("targetValue", 17.0);
+        for (var k : new String[]{"sourceFile", "sourceSha256"}) p.set(k, c.get(k));
+        for (var k : new String[]{"componentIndex", "componentName", "field", "lineNumber", "unit", "originalValue"}) p.set(k, r.get(k));
+        var good = request(null, "eclipse"); good.setParameters(p);
+        assertThat(runService.create(seed.seed().version().getId(), good).parameters().toString()).isEqualTo(p.toString());
+        int before = runStore.listByVersion(seed.seed().version().getId(), 100).size();
+        for (var fault : new String[]{"hash", "line", "original", "baseline", "legacy"}) {
+            var bad = p.deepCopy();
+            switch (fault) {case "hash" -> bad.put("sourceSha256", "0".repeat(64)); case "line" -> bad.put("lineNumber", 122);
+                case "original" -> bad.put("originalValue", 343); case "baseline" -> bad.put("baselineRunId", 999999); default -> bad.put("schemaVersion", "eclipse-compositional-production-parameters/1");}
+            var req = request(null, "eclipse"); req.setParameters(bad);
+            assertThatThrownBy(() -> runService.create(seed.seed().version().getId(), req)).isInstanceOf(RunException.class);
+            assertThat(runStore.listByVersion(seed.seed().version().getId(), 100)).hasSize(before);
+        }
+    }
+
+    @Test void thermalQualityAndTemperatureRequireTheirOwnPhysicalSourceAndOriginalBaseline() throws Exception {
+        var seed=eclipseBatchSeed();var i=objectMapper.readTree(getClass().getResourceAsStream("/eclipse-thermal-injection-inspection.json"));
+        seed.seed().model().setSimulatorType("ECLIPSE_300");modelMapper.updateById(seed.seed().model());
+        seed.seed().version().setModelKind("eclipse_300");seed.seed().version().setOriginalName("THERM3.DATA");seed.seed().version().setInspectionJson(objectMapper.writeValueAsString(i));versionMapper.updateById(seed.seed().version());fakeWorker.compositionalAvailable=true;
+        var c=i.path("thermalInjectionContext");var r=c.path("records").get(0);
+        var p=objectMapper.createObjectNode().put("schemaVersion","eclipse-thermal-injection-parameters/1").put("baselineRunId",seed.baselineId()).put("field","STEAM_QUALITY").put("unit","fraction").put("originalValue",.7).put("targetValue",.5);
+        for(var k:new String[]{"sourceFile","sourceSha256"})p.set(k,c.get(k));for(var k:new String[]{"well","lineNumber"})p.set(k,r.get(k));
+        var good=request(null,"eclipse");good.setParameters(p);assertThat(runService.create(seed.seed().version().getId(),good).parameters().toString()).isEqualTo(p.toString());
+        var t=p.deepCopy().put("field","INJECTION_TEMPERATURE").put("unit","degF").put("originalValue",450).put("targetValue",400);good=request(null,"eclipse");good.setParameters(t);assertThat(runService.create(seed.seed().version().getId(),good).parameters().toString()).isEqualTo(t.toString());
+        int before=runStore.listByVersion(seed.seed().version().getId(),100).size();
+        for(var fault:new String[]{"hash","line","original","baseline","foreign"}){
+            var bad=p.deepCopy();switch(fault){case "hash"->bad.put("sourceSha256","0".repeat(64));case "line"->bad.put("lineNumber",1);case "original"->bad.put("originalValue",.6);case "baseline"->bad.put("baselineRunId",999999);default->bad.put("schemaVersion","eclipse-compositional-production-parameters/1");}
+            var invalid=request(null,"eclipse");invalid.setParameters(bad);assertThatThrownBy(()->runService.create(seed.seed().version().getId(),invalid)).isInstanceOf(RunException.class);assertThat(runStore.listByVersion(seed.seed().version().getId(),100)).hasSize(before);
+        }
+    }
+
+    @Test void thermalRateAndUpperPressureUseSchemaTwoAndTheSeparateControlRow() throws Exception {
+        var seed=eclipseBatchSeed();var i=objectMapper.readTree(getClass().getResourceAsStream("/eclipse-thermal-injection-inspection.json"));
+        seed.seed().model().setSimulatorType("ECLIPSE_300");modelMapper.updateById(seed.seed().model());seed.seed().version().setModelKind("eclipse_300");seed.seed().version().setOriginalName("THERM3.DATA");seed.seed().version().setInspectionJson(objectMapper.writeValueAsString(i));versionMapper.updateById(seed.seed().version());fakeWorker.compositionalAvailable=true;
+        var c=i.path("thermalInjectionContext");var r=c.path("records").get(0);
+        var p=objectMapper.createObjectNode().put("schemaVersion","eclipse-thermal-injection-parameters/2").put("baselineRunId",seed.baselineId()).put("field","SURFACE_INJECTION_RATE").put("unit","STB/day").put("originalValue",37.5).put("targetValue",25).put("lineNumber",429);
+        for(var k:new String[]{"sourceFile","sourceSha256"})p.set(k,c.get(k));p.set("well",r.get("well"));var good=request(null,"eclipse");good.setParameters(p);assertThat(runService.create(seed.seed().version().getId(),good).parameters().toString()).isEqualTo(p.toString());
+        var pressure=p.deepCopy().put("field","BHP_UPPER_LIMIT").put("unit","psia").put("originalValue",1000).put("targetValue",700);good=request(null,"eclipse");good.setParameters(pressure);assertThat(runService.create(seed.seed().version().getId(),good).parameters().toString()).isEqualTo(pressure.toString());
+        int before=runStore.listByVersion(seed.seed().version().getId(),100).size();
+        for(var fault:new String[]{"line","unit","original","schema","baseline"}){
+            var bad=p.deepCopy();switch(fault){case "line"->bad.put("lineNumber",433);case "unit"->bad.put("unit","psia");case "original"->bad.put("originalValue",37);case "schema"->bad.put("schemaVersion","eclipse-thermal-injection-parameters/1");default->bad.put("baselineRunId",999999);}
+            var invalid=request(null,"eclipse");invalid.setParameters(bad);assertThatThrownBy(()->runService.create(seed.seed().version().getId(),invalid)).isInstanceOf(RunException.class);assertThat(runStore.listByVersion(seed.seed().version().getId(),100)).hasSize(before);
+        }
+    }
+
+
+    private BatchSeed compositionalBatchSeed() throws Exception {
+        var original=eclipseBatchSeed();var seed=original.seed();var i=objectMapper.readTree(getClass().getResourceAsStream("/eclipse-compositional-eos-inspection.json"));
+        seed.model().setSimulatorType("ECLIPSE_300");modelMapper.updateById(seed.model());seed.version().setModelKind("eclipse_300");seed.version().setOriginalName("SPE3_GASCOND.DATA");seed.version().setInspectionJson(objectMapper.writeValueAsString(i));versionMapper.updateById(seed.version());fakeWorker.compositionalAvailable=true;
+        var baseline=runStore.find(original.baselineId());baseline.setResultJson(objectMapper.readTree(getClass().getResourceAsStream("/eclipse-compositional-batch-baseline-result.json")).toString());runMapper.updateById(baseline);
+        var req=objectMapper.createObjectNode().put("requestKey",UUID.randomUUID().toString()).put("name","组分物性批量").put("baselineRunId",baseline.getId());var cases=req.putArray("cases");
+        for(int j=0;j<4;j++){
+            var c=j==0?i.path("compositionalAcentricFactorContext"):i.path("compositionalEosPropertyContexts").get(j-1);var row=c.path("records").get(2);var p=cases.addObject().put("name",row.path("field").asText()).putObject("parameters").put("schemaVersion",j==0?"eclipse-compositional-acentric-factor-parameters/1":"eclipse-compositional-eos-property-parameters/1").put("baselineRunId",baseline.getId()).put("targetValue",new double[]{.03,17,.54,.078}[j]);
+            for(var k:new String[]{"sourceFile","sourceSha256"})p.set(k,c.get(k));for(var k:new String[]{"componentIndex","componentName","field","lineNumber","unit","originalValue"})p.set(k,row.get(k));
+        }
+        return new BatchSeed(seed,baseline.getId(),req);
+    }
+    @Test void compositionalBatchPersistsFourSourceBoundChildrenAndRetriesWithoutDuplicates() throws Exception {
+        var seed=compositionalBatchSeed();var batch=eclipseBatches.create(seed.seed().version().getId(),seed.request());assertThat(batch.members()).hasSize(4);assertThat(runStore.listByVersion(seed.seed().version().getId(),100)).hasSize(5);
+        for(int j=0;j<4;j++)assertThat(com.grdp.studio.softwareintegration.support.EclipseBatchParameters.sameContent(batch.members().get(j).run().parameters(),seed.request().path("cases").get(j).path("parameters"))).isTrue();
+        var replay=eclipseBatches.create(seed.seed().version().getId(),seed.request().deepCopy());assertThat(replay.id()).isEqualTo(batch.id());assertThat(replay.members().stream().map(m->m.run().id())).containsExactlyElementsOf(batch.members().stream().map(m->m.run().id()).toList());assertThat(runStore.listByVersion(seed.seed().version().getId(),100)).hasSize(5);
+        var conflict=seed.request().deepCopy().put("name","不同内容");assertThatThrownBy(()->eclipseBatches.create(seed.seed().version().getId(),conflict)).isInstanceOf(RunException.class);
+    }
+    @Test void invalidSecondCompositionalSourceRollsBackTheEntireCollectionAndEveryQueuedChild() throws Exception {
+        var seed=compositionalBatchSeed();((ObjectNode)seed.request().path("cases").get(1).path("parameters")).put("sourceSha256","0".repeat(64));
+        assertThatThrownBy(()->eclipseBatches.create(seed.seed().version().getId(),seed.request())).isInstanceOf(RunException.class);assertThat(runStore.listByVersion(seed.seed().version().getId(),100)).hasSize(1);assertThat(eclipseBatches.list(seed.seed().version().getId())).isEmpty();
+    }
+    @Test void compositionalBatchCannotUseAnE100BaselineEvenWhenEveryParameterIsStructurallyValid() throws Exception {
+        var comp=compositionalBatchSeed();var old=eclipseBatchSeed();var request=comp.request().deepCopy().put("baselineRunId",old.baselineId());for(var item:request.path("cases"))((ObjectNode)item.path("parameters")).put("baselineRunId",old.baselineId());
+        assertThatThrownBy(()->eclipseBatches.create(old.seed().version().getId(),request)).isInstanceOf(RunException.class).satisfies(e->assertThat(((RunException)e).status()).isEqualTo(HttpStatus.CONFLICT));assertThat(runStore.listByVersion(old.seed().version().getId(),100)).hasSize(1);assertThat(eclipseBatches.list(old.seed().version().getId())).isEmpty();
+    }
+    private String compositionalHistoryCsv() {
+        var result=objectMapper.readTree(getClass().getResourceAsStream("/eclipse-compositional-batch-baseline-result.json"));String csv="well,keyword,unit,timeDays,value,vectorIndex\n";
+        for(var curve:result.path("summary").path("series"))if("FOPT".equals(curve.path("keyword").asText()))csv+=",FOPT,STB,5475,2593602.25,"+curve.path("vectorIndex").asInt()+"\n";return csv;
+    }
+    @Test void compositionalHistoryPersistsBothRawOilColumnsAndReusesSource()throws Exception {
+        var seed=compositionalBatchSeed();var request=eclipseHistoryRequest(seed.baselineId(),compositionalHistoryCsv());var dataset=eclipseHistory.create(seed.seed().version().getId(),request);
+        assertThat(dataset.observations()).hasSize(2);assertThat(dataset.csv()).isEqualTo(compositionalHistoryCsv());
+        assertThat(eclipseHistory.create(seed.seed().version().getId(),request).metadata().id()).isEqualTo(dataset.metadata().id());
+        var comparison=eclipseHistory.compare(dataset.metadata().id(),seed.baselineId());assertThat(comparison.comparison().metrics()).hasSize(2);assertThat(comparison.comparison().metrics()).allSatisfy(m->{assertThat(m.rmse()).isZero();assertThat(m.vectorIndex()).isNotNull();});
+    }
+    @Test void compositionalHistoryRejectsAmbiguousLegacyCsvAndForeignColumnBeforeSaving()throws Exception {
+        var seed=compositionalBatchSeed();
+        for(var csv:new String[]{"well,keyword,unit,timeDays,value\n,FOPT,STB,5475,1",compositionalHistoryCsv().replace("FOPT","FPR"),compositionalHistoryCsv().replace("STB","SM3")})assertThatThrownBy(()->eclipseHistory.create(seed.seed().version().getId(),eclipseHistoryRequest(seed.baselineId(),csv))).isInstanceOf(RunException.class).satisfies(e->assertThat(((RunException)e).status()).isEqualTo(HttpStatus.BAD_REQUEST));
+        assertThat(eclipseHistory.list(seed.seed().version().getId())).isEmpty();
+    }
+
+    @Test void thermalStageBoundaryIsValidatedBeforeAnyQueueEntry()throws Exception {
+        var seed=eclipseBatchSeed();var i=objectMapper.readTree(getClass().getResourceAsStream("/eclipse-thermal-injection-inspection.json"));seed.seed().model().setSimulatorType("ECLIPSE_300");modelMapper.updateById(seed.seed().model());seed.seed().version().setModelKind("eclipse_300");seed.seed().version().setOriginalName("THERM3.DATA");seed.seed().version().setInspectionJson(objectMapper.writeValueAsString(i));versionMapper.updateById(seed.seed().version());fakeWorker.compositionalAvailable=true;
+        var c=i.path("thermalInjectionContext");var p=objectMapper.createObjectNode().put("schemaVersion","eclipse-thermal-injection-parameters/3").put("baselineRunId",seed.baselineId()).put("field","SURFACE_INJECTION_RATE").put("unit","STB/day").put("originalValue",37.5).put("targetValue",25).put("lineNumber",429).put("well","I").put("startTimeDays",1825);for(var k:new String[]{"sourceFile","sourceSha256"})p.set(k,c.get(k));
+        for(int day:new int[]{0,1824,3650}){var bad=request(null,"eclipse");bad.setParameters(p.deepCopy().put("startTimeDays",day));assertThatThrownBy(()->runService.create(seed.seed().version().getId(),bad)).isInstanceOf(RunException.class);assertThat(runStore.listByVersion(seed.seed().version().getId(),100)).hasSize(1);}
+        var good=request(null,"eclipse");good.setParameters(p);assertThat(runService.create(seed.seed().version().getId(),good).parameters().toString()).isEqualTo(p.toString());
+    }
+
+
+    @Test void thermalMultiStagePlanChecksEveryBoundarySourceAndBaselineBeforeQueue() throws Exception {
+        var seed=eclipseBatchSeed();var i=objectMapper.readTree(getClass().getResourceAsStream("/eclipse-thermal-injection-inspection.json"));
+        seed.seed().model().setSimulatorType("ECLIPSE_300");modelMapper.updateById(seed.seed().model());seed.seed().version().setModelKind("eclipse_300");seed.seed().version().setOriginalName("THERM3.DATA");seed.seed().version().setInspectionJson(objectMapper.writeValueAsString(i));versionMapper.updateById(seed.seed().version());fakeWorker.compositionalAvailable=true;
+        var c=i.path("thermalInjectionContext");var r=c.path("records").get(0);
+        var p=objectMapper.createObjectNode().put("schemaVersion","eclipse-thermal-injection-plan-parameters/1").put("baselineRunId",seed.baselineId()).put("temperatureUnit","degF").put("rateUnit","STB/day").put("pressureUnit","psia");
+        for(var k:new String[]{"sourceFile","sourceSha256"})p.set(k,c.get(k));for(var k:new String[]{"well","lineNumber","controlLineNumber"})p.set(k,r.get(k));
+        p.putObject("original").put("surfaceInjectionRate",37.5).put("injectionTemperature",450).put("steamQuality",.7).put("bhpUpperLimit",1000);
+        var stages=p.putArray("stages");stages.addObject().put("startTimeDays",1095).put("surfaceInjectionRate",25).put("injectionTemperature",450).put("steamQuality",.7).put("bhpUpperLimit",1000);
+        stages.addObject().put("startTimeDays",2190).put("surfaceInjectionRate",25).put("injectionTemperature",400).put("steamQuality",.7).put("bhpUpperLimit",1000);
+        for(var fault:new String[]{"boundary","end","hash","baseline","noop"}) {
+            var invalid=p.deepCopy();switch(fault){case "boundary"->((ObjectNode)invalid.path("stages").get(0)).put("startTimeDays",1094);case "end"->((ObjectNode)invalid.path("stages").get(1)).put("startTimeDays",3650);case "hash"->invalid.put("sourceSha256","0".repeat(64));case "baseline"->invalid.put("baselineRunId",Long.MAX_VALUE);default->invalid.path("original").properties().forEach(e->((ObjectNode)invalid.path("stages").get(0)).set(e.getKey(),e.getValue()));}
+            var bad=request(null,"eclipse");bad.setParameters(invalid);assertThatThrownBy(()->runService.create(seed.seed().version().getId(),bad)).isInstanceOf(RunException.class);assertThat(runStore.listByVersion(seed.seed().version().getId(),100)).hasSize(1);
+        }
+        var good=request(null,"eclipse");good.setParameters(p);assertThat(runService.create(seed.seed().version().getId(),good).parameters().toString()).isEqualTo(p.toString());
+    }
+
+    @Test void thermalRockSourceBoundaryAndBaselineAreCheckedBeforeQueue() throws Exception {
+        var seed=eclipseBatchSeed();var i=objectMapper.readTree(getClass().getResourceAsStream("/eclipse-thermal-rock-official-inspection.json"));
+        seed.seed().model().setSimulatorType("ECLIPSE_300");modelMapper.updateById(seed.seed().model());seed.seed().version().setModelKind("eclipse_300");seed.seed().version().setOriginalName("THERM3.DATA");seed.seed().version().setInspectionJson(objectMapper.writeValueAsString(i));versionMapper.updateById(seed.seed().version());fakeWorker.compositionalAvailable=true;
+        var c=i.path("thermalRockContext");var r=c.path("records").get(0);
+        var p=objectMapper.createObjectNode().put("schemaVersion","eclipse-thermal-rock-parameters/1").put("baselineRunId",seed.baselineId()).put("targetValue",45);
+        for(var k:new String[]{"sourceFile","sourceSha256","cellCount"})p.set(k,c.get(k));for(var k:new String[]{"field","lineNumber","unit","originalValue"})p.set(k,r.get(k));
+        for(var fault:new String[]{"source","line","count","original","unit","zero","baseline"}){
+            var invalid=p.deepCopy();switch(fault){case "source"->invalid.put("sourceSha256","0".repeat(64));case "line"->invalid.put("lineNumber",1);case "count"->invalid.put("cellCount",100);case "original"->invalid.put("originalValue",34);case "unit"->invalid.put("unit","degF");case "zero"->invalid.put("targetValue",0);default->invalid.put("baselineRunId",Long.MAX_VALUE);}
+            var bad=request(null,"eclipse");bad.setParameters(invalid);assertThatThrownBy(()->runService.create(seed.seed().version().getId(),bad)).isInstanceOf(RunException.class);assertThat(runStore.listByVersion(seed.seed().version().getId(),100)).hasSize(1);
+        }
+        var good=request(null,"eclipse");good.setParameters(p);assertThat(runService.create(seed.seed().version().getId(),good).parameters().toString()).isEqualTo(p.toString());
+    }
+
+    @ParameterizedTest @ValueSource(booleans={false,true})
+    void nativeThermal23PublishesAsVersionThreeAndRejectsWrongTemperatureUnits(boolean wrongUnit) throws Exception {
+        var seed=seed("READY","models/eclipse/thermal-rock/THERM3.DATA","ECLIPSE_100");
+        var i=objectMapper.readTree(getClass().getResourceAsStream("/eclipse-thermal-rock-output-inspection.json"));
+        seed.model().setSimulatorType("ECLIPSE_300");modelMapper.updateById(seed.model());seed.version().setModelKind("eclipse_300");seed.version().setOriginalName("THERM3.DATA");seed.version().setInspectionJson(objectMapper.writeValueAsString(i));versionMapper.updateById(seed.version());fakeWorker.compositionalAvailable=true;
+        long id=runService.create(seed.version().getId(),request(null,"eclipse")).id();var dispatcher=dispatcher();dispatcher.dispatch();
+        var result=(ObjectNode)objectMapper.readTree(getClass().getResourceAsStream("/eclipse-thermal-rock-native-temperature-result.json"));
+        if(wrongUnit){boolean changed=false;for(var series:result.path("summary").path("series"))if("WTEMP".equals(series.path("keyword").asText())){((ObjectNode)series).put("unit","DEG C");changed=true;break;}assertThat(changed).isTrue();}
+        var folder=STORAGE_ROOT.resolve("jobs/"+id+"/output");Files.createDirectories(folder);
+        var normalized=folder.resolve("normalized-result.json");Files.writeString(normalized,objectMapper.writeValueAsString(result));var log=folder.resolve("run.log");Files.writeString(log,"SUCCEEDED\n");
+        var manifest=folder.resolve("manifest.json");Files.writeString(manifest,"""
+          {"schemaVersion":"grdp-worker-artifact-manifest/1","runId":%d,"generatedAtUtc":"2026-10-19T00:00:00Z","files":[
+          {"storageKey":"jobs/%d/output/normalized-result.json","size":%d,"sha256":"%s","contentType":"application/json"},
+          {"storageKey":"jobs/%d/output/run.log","size":%d,"sha256":"%s","contentType":"text/plain"}]}
+          """.formatted(id,id,Files.size(normalized),sha256(normalized),id,Files.size(log),sha256(log)));
+        fakeWorker.snapshot=new WorkerRunSnapshot(id,"SUCCEEDED",4,"worker-1","generation-1",List.of(
+            new WorkerRunEvent(1,"PREPARING",Instant.now(),"prepare"),new WorkerRunEvent(2,"RUNNING_ECLIPSE",Instant.now(),"solve"),new WorkerRunEvent(3,"COLLECTING",Instant.now(),"collect"),new WorkerRunEvent(4,"SUCCEEDED",Instant.now(),"done")),result,null,List.of(
+            new WorkerRunArtifact("jobs/"+id+"/output/normalized-result.json",Files.size(normalized),sha256(normalized),"application/json"),
+            new WorkerRunArtifact("jobs/"+id+"/output/run.log",Files.size(log),sha256(log),"text/plain"),
+            new WorkerRunArtifact("jobs/"+id+"/output/manifest.json",Files.size(manifest),sha256(manifest),"application/json")),objectMapper.readTree("{\"processTreeExitConfirmed\":true}"));
+        dispatcher.poll();
+        if(wrongUnit){assertThat(runService.get(id).status()).isEqualTo("FAILED");assertThat(runService.get(id).error().path("message").asText()).contains("eclipse-summary-result/3");}
+        else{assertThat(runService.get(id).status()).isEqualTo("SUCCEEDED");assertThat(runService.get(id).result().path("schemaVersion").asText()).isEqualTo("eclipse-summary-result/3");assertThat(runService.get(id).result().path("summary").path("series").size()).isEqualTo(343);}
     }
 }

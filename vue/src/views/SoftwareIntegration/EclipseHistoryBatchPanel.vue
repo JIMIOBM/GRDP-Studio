@@ -1,4 +1,5 @@
 <script setup>
+import EclipseHistoryRanking from './EclipseHistoryRanking.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { softwareIntegrationApi } from '@/api/softwareIntegration'
 import { historyIdentity, historyRunAvailable, validHistoryEvaluation } from './eclipseHistory.js'
@@ -6,7 +7,7 @@ import { historyBatchCandidates, historyBatchComparison, historyBatchCsv } from 
 const props=defineProps({dataset:{type:Object,default:null}})
 const emit=defineEmits(['select-run'])
 const batches=ref([]),batchId=ref(null),batch=ref(null),evaluations=ref({}),failures=ref({}),error=ref(''),busy=ref(false),metricKey=ref('')
-const metricChoices=computed(()=>[...new Map((props.dataset?.observations || []).map(o=>[historyIdentity(o),o])).entries()].map(([key,row])=>({key,label:`${row.well || '全场'} · ${row.keyword} · ${row.unit}`})))
+const metricChoices=computed(()=>[...new Map((props.dataset?.observations || []).map(o=>[historyIdentity(o),o])).entries()].map(([key,row])=>({key,label:`${row.vectorIndex == null ? '' : '第'+(row.vectorIndex+1)+'列 · '}${row.well || '全场'} · ${row.keyword} · ${row.unit}`})))
 const comparison=computed(()=>batch.value?historyBatchComparison({batch:batch.value,dataset:props.dataset,evaluations:evaluations.value,failures:failures.value,metricKey:metricKey.value}):{rows:[],message:'',canRank:false})
 let epoch=0,listToken=0,compareToken=0,disposed=false
 const context=()=>({epoch,id:props.dataset?.metadata?.id,sha:props.dataset?.metadata?.sourceSha256,version:props.dataset?.metadata?.modelVersionId})
@@ -71,6 +72,7 @@ const format=v=>v==null?'不可计算':Number(v).toPrecision(8)
   <template v-if="batch">
    <el-select v-model="metricKey" aria-label="批量历史比较指标" filterable><el-option v-for="c in metricChoices" :key="c.key" :value="c.key" :label="c.label" /></el-select>
    <p>{{ comparison.message }}</p>
+   <EclipseHistoryRanking :comparison="comparison" :metric-label="metricChoices.find(c => c.key === metricKey)?.label || ''" @select-run="emit('select-run', $event)"/>
    <el-table :data="comparison.rows" border size="small" aria-label="批量方案历史误差">
     <el-table-column prop="name" label="方案" /><el-table-column prop="runId" label="运行" /><el-table-column prop="status" label="状态" />
     <el-table-column label="可比点"><template #default="{row}">{{ row.metric ? `${row.metric.matchedCount}/${row.metric.observedCount}` : '不可计算' }}</template></el-table-column>

@@ -1,0 +1,7 @@
+import {readFileSync} from 'node:fs'
+const root=new URL('./eclipseMultiSatFamilyII/',import.meta.url),load=name=>JSON.parse(readFileSync(new URL(name+'.json',root),'utf8'))
+export function multiFamilyIIBrowserFixture(field='OIL_KR'){
+ const inspection=load('inspection'),baseline=load('baseline'),label={WATER_KR:'water',GAS_KR:'gas',OIL_KR:'oil'}[field],target=load(label),native=load('native-acceptance')
+ if(!native.nativeVerified||!native.oilColumnsLinked||!native.firstRegionUnchanged||JSON.stringify(baseline.result.summary.series)!==JSON.stringify(native.baseline.series)||JSON.stringify(target.result.summary.series)!==JSON.stringify(native[label].series))throw new Error('Two-table platform differs from independent native output')
+ Object.assign(baseline,{id:9081,projectId:1,modelId:22,modelVersionId:201,versionNo:1,modelName:'ECLIPSE演示模型',artifacts:[]});const parameters={...target.parameters,baselineRunId:baseline.id};Object.assign(target,{id:9082,projectId:1,modelId:22,modelVersionId:201,versionNo:1,modelName:'ECLIPSE演示模型',parameters,artifacts:[]});return {inspection,baseline,target,parameters}
+}

@@ -98,7 +98,7 @@ async function renderChart() {
     observer?.disconnect(); chart?.dispose(); chart = echarts.init(chartElement.value)
     observer = new ResizeObserver(() => chart?.resize()); observer.observe(chartElement.value)
   }
-  const metric = selectedMetric.value, predicted = props.run.result.summary.series.find(s => s.keyword === metric.keyword && (s.objectName || '') === metric.well && s.unit === metric.unit)
+  const metric = selectedMetric.value, predicted = props.run.result.summary.series.find(s => s.keyword === metric.keyword && (s.objectName || '') === metric.well && s.unit === metric.unit && (metric.vectorIndex == null || s.vectorIndex === metric.vectorIndex))
   chart.setOption({ animation: false, tooltip: { trigger: 'axis', renderMode: 'richText' }, legend: { data: ['计算值','观察值'] },
     grid: { left: 70, right: 30, top: 45, bottom: 45, containLabel: true }, xAxis: { type: 'value', name: '时间（天）' }, yAxis: { type: 'value', name: metric.unit },
     series: [{ name: '计算值', type: 'line', showSymbol: false, connectNulls: false, data: (predicted?.points || []).map(p => [p.timeDays,p.value]) },
@@ -127,10 +127,10 @@ const format = value => value == null ? '不可计算' : Number(value).toPrecisi
     <el-form v-if="canImport" label-position="top" :disabled="busy">
       <el-form-item label="实测数据名称"><el-input v-model="name" maxlength="100" aria-label="实测数据名称" /></el-form-item>
       <input ref="fileInput" type="file" accept=".csv,text/csv" aria-label="历史实测 CSV 文件" :disabled="busy" @change="selectFile" />
-      <p>UTF-8、逗号分隔，最多1MiB/5000点。表头：well,keyword,unit,timeDays,value；全场指标的well留空。井名、指标及单位须与基线曲线一致。日历日期需先换算到模型时间轴。</p>
+      <p>UTF-8、逗号分隔，最多1MiB/5000点。表头：well,keyword,unit,timeDays,value；组分E300须在末尾加vectorIndex列（结果原始列号减1）。全场指标的well留空。井名、指标及单位须与基线曲线一致。日历日期需先换算到模型时间轴。</p>
       <el-button type="primary" :loading="busy" :disabled="!selectedFile" @click="upload">导入并校核</el-button>
     </el-form>
-    <p v-else>请先选择完整无参数 E100 基线导入观察数据，再切换成功方案查看同一份数据的拟合指标。</p>
+    <p v-else>请先选择完整无参数 E100 或组分 E300 基线导入观察数据，再切换成功方案查看同一份数据的拟合指标。</p>
     <el-button :disabled="busy" @click="loadRecords">刷新实测记录</el-button>
     <el-select v-if="records.length" v-model="datasetId" aria-label="实测数据记录" :disabled="busy"><el-option v-for="record in records" :key="record.id" :value="record.id" :label="`${record.name} · ${record.observationCount}点`" /></el-select>
     <template v-if="dataset">
@@ -142,17 +142,17 @@ const format = value => value == null ? '不可计算' : Number(value).toPrecisi
     <template v-if="evaluation">
       <p>运行 #{{ evaluation.runId }}。MAE/RMSE/平均误差采用本行单位；覆盖率为可比点/观察点；MAPE仅使用非零观察值并披露点数，超数值范围时不可计算。</p>
       <el-table :data="visibleMetrics" border size="small" aria-label="历史拟合指标">
-        <el-table-column prop="well" label="井/对象" /><el-table-column prop="keyword" label="指标" /><el-table-column prop="unit" label="单位" /><el-table-column prop="observedCount" label="观察点" /><el-table-column prop="matchedCount" label="可比点" />
+        <el-table-column v-if="run?.result?.modelKind === 'eclipse_300'" label="原始列（从1计）"><template #default="{row}">{{ row.vectorIndex + 1 }}</template></el-table-column><el-table-column prop="well" label="井/对象" /><el-table-column prop="keyword" label="指标" /><el-table-column prop="unit" label="单位" /><el-table-column prop="observedCount" label="观察点" /><el-table-column prop="matchedCount" label="可比点" />
         <el-table-column label="覆盖率"><template #default="{ row }">{{ (row.coverage * 100).toFixed(2) }}%</template></el-table-column>
         <el-table-column label="MAE"><template #default="{ row }">{{ format(row.mae) }}</template></el-table-column><el-table-column label="RMSE"><template #default="{ row }">{{ format(row.rmse) }}</template></el-table-column><el-table-column label="平均误差"><template #default="{ row }">{{ format(row.bias) }}</template></el-table-column>
         <el-table-column label="MAPE（%）"><template #default="{ row }">{{ format(row.mape) }} · {{ row.mapeCount }}点<span v-if="row.mapeOverflowCount"> · {{ row.mapeOverflowCount }}点超范围</span></template></el-table-column>
       </el-table>
       <el-pagination v-if="metrics.length > 20" v-model:current-page="metricPage" :page-size="20" :total="metrics.length" layout="prev, pager, next" />
-      <el-select v-model="metricKey" filterable aria-label="历史校核指标"><el-option v-for="metric in metrics" :key="historyIdentity(metric)" :value="historyIdentity(metric)" :label="`${metric.well || '全场'} · ${metric.keyword} · ${metric.unit}`" /></el-select>
+      <el-select v-model="metricKey" filterable aria-label="历史校核指标"><el-option v-for="metric in metrics" :key="historyIdentity(metric)" :value="historyIdentity(metric)" :label="`${metric.vectorIndex == null ? '' : '第'+(metric.vectorIndex+1)+'列 · '}${metric.well || '全场'} · ${metric.keyword} · ${metric.unit}`" /></el-select>
       <div v-if="selectedMetric" ref="chartElement" class="history-chart" role="img" aria-label="观察值与计算值曲线" />
       <el-button @click="exportPoints">导出逐点校核 CSV</el-button>
       <el-table :data="visiblePoints" max-height="350" border size="small" aria-label="历史逐点校核">
-        <el-table-column prop="well" label="井/对象" /><el-table-column prop="keyword" label="指标" /><el-table-column prop="timeDays" label="时间（天）" /><el-table-column prop="unit" label="单位" /><el-table-column prop="sourceLine" label="源行" />
+        <el-table-column v-if="run?.result?.modelKind === 'eclipse_300'" label="原始列（从1计）"><template #default="{row}">{{ row.vectorIndex + 1 }}</template></el-table-column><el-table-column prop="well" label="井/对象" /><el-table-column prop="keyword" label="指标" /><el-table-column prop="timeDays" label="时间（天）" /><el-table-column prop="unit" label="单位" /><el-table-column prop="sourceLine" label="源行" />
         <el-table-column label="观察值"><template #default="{ row }">{{ format(row.observed) }}</template></el-table-column><el-table-column label="计算值"><template #default="{ row }">{{ format(row.simulated) }}</template></el-table-column><el-table-column label="误差"><template #default="{ row }">{{ format(row.difference) }}</template></el-table-column><el-table-column prop="reason" label="缺失原因" />
       </el-table>
       <el-pagination v-if="points.length > 100" v-model:current-page="pointPage" :page-size="100" :total="points.length" layout="prev, pager, next" />

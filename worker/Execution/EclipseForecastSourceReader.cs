@@ -6,7 +6,7 @@ using System.Text.RegularExpressions;
 namespace Grdp.SoftwareIntegration.Worker.Execution;
 
 public sealed record EclipseForecastSource(string PhysicsSha256, string StartDate, string RestartCase, int RestartReport,
-    IReadOnlyList<string> FutureDates);
+    IReadOnlyList<string> FutureDates, string RestartFormat = "FORMATTED");
 public sealed record EclipseForecastInput(string RelativePath, string Sha256, int RestartReport,
     string RestartCase, IReadOnlyList<string> FutureDates);
 public sealed record EclipseRestartSourceCatalog(string SchemaVersion, EclipseRestartCatalog Catalog,
@@ -21,7 +21,7 @@ public static class EclipseForecastSourceReader
     private static readonly Regex Tokens = new("'(?:(?:[^']|'')*)'|\"(?:(?:[^\"]|\"\")*)\"|/|[^\\s/]+", RegexOptions.CultureInvariant);
     private static readonly Regex Includes = new("(?im)^[ \\t]*INCLUDE[ \\t\\r\\n]+(?:'(?<one>[^']+)'|\"(?<two>[^\"]+)\"|(?<bare>[^\\s/]+))[ \\t\\r\\n]*/", RegexOptions.CultureInvariant);
 
-    public static EclipseForecastSource Read(EclipseDeckPackage package, bool forecast)
+    public static EclipseForecastSource Read(EclipseDeckPackage package, bool forecast, bool allowBinary = false)
     {
         long total = 0;
         var text = Expand(package.MainFile, package, new HashSet<string>(StringComparer.OrdinalIgnoreCase), ref total);
@@ -53,8 +53,8 @@ public static class EclipseForecastSourceReader
                 throw new InvalidDataException("A history source cannot itself restart from an unbound state.");
             return new(hash, startDate, "", 0, []);
         }
-        if (!blocks.Take(solution).Any(b => b.Name == "FMTIN") || !blocks.Take(solution).Any(b => b.Name == "UNIFIN"))
-            throw new InvalidDataException("Forecast requires formatted unified restart input switches.");
+        if (!allowBinary && !blocks.Take(solution).Any(b => b.Name == "FMTIN") || blocks.Take(solution).Count(b => b.Name == "FMTIN") > 1 || blocks.Take(solution).Count(b => b.Name == "UNIFIN") != 1)
+            throw new InvalidDataException("Forecast requires unambiguous unified restart input switches.");
         var summary = Array.FindIndex(blocks, b => b.Name == "SUMMARY");
         if (summary <= solution || summary >= schedule) throw new InvalidDataException("Forecast requires an explicit SUMMARY section.");
         var state = blocks.Skip(solution + 1).Take(summary - solution - 1).ToArray();
@@ -85,7 +85,7 @@ public static class EclipseForecastSourceReader
             if (!terminated || row.Count != 0) throw new InvalidDataException("Unterminated forecast dates.");
         }
         if (dates.Count is < 1 or > 8192) throw new InvalidDataException("Forecast requires bounded future dates.");
-        return new(hash, startDate, caseName, report, dates);
+        return new(hash, startDate, caseName, report, dates, blocks.Take(solution).Any(b => b.Name == "FMTIN") ? "FORMATTED" : "BINARY");
     }
 
     public static EclipseRestartSourceCatalog Describe(EclipseDeckPackage history, EclipseRestartCatalog catalog)
@@ -101,16 +101,16 @@ public static class EclipseForecastSourceReader
             if (Path.GetFullPath(file).Equals(Path.GetFullPath(history.MainFile), StringComparison.OrdinalIgnoreCase)) continue;
             try
             {
-                var candidate = Read(resolver.Resolve(file, history.Root), true);
+                var candidate = Read(resolver.Resolve(file, history.Root), true, EclipseRestartReader.IsBinary(catalog));
                 var report = catalog.Reports.SingleOrDefault(r => r.ReportNumber == candidate.RestartReport);
-                if (candidate.PhysicsSha256 != source.PhysicsSha256 || candidate.RestartCase != catalog.CaseName || report is null
+                if ((candidate.RestartFormat == "BINARY") != EclipseRestartReader.IsBinary(catalog) || candidate.PhysicsSha256 != source.PhysicsSha256 || candidate.RestartCase != catalog.CaseName || report is null
                     || candidate.FutureDates.Any(d => string.CompareOrdinal(d, report.Date) <= 0)) continue;
                 var relative = Path.GetRelativePath(history.Root, file).Replace('\\', '/');
                 candidates.Add(new(relative, Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(file))), candidate.RestartReport, candidate.RestartCase, candidate.FutureDates));
             }
             catch (Exception e) when (e is InvalidDataException or EclipseDeckPackageException) { /* Incompatible inputs are never offered as verified forecasts. */ }
         }
-        return new("eclipse-restart-source/1", catalog, source.PhysicsSha256, candidates.OrderBy(c => c.RelativePath, StringComparer.Ordinal).ToArray());
+        return new(EclipseRestartReader.IsBinary(catalog) ? "eclipse-restart-source/2" : "eclipse-restart-source/1", catalog, source.PhysicsSha256, candidates.OrderBy(c => c.RelativePath, StringComparer.Ordinal).ToArray());
     }
 
     private static string Expand(string file, EclipseDeckPackage package, HashSet<string> active, ref long total)
@@ -123,7 +123,7 @@ public static class EclipseForecastSourceReader
         {
             result.Append(text[previous..m.Index]);
             var name = m.Groups["one"].Success ? m.Groups["one"].Value : m.Groups["two"].Success ? m.Groups["two"].Value : m.Groups["bare"].Value;
-            result.Append('\n').Append(Expand(EclipseDeckPackageResolver.ResolveInclude(file, name), package, active, ref total)).Append('\n');
+            result.Append('\n').Append(Expand(EclipseDeckPackageResolver.ResolveInclude(file, name, Path.GetDirectoryName(package.MainFile)!), package, active, ref total)).Append('\n');
             previous = m.Index + m.Length;
         }
         result.Append(text[previous..]); active.Remove(file);

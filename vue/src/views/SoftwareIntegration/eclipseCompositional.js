@@ -1,3 +1,7 @@
+import { validCompositionalFluidPropertyContext, validCompositionalTemperatureContext, validCompositionalCriticalZContext, validCompositionalAcentricFactorContext, validCompositionalEosPropertyContexts } from './eclipseCompositionalFluidProperty.js'
+import { validCompositionalProductionContext } from './eclipseCompositionalProduction.js'
+import { validCompositionalReinjectionContext } from './eclipseCompositionalReinjection.js'
+import { validCompositionalPortableContext } from './eclipseCompositionalForecast.js'
 const fields = (value, names) => value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === names.length && names.every(n => Object.hasOwn(value, n))
 const integer = (n, low, high = Number.MAX_SAFE_INTEGER) => Number.isSafeInteger(n) && n >= low && n <= high
 const safe = value => typeof value === 'string' && value.length > 0 && value.length <= 128 && !/[\u0000-\u001f\u007f/\\]/.test(value)
@@ -5,7 +9,21 @@ export const validCompositionalMetadata = value => fields(value, ['solver', 'mod
   value.solver === 300 && value.modelType === 'COMPOSITIONAL' && value.equationOfState === 'PR' && integer(value.componentCount, 1, 100) &&
   Array.isArray(value.componentNames) && value.componentNames.length === value.componentCount && new Set(value.componentNames).size === value.componentCount &&
   value.componentNames.every(n => safe(n) && n.length <= 8 && /^[\x20-\x7e]+$/.test(n))
-export const validCompositionalInspection = value => fields(value, ['schemaVersion', 'caseName', 'sections', 'unitSystem', 'phases', 'dimensions', 'wellNames', 'scheduleTimeline', 'packageFiles', 'simulation']) && value.schemaVersion === 'eclipse-data-inspection/14' && validCompositionalMetadata(value.simulation) &&
+const optionalContexts = value => value?.schemaVersion === 'eclipse-data-inspection/18' ? ['compositionalRestartContext'] : ['eclipse-data-inspection/17', 'eclipse-data-inspection/19', 'eclipse-data-inspection/20', 'eclipse-data-inspection/21', 'eclipse-data-inspection/22'].includes(value?.schemaVersion)
+  ? ['compositionalProductionContext', 'compositionalFluidPropertyContext', ...(['eclipse-data-inspection/19', 'eclipse-data-inspection/20', 'eclipse-data-inspection/21', 'eclipse-data-inspection/22'].includes(value.schemaVersion) ? ['compositionalTemperatureContext'] : []), ...(['eclipse-data-inspection/20', 'eclipse-data-inspection/21', 'eclipse-data-inspection/22'].includes(value.schemaVersion) ? ['compositionalCriticalZContext'] : []), ...(['eclipse-data-inspection/21', 'eclipse-data-inspection/22'].includes(value.schemaVersion) ? ['compositionalAcentricFactorContext'] : []), ...(value.schemaVersion === 'eclipse-data-inspection/22' ? ['compositionalEosPropertyContexts'] : []), ...(Object.hasOwn(value, 'compositionalReinjectionContext') ? ['compositionalReinjectionContext'] : [])]
+  : value?.schemaVersion === 'eclipse-data-inspection/16' ? ['compositionalProductionContext', 'compositionalReinjectionContext']
+    : Object.hasOwn(value || {}, 'compositionalProductionContext') ? ['compositionalProductionContext'] : []
+export const validCompositionalInspection = value => fields(value, ['schemaVersion', 'caseName', 'sections', 'unitSystem', 'phases', 'dimensions', 'wellNames', 'scheduleTimeline', 'packageFiles', 'simulation', ...optionalContexts(value)]) &&
+  (!Object.hasOwn(value, 'compositionalProductionContext') || validCompositionalProductionContext(value.compositionalProductionContext, value)) &&
+  ['eclipse-data-inspection/14', 'eclipse-data-inspection/16', 'eclipse-data-inspection/17', 'eclipse-data-inspection/18', 'eclipse-data-inspection/19', 'eclipse-data-inspection/20', 'eclipse-data-inspection/21', 'eclipse-data-inspection/22'].includes(value.schemaVersion) &&
+  (value.schemaVersion !== 'eclipse-data-inspection/18' || validCompositionalPortableContext(value.compositionalRestartContext, value)) &&
+  (value.schemaVersion !== 'eclipse-data-inspection/16' || validCompositionalReinjectionContext(value.compositionalReinjectionContext, value)) &&
+  (value.schemaVersion !== 'eclipse-data-inspection/22' || validCompositionalEosPropertyContexts(value.compositionalEosPropertyContexts, value)) &&
+  (!['eclipse-data-inspection/21', 'eclipse-data-inspection/22'].includes(value.schemaVersion) || validCompositionalAcentricFactorContext(value.compositionalAcentricFactorContext, value)) &&
+  (!['eclipse-data-inspection/20', 'eclipse-data-inspection/21', 'eclipse-data-inspection/22'].includes(value.schemaVersion) || validCompositionalCriticalZContext(value.compositionalCriticalZContext, value)) &&
+  (!['eclipse-data-inspection/19', 'eclipse-data-inspection/20', 'eclipse-data-inspection/21', 'eclipse-data-inspection/22'].includes(value.schemaVersion) || validCompositionalTemperatureContext(value.compositionalTemperatureContext, value)) &&
+  (!['eclipse-data-inspection/17', 'eclipse-data-inspection/19', 'eclipse-data-inspection/20', 'eclipse-data-inspection/21', 'eclipse-data-inspection/22'].includes(value.schemaVersion) || validCompositionalFluidPropertyContext(value.compositionalFluidPropertyContext, value) &&
+    (!Object.hasOwn(value, 'compositionalReinjectionContext') || validCompositionalReinjectionContext(value.compositionalReinjectionContext, value))) && validCompositionalMetadata(value.simulation) &&
   safe(value.caseName) && /\.DATA$/i.test(value.caseName) && Array.isArray(value.sections) && Array.isArray(value.phases) && Array.isArray(value.wellNames) && Array.isArray(value.scheduleTimeline) &&
   ['FIELD', 'METRIC'].includes(value.unitSystem) && value.dimensions && ['nx', 'ny', 'nz'].every(k => integer(value.dimensions[k], 1, 1000000)) &&
   Array.isArray(value.packageFiles) && value.packageFiles.length > 0 && value.packageFiles.length <= 4096 && value.packageFiles.every(f =>

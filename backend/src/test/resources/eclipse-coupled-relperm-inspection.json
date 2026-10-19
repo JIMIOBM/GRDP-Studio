@@ -1,0 +1,1471 @@
+{
+  "schemaVersion": "eclipse-data-inspection/4",
+  "caseName": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+  "sections": [
+    "RUNSPEC",
+    "GRID",
+    "PROPS",
+    "REGIONS",
+    "SOLUTION",
+    "SUMMARY",
+    "SCHEDULE"
+  ],
+  "unitSystem": "FIELD",
+  "phases": [
+    "OIL",
+    "WATER",
+    "GAS"
+  ],
+  "dimensions": {
+    "nx": 24,
+    "ny": 25,
+    "nz": 15
+  },
+  "wellNames": [
+    "INJE1 ",
+    "PROD2 ",
+    "PROD3 ",
+    "PROD4 ",
+    "PROD5 ",
+    "PROD6 ",
+    "PROD7 ",
+    "PROD8 ",
+    "PROD9 ",
+    "PROD10",
+    "PROD11",
+    "PROD12",
+    "PROD13",
+    "PROD14",
+    "PROD15",
+    "PROD16",
+    "PROD17",
+    "PROD18",
+    "PROD19",
+    "PROD20",
+    "PROD21",
+    "PROD22",
+    "PROD23",
+    "PROD24",
+    "PROD25",
+    "PROD26"
+  ],
+  "scheduleTimeline": [],
+  "packageFiles": [
+    {
+      "relativePath": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+      "sizeBytes": 155612,
+      "sha256": "9d53fd11f3313288643fca8616d00653a1e9266d2f30fc27a2bbecffdd9a5b4d"
+    }
+  ],
+  "scheduleMetadata": {
+    "wells": [
+      {
+        "name": "INJE1 ",
+        "group": "G",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2577
+      },
+      {
+        "name": "PROD2 ",
+        "group": "G",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2578
+      },
+      {
+        "name": "PROD3 ",
+        "group": "G",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2579
+      },
+      {
+        "name": "PROD4 ",
+        "group": "G",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2580
+      },
+      {
+        "name": "PROD5 ",
+        "group": "G",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2581
+      },
+      {
+        "name": "PROD6 ",
+        "group": "G",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2582
+      },
+      {
+        "name": "PROD7 ",
+        "group": "G",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2583
+      },
+      {
+        "name": "PROD8 ",
+        "group": "G",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2584
+      },
+      {
+        "name": "PROD9 ",
+        "group": "G",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2585
+      },
+      {
+        "name": "PROD10",
+        "group": "G",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2586
+      },
+      {
+        "name": "PROD11",
+        "group": "G",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2587
+      },
+      {
+        "name": "PROD12",
+        "group": "G",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2588
+      },
+      {
+        "name": "PROD13",
+        "group": "G",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2589
+      },
+      {
+        "name": "PROD14",
+        "group": "G",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2590
+      },
+      {
+        "name": "PROD15",
+        "group": "G",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2591
+      },
+      {
+        "name": "PROD16",
+        "group": "G",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2592
+      },
+      {
+        "name": "PROD17",
+        "group": "G",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2593
+      },
+      {
+        "name": "PROD18",
+        "group": "G",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2594
+      },
+      {
+        "name": "PROD19",
+        "group": "G",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2595
+      },
+      {
+        "name": "PROD20",
+        "group": "G",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2596
+      },
+      {
+        "name": "PROD21",
+        "group": "G",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2597
+      },
+      {
+        "name": "PROD22",
+        "group": "G",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2598
+      },
+      {
+        "name": "PROD23",
+        "group": "G",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2599
+      },
+      {
+        "name": "PROD24",
+        "group": "G",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2600
+      },
+      {
+        "name": "PROD25",
+        "group": "G",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2601
+      },
+      {
+        "name": "PROD26",
+        "group": "G",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2602
+      }
+    ],
+    "groups": [
+      {
+        "name": "G",
+        "parent": "FIELD",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2572
+      }
+    ],
+    "records": [
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "INJE1 ",
+          "2*",
+          "11",
+          "15",
+          "OPEN",
+          "2*",
+          "1.0",
+          "1*"
+        ],
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2607
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "PROD2 ",
+          "2*",
+          "2",
+          "4",
+          "OPEN",
+          "2*",
+          "1.0",
+          "1*"
+        ],
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2608
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "PROD3 ",
+          "2*",
+          "2",
+          "4",
+          "OPEN",
+          "2*",
+          "1.0",
+          "1*"
+        ],
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2609
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "PROD4 ",
+          "2*",
+          "2",
+          "4",
+          "OPEN",
+          "2*",
+          "1.0",
+          "1*"
+        ],
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2610
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "PROD5 ",
+          "2*",
+          "2",
+          "4",
+          "OPEN",
+          "2*",
+          "1.0",
+          "1*"
+        ],
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2611
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "PROD6 ",
+          "2*",
+          "2",
+          "4",
+          "OPEN",
+          "2*",
+          "1.0",
+          "1*"
+        ],
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2612
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "PROD7 ",
+          "2*",
+          "2",
+          "4",
+          "OPEN",
+          "2*",
+          "1.0",
+          "1*"
+        ],
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2613
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "PROD8 ",
+          "2*",
+          "2",
+          "4",
+          "OPEN",
+          "2*",
+          "1.0",
+          "1*"
+        ],
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2614
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "PROD9 ",
+          "2*",
+          "2",
+          "4",
+          "OPEN",
+          "2*",
+          "1.0",
+          "1*"
+        ],
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2615
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "PROD10",
+          "2*",
+          "2",
+          "4",
+          "OPEN",
+          "2*",
+          "1.0",
+          "1*"
+        ],
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2616
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "PROD11",
+          "2*",
+          "2",
+          "4",
+          "OPEN",
+          "2*",
+          "1.0",
+          "1*"
+        ],
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2617
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "PROD12",
+          "2*",
+          "2",
+          "4",
+          "OPEN",
+          "2*",
+          "1.0",
+          "1*"
+        ],
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2618
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "PROD13",
+          "2*",
+          "2",
+          "4",
+          "OPEN",
+          "2*",
+          "1.0",
+          "1*"
+        ],
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2619
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "PROD14",
+          "2*",
+          "2",
+          "4",
+          "OPEN",
+          "2*",
+          "1.0",
+          "1*"
+        ],
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2620
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "PROD15",
+          "2*",
+          "2",
+          "4",
+          "OPEN",
+          "2*",
+          "1.0",
+          "1*"
+        ],
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2621
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "PROD16",
+          "2*",
+          "2",
+          "4",
+          "OPEN",
+          "2*",
+          "1.0",
+          "1*"
+        ],
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2622
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "PROD17",
+          "2*",
+          "2",
+          "4",
+          "OPEN",
+          "2*",
+          "1.0",
+          "1*"
+        ],
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2623
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "PROD18",
+          "2*",
+          "2",
+          "4",
+          "OPEN",
+          "2*",
+          "1.0",
+          "1*"
+        ],
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2624
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "PROD19",
+          "2*",
+          "2",
+          "4",
+          "OPEN",
+          "2*",
+          "1.0",
+          "1*"
+        ],
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2625
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "PROD20",
+          "2*",
+          "2",
+          "4",
+          "OPEN",
+          "2*",
+          "1.0",
+          "1*"
+        ],
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2626
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "PROD21",
+          "2*",
+          "2",
+          "4",
+          "OPEN",
+          "2*",
+          "1.0",
+          "1*"
+        ],
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2627
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "PROD22",
+          "2*",
+          "2",
+          "4",
+          "OPEN",
+          "2*",
+          "1.0",
+          "1*"
+        ],
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2628
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "PROD23",
+          "2*",
+          "2",
+          "4",
+          "OPEN",
+          "2*",
+          "1.0",
+          "1*"
+        ],
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2629
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "PROD24",
+          "2*",
+          "2",
+          "4",
+          "OPEN",
+          "2*",
+          "1.0",
+          "1*"
+        ],
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2630
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "PROD25",
+          "2*",
+          "2",
+          "4",
+          "OPEN",
+          "2*",
+          "1.0",
+          "1*"
+        ],
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2631
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "PROD26",
+          "2*",
+          "2",
+          "4",
+          "OPEN",
+          "2*",
+          "1.0",
+          "1*"
+        ],
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2632
+      },
+      {
+        "keyword": "WCONINJE",
+        "values": [
+          "INJE1",
+          "WATER",
+          "OPEN",
+          "RATE",
+          "5000",
+          "1*",
+          "4000"
+        ],
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2638
+      },
+      {
+        "keyword": "WCONPROD",
+        "values": [
+          "PROD*",
+          "OPEN",
+          "ORAT",
+          "1500",
+          "4*",
+          "1000"
+        ],
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2644
+      }
+    ],
+    "completions": [
+      {
+        "keyword": "COMPDAT",
+        "well": "INJE1 ",
+        "i": "2*",
+        "j": "11",
+        "k1": "15",
+        "k2": "OPEN",
+        "status": "2*",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2607
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "PROD2 ",
+        "i": "2*",
+        "j": "2",
+        "k1": "4",
+        "k2": "OPEN",
+        "status": "2*",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2608
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "PROD3 ",
+        "i": "2*",
+        "j": "2",
+        "k1": "4",
+        "k2": "OPEN",
+        "status": "2*",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2609
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "PROD4 ",
+        "i": "2*",
+        "j": "2",
+        "k1": "4",
+        "k2": "OPEN",
+        "status": "2*",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2610
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "PROD5 ",
+        "i": "2*",
+        "j": "2",
+        "k1": "4",
+        "k2": "OPEN",
+        "status": "2*",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2611
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "PROD6 ",
+        "i": "2*",
+        "j": "2",
+        "k1": "4",
+        "k2": "OPEN",
+        "status": "2*",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2612
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "PROD7 ",
+        "i": "2*",
+        "j": "2",
+        "k1": "4",
+        "k2": "OPEN",
+        "status": "2*",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2613
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "PROD8 ",
+        "i": "2*",
+        "j": "2",
+        "k1": "4",
+        "k2": "OPEN",
+        "status": "2*",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2614
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "PROD9 ",
+        "i": "2*",
+        "j": "2",
+        "k1": "4",
+        "k2": "OPEN",
+        "status": "2*",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2615
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "PROD10",
+        "i": "2*",
+        "j": "2",
+        "k1": "4",
+        "k2": "OPEN",
+        "status": "2*",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2616
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "PROD11",
+        "i": "2*",
+        "j": "2",
+        "k1": "4",
+        "k2": "OPEN",
+        "status": "2*",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2617
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "PROD12",
+        "i": "2*",
+        "j": "2",
+        "k1": "4",
+        "k2": "OPEN",
+        "status": "2*",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2618
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "PROD13",
+        "i": "2*",
+        "j": "2",
+        "k1": "4",
+        "k2": "OPEN",
+        "status": "2*",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2619
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "PROD14",
+        "i": "2*",
+        "j": "2",
+        "k1": "4",
+        "k2": "OPEN",
+        "status": "2*",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2620
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "PROD15",
+        "i": "2*",
+        "j": "2",
+        "k1": "4",
+        "k2": "OPEN",
+        "status": "2*",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2621
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "PROD16",
+        "i": "2*",
+        "j": "2",
+        "k1": "4",
+        "k2": "OPEN",
+        "status": "2*",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2622
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "PROD17",
+        "i": "2*",
+        "j": "2",
+        "k1": "4",
+        "k2": "OPEN",
+        "status": "2*",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2623
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "PROD18",
+        "i": "2*",
+        "j": "2",
+        "k1": "4",
+        "k2": "OPEN",
+        "status": "2*",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2624
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "PROD19",
+        "i": "2*",
+        "j": "2",
+        "k1": "4",
+        "k2": "OPEN",
+        "status": "2*",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2625
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "PROD20",
+        "i": "2*",
+        "j": "2",
+        "k1": "4",
+        "k2": "OPEN",
+        "status": "2*",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2626
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "PROD21",
+        "i": "2*",
+        "j": "2",
+        "k1": "4",
+        "k2": "OPEN",
+        "status": "2*",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2627
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "PROD22",
+        "i": "2*",
+        "j": "2",
+        "k1": "4",
+        "k2": "OPEN",
+        "status": "2*",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2628
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "PROD23",
+        "i": "2*",
+        "j": "2",
+        "k1": "4",
+        "k2": "OPEN",
+        "status": "2*",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2629
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "PROD24",
+        "i": "2*",
+        "j": "2",
+        "k1": "4",
+        "k2": "OPEN",
+        "status": "2*",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2630
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "PROD25",
+        "i": "2*",
+        "j": "2",
+        "k1": "4",
+        "k2": "OPEN",
+        "status": "2*",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2631
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "PROD26",
+        "i": "2*",
+        "j": "2",
+        "k1": "4",
+        "k2": "OPEN",
+        "status": "2*",
+        "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+        "lineNumber": 2632
+      }
+    ]
+  },
+  "liveOilPvtContext": {
+    "schemaVersion": "eclipse-live-oil-pvt-context/1",
+    "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+    "keywordLineNumber": 2450,
+    "records": [
+      {
+        "rows": [
+          {
+            "lineNumber": 2452,
+            "values": [
+              ".0",
+              "14.7",
+              "1.0000",
+              "1.20"
+            ]
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "lineNumber": 2453,
+            "values": [
+              ".165",
+              "400.",
+              "1.0120",
+              "1.17"
+            ]
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "lineNumber": 2454,
+            "values": [
+              ".335",
+              "800.",
+              "1.0255",
+              "1.14"
+            ]
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "lineNumber": 2455,
+            "values": [
+              ".500",
+              "1200.",
+              "1.0380",
+              "1.11"
+            ]
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "lineNumber": 2456,
+            "values": [
+              ".665",
+              "1600.",
+              "1.0510",
+              "1.08"
+            ]
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "lineNumber": 2457,
+            "values": [
+              ".828",
+              "2000.",
+              "1.0630",
+              "1.06"
+            ]
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "lineNumber": 2458,
+            "values": [
+              ".985",
+              "2400.",
+              "1.0750",
+              "1.03"
+            ]
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "lineNumber": 2459,
+            "values": [
+              "1.130",
+              "2800.",
+              "1.0870",
+              "1.00"
+            ]
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "lineNumber": 2460,
+            "values": [
+              "1.270",
+              "3200.",
+              "1.0985",
+              ".98"
+            ]
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "lineNumber": 2461,
+            "values": [
+              "1.390",
+              "3600.",
+              "1.1100",
+              ".95"
+            ]
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "lineNumber": 2462,
+            "values": [
+              "1.500",
+              "4000.",
+              "1.1200",
+              ".94"
+            ]
+          },
+          {
+            "lineNumber": 2463,
+            "values": [
+              "5000.",
+              "1.1189",
+              ".94"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "coupledRelpermContext": {
+    "schemaVersion": "eclipse-coupled-relperm-context/1",
+    "sourceFile": "ECLIPSE_SWOF_SGOF_OIL.DATA",
+    "tables": [
+      {
+        "keyword": "SWOF",
+        "keywordLineNumber": 2404,
+        "rows": [
+          {
+            "lineNumber": 2406,
+            "values": [
+              "0.151090",
+              "0.0",
+              "1.0",
+              "400.0"
+            ]
+          },
+          {
+            "lineNumber": 2407,
+            "values": [
+              "0.151230",
+              "0.0",
+              "0.99997",
+              "359.190"
+            ]
+          },
+          {
+            "lineNumber": 2408,
+            "values": [
+              "0.151740",
+              "0.0",
+              "0.99993",
+              "257.920"
+            ]
+          },
+          {
+            "lineNumber": 2409,
+            "values": [
+              "0.152460",
+              "0.0",
+              "0.99991",
+              "186.310"
+            ]
+          },
+          {
+            "lineNumber": 2410,
+            "values": [
+              "0.156470",
+              "0.0",
+              "0.999510",
+              "79.060"
+            ]
+          },
+          {
+            "lineNumber": 2411,
+            "values": [
+              "0.165850",
+              "0.0",
+              "0.996290",
+              "40.010"
+            ]
+          },
+          {
+            "lineNumber": 2412,
+            "values": [
+              "0.178350",
+              "0.0",
+              "0.991590",
+              "27.930"
+            ]
+          },
+          {
+            "lineNumber": 2413,
+            "values": [
+              "0.203350",
+              "0.000010",
+              "0.978830",
+              "20.400"
+            ]
+          },
+          {
+            "lineNumber": 2414,
+            "values": [
+              "0.253350",
+              "0.000030",
+              "0.943730",
+              "15.550"
+            ]
+          },
+          {
+            "lineNumber": 2415,
+            "values": [
+              "0.350000",
+              "0.000280",
+              "0.830230",
+              "11.655"
+            ]
+          },
+          {
+            "lineNumber": 2416,
+            "values": [
+              "0.352000",
+              "0.002292",
+              "0.804277",
+              "8.720"
+            ]
+          },
+          {
+            "lineNumber": 2417,
+            "values": [
+              "0.354000",
+              "0.004304",
+              "0.778326",
+              "5.947"
+            ]
+          },
+          {
+            "lineNumber": 2418,
+            "values": [
+              "0.356000",
+              "0.006316",
+              "0.752374",
+              "3.317"
+            ]
+          },
+          {
+            "lineNumber": 2419,
+            "values": [
+              "0.358000",
+              "0.008328",
+              "0.726422",
+              "1.165"
+            ]
+          },
+          {
+            "lineNumber": 2420,
+            "values": [
+              "0.360000",
+              "0.010340",
+              "0.700470",
+              "0.463"
+            ]
+          },
+          {
+            "lineNumber": 2421,
+            "values": [
+              "0.364395",
+              "0.015548",
+              "0.642258",
+              "-0.499"
+            ]
+          },
+          {
+            "lineNumber": 2422,
+            "values": [
+              "0.368790",
+              "0.020756",
+              "0.584046",
+              "-1.139"
+            ]
+          },
+          {
+            "lineNumber": 2423,
+            "values": [
+              "0.370000",
+              "0.022190",
+              "0.568020",
+              "-1.194"
+            ]
+          },
+          {
+            "lineNumber": 2424,
+            "values": [
+              "0.380000",
+              "0.035890",
+              "0.434980",
+              "-1.547"
+            ]
+          },
+          {
+            "lineNumber": 2425,
+            "values": [
+              "0.400000",
+              "0.069530",
+              "0.171430",
+              "-1.604"
+            ]
+          },
+          {
+            "lineNumber": 2426,
+            "values": [
+              "0.433450",
+              "0.087900",
+              "0.125310",
+              "-1.710"
+            ]
+          },
+          {
+            "lineNumber": 2427,
+            "values": [
+              "0.461390",
+              "0.104910",
+              "0.094980",
+              "-1.780"
+            ]
+          },
+          {
+            "lineNumber": 2428,
+            "values": [
+              "0.489320",
+              "0.123290",
+              "0.070530",
+              "-1.860"
+            ]
+          },
+          {
+            "lineNumber": 2429,
+            "values": [
+              "0.517250",
+              "0.143030",
+              "0.051130",
+              "-1.930"
+            ]
+          },
+          {
+            "lineNumber": 2430,
+            "values": [
+              "0.573120",
+              "0.186590",
+              "0.024640",
+              "-2.070"
+            ]
+          },
+          {
+            "lineNumber": 2431,
+            "values": [
+              "0.601060",
+              "0.210380",
+              "0.016190",
+              "-2.130"
+            ]
+          },
+          {
+            "lineNumber": 2432,
+            "values": [
+              "0.656930",
+              "0.261900",
+              "0.005940",
+              "-2.260"
+            ]
+          },
+          {
+            "lineNumber": 2433,
+            "values": [
+              "0.712800",
+              "0.318650",
+              "0.001590",
+              "-2.380"
+            ]
+          },
+          {
+            "lineNumber": 2434,
+            "values": [
+              "0.811110",
+              "0.430920",
+              "0.000020",
+              "-2.600"
+            ]
+          },
+          {
+            "lineNumber": 2435,
+            "values": [
+              "0.881490",
+              "0.490000",
+              "0.000000",
+              "-2.750"
+            ]
+          }
+        ]
+      },
+      {
+        "keyword": "SGOF",
+        "keywordLineNumber": 2437,
+        "rows": [
+          {
+            "lineNumber": 2439,
+            "values": [
+              ".00",
+              ".0",
+              "1.",
+              "0"
+            ]
+          },
+          {
+            "lineNumber": 2440,
+            "values": [
+              ".04",
+              ".0",
+              ".6",
+              ".2"
+            ]
+          },
+          {
+            "lineNumber": 2441,
+            "values": [
+              ".1",
+              ".022",
+              ".33",
+              ".5"
+            ]
+          },
+          {
+            "lineNumber": 2442,
+            "values": [
+              ".2",
+              ".1",
+              ".1",
+              "1"
+            ]
+          },
+          {
+            "lineNumber": 2443,
+            "values": [
+              ".3",
+              ".24",
+              ".02",
+              "1.5"
+            ]
+          },
+          {
+            "lineNumber": 2444,
+            "values": [
+              ".4",
+              ".34",
+              ".0",
+              "2"
+            ]
+          },
+          {
+            "lineNumber": 2445,
+            "values": [
+              ".5",
+              ".42",
+              ".0",
+              "2.5"
+            ]
+          },
+          {
+            "lineNumber": 2446,
+            "values": [
+              ".6",
+              ".5",
+              ".0",
+              "3"
+            ]
+          },
+          {
+            "lineNumber": 2447,
+            "values": [
+              ".7",
+              ".8125",
+              ".0",
+              "3.5"
+            ]
+          },
+          {
+            "lineNumber": 2448,
+            "values": [
+              "0.84891",
+              "1.",
+              ".0",
+              "3.9"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

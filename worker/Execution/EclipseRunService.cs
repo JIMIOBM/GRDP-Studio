@@ -30,8 +30,57 @@ public sealed partial class EclipseRunService : IDisposable
             EclipseSimulationModel? requestedSimulation;
             try { requestedSimulation = EclipseSimulationModelReader.Read(packages.Resolve(source, storage.ResolveModelPackageRoot(source))); }
             catch (EclipseDeckPackageException exception) { return new(422, WorkerApiError.Request(exception.Code, exception.Message)); }
-            if (requestedSimulation is not null && request.Parameters.ValueKind != JsonValueKind.Null)
-                return new(400, WorkerApiError.Request("ECLIPSE_COMPOSITIONAL_SCENARIO_UNSUPPORTED", "E100 editing and restart parameters cannot be applied to a compositional model."));
+            var compositionalForecast = EclipseCompositionalForecastParameters.TryParse(request.Parameters, out var compositionalForecastParameters);
+            if (compositionalForecast)
+            {
+                try
+                {
+                    if (requestedSimulation?.ModelType != "COMPOSITIONAL")
+                        return new(400, WorkerApiError.Request("ECLIPSE_COMPOSITIONAL_FORECAST_MISMATCH", "Historical SAVE forecasting requires its qualified compositional model."));
+                    _ = await EclipseCompositionalSaveState.LoadPublishedAsync(storage, compositionalForecastParameters!,
+                        packages.Resolve(source, storage.ResolveModelPackageRoot(source)), cancellationToken);
+                }
+                catch (InvalidDataException exception) { return new(400, WorkerApiError.Request("ECLIPSE_COMPOSITIONAL_FORECAST_MISMATCH", exception.Message)); }
+                catch (StorageException exception) { return new(exception.HttpStatus, WorkerApiError.Storage(exception.Code, exception.Message)); }
+            }
+            var thermalRock = EclipseThermalRockParameters.TryParse(request.Parameters, out var rockParameters);
+            if (thermalRock && (requestedSimulation?.ModelType != "THERMAL"
+                || !EclipseThermalRockEditor.Matches(EclipseThermalRockReader.Read(packages.Resolve(source, storage.ResolveModelPackageRoot(source))), rockParameters!)))
+                return new(400, WorkerApiError.Request("ECLIPSE_THERMAL_ROCK_MISMATCH", "The thermal rock property does not match its complete qualified source."));
+            var thermalPlan = EclipseThermalPlanParameters.TryParse(request.Parameters, out var planParameters);
+            if (thermalPlan && (requestedSimulation?.ModelType != "THERMAL"
+                || !EclipseThermalPlanEditor.Matches(EclipseThermalInjectionReader.Read(packages.Resolve(source, storage.ResolveModelPackageRoot(source))), planParameters!)))
+                return new(400, WorkerApiError.Request("ECLIPSE_THERMAL_PLAN_MISMATCH", "The thermal plan does not match its qualified complete source and report boundaries."));
+            var thermalTarget = EclipseThermalInjectionParameters.TryParse(request.Parameters, out var thermalInjection);
+            if (thermalTarget && (requestedSimulation?.ModelType != "THERMAL"
+                || !EclipseThermalInjectionEditor.Matches(EclipseThermalInjectionReader.Read(packages.Resolve(source, storage.ResolveModelPackageRoot(source))), thermalInjection!)))
+                return new(400, WorkerApiError.Request("ECLIPSE_THERMAL_INJECTION_MISMATCH", "The thermal injection property does not match the qualified complete source."));
+            var compositionalReinjection = EclipseCompositionalReinjectionParameters.TryParse(request.Parameters, out var reinjectionTarget);
+            if (compositionalReinjection && (requestedSimulation?.ModelType != "COMPOSITIONAL"
+                || !EclipseCompositionalReinjectionEditor.Matches(EclipseCompositionalReinjectionReader.Read(packages.Resolve(source, storage.ResolveModelPackageRoot(source))), reinjectionTarget!)))
+                return new(400, WorkerApiError.Request("ECLIPSE_COMPOSITIONAL_REINJECTION_MISMATCH", "The E300 available-gas reinjection fraction does not match the qualified complete source."));
+            var compositionalGasSales = EclipseCompositionalGasSalesParameters.TryParse(request.Parameters, out var gasSalesTarget);
+            if (compositionalGasSales && (requestedSimulation?.ModelType != "COMPOSITIONAL"
+                || !EclipseCompositionalGasSalesEditor.Matches(EclipseCompositionalReinjectionReader.Read(packages.Resolve(source, storage.ResolveModelPackageRoot(source))), gasSalesTarget!)))
+                return new(400, WorkerApiError.Request("ECLIPSE_COMPOSITIONAL_GAS_SALES_MISMATCH", "The E300 constant gas sales target does not match the qualified complete source."));
+            var compositionalInjectionPressure = EclipseCompositionalInjectionPressureParameters.TryParse(request.Parameters, out var injectionPressureTarget);
+            if (compositionalInjectionPressure && (requestedSimulation?.ModelType != "COMPOSITIONAL"
+                || !EclipseCompositionalInjectionPressureEditor.Matches(EclipseCompositionalReinjectionReader.Read(packages.Resolve(source, storage.ResolveModelPackageRoot(source))), injectionPressureTarget!)))
+                return new(400, WorkerApiError.Request("ECLIPSE_COMPOSITIONAL_INJECTION_PRESSURE_MISMATCH", "The E300 injector BHP upper limit does not match the qualified complete source."));
+            var compositionalFluidProperty = EclipseCompositionalFluidPropertyParameters.TryParse(request.Parameters, out var fluidPropertyTarget);
+            if (compositionalFluidProperty && (requestedSimulation?.ModelType != "COMPOSITIONAL"
+                || !EclipseCompositionalFluidPropertyEditor.Matches(EclipseCompositionalFluidPropertyReader.Read(packages.Resolve(source, storage.ResolveModelPackageRoot(source)), fluidPropertyTarget!.Field), fluidPropertyTarget)))
+                return new(400, WorkerApiError.Request("ECLIPSE_COMPOSITIONAL_FLUID_PROPERTY_MISMATCH", "The E300 component critical property does not match the qualified complete source."));
+            var compositionalPressure = EclipseCompositionalPressureParameters.TryParse(request.Parameters, out var pressureTarget);
+            if (compositionalPressure && (requestedSimulation?.ModelType != "COMPOSITIONAL"
+                || !EclipseCompositionalPressureEditor.Matches(EclipseCompositionalProductionReader.Read(packages.Resolve(source, storage.ResolveModelPackageRoot(source))), pressureTarget!)))
+                return new(400, WorkerApiError.Request("ECLIPSE_COMPOSITIONAL_PRESSURE_MISMATCH", "The E300 producer BHP lower limit does not match the qualified complete source."));
+            var compositionalTarget = EclipseCompositionalProductionParameters.TryParse(request.Parameters, out var gasTarget);
+            if (compositionalTarget && (requestedSimulation?.ModelType != "COMPOSITIONAL"
+                || !EclipseCompositionalProductionEditor.Matches(EclipseCompositionalProductionReader.Read(packages.Resolve(source, storage.ResolveModelPackageRoot(source))), gasTarget!)))
+                return new(400, WorkerApiError.Request("ECLIPSE_COMPOSITIONAL_PRODUCTION_MISMATCH", "The E300 gas target does not match the qualified complete source."));
+            if (requestedSimulation is not null && request.Parameters.ValueKind != JsonValueKind.Null && !compositionalTarget && !compositionalPressure && !compositionalReinjection && !compositionalGasSales && !compositionalInjectionPressure && !compositionalFluidProperty && !thermalTarget && !thermalPlan && !thermalRock && !compositionalForecast)
+                return new(400, WorkerApiError.Request("ECLIPSE_COMPOSITIONAL_SCENARIO_UNSUPPORTED", "Only qualified E300 producer gas-target/BHP or thermal-injection parameters can edit their respective model types; E100 and restart parameters remain unsupported."));
             var capability = await launcher.GetCapabilityAsync(requestedSimulation?.Solver ?? 100, cancellationToken);
             if (!capability.Available) return new(503, new WorkerError("ENVIRONMENT", "ECLIPSE_UNAVAILABLE", "ECLIPSE launcher is unavailable.", true));
             var lease = coordinator.TryAcquire("run"); if (!lease.Acquired) return new(409, lease.Error!);
@@ -60,9 +109,103 @@ public sealed partial class EclipseRunService : IDisposable
             var solver = simulation?.Solver ?? 100;
             EclipseForecastSource? verifiedFuture = null;
             await EclipsePackageIntegrity.VerifyAsync(workPackage, request.ExpectedPackageFiles, CancellationToken.None);
+            var compositionalState = EclipseCompositionalSaveState.ReadPortable(workPackage);
+            if (EclipseCompositionalForecastParameters.TryParse(request.Parameters, out var e300Forecast))
+                compositionalState = await EclipseCompositionalSaveState.PreparePublishedAsync(storage, e300Forecast!, workPackage, cancellation);
+            if (compositionalState is not null)
+                descriptors.Add(await artifacts.WriteEclipseCompositionalForecastPackageAsync(dirs.Output, workPackage, cancellation));
             if (request.Parameters.ValueKind == JsonValueKind.Null && EclipsePortableRestartBinding.Validate(workPackage) is not null)
-                verifiedFuture = EclipseForecastSourceReader.Read(workPackage, true);
-            if (EclipseRelpermParameters.TryParse(request.Parameters, out var relperm))
+                verifiedFuture = EclipseForecastSourceReader.Read(workPackage, true, true);
+            if (EclipseThermalRockParameters.TryParse(request.Parameters, out var thermalRockParameters))
+            {
+                if (simulation?.ModelType != "THERMAL") throw new EclipseDeckPackageException("ECLIPSE_THERMAL_ROCK_MISMATCH", "This property requires a verified E300 thermal model.");
+                registry.Report(request.RunId,"PREPARING",await EclipseThermalRockEditor.ApplyAsync(workPackage,thermalRockParameters!,CancellationToken.None));
+                descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output,workPackage,CancellationToken.None));
+            }
+            else if (EclipseThermalPlanParameters.TryParse(request.Parameters, out var thermalPlanParameters))
+            {
+                if (simulation?.ModelType != "THERMAL") throw new EclipseDeckPackageException("ECLIPSE_THERMAL_PLAN_MISMATCH", "This schedule requires a verified E300 thermal model.");
+                registry.Report(request.RunId,"PREPARING",await EclipseThermalPlanEditor.ApplyAsync(workPackage,thermalPlanParameters!,CancellationToken.None));
+                descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output,workPackage,CancellationToken.None));
+            }
+            else if (EclipseThermalInjectionParameters.TryParse(request.Parameters, out var thermalParameters))
+            {
+                if (simulation?.ModelType != "THERMAL") throw new EclipseDeckPackageException("ECLIPSE_THERMAL_INJECTION_MISMATCH", "This property requires a verified E300 thermal model.");
+                registry.Report(request.RunId,"PREPARING",await EclipseThermalInjectionEditor.ApplyAsync(workPackage,thermalParameters!,CancellationToken.None));
+                descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output,workPackage,CancellationToken.None));
+            }
+            else if (EclipseCompositionalReinjectionParameters.TryParse(request.Parameters, out var reinjectionParameters))
+            {
+                if (simulation?.ModelType != "COMPOSITIONAL") throw new EclipseDeckPackageException("ECLIPSE_COMPOSITIONAL_REINJECTION_MISMATCH", "This fraction requires a verified E300 compositional model.");
+                registry.Report(request.RunId, "PREPARING", await EclipseCompositionalReinjectionEditor.ApplyAsync(workPackage, reinjectionParameters!, CancellationToken.None));
+                descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output, workPackage, CancellationToken.None));
+            }
+            else if (EclipseCompositionalGasSalesParameters.TryParse(request.Parameters, out var gasSalesParameters))
+            {
+                if (simulation?.ModelType != "COMPOSITIONAL") throw new EclipseDeckPackageException("ECLIPSE_COMPOSITIONAL_GAS_SALES_MISMATCH", "This gas sales target requires a verified E300 compositional model.");
+                registry.Report(request.RunId, "PREPARING", await EclipseCompositionalGasSalesEditor.ApplyAsync(workPackage, gasSalesParameters!, CancellationToken.None));
+                descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output, workPackage, CancellationToken.None));
+            }
+            else if (EclipseCompositionalInjectionPressureParameters.TryParse(request.Parameters, out var injectionPressureParameters))
+            {
+                if (simulation?.ModelType != "COMPOSITIONAL") throw new EclipseDeckPackageException("ECLIPSE_COMPOSITIONAL_INJECTION_PRESSURE_MISMATCH", "This injector BHP upper limit requires a verified E300 compositional model.");
+                registry.Report(request.RunId, "PREPARING", await EclipseCompositionalInjectionPressureEditor.ApplyAsync(workPackage, injectionPressureParameters!, CancellationToken.None));
+                descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output, workPackage, CancellationToken.None));
+            }
+            else if (EclipseCompositionalFluidPropertyParameters.TryParse(request.Parameters, out var fluidPropertyParameters))
+            {
+                if (simulation?.ModelType != "COMPOSITIONAL") throw new EclipseDeckPackageException("ECLIPSE_COMPOSITIONAL_FLUID_PROPERTY_MISMATCH", "This component critical pressure requires a verified E300 compositional model.");
+                registry.Report(request.RunId, "PREPARING", await EclipseCompositionalFluidPropertyEditor.ApplyAsync(workPackage, fluidPropertyParameters!, CancellationToken.None));
+                descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output, workPackage, CancellationToken.None));
+            }
+            else if (EclipseCompositionalPressureParameters.TryParse(request.Parameters, out var pressureParameters))
+            {
+                if (simulation?.ModelType != "COMPOSITIONAL") throw new EclipseDeckPackageException("ECLIPSE_COMPOSITIONAL_PRESSURE_MISMATCH", "This BHP lower limit requires a verified E300 compositional model.");
+                registry.Report(request.RunId, "PREPARING", await EclipseCompositionalPressureEditor.ApplyAsync(workPackage, pressureParameters!, CancellationToken.None));
+                descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output, workPackage, CancellationToken.None));
+            }
+            else if (EclipseCompositionalProductionParameters.TryParse(request.Parameters, out var compositionalProduction))
+            {
+                if (simulation?.ModelType != "COMPOSITIONAL") throw new EclipseDeckPackageException("ECLIPSE_COMPOSITIONAL_PRODUCTION_MISMATCH", "This target requires a verified E300 compositional model.");
+                registry.Report(request.RunId, "PREPARING", await EclipseCompositionalProductionEditor.ApplyAsync(workPackage, compositionalProduction!, CancellationToken.None));
+                descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output, workPackage, CancellationToken.None));
+            }
+            else if (EclipseMultiWaterPvtParameters.TryParse(request.Parameters, out var multiWaterPvt))
+            {
+                registry.Report(request.RunId,"PREPARING",await EclipseMultiWaterPvtEditor.ApplyAsync(workPackage,multiWaterPvt!,CancellationToken.None));
+                descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output,workPackage,CancellationToken.None));
+            }
+            else if (EclipseMultiWetGasPvtParameters.TryParse(request.Parameters, out var multiWetGasPvt))
+            {
+                registry.Report(request.RunId,"PREPARING",await EclipseMultiWetGasPvtEditor.ApplyAsync(workPackage,multiWetGasPvt!,CancellationToken.None));
+                descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output,workPackage,CancellationToken.None));
+            }
+            else if (EclipseMultiLiveOilPvtParameters.TryParse(request.Parameters, out var multiLiveOilPvt))
+            {
+                registry.Report(request.RunId,"PREPARING",await EclipseMultiLiveOilPvtEditor.ApplyAsync(workPackage,multiLiveOilPvt!,CancellationToken.None));
+                descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output,workPackage,CancellationToken.None));
+            }
+            else if (EclipseMultiPvtParameters.TryParse(request.Parameters, out var multiPvt))
+            {
+                registry.Report(request.RunId,"PREPARING",await EclipseMultiPvtEditor.ApplyAsync(workPackage,multiPvt!,CancellationToken.None));
+                descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output,workPackage,CancellationToken.None));
+            }
+            else if (EclipseMultiSatFamilyIIParameters.TryParse(request.Parameters, out var multiFamilyII))
+            {
+                registry.Report(request.RunId,"PREPARING",await EclipseMultiSatFamilyIIEditor.ApplyAsync(workPackage,multiFamilyII!,CancellationToken.None));
+                descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output,workPackage,CancellationToken.None));
+            }
+            else if (EclipseMultiSatRelpermParameters.TryParse(request.Parameters, out var multiSatRelperm))
+            {
+                registry.Report(request.RunId,"PREPARING",await EclipseMultiSatRelpermEditor.ApplyAsync(workPackage,multiSatRelperm!,CancellationToken.None));
+                descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output,workPackage,CancellationToken.None));
+            }
+            else if (EclipseCoupledRelpermParameters.TryParse(request.Parameters, out var coupledRelperm))
+            {
+                registry.Report(request.RunId,"PREPARING",await EclipseCoupledRelpermEditor.ApplyAsync(workPackage,coupledRelperm!,CancellationToken.None));
+                descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output,workPackage,CancellationToken.None));
+            }
+            else if (EclipseRelpermParameters.TryParse(request.Parameters, out var relperm))
             {
                 registry.Report(request.RunId,"PREPARING",await EclipseRelpermEditor.ApplyAsync(workPackage,relperm!,CancellationToken.None));
                 descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output,workPackage,CancellationToken.None));
@@ -70,6 +213,16 @@ public sealed partial class EclipseRunService : IDisposable
             else if (EclipseGasPvtParameters.TryParse(request.Parameters, out var gasPvt))
             {
                 registry.Report(request.RunId,"PREPARING",await EclipseGasPvtEditor.ApplyAsync(workPackage,gasPvt!,CancellationToken.None));
+                descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output,workPackage,CancellationToken.None));
+            }
+            else if (EclipseWetGasPvtParameters.TryParse(request.Parameters, out var wetGasPvt))
+            {
+                registry.Report(request.RunId,"PREPARING",await EclipseWetGasPvtEditor.ApplyAsync(workPackage,wetGasPvt!,CancellationToken.None));
+                descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output,workPackage,CancellationToken.None));
+            }
+            else if (EclipseLiveOilPvtParameters.TryParse(request.Parameters, out var liveOilPvt))
+            {
+                registry.Report(request.RunId,"PREPARING",await EclipseLiveOilPvtEditor.ApplyAsync(workPackage,liveOilPvt!,CancellationToken.None));
                 descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output,workPackage,CancellationToken.None));
             }
             else if (EclipseOilPvtParameters.TryParse(request.Parameters, out var oilPvt))
@@ -165,6 +318,18 @@ public sealed partial class EclipseRunService : IDisposable
                 registry.Report(request.RunId, "PREPARING", editMessage);
                 descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output, workPackage, cancellation));
             }
+            else if (EclipseWaterInjectionPlanParameters.TryParse(request.Parameters, out var waterInjectionPlan))
+            {
+                var editMessage = await EclipseWaterInjectionPlanEditor.ApplyAsync(workPackage, waterInjectionPlan!, cancellation);
+                registry.Report(request.RunId, "PREPARING", editMessage);
+                descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output, workPackage, cancellation));
+            }
+            else if (EclipsePackageControlPlanParameters.TryParse(request.Parameters, out var packageControlPlan))
+            {
+                var editMessage = await EclipsePackageControlPlanEditor.ApplyAsync(workPackage, packageControlPlan!, cancellation);
+                registry.Report(request.RunId, "PREPARING", editMessage);
+                descriptors.Add(await artifacts.WriteEclipseSchedulePackageAsync(dirs.Output, workPackage, cancellation));
+            }
             else if (EclipseControlPlanParameters.TryParse(request.Parameters, out var controlPlan))
             {
                 var editMessage = await EclipseControlPlanEditor.ApplyAsync(workPackage, controlPlan!, cancellation);
@@ -252,10 +417,10 @@ public sealed partial class EclipseRunService : IDisposable
                 var forecastPackage = packages.Resolve(forecastPath, dirs.Work);
                 var restartPath = await storage.CopyPublishedRestartArtifactToWorkAsync(binding.HistoryRunId,
                     binding.RestartArtifactName, binding.RestartArtifactSha256, dirs.Work, CancellationToken.None);
-                var catalog = EclipseFormattedRestartReader.Read(restartPath);
+                var catalog = EclipseRestartReader.Read(restartPath);
                 restartForecast.Validate(workPackage, forecastPackage, catalog);
-                verifiedFuture = EclipseForecastSourceReader.Read(forecastPackage, true);
-                var bytes = EclipseFormattedRestartReader.Select(restartPath, catalog, binding.RestartReport);
+                verifiedFuture = EclipseForecastSourceReader.Read(forecastPackage, true, restartForecast.Binary);
+                var bytes = EclipseRestartReader.Select(restartPath, catalog, binding.RestartReport);
                 await File.WriteAllBytesAsync(restartPath, bytes, cancellation);
                 descriptors.Add(await artifacts.WriteEclipseForecastPackageAsync(dirs.Output, forecastPackage, restartPath, cancellation));
                 workPackage = forecastPackage;
@@ -273,6 +438,8 @@ public sealed partial class EclipseRunService : IDisposable
                 registry.Report(request.RunId, "PREPARING", $"Prepared forecast DATA {forecastParameters.ForecastDataFile} from restart report {forecastParameters.RestartReport}.");
             }
             var deck = Path.GetRelativePath(dirs.Work, workModel);
+            var compositionalHistory = compositionalState is null && simulation?.ModelType == "COMPOSITIONAL" && request.Parameters.ValueKind == JsonValueKind.Null
+                ? EclipseCompositionalSaveSourceReader.Read(workPackage) : null;
             var before = Snapshot(dirs.Work);
             registry.Transition(request.RunId, "RUNNING_ECLIPSE", $"Running ECLIPSE {solver}.");
             var launch = await launcher.RunAsync(solver, deck, dirs.Work, TimeSpan.FromSeconds(request.TimeoutSeconds), cancellation);
@@ -283,7 +450,13 @@ public sealed partial class EclipseRunService : IDisposable
             if (cleanup.Error is not null || cleanup.ExitCode != 0) { cleanupFailed = true; error = new("CLEANUP", "ECLIPSE_CLEANUP_FAILED", "ECLIPSE cleanup could not be confirmed.", false); return; }
             if (launch.StopReason == AdapterStopReason.Cancelled) { state = "CANCELLED"; error = launch.Error; message = "Run cancellation completed after ECLIPSE cleanup."; return; }
             if (launch.StopReason == AdapterStopReason.TimedOut) { state = "TIMED_OUT"; error = launch.Error; message = "Run timed out after ECLIPSE cleanup."; return; }
-            var fresh = Fresh(dirs.Work, before).ToArray();
+            var collectCompositionalSave = compositionalHistory is not null;
+            var saveNames = compositionalHistory is null ? null : new HashSet<string>(StringComparer.OrdinalIgnoreCase) {
+                Path.GetFileNameWithoutExtension(compositionalHistory.Production.SourceFile) + ".V0000",
+                Path.GetFileNameWithoutExtension(compositionalHistory.Production.SourceFile) + ".V" + compositionalHistory.ReportNumber.ToString("D4", System.Globalization.CultureInfo.InvariantCulture),
+                Path.GetFileNameWithoutExtension(compositionalHistory.Production.SourceFile) + ".X" + compositionalHistory.ReportNumber.ToString("D4", System.Globalization.CultureInfo.InvariantCulture)
+            };
+            var fresh = Fresh(dirs.Work, before, collectCompositionalSave, saveNames).ToArray();
             var eclEnd = fresh.FirstOrDefault(path => path.EndsWith(".ECLEND", StringComparison.OrdinalIgnoreCase));
             var diagnostics = launch.Diagnostics + "\n" + string.Join("\n", fresh.Where(path => path.EndsWith(".MSG", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".ECLEND", StringComparison.OrdinalIgnoreCase)).Select(File.ReadAllText));
             if (EclipseRunRules.HasLicenseDiagnostic(diagnostics)) { error = new("LICENSE", "LICENSE_UNAVAILABLE", "ECLIPSE reported a license diagnostic.", true); return; }
@@ -311,10 +484,15 @@ public sealed partial class EclipseRunService : IDisposable
                 if (smspec is null) throw new EclipseDeckPackageException("ECLIPSE_COMPOSITIONAL_SUMMARY_MISSING", "A complete native binary Summary specification is required for this compositional card.");
                 try
                 {
-                    var inputMetadata = EclipseDataInspector.InspectPackage(workPackage.Files, Path.GetFileName(workModel));
-                    var dimensions = inputMetadata.Dimensions ?? throw new InvalidDataException("Verified model dimensions are required.");
+                    var inputMetadata = compositionalState is null ? EclipseDataInspector.InspectPackage(workPackage.Files, Path.GetFileName(workModel), workPackage.Root) : null;
+                    var dimensions = compositionalState?.Catalog.Dimensions ?? inputMetadata?.Dimensions ?? throw new InvalidDataException("Verified model dimensions are required.");
                     compositionalSummary = EclipseCompositionalSummaryParser.ParseForModel(smspec, unsmry is null ? stepSummaries : [unsmry],
-                        simulation.SummaryProgramIdentifier, inputMetadata.UnitSystem!, dimensions.Nx, dimensions.Ny, dimensions.Nz);
+                        simulation.SummaryProgramIdentifier, compositionalState?.Catalog.UnitSystem ?? inputMetadata!.UnitSystem!, dimensions.Nx, dimensions.Ny, dimensions.Nz);
+                    if (compositionalState is not null && (compositionalSummary.StartDate != compositionalState.Catalog.StartDate
+                        || compositionalSummary.Series.Any(s => s.Points.Count == 0 || s.Points[0].TimeDays <= compositionalState.Catalog.TimeDays
+                            || s.Points.Any(p => p.TimeDays > compositionalState.Catalog.EndTimeDays)
+                            || !partial && s.Points[^1].TimeDays != compositionalState.Catalog.EndTimeDays)))
+                        throw new InvalidDataException("Forecast actual output must preserve the original history origin and cover its qualified future interval.");
                 }
                 catch (InvalidDataException exception) { throw new EclipseDeckPackageException("ECLIPSE_COMPOSITIONAL_SUMMARY_INVALID", exception.Message); }
             }
@@ -322,8 +500,8 @@ public sealed partial class EclipseRunService : IDisposable
             var summarySeries = summaryRead.Series;
             if (verifiedFuture is not null)
             {
-                if (!summaryRead.IsFormatted || formattedSmspec is null || summarySeries is null || !EclipseParsers.IsPublishableSummary(summarySeries)
-                    || EclipseFormattedSummaryParser.ReadStartDate(formattedSmspec) != verifiedFuture.StartDate)
+                if ((!summaryRead.IsFormatted && !summaryRead.IsBinary) || summarySeries is null || !EclipseParsers.IsPublishableSummary(summarySeries)
+                    || ReadSummaryOrigin(summaryRead.IsFormatted, formattedSmspec, smspec) != verifiedFuture.StartDate)
                     throw new EclipseDeckPackageException("ECLIPSE_FORECAST_TIME_ORIGIN_INVALID", "Forecast Summary must preserve the verified history START date.");
                 var origin = DateOnly.ParseExact(verifiedFuture.StartDate, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
                 var times = verifiedFuture.FutureDates.Select(d => (double)(DateOnly.ParseExact(d, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture).DayNumber - origin.DayNumber)).ToArray();
@@ -342,21 +520,40 @@ public sealed partial class EclipseRunService : IDisposable
                 descriptors.Add(await artifacts.CopyEclipseBinaryOutputAsync(dirs.Output, binaryOutput, CancellationToken.None));
             foreach (var formattedGrid in fresh.Where(EclipseRunRules.IsFormattedGridOutput))
                 descriptors.Add(await artifacts.CopyEclipseFormattedGridOutputAsync(dirs.Output, formattedGrid, CancellationToken.None));
-            var restartOutput = fresh.SingleOrDefault(path => Path.GetFileName(path).Equals(caseName + ".FUNRST", StringComparison.OrdinalIgnoreCase));
+            if (collectCompositionalSave && !partial)
+            {
+                try
+                {
+                    var saved = EclipseCompositionalSaveCatalogReader.Read(workPackage, fresh, "2024.1", verifiedSource: compositionalHistory);
+                    var saveArtifacts = new List<ArtifactDescriptor>();
+                    foreach (var file in saved.Files)
+                    {
+                        var path = fresh.Single(p => Path.GetFileName(p) == file.Name);
+                        saveArtifacts.Add(await artifacts.CopyEclipseCompositionalSaveOutputAsync(dirs.Output, path, file, cancellation));
+                    }
+                    saveArtifacts.Add(await artifacts.WriteJsonAsync(dirs.Output, "eclipse-compositional-save-catalog.json", saved, cancellation));
+                    descriptors.AddRange(saveArtifacts);
+                }
+                catch (InvalidDataException)
+                {
+                    registry.Report(request.RunId, "COLLECTING", "E300 SAVE files do not match the verified serial history subset; no selectable compositional checkpoint was published.");
+                }
+            }
+            var restartOutput = fresh.SingleOrDefault(path => Path.GetFileName(path).Equals(caseName + (summaryRead.IsFormatted ? ".FUNRST" : ".UNRST"), StringComparison.OrdinalIgnoreCase));
             if (simulation is null && !partial && request.Parameters.ValueKind == JsonValueKind.Null && restartOutput is not null)
             {
                 try
                 {
-                    var catalog = EclipseFormattedRestartReader.Read(restartOutput);
+                    var catalog = EclipseRestartReader.Read(restartOutput);
                     var described = EclipseForecastSourceReader.Describe(workPackage, catalog);
-                    if (!summaryRead.IsFormatted || formattedSmspec is null || EclipseFormattedSummaryParser.ReadStartDate(formattedSmspec) != catalog.StartDate
+                    if ((!summaryRead.IsFormatted && !summaryRead.IsBinary) || ReadSummaryOrigin(summaryRead.IsFormatted, formattedSmspec, smspec) != catalog.StartDate
                         || summarySeries is null || summarySeries.Any(s => !s.Points.Select(p => p.TimeDays).SequenceEqual(catalog.Reports.Select(r => r.TimeDays))))
                         throw new InvalidDataException("History Summary and restart report clocks are not identical.");
                     descriptors.Add(await artifacts.WriteJsonAsync(dirs.Output, "eclipse-restart-catalog.json", described, cancellation));
                 }
                 catch (Exception exception) when (exception is InvalidDataException or EclipseDeckPackageException or DecoderFallbackException)
                 {
-                    registry.Report(request.RunId, "COLLECTING", "Restart source is outside the verified E100 formatted global-grid scope; no selectable restart catalog was published.");
+                    registry.Report(request.RunId, "COLLECTING", "Restart source is outside the verified E100 unified global-grid scope; no selectable restart catalog was published.");
                 }
             }
             if (summaryRead.IsFormatted && formattedUnsmry is not null)
@@ -370,9 +567,10 @@ public sealed partial class EclipseRunService : IDisposable
                 compositionalEnvelope["modelKind"] = "eclipse_300";
                 compositionalEnvelope["simulation"] = System.Text.Json.Nodes.JsonNode.Parse(simulation.Metadata.GetRawText());
                 result = JsonSerializer.SerializeToElement(compositionalEnvelope);
-                descriptors.Add(simulation.ModelType == "THERMAL"
-                    ? await artifacts.WriteEclipseThermalPackageAsync(dirs.Output, workPackage, cancellation)
-                    : await artifacts.WriteEclipseCompositionalPackageAsync(dirs.Output, workPackage, cancellation));
+                if (compositionalState is null)
+                    descriptors.Add(simulation.ModelType == "THERMAL"
+                        ? await artifacts.WriteEclipseThermalPackageAsync(dirs.Output, workPackage, cancellation)
+                        : await artifacts.WriteEclipseCompositionalPackageAsync(dirs.Output, workPackage, cancellation));
             }
             else result = envelope;
             descriptors.Add(await artifacts.WriteJsonElementAsync(dirs.Output, "normalized-result.json", result.Value));
@@ -412,8 +610,26 @@ public sealed partial class EclipseRunService : IDisposable
         if (request.RunTask != "eclipse") return WorkerApiError.Request("INVALID_RUN_TASK", "runTask must be eclipse.");
         if (request.Study is not null) return WorkerApiError.Request("INVALID_STUDY", "study must be null for ECLIPSE.");
         if (request.Parameters.ValueKind != JsonValueKind.Null &&
+            !EclipseMultiLiveOilPvtParameters.TryParse(request.Parameters, out _) &&
+            !EclipseMultiWetGasPvtParameters.TryParse(request.Parameters, out _) &&
+            !EclipseMultiWaterPvtParameters.TryParse(request.Parameters, out _) &&
+            !EclipseCompositionalReinjectionParameters.TryParse(request.Parameters, out _) &&
+            !EclipseCompositionalGasSalesParameters.TryParse(request.Parameters, out _) &&
+            !EclipseCompositionalInjectionPressureParameters.TryParse(request.Parameters, out _) &&
+            !EclipseCompositionalFluidPropertyParameters.TryParse(request.Parameters, out _) &&
+            !EclipseCompositionalPressureParameters.TryParse(request.Parameters, out _) &&
+            !EclipseCompositionalProductionParameters.TryParse(request.Parameters, out _) &&
+            !EclipseThermalRockParameters.TryParse(request.Parameters, out _) &&
+            !EclipseThermalPlanParameters.TryParse(request.Parameters, out _) &&
+            !EclipseThermalInjectionParameters.TryParse(request.Parameters, out _) &&
+            !EclipseMultiPvtParameters.TryParse(request.Parameters, out _) &&
+            !EclipseMultiSatFamilyIIParameters.TryParse(request.Parameters, out _) &&
+            !EclipseMultiSatRelpermParameters.TryParse(request.Parameters, out _) &&
+            !EclipseCoupledRelpermParameters.TryParse(request.Parameters, out _) &&
             !EclipseRelpermParameters.TryParse(request.Parameters, out _) &&
             !EclipseGasPvtParameters.TryParse(request.Parameters, out _) &&
+            !EclipseWetGasPvtParameters.TryParse(request.Parameters, out _) &&
+            !EclipseLiveOilPvtParameters.TryParse(request.Parameters, out _) &&
             !EclipseOilPvtParameters.TryParse(request.Parameters, out _) &&
             !EclipsePvtwParameters.TryParse(request.Parameters, out _) &&
             !EclipseNewCompletionParameters.TryParse(request.Parameters, out _) &&
@@ -427,6 +643,8 @@ public sealed partial class EclipseRunService : IDisposable
             !EclipseGroupGasInjectionParameters.TryParse(request.Parameters, out _) &&
             !EclipseGroupInjectionParameters.TryParse(request.Parameters, out _) &&
             !EclipseControlPlanParameters.TryParse(request.Parameters, out _) &&
+            !EclipsePackageControlPlanParameters.TryParse(request.Parameters, out _) &&
+            !EclipseWaterInjectionPlanParameters.TryParse(request.Parameters, out _) &&
             !EclipseGroupStructureParameters.TryParse(request.Parameters, out _) &&
             !EclipseAdvancedInjectionParameters.TryParse(request.Parameters, out _) &&
             !EclipseGroupWaterProductionParameters.TryParse(request.Parameters, out _) &&
@@ -439,7 +657,8 @@ public sealed partial class EclipseRunService : IDisposable
             !EclipsePressureControlParameters.TryParse(request.Parameters, out _) &&
             !EclipseScheduleParameters.TryParse(request.Parameters, out _) &&
             !EclipseHistoryForecastParameters.TryParse(request.Parameters, out _) &&
-            !EclipseRestartForecastParameters.TryParse(request.Parameters, out _))
+            !EclipseRestartForecastParameters.TryParse(request.Parameters, out _) &&
+            !EclipseCompositionalForecastParameters.TryParse(request.Parameters, out _))
             return WorkerApiError.Request("INVALID_ECLIPSE_PARAMETERS", "ECLIPSE parameters must be null or a valid controlled Schedule, COMPDAT, or connection-factor scenario.");
         if (request.TimeoutSeconds is <= 0 || request.TimeoutSeconds > options.EclipseMaxRunTimeoutSeconds) return WorkerApiError.Request("INVALID_TIMEOUT", "timeoutSeconds exceeds the ECLIPSE limit.");
         if (request.ExpectedPackageFiles is not null && !EclipsePackageIntegrity.IsValidManifest(request.ExpectedPackageFiles))
@@ -458,7 +677,12 @@ public sealed partial class EclipseRunService : IDisposable
         return path;
     }
     private static Dictionary<string, (long Size, DateTime LastWrite)> Snapshot(string root) => Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories).ToDictionary(path => path, path => (new FileInfo(path).Length, File.GetLastWriteTimeUtc(path)), StringComparer.OrdinalIgnoreCase);
-    private static IEnumerable<string> Fresh(string root, Dictionary<string, (long Size, DateTime LastWrite)> before) => Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories).Where(path => Output().IsMatch(Path.GetFileName(path)) && EclipseRunRules.IsFresh(before.TryGetValue(path, out var prior) ? prior : null, new FileInfo(path).Length, File.GetLastWriteTimeUtc(path)));
+    internal static IEnumerable<string> Fresh(string root, Dictionary<string, (long Size, DateTime LastWrite)> before, bool compositionalSave = false,
+        IReadOnlySet<string>? selectedSaveNames = null)
+        => Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories).Where(path => (Output().IsMatch(Path.GetFileName(path))
+            || compositionalSave && (selectedSaveNames is null || selectedSaveNames.Contains(Path.GetFileName(path)))
+                && Regex.IsMatch(Path.GetFileName(path), @"^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\.(?:V|X)[0-9]{4}$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+            && EclipseRunRules.IsFresh(before.TryGetValue(path, out var prior) ? prior : null, new FileInfo(path).Length, File.GetLastWriteTimeUtc(path)));
     internal static async Task<IReadOnlyList<EclipseSummarySeries>?> ReadRsmAsync(string? path, Func<string, IReadOnlyList<EclipseSummarySeries>>? parser = null)
     {
         if (path is null) return null;
@@ -469,7 +693,11 @@ public sealed partial class EclipseRunService : IDisposable
         IEnumerable<string>? stepSummaries = null, string? formattedSmspec = null, string? formattedUnsmry = null)
         => (await ReadSummaryWithSourceAsync(smspec, unsmry, rsm, stepSummaries, formattedSmspec, formattedUnsmry)).Series;
 
-    private sealed record SummaryRead(IReadOnlyList<EclipseSummarySeries>? Series, bool IsFormatted);
+    private static string ReadSummaryOrigin(bool formatted, string? formattedPath, string? binaryPath) => formatted
+        ? EclipseFormattedSummaryParser.ReadStartDate(formattedPath ?? throw new InvalidDataException("Missing formatted Summary specification."))
+        : EclipseBinarySummaryParser.ReadStartDate(binaryPath ?? throw new InvalidDataException("Missing binary Summary specification."));
+
+    private sealed record SummaryRead(IReadOnlyList<EclipseSummarySeries>? Series, bool IsFormatted, bool IsBinary = false);
     private static async Task<SummaryRead> ReadSummaryWithSourceAsync(string? smspec, string? unsmry, string? rsm,
         IEnumerable<string>? stepSummaries, string? formattedSmspec, string? formattedUnsmry)
     {
@@ -488,7 +716,7 @@ public sealed partial class EclipseRunService : IDisposable
                 try
                 {
                     var binary = await Task.Run(() => EclipseBinarySummaryParser.Parse(smspec, summaryPaths));
-                    if (EclipseParsers.IsPublishableSummary(binary)) return new(binary, false);
+                    if (EclipseParsers.IsPublishableSummary(binary)) return new(binary, false, true);
                 }
                 catch { /* Try another fresh Summary representation before the text RSM fallback. */ }
             }

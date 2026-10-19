@@ -1,0 +1,3923 @@
+{
+  "id": 652,
+  "projectId": 153,
+  "modelId": 189,
+  "modelVersionId": 193,
+  "modelName": "ECLIPSE_PVTG_WET_GAS",
+  "versionNo": 1,
+  "status": "SUCCEEDED",
+  "study": null,
+  "runType": "eclipse",
+  "parameters": {
+    "unit": "cP",
+    "field": "VISCOSITY",
+    "records": [
+      {
+        "rows": [
+          {
+            "values": [
+              "30",
+              "0.000132",
+              "0.04234",
+              "0.01344"
+            ],
+            "lineNumber": 133
+          },
+          {
+            "values": [
+              "0",
+              "0.04231",
+              "0.01389"
+            ],
+            "lineNumber": 134
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "values": [
+              "60",
+              "0.000124",
+              "0.02046",
+              "0.01420"
+            ],
+            "lineNumber": 135
+          },
+          {
+            "values": [
+              "0",
+              "0.02043",
+              "0.01450"
+            ],
+            "lineNumber": 136
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "values": [
+              "90",
+              "0.000126",
+              "0.01328",
+              "0.01526"
+            ],
+            "lineNumber": 137
+          },
+          {
+            "values": [
+              "0",
+              "0.01325",
+              "0.01532"
+            ],
+            "lineNumber": 138
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "values": [
+              "120",
+              "0.000135",
+              "0.00977",
+              "0.01660"
+            ],
+            "lineNumber": 139
+          },
+          {
+            "values": [
+              "0",
+              "0.00973",
+              "0.01634"
+            ],
+            "lineNumber": 140
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "values": [
+              "150",
+              "0.000149",
+              "0.00773",
+              "0.01818"
+            ],
+            "lineNumber": 141
+          },
+          {
+            "values": [
+              "0",
+              "0.00769",
+              "0.01752"
+            ],
+            "lineNumber": 142
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "values": [
+              "180",
+              "0.000163",
+              "0.006426",
+              "0.01994"
+            ],
+            "lineNumber": 143
+          },
+          {
+            "values": [
+              "0",
+              "0.006405",
+              "0.01883"
+            ],
+            "lineNumber": 144
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "values": [
+              "210",
+              "0.000191",
+              "0.005541",
+              "0.02181"
+            ],
+            "lineNumber": 145
+          },
+          {
+            "values": [
+              "0",
+              "0.005553",
+              "0.02021"
+            ],
+            "lineNumber": 146
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "values": [
+              "240",
+              "0.000225",
+              "0.004919",
+              "0.02370"
+            ],
+            "lineNumber": 147
+          },
+          {
+            "values": [
+              "0",
+              "0.004952",
+              "0.02163"
+            ],
+            "lineNumber": 148
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "values": [
+              "270",
+              "0.000272",
+              "0.004471",
+              "0.02559"
+            ],
+            "lineNumber": 149
+          },
+          {
+            "values": [
+              "0",
+              "0.004511",
+              "0.02305"
+            ],
+            "lineNumber": 150
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "values": [
+              "295",
+              "0.000354",
+              "0.004194",
+              "0.02714"
+            ],
+            "lineNumber": 151
+          },
+          {
+            "values": [
+              "0",
+              "0.004225",
+              "0.02423"
+            ],
+            "lineNumber": 152
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "values": [
+              "310",
+              "0.000403",
+              "0.004031",
+              "0.02806"
+            ],
+            "lineNumber": 153
+          },
+          {
+            "values": [
+              "0.000354",
+              "0.004059",
+              "0.02768"
+            ],
+            "lineNumber": 154
+          },
+          {
+            "values": [
+              "0",
+              "0.004081",
+              "0.02492"
+            ],
+            "lineNumber": 155
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "values": [
+              "330",
+              "0.000469",
+              "0.003878",
+              "0.02925"
+            ],
+            "lineNumber": 156
+          },
+          {
+            "values": [
+              "0.000354",
+              "0.003910",
+              "0.02832"
+            ],
+            "lineNumber": 157
+          },
+          {
+            "values": [
+              "0",
+              "0.003913",
+              "0.02583"
+            ],
+            "lineNumber": 158
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "values": [
+              "530",
+              "0.000479",
+              "0.003868",
+              "0.02935"
+            ],
+            "lineNumber": 159
+          },
+          {
+            "values": [
+              "0.000354",
+              "0.003900",
+              "0.02842"
+            ],
+            "lineNumber": 160
+          },
+          {
+            "values": [
+              "0",
+              "0.003903",
+              "0.02593"
+            ],
+            "lineNumber": 161
+          }
+        ]
+      }
+    ],
+    "multiplier": 2,
+    "sourceFile": "ECLIPSE_PVTG_WET_GAS.DATA",
+    "sourceSha256": "a55d6d54cc752f928d793fa13601b444d23ba6a4118ab97f4641b2f757bf1215",
+    "baselineRunId": 651,
+    "schemaVersion": "eclipse-pvtg-parameters/1",
+    "keywordLineNumber": 131
+  },
+  "createdAt": "2026-10-13T20:44:00.313",
+  "queuedAt": "2026-10-13T20:44:00.313",
+  "claimedAt": "2026-10-13T20:44:00.605",
+  "startedAt": "2026-10-13T20:44:01.059",
+  "deadlineAt": "2026-10-13T21:14:01.059",
+  "finishedAt": "2026-10-13T20:44:07.403",
+  "timeoutSeconds": 1800,
+  "elapsedMillis": 6344,
+  "cancellable": false,
+  "error": null,
+  "cleanup": {
+    "message": "ECLIPSE cleanup completed.",
+    "killUsed": false,
+    "inputDeleted": true,
+    "workDirectoryDeleted": true,
+    "processTreeExitConfirmed": true
+  },
+  "resultContract": "VALID_FULL",
+  "result": {
+    "schemaVersion": "eclipse-summary-result/1",
+    "modelKind": "eclipse_100",
+    "runTask": "eclipse",
+    "resultContract": "VALID_FULL",
+    "caseName": "ECLIPSE_PVTG_WET_GAS.DATA",
+    "eclEnd": {
+      "comments": 0,
+      "warnings": 4,
+      "problems": 0,
+      "errors": 0,
+      "bugs": 0
+    },
+    "summary": {
+      "series": [
+        {
+          "keyword": "YEARS",
+          "objectName": null,
+          "unit": "YEARS",
+          "points": [
+            {
+              "timeDays": 0,
+              "value": 0
+            },
+            {
+              "timeDays": 1,
+              "value": 0.00273785088211298
+            },
+            {
+              "timeDays": 4,
+              "value": 0.01095140352845192
+            },
+            {
+              "timeDays": 13,
+              "value": 0.035592060536146164
+            },
+            {
+              "timeDays": 40,
+              "value": 0.1095140278339386
+            },
+            {
+              "timeDays": 99.0455322265625,
+              "value": 0.271171897649765
+            },
+            {
+              "timeDays": 188.44338989257812,
+              "value": 0.5159298777580261
+            },
+            {
+              "timeDays": 342.7833251953125,
+              "value": 0.9384896159172058
+            },
+            {
+              "timeDays": 500,
+              "value": 1.3689254522323608
+            },
+            {
+              "timeDays": 750,
+              "value": 2.0533881187438965
+            },
+            {
+              "timeDays": 1000,
+              "value": 2.7378509044647217
+            },
+            {
+              "timeDays": 1250,
+              "value": 3.4223134517669678
+            },
+            {
+              "timeDays": 1500,
+              "value": 4.106776237487793
+            },
+            {
+              "timeDays": 1750,
+              "value": 4.791238784790039
+            },
+            {
+              "timeDays": 2000,
+              "value": 5.475701808929443
+            }
+          ]
+        },
+        {
+          "keyword": "WBHP",
+          "objectName": "PRODUCER",
+          "unit": "BARSA",
+          "points": [
+            {
+              "timeDays": 0,
+              "value": 308.00811767578125
+            },
+            {
+              "timeDays": 1,
+              "value": 303.96075439453125
+            },
+            {
+              "timeDays": 4,
+              "value": 303.6548767089844
+            },
+            {
+              "timeDays": 13,
+              "value": 303.277099609375
+            },
+            {
+              "timeDays": 40,
+              "value": 302.32049560546875
+            },
+            {
+              "timeDays": 99.0455322265625,
+              "value": 300.1917419433594
+            },
+            {
+              "timeDays": 188.44338989257812,
+              "value": 297.1163635253906
+            },
+            {
+              "timeDays": 342.7833251953125,
+              "value": 292.2569885253906
+            },
+            {
+              "timeDays": 500,
+              "value": 287.7925720214844
+            },
+            {
+              "timeDays": 750,
+              "value": 281.97515869140625
+            },
+            {
+              "timeDays": 1000,
+              "value": 276.1814880371094
+            },
+            {
+              "timeDays": 1250,
+              "value": 270.3359069824219
+            },
+            {
+              "timeDays": 1500,
+              "value": 264.4261474609375
+            },
+            {
+              "timeDays": 1750,
+              "value": 258.48284912109375
+            },
+            {
+              "timeDays": 2000,
+              "value": 252.50262451171875
+            }
+          ]
+        },
+        {
+          "keyword": "WOPR",
+          "objectName": "PRODUCER",
+          "unit": "SM3/DAY",
+          "points": [
+            {
+              "timeDays": 0,
+              "value": 0
+            },
+            {
+              "timeDays": 1,
+              "value": 175
+            },
+            {
+              "timeDays": 4,
+              "value": 175
+            },
+            {
+              "timeDays": 13,
+              "value": 175
+            },
+            {
+              "timeDays": 40,
+              "value": 175
+            },
+            {
+              "timeDays": 99.0455322265625,
+              "value": 175
+            },
+            {
+              "timeDays": 188.44338989257812,
+              "value": 175
+            },
+            {
+              "timeDays": 342.7833251953125,
+              "value": 175
+            },
+            {
+              "timeDays": 500,
+              "value": 171.10076904296875
+            },
+            {
+              "timeDays": 750,
+              "value": 161.61959838867188
+            },
+            {
+              "timeDays": 1000,
+              "value": 152.2210235595703
+            },
+            {
+              "timeDays": 1250,
+              "value": 142.9143524169922
+            },
+            {
+              "timeDays": 1500,
+              "value": 134.85592651367188
+            },
+            {
+              "timeDays": 1750,
+              "value": 130.11544799804688
+            },
+            {
+              "timeDays": 2000,
+              "value": 125.40755462646484
+            }
+          ]
+        },
+        {
+          "keyword": "WWPR",
+          "objectName": "PRODUCER",
+          "unit": "SM3/DAY",
+          "points": [
+            {
+              "timeDays": 0,
+              "value": 0
+            },
+            {
+              "timeDays": 1,
+              "value": 0.004164904356002808
+            },
+            {
+              "timeDays": 4,
+              "value": 0.006263400427997112
+            },
+            {
+              "timeDays": 13,
+              "value": 0.007779784966260195
+            },
+            {
+              "timeDays": 40,
+              "value": 0.00956573337316513
+            },
+            {
+              "timeDays": 99.0455322265625,
+              "value": 0.01138060912489891
+            },
+            {
+              "timeDays": 188.44338989257812,
+              "value": 0.011840615421533585
+            },
+            {
+              "timeDays": 342.7833251953125,
+              "value": 0.011203935369849205
+            },
+            {
+              "timeDays": 500,
+              "value": 0.010205586440861225
+            },
+            {
+              "timeDays": 750,
+              "value": 0.008425246924161911
+            },
+            {
+              "timeDays": 1000,
+              "value": 0.00814138911664486
+            },
+            {
+              "timeDays": 1250,
+              "value": 0.008136317133903503
+            },
+            {
+              "timeDays": 1500,
+              "value": 0.00816318579018116
+            },
+            {
+              "timeDays": 1750,
+              "value": 0.008161773905158043
+            },
+            {
+              "timeDays": 2000,
+              "value": 0.00816862192004919
+            }
+          ]
+        },
+        {
+          "keyword": "WGPR",
+          "objectName": "PRODUCER",
+          "unit": "SM3/DAY",
+          "points": [
+            {
+              "timeDays": 0,
+              "value": 0
+            },
+            {
+              "timeDays": 1,
+              "value": 500000
+            },
+            {
+              "timeDays": 4,
+              "value": 500000
+            },
+            {
+              "timeDays": 13,
+              "value": 500000
+            },
+            {
+              "timeDays": 40,
+              "value": 500000
+            },
+            {
+              "timeDays": 99.0455322265625,
+              "value": 500000
+            },
+            {
+              "timeDays": 188.44338989257812,
+              "value": 500000
+            },
+            {
+              "timeDays": 342.7833251953125,
+              "value": 500000
+            },
+            {
+              "timeDays": 500,
+              "value": 500000
+            },
+            {
+              "timeDays": 750,
+              "value": 500000
+            },
+            {
+              "timeDays": 1000,
+              "value": 500000
+            },
+            {
+              "timeDays": 1250,
+              "value": 500000
+            },
+            {
+              "timeDays": 1500,
+              "value": 500000
+            },
+            {
+              "timeDays": 1750,
+              "value": 500000
+            },
+            {
+              "timeDays": 2000,
+              "value": 500000
+            }
+          ]
+        },
+        {
+          "keyword": "WLPR",
+          "objectName": "PRODUCER",
+          "unit": "SM3/DAY",
+          "points": [
+            {
+              "timeDays": 0,
+              "value": 0
+            },
+            {
+              "timeDays": 1,
+              "value": 175.00416564941406
+            },
+            {
+              "timeDays": 4,
+              "value": 175.00625610351562
+            },
+            {
+              "timeDays": 13,
+              "value": 175.00778198242188
+            },
+            {
+              "timeDays": 40,
+              "value": 175.0095672607422
+            },
+            {
+              "timeDays": 99.0455322265625,
+              "value": 175.01138305664062
+            },
+            {
+              "timeDays": 188.44338989257812,
+              "value": 175.0118408203125
+            },
+            {
+              "timeDays": 342.7833251953125,
+              "value": 175.01119995117188
+            },
+            {
+              "timeDays": 500,
+              "value": 171.11097717285156
+            },
+            {
+              "timeDays": 750,
+              "value": 161.62802124023438
+            },
+            {
+              "timeDays": 1000,
+              "value": 152.2291717529297
+            },
+            {
+              "timeDays": 1250,
+              "value": 142.92250061035156
+            },
+            {
+              "timeDays": 1500,
+              "value": 134.8640899658203
+            },
+            {
+              "timeDays": 1750,
+              "value": 130.1236114501953
+            },
+            {
+              "timeDays": 2000,
+              "value": 125.41571807861328
+            }
+          ]
+        },
+        {
+          "keyword": "WGOR",
+          "objectName": "PRODUCER",
+          "unit": "SM3/SM3",
+          "points": [
+            {
+              "timeDays": 0,
+              "value": 0
+            },
+            {
+              "timeDays": 1,
+              "value": 2857.142822265625
+            },
+            {
+              "timeDays": 4,
+              "value": 2857.142822265625
+            },
+            {
+              "timeDays": 13,
+              "value": 2857.142822265625
+            },
+            {
+              "timeDays": 40,
+              "value": 2857.142822265625
+            },
+            {
+              "timeDays": 99.0455322265625,
+              "value": 2857.142822265625
+            },
+            {
+              "timeDays": 188.44338989257812,
+              "value": 2857.142822265625
+            },
+            {
+              "timeDays": 342.7833251953125,
+              "value": 2857.142822265625
+            },
+            {
+              "timeDays": 500,
+              "value": 2922.25439453125
+            },
+            {
+              "timeDays": 750,
+              "value": 3093.684326171875
+            },
+            {
+              "timeDays": 1000,
+              "value": 3284.697265625
+            },
+            {
+              "timeDays": 1250,
+              "value": 3498.598876953125
+            },
+            {
+              "timeDays": 1500,
+              "value": 3707.66064453125
+            },
+            {
+              "timeDays": 1750,
+              "value": 3842.7412109375
+            },
+            {
+              "timeDays": 2000,
+              "value": 3987.000732421875
+            }
+          ]
+        },
+        {
+          "keyword": "WOPT",
+          "objectName": "PRODUCER",
+          "unit": "SM3",
+          "points": [
+            {
+              "timeDays": 0,
+              "value": 0
+            },
+            {
+              "timeDays": 1,
+              "value": 175
+            },
+            {
+              "timeDays": 4,
+              "value": 700
+            },
+            {
+              "timeDays": 13,
+              "value": 2275
+            },
+            {
+              "timeDays": 40,
+              "value": 7000
+            },
+            {
+              "timeDays": 99.0455322265625,
+              "value": 17332.96875
+            },
+            {
+              "timeDays": 188.44338989257812,
+              "value": 32977.59375
+            },
+            {
+              "timeDays": 342.7833251953125,
+              "value": 59987.08203125
+            },
+            {
+              "timeDays": 500,
+              "value": 86886.9765625
+            },
+            {
+              "timeDays": 750,
+              "value": 127291.875
+            },
+            {
+              "timeDays": 1000,
+              "value": 165347.125
+            },
+            {
+              "timeDays": 1250,
+              "value": 201075.71875
+            },
+            {
+              "timeDays": 1500,
+              "value": 234789.703125
+            },
+            {
+              "timeDays": 1750,
+              "value": 267318.5625
+            },
+            {
+              "timeDays": 2000,
+              "value": 298670.46875
+            }
+          ]
+        },
+        {
+          "keyword": "WWPT",
+          "objectName": "PRODUCER",
+          "unit": "SM3",
+          "points": [
+            {
+              "timeDays": 0,
+              "value": 0
+            },
+            {
+              "timeDays": 1,
+              "value": 0.004164904356002808
+            },
+            {
+              "timeDays": 4,
+              "value": 0.02295510657131672
+            },
+            {
+              "timeDays": 13,
+              "value": 0.09297317266464233
+            },
+            {
+              "timeDays": 40,
+              "value": 0.35124796628952026
+            },
+            {
+              "timeDays": 99.0455322265625,
+              "value": 1.0232220888137817
+            },
+            {
+              "timeDays": 188.44338989257812,
+              "value": 2.0817477703094482
+            },
+            {
+              "timeDays": 342.7833251953125,
+              "value": 3.810962438583374
+            },
+            {
+              "timeDays": 500,
+              "value": 5.415450572967529
+            },
+            {
+              "timeDays": 750,
+              "value": 7.521762371063232
+            },
+            {
+              "timeDays": 1000,
+              "value": 9.557109832763672
+            },
+            {
+              "timeDays": 1250,
+              "value": 11.59118938446045
+            },
+            {
+              "timeDays": 1500,
+              "value": 13.631985664367676
+            },
+            {
+              "timeDays": 1750,
+              "value": 15.672429084777832
+            },
+            {
+              "timeDays": 2000,
+              "value": 17.714584350585938
+            }
+          ]
+        },
+        {
+          "keyword": "WGPT",
+          "objectName": "PRODUCER",
+          "unit": "SM3",
+          "points": [
+            {
+              "timeDays": 0,
+              "value": 0
+            },
+            {
+              "timeDays": 1,
+              "value": 500000
+            },
+            {
+              "timeDays": 4,
+              "value": 2000000
+            },
+            {
+              "timeDays": 13,
+              "value": 6500000
+            },
+            {
+              "timeDays": 40,
+              "value": 20000000
+            },
+            {
+              "timeDays": 99.0455322265625,
+              "value": 49522768
+            },
+            {
+              "timeDays": 188.44338989257812,
+              "value": 94221696
+            },
+            {
+              "timeDays": 342.7833251953125,
+              "value": 171391664
+            },
+            {
+              "timeDays": 500,
+              "value": 250000000
+            },
+            {
+              "timeDays": 750,
+              "value": 375000000
+            },
+            {
+              "timeDays": 1000,
+              "value": 500000000
+            },
+            {
+              "timeDays": 1250,
+              "value": 625000000
+            },
+            {
+              "timeDays": 1500,
+              "value": 750000000
+            },
+            {
+              "timeDays": 1750,
+              "value": 875000000
+            },
+            {
+              "timeDays": 2000,
+              "value": 1000000000
+            }
+          ]
+        }
+      ]
+    },
+    "grid": {
+      "fileName": "ECLIPSE_PVTG_WET_GAS.EGRID",
+      "nx": 9,
+      "ny": 9,
+      "nz": 2,
+      "activeCells": 162
+    },
+    "fieldIndex": {
+      "schemaVersion": "eclipse-binary-field-index/1",
+      "files": [
+        {
+          "name": "ECLIPSE_PVTG_WET_GAS.EGRID",
+          "sizeBytes": 9344,
+          "byteOrder": "BIG",
+          "fields": [
+            {
+              "keyword": "FILEHEAD",
+              "dataType": "INTE",
+              "count": 100,
+              "elementSize": 4,
+              "dataBytes": 400,
+              "segments": [
+                {
+                  "offset": 28,
+                  "length": 400
+                }
+              ]
+            },
+            {
+              "keyword": "GRIDUNIT",
+              "dataType": "CHAR",
+              "count": 2,
+              "elementSize": 8,
+              "dataBytes": 16,
+              "segments": [
+                {
+                  "offset": 460,
+                  "length": 16
+                }
+              ]
+            },
+            {
+              "keyword": "GDORIENT",
+              "dataType": "CHAR",
+              "count": 5,
+              "elementSize": 8,
+              "dataBytes": 40,
+              "segments": [
+                {
+                  "offset": 508,
+                  "length": 40
+                }
+              ]
+            },
+            {
+              "keyword": "GRIDHEAD",
+              "dataType": "INTE",
+              "count": 100,
+              "elementSize": 4,
+              "dataBytes": 400,
+              "segments": [
+                {
+                  "offset": 580,
+                  "length": 400
+                }
+              ]
+            },
+            {
+              "keyword": "COORD",
+              "dataType": "REAL",
+              "count": 600,
+              "elementSize": 4,
+              "dataBytes": 2400,
+              "segments": [
+                {
+                  "offset": 1012,
+                  "length": 2400
+                }
+              ]
+            },
+            {
+              "keyword": "ZCORN",
+              "dataType": "REAL",
+              "count": 1296,
+              "elementSize": 4,
+              "dataBytes": 5184,
+              "segments": [
+                {
+                  "offset": 3444,
+                  "length": 4000
+                },
+                {
+                  "offset": 7452,
+                  "length": 1184
+                }
+              ]
+            },
+            {
+              "keyword": "ACTNUM",
+              "dataType": "INTE",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "segments": [
+                {
+                  "offset": 8668,
+                  "length": 648
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "ECLIPSE_PVTG_WET_GAS.INIT",
+          "sizeBytes": 49424,
+          "byteOrder": "BIG",
+          "fields": [
+            {
+              "keyword": "INTEHEAD",
+              "dataType": "INTE",
+              "count": 411,
+              "elementSize": 4,
+              "dataBytes": 1644,
+              "segments": [
+                {
+                  "offset": 28,
+                  "length": 1644
+                }
+              ]
+            },
+            {
+              "keyword": "LOGIHEAD",
+              "dataType": "LOGI",
+              "count": 121,
+              "elementSize": 4,
+              "dataBytes": 484,
+              "segments": [
+                {
+                  "offset": 1704,
+                  "length": 484
+                }
+              ]
+            },
+            {
+              "keyword": "DOUBHEAD",
+              "dataType": "DOUB",
+              "count": 229,
+              "elementSize": 8,
+              "dataBytes": 1832,
+              "segments": [
+                {
+                  "offset": 2220,
+                  "length": 1832
+                }
+              ]
+            },
+            {
+              "keyword": "PORV",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "segments": [
+                {
+                  "offset": 4084,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "DX",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "segments": [
+                {
+                  "offset": 4764,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "DY",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "segments": [
+                {
+                  "offset": 5444,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "DZ",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "segments": [
+                {
+                  "offset": 6124,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "PERMX",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "segments": [
+                {
+                  "offset": 6804,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "PERMY",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "segments": [
+                {
+                  "offset": 7484,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "PERMZ",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "segments": [
+                {
+                  "offset": 8164,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "MULTX",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "segments": [
+                {
+                  "offset": 8844,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "MULTY",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "segments": [
+                {
+                  "offset": 9524,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "MULTZ",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "segments": [
+                {
+                  "offset": 10204,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "PORO",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "segments": [
+                {
+                  "offset": 10884,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "NTG",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "segments": [
+                {
+                  "offset": 11564,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "TOPS",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "segments": [
+                {
+                  "offset": 12244,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "DEPTH",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "segments": [
+                {
+                  "offset": 12924,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "TRANX",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "segments": [
+                {
+                  "offset": 13604,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "TRANY",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "segments": [
+                {
+                  "offset": 14284,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "TRANZ",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "segments": [
+                {
+                  "offset": 14964,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "MINPVV",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "segments": [
+                {
+                  "offset": 15644,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "MULTPV",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "segments": [
+                {
+                  "offset": 16324,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "TABDIMS",
+              "dataType": "INTE",
+              "count": 100,
+              "elementSize": 4,
+              "dataBytes": 400,
+              "segments": [
+                {
+                  "offset": 17004,
+                  "length": 400
+                }
+              ]
+            },
+            {
+              "keyword": "TAB",
+              "dataType": "DOUB",
+              "count": 3648,
+              "elementSize": 8,
+              "dataBytes": 29184,
+              "segments": [
+                {
+                  "offset": 17436,
+                  "length": 8000
+                },
+                {
+                  "offset": 25444,
+                  "length": 8000
+                },
+                {
+                  "offset": 33452,
+                  "length": 8000
+                },
+                {
+                  "offset": 41460,
+                  "length": 5184
+                }
+              ]
+            },
+            {
+              "keyword": "CON",
+              "dataType": "DOUB",
+              "count": 3,
+              "elementSize": 8,
+              "dataBytes": 24,
+              "segments": [
+                {
+                  "offset": 46676,
+                  "length": 24
+                }
+              ]
+            },
+            {
+              "keyword": "PVTNUM",
+              "dataType": "INTE",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "segments": [
+                {
+                  "offset": 46732,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "SATNUM",
+              "dataType": "INTE",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "segments": [
+                {
+                  "offset": 47412,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "EQLNUM",
+              "dataType": "INTE",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "segments": [
+                {
+                  "offset": 48092,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "FIPNUM",
+              "dataType": "INTE",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "segments": [
+                {
+                  "offset": 48772,
+                  "length": 648
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "ECLIPSE_PVTG_WET_GAS.UNRST",
+          "sizeBytes": 112784,
+          "byteOrder": "BIG",
+          "fields": [
+            {
+              "keyword": "SEQNUM",
+              "dataType": "INTE",
+              "count": 1,
+              "elementSize": 4,
+              "dataBytes": 4,
+              "timeStep": 1,
+              "segments": [
+                {
+                  "offset": 28,
+                  "length": 4
+                }
+              ]
+            },
+            {
+              "keyword": "INTEHEAD",
+              "dataType": "INTE",
+              "count": 411,
+              "elementSize": 4,
+              "dataBytes": 1644,
+              "timeStep": 1,
+              "segments": [
+                {
+                  "offset": 64,
+                  "length": 1644
+                }
+              ]
+            },
+            {
+              "keyword": "LOGIHEAD",
+              "dataType": "LOGI",
+              "count": 121,
+              "elementSize": 4,
+              "dataBytes": 484,
+              "timeStep": 1,
+              "segments": [
+                {
+                  "offset": 1740,
+                  "length": 484
+                }
+              ]
+            },
+            {
+              "keyword": "DOUBHEAD",
+              "dataType": "DOUB",
+              "count": 229,
+              "elementSize": 8,
+              "dataBytes": 1832,
+              "timeStep": 1,
+              "segments": [
+                {
+                  "offset": 2256,
+                  "length": 1832
+                }
+              ]
+            },
+            {
+              "keyword": "IGRP",
+              "dataType": "INTE",
+              "count": 321,
+              "elementSize": 4,
+              "dataBytes": 1284,
+              "timeStep": 1,
+              "segments": [
+                {
+                  "offset": 4120,
+                  "length": 1284
+                }
+              ]
+            },
+            {
+              "keyword": "SGRP",
+              "dataType": "REAL",
+              "count": 336,
+              "elementSize": 4,
+              "dataBytes": 1344,
+              "timeStep": 1,
+              "segments": [
+                {
+                  "offset": 5436,
+                  "length": 1344
+                }
+              ]
+            },
+            {
+              "keyword": "XGRP",
+              "dataType": "DOUB",
+              "count": 543,
+              "elementSize": 8,
+              "dataBytes": 4344,
+              "timeStep": 1,
+              "segments": [
+                {
+                  "offset": 6812,
+                  "length": 4344
+                }
+              ]
+            },
+            {
+              "keyword": "ZGRP",
+              "dataType": "CHAR",
+              "count": 15,
+              "elementSize": 8,
+              "dataBytes": 120,
+              "timeStep": 1,
+              "segments": [
+                {
+                  "offset": 11188,
+                  "length": 120
+                }
+              ]
+            },
+            {
+              "keyword": "IWEL",
+              "dataType": "INTE",
+              "count": 155,
+              "elementSize": 4,
+              "dataBytes": 620,
+              "timeStep": 1,
+              "segments": [
+                {
+                  "offset": 11340,
+                  "length": 620
+                }
+              ]
+            },
+            {
+              "keyword": "SWEL",
+              "dataType": "REAL",
+              "count": 122,
+              "elementSize": 4,
+              "dataBytes": 488,
+              "timeStep": 1,
+              "segments": [
+                {
+                  "offset": 11992,
+                  "length": 488
+                }
+              ]
+            },
+            {
+              "keyword": "XWEL",
+              "dataType": "DOUB",
+              "count": 131,
+              "elementSize": 8,
+              "dataBytes": 1048,
+              "timeStep": 1,
+              "segments": [
+                {
+                  "offset": 12512,
+                  "length": 1048
+                }
+              ]
+            },
+            {
+              "keyword": "ZWEL",
+              "dataType": "CHAR",
+              "count": 3,
+              "elementSize": 8,
+              "dataBytes": 24,
+              "timeStep": 1,
+              "segments": [
+                {
+                  "offset": 13592,
+                  "length": 24
+                }
+              ]
+            },
+            {
+              "keyword": "ZWLS",
+              "dataType": "CHAR",
+              "count": 18,
+              "elementSize": 8,
+              "dataBytes": 144,
+              "timeStep": 1,
+              "segments": [
+                {
+                  "offset": 13648,
+                  "length": 144
+                }
+              ]
+            },
+            {
+              "keyword": "IWLS",
+              "dataType": "INTE",
+              "count": 18,
+              "elementSize": 4,
+              "dataBytes": 72,
+              "timeStep": 1,
+              "segments": [
+                {
+                  "offset": 13824,
+                  "length": 72
+                }
+              ]
+            },
+            {
+              "keyword": "ICON",
+              "dataType": "INTE",
+              "count": 52,
+              "elementSize": 4,
+              "dataBytes": 208,
+              "timeStep": 1,
+              "segments": [
+                {
+                  "offset": 13928,
+                  "length": 208
+                }
+              ]
+            },
+            {
+              "keyword": "SCON",
+              "dataType": "REAL",
+              "count": 84,
+              "elementSize": 4,
+              "dataBytes": 336,
+              "timeStep": 1,
+              "segments": [
+                {
+                  "offset": 14168,
+                  "length": 336
+                }
+              ]
+            },
+            {
+              "keyword": "XCON",
+              "dataType": "DOUB",
+              "count": 116,
+              "elementSize": 8,
+              "dataBytes": 928,
+              "timeStep": 1,
+              "segments": [
+                {
+                  "offset": 14536,
+                  "length": 928
+                }
+              ]
+            },
+            {
+              "keyword": "IDWL",
+              "dataType": "INTE",
+              "count": 4,
+              "elementSize": 4,
+              "dataBytes": 16,
+              "timeStep": 1,
+              "segments": [
+                {
+                  "offset": 15496,
+                  "length": 16
+                }
+              ]
+            },
+            {
+              "keyword": "SDWL",
+              "dataType": "DOUB",
+              "count": 1,
+              "elementSize": 8,
+              "dataBytes": 8,
+              "timeStep": 1,
+              "segments": [
+                {
+                  "offset": 15544,
+                  "length": 8
+                }
+              ]
+            },
+            {
+              "keyword": "ZDWL",
+              "dataType": "CHAR",
+              "count": 3,
+              "elementSize": 8,
+              "dataBytes": 24,
+              "timeStep": 1,
+              "segments": [
+                {
+                  "offset": 15584,
+                  "length": 24
+                }
+              ]
+            },
+            {
+              "keyword": "DLYTIM",
+              "dataType": "DOUB",
+              "count": 30,
+              "elementSize": 8,
+              "dataBytes": 240,
+              "timeStep": 1,
+              "segments": [
+                {
+                  "offset": 15640,
+                  "length": 240
+                }
+              ]
+            },
+            {
+              "keyword": "HIDDEN",
+              "dataType": "CHAR",
+              "count": 58,
+              "elementSize": 8,
+              "dataBytes": 464,
+              "timeStep": 1,
+              "segments": [
+                {
+                  "offset": 15912,
+                  "length": 464
+                }
+              ]
+            },
+            {
+              "keyword": "PRESSURE",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 1,
+              "segments": [
+                {
+                  "offset": 16432,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "SWAT",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 1,
+              "segments": [
+                {
+                  "offset": 17112,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "SGAS",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 1,
+              "segments": [
+                {
+                  "offset": 17792,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "RS",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 1,
+              "segments": [
+                {
+                  "offset": 18472,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "RV",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 1,
+              "segments": [
+                {
+                  "offset": 19152,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "SOMAX",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 1,
+              "segments": [
+                {
+                  "offset": 19832,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "REGDIMS",
+              "dataType": "INTE",
+              "count": 40,
+              "elementSize": 4,
+              "dataBytes": 160,
+              "timeStep": 1,
+              "segments": [
+                {
+                  "offset": 20512,
+                  "length": 160
+                }
+              ]
+            },
+            {
+              "keyword": "FIPFAMNA",
+              "dataType": "CHAR",
+              "count": 1,
+              "elementSize": 8,
+              "dataBytes": 8,
+              "timeStep": 1,
+              "segments": [
+                {
+                  "offset": 20704,
+                  "length": 8
+                }
+              ]
+            },
+            {
+              "keyword": "REGRPT",
+              "dataType": "DOUB",
+              "count": 418,
+              "elementSize": 8,
+              "dataBytes": 3344,
+              "timeStep": 1,
+              "segments": [
+                {
+                  "offset": 20744,
+                  "length": 3344
+                }
+              ]
+            },
+            {
+              "keyword": "FIPOIL",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 1,
+              "segments": [
+                {
+                  "offset": 24120,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "FIPWAT",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 1,
+              "segments": [
+                {
+                  "offset": 24800,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "FIPGAS",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 1,
+              "segments": [
+                {
+                  "offset": 25480,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "SFIPOIL",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 1,
+              "segments": [
+                {
+                  "offset": 26160,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "SFIPWAT",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 1,
+              "segments": [
+                {
+                  "offset": 26840,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "SFIPGAS",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 1,
+              "segments": [
+                {
+                  "offset": 27520,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "SEQNUM",
+              "dataType": "INTE",
+              "count": 1,
+              "elementSize": 4,
+              "dataBytes": 4,
+              "timeStep": 2,
+              "segments": [
+                {
+                  "offset": 28224,
+                  "length": 4
+                }
+              ]
+            },
+            {
+              "keyword": "INTEHEAD",
+              "dataType": "INTE",
+              "count": 411,
+              "elementSize": 4,
+              "dataBytes": 1644,
+              "timeStep": 2,
+              "segments": [
+                {
+                  "offset": 28260,
+                  "length": 1644
+                }
+              ]
+            },
+            {
+              "keyword": "LOGIHEAD",
+              "dataType": "LOGI",
+              "count": 121,
+              "elementSize": 4,
+              "dataBytes": 484,
+              "timeStep": 2,
+              "segments": [
+                {
+                  "offset": 29936,
+                  "length": 484
+                }
+              ]
+            },
+            {
+              "keyword": "DOUBHEAD",
+              "dataType": "DOUB",
+              "count": 229,
+              "elementSize": 8,
+              "dataBytes": 1832,
+              "timeStep": 2,
+              "segments": [
+                {
+                  "offset": 30452,
+                  "length": 1832
+                }
+              ]
+            },
+            {
+              "keyword": "IGRP",
+              "dataType": "INTE",
+              "count": 321,
+              "elementSize": 4,
+              "dataBytes": 1284,
+              "timeStep": 2,
+              "segments": [
+                {
+                  "offset": 32316,
+                  "length": 1284
+                }
+              ]
+            },
+            {
+              "keyword": "SGRP",
+              "dataType": "REAL",
+              "count": 336,
+              "elementSize": 4,
+              "dataBytes": 1344,
+              "timeStep": 2,
+              "segments": [
+                {
+                  "offset": 33632,
+                  "length": 1344
+                }
+              ]
+            },
+            {
+              "keyword": "XGRP",
+              "dataType": "DOUB",
+              "count": 543,
+              "elementSize": 8,
+              "dataBytes": 4344,
+              "timeStep": 2,
+              "segments": [
+                {
+                  "offset": 35008,
+                  "length": 4344
+                }
+              ]
+            },
+            {
+              "keyword": "ZGRP",
+              "dataType": "CHAR",
+              "count": 15,
+              "elementSize": 8,
+              "dataBytes": 120,
+              "timeStep": 2,
+              "segments": [
+                {
+                  "offset": 39384,
+                  "length": 120
+                }
+              ]
+            },
+            {
+              "keyword": "IWEL",
+              "dataType": "INTE",
+              "count": 155,
+              "elementSize": 4,
+              "dataBytes": 620,
+              "timeStep": 2,
+              "segments": [
+                {
+                  "offset": 39536,
+                  "length": 620
+                }
+              ]
+            },
+            {
+              "keyword": "SWEL",
+              "dataType": "REAL",
+              "count": 122,
+              "elementSize": 4,
+              "dataBytes": 488,
+              "timeStep": 2,
+              "segments": [
+                {
+                  "offset": 40188,
+                  "length": 488
+                }
+              ]
+            },
+            {
+              "keyword": "XWEL",
+              "dataType": "DOUB",
+              "count": 131,
+              "elementSize": 8,
+              "dataBytes": 1048,
+              "timeStep": 2,
+              "segments": [
+                {
+                  "offset": 40708,
+                  "length": 1048
+                }
+              ]
+            },
+            {
+              "keyword": "ZWEL",
+              "dataType": "CHAR",
+              "count": 3,
+              "elementSize": 8,
+              "dataBytes": 24,
+              "timeStep": 2,
+              "segments": [
+                {
+                  "offset": 41788,
+                  "length": 24
+                }
+              ]
+            },
+            {
+              "keyword": "ZWLS",
+              "dataType": "CHAR",
+              "count": 18,
+              "elementSize": 8,
+              "dataBytes": 144,
+              "timeStep": 2,
+              "segments": [
+                {
+                  "offset": 41844,
+                  "length": 144
+                }
+              ]
+            },
+            {
+              "keyword": "IWLS",
+              "dataType": "INTE",
+              "count": 18,
+              "elementSize": 4,
+              "dataBytes": 72,
+              "timeStep": 2,
+              "segments": [
+                {
+                  "offset": 42020,
+                  "length": 72
+                }
+              ]
+            },
+            {
+              "keyword": "ICON",
+              "dataType": "INTE",
+              "count": 52,
+              "elementSize": 4,
+              "dataBytes": 208,
+              "timeStep": 2,
+              "segments": [
+                {
+                  "offset": 42124,
+                  "length": 208
+                }
+              ]
+            },
+            {
+              "keyword": "SCON",
+              "dataType": "REAL",
+              "count": 84,
+              "elementSize": 4,
+              "dataBytes": 336,
+              "timeStep": 2,
+              "segments": [
+                {
+                  "offset": 42364,
+                  "length": 336
+                }
+              ]
+            },
+            {
+              "keyword": "XCON",
+              "dataType": "DOUB",
+              "count": 116,
+              "elementSize": 8,
+              "dataBytes": 928,
+              "timeStep": 2,
+              "segments": [
+                {
+                  "offset": 42732,
+                  "length": 928
+                }
+              ]
+            },
+            {
+              "keyword": "IDWL",
+              "dataType": "INTE",
+              "count": 4,
+              "elementSize": 4,
+              "dataBytes": 16,
+              "timeStep": 2,
+              "segments": [
+                {
+                  "offset": 43692,
+                  "length": 16
+                }
+              ]
+            },
+            {
+              "keyword": "SDWL",
+              "dataType": "DOUB",
+              "count": 1,
+              "elementSize": 8,
+              "dataBytes": 8,
+              "timeStep": 2,
+              "segments": [
+                {
+                  "offset": 43740,
+                  "length": 8
+                }
+              ]
+            },
+            {
+              "keyword": "ZDWL",
+              "dataType": "CHAR",
+              "count": 3,
+              "elementSize": 8,
+              "dataBytes": 24,
+              "timeStep": 2,
+              "segments": [
+                {
+                  "offset": 43780,
+                  "length": 24
+                }
+              ]
+            },
+            {
+              "keyword": "DLYTIM",
+              "dataType": "DOUB",
+              "count": 30,
+              "elementSize": 8,
+              "dataBytes": 240,
+              "timeStep": 2,
+              "segments": [
+                {
+                  "offset": 43836,
+                  "length": 240
+                }
+              ]
+            },
+            {
+              "keyword": "HIDDEN",
+              "dataType": "CHAR",
+              "count": 58,
+              "elementSize": 8,
+              "dataBytes": 464,
+              "timeStep": 2,
+              "segments": [
+                {
+                  "offset": 44108,
+                  "length": 464
+                }
+              ]
+            },
+            {
+              "keyword": "PRESSURE",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 2,
+              "segments": [
+                {
+                  "offset": 44628,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "SWAT",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 2,
+              "segments": [
+                {
+                  "offset": 45308,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "SGAS",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 2,
+              "segments": [
+                {
+                  "offset": 45988,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "RS",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 2,
+              "segments": [
+                {
+                  "offset": 46668,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "RV",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 2,
+              "segments": [
+                {
+                  "offset": 47348,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "SOMAX",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 2,
+              "segments": [
+                {
+                  "offset": 48028,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "REGDIMS",
+              "dataType": "INTE",
+              "count": 40,
+              "elementSize": 4,
+              "dataBytes": 160,
+              "timeStep": 2,
+              "segments": [
+                {
+                  "offset": 48708,
+                  "length": 160
+                }
+              ]
+            },
+            {
+              "keyword": "FIPFAMNA",
+              "dataType": "CHAR",
+              "count": 1,
+              "elementSize": 8,
+              "dataBytes": 8,
+              "timeStep": 2,
+              "segments": [
+                {
+                  "offset": 48900,
+                  "length": 8
+                }
+              ]
+            },
+            {
+              "keyword": "REGRPT",
+              "dataType": "DOUB",
+              "count": 418,
+              "elementSize": 8,
+              "dataBytes": 3344,
+              "timeStep": 2,
+              "segments": [
+                {
+                  "offset": 48940,
+                  "length": 3344
+                }
+              ]
+            },
+            {
+              "keyword": "FIPOIL",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 2,
+              "segments": [
+                {
+                  "offset": 52316,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "FIPWAT",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 2,
+              "segments": [
+                {
+                  "offset": 52996,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "FIPGAS",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 2,
+              "segments": [
+                {
+                  "offset": 53676,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "SFIPOIL",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 2,
+              "segments": [
+                {
+                  "offset": 54356,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "SFIPWAT",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 2,
+              "segments": [
+                {
+                  "offset": 55036,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "SFIPGAS",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 2,
+              "segments": [
+                {
+                  "offset": 55716,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "SEQNUM",
+              "dataType": "INTE",
+              "count": 1,
+              "elementSize": 4,
+              "dataBytes": 4,
+              "timeStep": 3,
+              "segments": [
+                {
+                  "offset": 56420,
+                  "length": 4
+                }
+              ]
+            },
+            {
+              "keyword": "INTEHEAD",
+              "dataType": "INTE",
+              "count": 411,
+              "elementSize": 4,
+              "dataBytes": 1644,
+              "timeStep": 3,
+              "segments": [
+                {
+                  "offset": 56456,
+                  "length": 1644
+                }
+              ]
+            },
+            {
+              "keyword": "LOGIHEAD",
+              "dataType": "LOGI",
+              "count": 121,
+              "elementSize": 4,
+              "dataBytes": 484,
+              "timeStep": 3,
+              "segments": [
+                {
+                  "offset": 58132,
+                  "length": 484
+                }
+              ]
+            },
+            {
+              "keyword": "DOUBHEAD",
+              "dataType": "DOUB",
+              "count": 229,
+              "elementSize": 8,
+              "dataBytes": 1832,
+              "timeStep": 3,
+              "segments": [
+                {
+                  "offset": 58648,
+                  "length": 1832
+                }
+              ]
+            },
+            {
+              "keyword": "IGRP",
+              "dataType": "INTE",
+              "count": 321,
+              "elementSize": 4,
+              "dataBytes": 1284,
+              "timeStep": 3,
+              "segments": [
+                {
+                  "offset": 60512,
+                  "length": 1284
+                }
+              ]
+            },
+            {
+              "keyword": "SGRP",
+              "dataType": "REAL",
+              "count": 336,
+              "elementSize": 4,
+              "dataBytes": 1344,
+              "timeStep": 3,
+              "segments": [
+                {
+                  "offset": 61828,
+                  "length": 1344
+                }
+              ]
+            },
+            {
+              "keyword": "XGRP",
+              "dataType": "DOUB",
+              "count": 543,
+              "elementSize": 8,
+              "dataBytes": 4344,
+              "timeStep": 3,
+              "segments": [
+                {
+                  "offset": 63204,
+                  "length": 4344
+                }
+              ]
+            },
+            {
+              "keyword": "ZGRP",
+              "dataType": "CHAR",
+              "count": 15,
+              "elementSize": 8,
+              "dataBytes": 120,
+              "timeStep": 3,
+              "segments": [
+                {
+                  "offset": 67580,
+                  "length": 120
+                }
+              ]
+            },
+            {
+              "keyword": "IWEL",
+              "dataType": "INTE",
+              "count": 155,
+              "elementSize": 4,
+              "dataBytes": 620,
+              "timeStep": 3,
+              "segments": [
+                {
+                  "offset": 67732,
+                  "length": 620
+                }
+              ]
+            },
+            {
+              "keyword": "SWEL",
+              "dataType": "REAL",
+              "count": 122,
+              "elementSize": 4,
+              "dataBytes": 488,
+              "timeStep": 3,
+              "segments": [
+                {
+                  "offset": 68384,
+                  "length": 488
+                }
+              ]
+            },
+            {
+              "keyword": "XWEL",
+              "dataType": "DOUB",
+              "count": 131,
+              "elementSize": 8,
+              "dataBytes": 1048,
+              "timeStep": 3,
+              "segments": [
+                {
+                  "offset": 68904,
+                  "length": 1048
+                }
+              ]
+            },
+            {
+              "keyword": "ZWEL",
+              "dataType": "CHAR",
+              "count": 3,
+              "elementSize": 8,
+              "dataBytes": 24,
+              "timeStep": 3,
+              "segments": [
+                {
+                  "offset": 69984,
+                  "length": 24
+                }
+              ]
+            },
+            {
+              "keyword": "ZWLS",
+              "dataType": "CHAR",
+              "count": 18,
+              "elementSize": 8,
+              "dataBytes": 144,
+              "timeStep": 3,
+              "segments": [
+                {
+                  "offset": 70040,
+                  "length": 144
+                }
+              ]
+            },
+            {
+              "keyword": "IWLS",
+              "dataType": "INTE",
+              "count": 18,
+              "elementSize": 4,
+              "dataBytes": 72,
+              "timeStep": 3,
+              "segments": [
+                {
+                  "offset": 70216,
+                  "length": 72
+                }
+              ]
+            },
+            {
+              "keyword": "ICON",
+              "dataType": "INTE",
+              "count": 52,
+              "elementSize": 4,
+              "dataBytes": 208,
+              "timeStep": 3,
+              "segments": [
+                {
+                  "offset": 70320,
+                  "length": 208
+                }
+              ]
+            },
+            {
+              "keyword": "SCON",
+              "dataType": "REAL",
+              "count": 84,
+              "elementSize": 4,
+              "dataBytes": 336,
+              "timeStep": 3,
+              "segments": [
+                {
+                  "offset": 70560,
+                  "length": 336
+                }
+              ]
+            },
+            {
+              "keyword": "XCON",
+              "dataType": "DOUB",
+              "count": 116,
+              "elementSize": 8,
+              "dataBytes": 928,
+              "timeStep": 3,
+              "segments": [
+                {
+                  "offset": 70928,
+                  "length": 928
+                }
+              ]
+            },
+            {
+              "keyword": "IDWL",
+              "dataType": "INTE",
+              "count": 4,
+              "elementSize": 4,
+              "dataBytes": 16,
+              "timeStep": 3,
+              "segments": [
+                {
+                  "offset": 71888,
+                  "length": 16
+                }
+              ]
+            },
+            {
+              "keyword": "SDWL",
+              "dataType": "DOUB",
+              "count": 1,
+              "elementSize": 8,
+              "dataBytes": 8,
+              "timeStep": 3,
+              "segments": [
+                {
+                  "offset": 71936,
+                  "length": 8
+                }
+              ]
+            },
+            {
+              "keyword": "ZDWL",
+              "dataType": "CHAR",
+              "count": 3,
+              "elementSize": 8,
+              "dataBytes": 24,
+              "timeStep": 3,
+              "segments": [
+                {
+                  "offset": 71976,
+                  "length": 24
+                }
+              ]
+            },
+            {
+              "keyword": "DLYTIM",
+              "dataType": "DOUB",
+              "count": 30,
+              "elementSize": 8,
+              "dataBytes": 240,
+              "timeStep": 3,
+              "segments": [
+                {
+                  "offset": 72032,
+                  "length": 240
+                }
+              ]
+            },
+            {
+              "keyword": "HIDDEN",
+              "dataType": "CHAR",
+              "count": 58,
+              "elementSize": 8,
+              "dataBytes": 464,
+              "timeStep": 3,
+              "segments": [
+                {
+                  "offset": 72304,
+                  "length": 464
+                }
+              ]
+            },
+            {
+              "keyword": "PRESSURE",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 3,
+              "segments": [
+                {
+                  "offset": 72824,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "SWAT",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 3,
+              "segments": [
+                {
+                  "offset": 73504,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "SGAS",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 3,
+              "segments": [
+                {
+                  "offset": 74184,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "RS",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 3,
+              "segments": [
+                {
+                  "offset": 74864,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "RV",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 3,
+              "segments": [
+                {
+                  "offset": 75544,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "SOMAX",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 3,
+              "segments": [
+                {
+                  "offset": 76224,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "REGDIMS",
+              "dataType": "INTE",
+              "count": 40,
+              "elementSize": 4,
+              "dataBytes": 160,
+              "timeStep": 3,
+              "segments": [
+                {
+                  "offset": 76904,
+                  "length": 160
+                }
+              ]
+            },
+            {
+              "keyword": "FIPFAMNA",
+              "dataType": "CHAR",
+              "count": 1,
+              "elementSize": 8,
+              "dataBytes": 8,
+              "timeStep": 3,
+              "segments": [
+                {
+                  "offset": 77096,
+                  "length": 8
+                }
+              ]
+            },
+            {
+              "keyword": "REGRPT",
+              "dataType": "DOUB",
+              "count": 418,
+              "elementSize": 8,
+              "dataBytes": 3344,
+              "timeStep": 3,
+              "segments": [
+                {
+                  "offset": 77136,
+                  "length": 3344
+                }
+              ]
+            },
+            {
+              "keyword": "FIPOIL",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 3,
+              "segments": [
+                {
+                  "offset": 80512,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "FIPWAT",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 3,
+              "segments": [
+                {
+                  "offset": 81192,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "FIPGAS",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 3,
+              "segments": [
+                {
+                  "offset": 81872,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "SFIPOIL",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 3,
+              "segments": [
+                {
+                  "offset": 82552,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "SFIPWAT",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 3,
+              "segments": [
+                {
+                  "offset": 83232,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "SFIPGAS",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 3,
+              "segments": [
+                {
+                  "offset": 83912,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "SEQNUM",
+              "dataType": "INTE",
+              "count": 1,
+              "elementSize": 4,
+              "dataBytes": 4,
+              "timeStep": 4,
+              "segments": [
+                {
+                  "offset": 84616,
+                  "length": 4
+                }
+              ]
+            },
+            {
+              "keyword": "INTEHEAD",
+              "dataType": "INTE",
+              "count": 411,
+              "elementSize": 4,
+              "dataBytes": 1644,
+              "timeStep": 4,
+              "segments": [
+                {
+                  "offset": 84652,
+                  "length": 1644
+                }
+              ]
+            },
+            {
+              "keyword": "LOGIHEAD",
+              "dataType": "LOGI",
+              "count": 121,
+              "elementSize": 4,
+              "dataBytes": 484,
+              "timeStep": 4,
+              "segments": [
+                {
+                  "offset": 86328,
+                  "length": 484
+                }
+              ]
+            },
+            {
+              "keyword": "DOUBHEAD",
+              "dataType": "DOUB",
+              "count": 229,
+              "elementSize": 8,
+              "dataBytes": 1832,
+              "timeStep": 4,
+              "segments": [
+                {
+                  "offset": 86844,
+                  "length": 1832
+                }
+              ]
+            },
+            {
+              "keyword": "IGRP",
+              "dataType": "INTE",
+              "count": 321,
+              "elementSize": 4,
+              "dataBytes": 1284,
+              "timeStep": 4,
+              "segments": [
+                {
+                  "offset": 88708,
+                  "length": 1284
+                }
+              ]
+            },
+            {
+              "keyword": "SGRP",
+              "dataType": "REAL",
+              "count": 336,
+              "elementSize": 4,
+              "dataBytes": 1344,
+              "timeStep": 4,
+              "segments": [
+                {
+                  "offset": 90024,
+                  "length": 1344
+                }
+              ]
+            },
+            {
+              "keyword": "XGRP",
+              "dataType": "DOUB",
+              "count": 543,
+              "elementSize": 8,
+              "dataBytes": 4344,
+              "timeStep": 4,
+              "segments": [
+                {
+                  "offset": 91400,
+                  "length": 4344
+                }
+              ]
+            },
+            {
+              "keyword": "ZGRP",
+              "dataType": "CHAR",
+              "count": 15,
+              "elementSize": 8,
+              "dataBytes": 120,
+              "timeStep": 4,
+              "segments": [
+                {
+                  "offset": 95776,
+                  "length": 120
+                }
+              ]
+            },
+            {
+              "keyword": "IWEL",
+              "dataType": "INTE",
+              "count": 155,
+              "elementSize": 4,
+              "dataBytes": 620,
+              "timeStep": 4,
+              "segments": [
+                {
+                  "offset": 95928,
+                  "length": 620
+                }
+              ]
+            },
+            {
+              "keyword": "SWEL",
+              "dataType": "REAL",
+              "count": 122,
+              "elementSize": 4,
+              "dataBytes": 488,
+              "timeStep": 4,
+              "segments": [
+                {
+                  "offset": 96580,
+                  "length": 488
+                }
+              ]
+            },
+            {
+              "keyword": "XWEL",
+              "dataType": "DOUB",
+              "count": 131,
+              "elementSize": 8,
+              "dataBytes": 1048,
+              "timeStep": 4,
+              "segments": [
+                {
+                  "offset": 97100,
+                  "length": 1048
+                }
+              ]
+            },
+            {
+              "keyword": "ZWEL",
+              "dataType": "CHAR",
+              "count": 3,
+              "elementSize": 8,
+              "dataBytes": 24,
+              "timeStep": 4,
+              "segments": [
+                {
+                  "offset": 98180,
+                  "length": 24
+                }
+              ]
+            },
+            {
+              "keyword": "ZWLS",
+              "dataType": "CHAR",
+              "count": 18,
+              "elementSize": 8,
+              "dataBytes": 144,
+              "timeStep": 4,
+              "segments": [
+                {
+                  "offset": 98236,
+                  "length": 144
+                }
+              ]
+            },
+            {
+              "keyword": "IWLS",
+              "dataType": "INTE",
+              "count": 18,
+              "elementSize": 4,
+              "dataBytes": 72,
+              "timeStep": 4,
+              "segments": [
+                {
+                  "offset": 98412,
+                  "length": 72
+                }
+              ]
+            },
+            {
+              "keyword": "ICON",
+              "dataType": "INTE",
+              "count": 52,
+              "elementSize": 4,
+              "dataBytes": 208,
+              "timeStep": 4,
+              "segments": [
+                {
+                  "offset": 98516,
+                  "length": 208
+                }
+              ]
+            },
+            {
+              "keyword": "SCON",
+              "dataType": "REAL",
+              "count": 84,
+              "elementSize": 4,
+              "dataBytes": 336,
+              "timeStep": 4,
+              "segments": [
+                {
+                  "offset": 98756,
+                  "length": 336
+                }
+              ]
+            },
+            {
+              "keyword": "XCON",
+              "dataType": "DOUB",
+              "count": 116,
+              "elementSize": 8,
+              "dataBytes": 928,
+              "timeStep": 4,
+              "segments": [
+                {
+                  "offset": 99124,
+                  "length": 928
+                }
+              ]
+            },
+            {
+              "keyword": "IDWL",
+              "dataType": "INTE",
+              "count": 4,
+              "elementSize": 4,
+              "dataBytes": 16,
+              "timeStep": 4,
+              "segments": [
+                {
+                  "offset": 100084,
+                  "length": 16
+                }
+              ]
+            },
+            {
+              "keyword": "SDWL",
+              "dataType": "DOUB",
+              "count": 1,
+              "elementSize": 8,
+              "dataBytes": 8,
+              "timeStep": 4,
+              "segments": [
+                {
+                  "offset": 100132,
+                  "length": 8
+                }
+              ]
+            },
+            {
+              "keyword": "ZDWL",
+              "dataType": "CHAR",
+              "count": 3,
+              "elementSize": 8,
+              "dataBytes": 24,
+              "timeStep": 4,
+              "segments": [
+                {
+                  "offset": 100172,
+                  "length": 24
+                }
+              ]
+            },
+            {
+              "keyword": "DLYTIM",
+              "dataType": "DOUB",
+              "count": 30,
+              "elementSize": 8,
+              "dataBytes": 240,
+              "timeStep": 4,
+              "segments": [
+                {
+                  "offset": 100228,
+                  "length": 240
+                }
+              ]
+            },
+            {
+              "keyword": "HIDDEN",
+              "dataType": "CHAR",
+              "count": 58,
+              "elementSize": 8,
+              "dataBytes": 464,
+              "timeStep": 4,
+              "segments": [
+                {
+                  "offset": 100500,
+                  "length": 464
+                }
+              ]
+            },
+            {
+              "keyword": "PRESSURE",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 4,
+              "segments": [
+                {
+                  "offset": 101020,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "SWAT",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 4,
+              "segments": [
+                {
+                  "offset": 101700,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "SGAS",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 4,
+              "segments": [
+                {
+                  "offset": 102380,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "RS",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 4,
+              "segments": [
+                {
+                  "offset": 103060,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "RV",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 4,
+              "segments": [
+                {
+                  "offset": 103740,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "SOMAX",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 4,
+              "segments": [
+                {
+                  "offset": 104420,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "REGDIMS",
+              "dataType": "INTE",
+              "count": 40,
+              "elementSize": 4,
+              "dataBytes": 160,
+              "timeStep": 4,
+              "segments": [
+                {
+                  "offset": 105100,
+                  "length": 160
+                }
+              ]
+            },
+            {
+              "keyword": "FIPFAMNA",
+              "dataType": "CHAR",
+              "count": 1,
+              "elementSize": 8,
+              "dataBytes": 8,
+              "timeStep": 4,
+              "segments": [
+                {
+                  "offset": 105292,
+                  "length": 8
+                }
+              ]
+            },
+            {
+              "keyword": "REGRPT",
+              "dataType": "DOUB",
+              "count": 418,
+              "elementSize": 8,
+              "dataBytes": 3344,
+              "timeStep": 4,
+              "segments": [
+                {
+                  "offset": 105332,
+                  "length": 3344
+                }
+              ]
+            },
+            {
+              "keyword": "FIPOIL",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 4,
+              "segments": [
+                {
+                  "offset": 108708,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "FIPWAT",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 4,
+              "segments": [
+                {
+                  "offset": 109388,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "FIPGAS",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 4,
+              "segments": [
+                {
+                  "offset": 110068,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "SFIPOIL",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 4,
+              "segments": [
+                {
+                  "offset": 110748,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "SFIPWAT",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 4,
+              "segments": [
+                {
+                  "offset": 111428,
+                  "length": 648
+                }
+              ]
+            },
+            {
+              "keyword": "SFIPGAS",
+              "dataType": "REAL",
+              "count": 162,
+              "elementSize": 4,
+              "dataBytes": 648,
+              "timeStep": 4,
+              "segments": [
+                {
+                  "offset": 112108,
+                  "length": 648
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "outputFiles": [
+      {
+        "name": "ECLIPSE_PVTG_WET_GAS.ECLEND",
+        "sizeBytes": 335,
+        "sha256": "32ad76d0be5956ae5fb6e20bff31a72e6df2864856b8286319e32e9d1641c72b"
+      },
+      {
+        "name": "ECLIPSE_PVTG_WET_GAS.EGRID",
+        "sizeBytes": 9344,
+        "sha256": "1f37356627dbf33941682dd383b8ead0bd128623513ea27ab01fe63f9dfe791b"
+      },
+      {
+        "name": "ECLIPSE_PVTG_WET_GAS.INIT",
+        "sizeBytes": 49424,
+        "sha256": "7f7bd509aacc65842700598653f611aa83b8b3d7188ddd22da683616768e27d8"
+      },
+      {
+        "name": "ECLIPSE_PVTG_WET_GAS.MSG",
+        "sizeBytes": 3895,
+        "sha256": "0e2ae4efff5cacf921ecda50de30c73d817454b7aa256cb9dcb23c00f169061c"
+      },
+      {
+        "name": "ECLIPSE_PVTG_WET_GAS.PRT",
+        "sizeBytes": 160634,
+        "sha256": "f580af9759d45e9797e13722f23d4d6baa2779cef1d8c55275d2e2452d6a1ec1"
+      },
+      {
+        "name": "ECLIPSE_PVTG_WET_GAS.SMSPEC",
+        "sizeBytes": 1380,
+        "sha256": "1aee3fd4e70ab6a018028ce975f8913465ba9b9d45abb37481b06bd7987b05f6"
+      },
+      {
+        "name": "ECLIPSE_PVTG_WET_GAS.UNRST",
+        "sizeBytes": 112784,
+        "sha256": "3b90608b39ff58801ddcb4338a3de3eff0e85226e52415afe9a6789d9aeeca4c"
+      },
+      {
+        "name": "ECLIPSE_PVTG_WET_GAS.UNSMRY",
+        "sizeBytes": 1824,
+        "sha256": "ed5a737011cce322111ae2c0331b4d3053465f4568ee9281d2fd52fed8ead5dc"
+      }
+    ],
+    "messages": [
+      {
+        "category": "SOLVER",
+        "severity": "WARNING",
+        "code": "ECLIPSE_WARNING",
+        "message": "THE MAXIMUM PRESSURE ENTERED IN THE PVT TABLES FOR THE OIL PHASE IS 900.700. THIS IS GREATER THAN THE MAXIMUM PRESSURE FOR THE GAS PHASE, 530.000 AND MAY LEAD TO PVT TABLE EXTRAPOLATION",
+        "retryable": false
+      },
+      {
+        "category": "SOLVER",
+        "severity": "WARNING",
+        "code": "ECLIPSE_WARNING",
+        "message": "THE MINIMUM PRESSURE ENTERED IN THE PVT TABLES FOR THE OIL PHASE IS 20.000. THIS IS LESS THAN THE MINIMUM PRESSURE FOR THE GAS PHASE, 30.000 AND MAY LEAD TO PVT TABLE EXTRAPOLATION",
+        "retryable": false
+      },
+      {
+        "category": "SOLVER",
+        "severity": "WARNING",
+        "code": "ECLIPSE_WARNING",
+        "message": "MAXIMUM RS IN EQUILIBRATION REGION 1 IS GREATER THAN THE MAXIMUM VALUE ENTERED IN THE PVTO TABLE NUMBER 1. THIS MAY LEAD TO PVT TABLE EXTRAPOLATION. THIS MESSAGE WILL NOT BE REPEATED",
+        "retryable": false
+      },
+      {
+        "category": "SOLVER",
+        "severity": "WARNING",
+        "code": "ECLIPSE_WARNING",
+        "message": "THE BOTTOM HOLE PRESSURE LIMIT FOR WELL PRODUCER HAS BEEN DEFAULTED. THE DEFAULT VALUE IS 1.0 BARSA",
+        "retryable": false
+      }
+    ]
+  },
+  "events": [
+    {
+      "id": 31391,
+      "sequence": 1,
+      "workerSequence": null,
+      "type": "STATE",
+      "status": "CREATED",
+      "message": "运行已创建",
+      "error": null,
+      "occurredAt": "2026-10-13T20:44:00.313"
+    },
+    {
+      "id": 31392,
+      "sequence": 2,
+      "workerSequence": null,
+      "type": "STATE",
+      "status": "QUEUED",
+      "message": "运行已进入持久队列",
+      "error": null,
+      "occurredAt": "2026-10-13T20:44:00.313"
+    },
+    {
+      "id": 31393,
+      "sequence": 3,
+      "workerSequence": null,
+      "type": "STATE",
+      "status": "CLAIMED",
+      "message": "运行已由调度器认领",
+      "error": null,
+      "occurredAt": "2026-10-13T20:44:00.605"
+    },
+    {
+      "id": 31394,
+      "sequence": 4,
+      "workerSequence": null,
+      "type": "WORKER_ACCEPTED",
+      "status": "CLAIMED",
+      "message": "Worker 已接受运行",
+      "error": null,
+      "occurredAt": "2026-10-13T20:44:01.059"
+    },
+    {
+      "id": 31395,
+      "sequence": 5,
+      "workerSequence": 1,
+      "type": "STATE",
+      "status": "CLAIMED",
+      "message": "Run claimed by Worker generation.",
+      "error": null,
+      "occurredAt": "2026-10-13T12:44:01.057"
+    },
+    {
+      "id": 31396,
+      "sequence": 6,
+      "workerSequence": 2,
+      "type": "STATE",
+      "status": "PREPARING",
+      "message": "Preparing isolated ECLIPSE deck.",
+      "error": null,
+      "occurredAt": "2026-10-13T12:44:01.057"
+    },
+    {
+      "id": 31397,
+      "sequence": 7,
+      "workerSequence": 3,
+      "type": "STATE",
+      "status": "PREPARING",
+      "message": "Applied PVTG VISCOSITY multiplier 2 to 13 branches; pressure, Rv, other property and all remaining bytes retained.",
+      "error": null,
+      "occurredAt": "2026-10-13T12:44:01.076"
+    },
+    {
+      "id": 31398,
+      "sequence": 8,
+      "workerSequence": null,
+      "type": "STATE",
+      "status": "PREPARING",
+      "message": "Worker 正在准备模型",
+      "error": null,
+      "occurredAt": "2026-10-13T20:44:01.101"
+    },
+    {
+      "id": 31399,
+      "sequence": 9,
+      "workerSequence": 4,
+      "type": "STATE",
+      "status": "RUNNING_ECLIPSE",
+      "message": "Running ECLIPSE 100.",
+      "error": null,
+      "occurredAt": "2026-10-13T12:44:01.083"
+    },
+    {
+      "id": 31400,
+      "sequence": 10,
+      "workerSequence": null,
+      "type": "STATE",
+      "status": "RUNNING_ECLIPSE",
+      "message": "Worker 正在执行 ECLIPSE 计算",
+      "error": null,
+      "occurredAt": "2026-10-13T20:44:01.655"
+    },
+    {
+      "id": 31401,
+      "sequence": 11,
+      "workerSequence": 5,
+      "type": "STATE",
+      "status": "COLLECTING",
+      "message": "Collecting fresh ECLIPSE output.",
+      "error": null,
+      "occurredAt": "2026-10-13T12:44:07.11"
+    },
+    {
+      "id": 31402,
+      "sequence": 12,
+      "workerSequence": 6,
+      "type": "STATE",
+      "status": "SUCCEEDED",
+      "message": "ECLIPSE 100 completed successfully.",
+      "error": null,
+      "occurredAt": "2026-10-13T12:44:07.157"
+    },
+    {
+      "id": 31403,
+      "sequence": 13,
+      "workerSequence": null,
+      "type": "STATE",
+      "status": "COLLECTING",
+      "message": "Worker 正在收集结果",
+      "error": null,
+      "occurredAt": "2026-10-13T20:44:07.36"
+    },
+    {
+      "id": 31404,
+      "sequence": 14,
+      "workerSequence": null,
+      "type": "STATE",
+      "status": "SUCCEEDED",
+      "message": "运行完成",
+      "error": null,
+      "occurredAt": "2026-10-13T20:44:07.403"
+    }
+  ],
+  "artifacts": [
+    {
+      "id": 5178,
+      "name": "eclipse-schedule-applied-package.zip",
+      "type": "output",
+      "contentType": "application/zip",
+      "sizeBytes": 2403,
+      "sha256": "ffc734dfc6cf925d426743b02b457761a5b43e1026fb4ba86a2d07e14578e172",
+      "createdAt": "2026-10-13T20:44:07.383",
+      "expiresAt": "2026-11-12T20:44:07.383"
+    },
+    {
+      "id": 5179,
+      "name": "eclipse-output-ECLIPSE_PVTG_WET_GAS.EGRID",
+      "type": "output",
+      "contentType": "application/octet-stream",
+      "sizeBytes": 9344,
+      "sha256": "1f37356627dbf33941682dd383b8ead0bd128623513ea27ab01fe63f9dfe791b",
+      "createdAt": "2026-10-13T20:44:07.385",
+      "expiresAt": "2026-11-12T20:44:07.385"
+    },
+    {
+      "id": 5180,
+      "name": "eclipse-output-ECLIPSE_PVTG_WET_GAS.INIT",
+      "type": "output",
+      "contentType": "application/octet-stream",
+      "sizeBytes": 49424,
+      "sha256": "7f7bd509aacc65842700598653f611aa83b8b3d7188ddd22da683616768e27d8",
+      "createdAt": "2026-10-13T20:44:07.388",
+      "expiresAt": "2026-11-12T20:44:07.388"
+    },
+    {
+      "id": 5181,
+      "name": "eclipse-output-ECLIPSE_PVTG_WET_GAS.SMSPEC",
+      "type": "output",
+      "contentType": "application/octet-stream",
+      "sizeBytes": 1380,
+      "sha256": "1aee3fd4e70ab6a018028ce975f8913465ba9b9d45abb37481b06bd7987b05f6",
+      "createdAt": "2026-10-13T20:44:07.389",
+      "expiresAt": "2026-11-12T20:44:07.389"
+    },
+    {
+      "id": 5182,
+      "name": "eclipse-output-ECLIPSE_PVTG_WET_GAS.UNRST",
+      "type": "output",
+      "contentType": "application/octet-stream",
+      "sizeBytes": 112784,
+      "sha256": "3b90608b39ff58801ddcb4338a3de3eff0e85226e52415afe9a6789d9aeeca4c",
+      "createdAt": "2026-10-13T20:44:07.393",
+      "expiresAt": "2026-11-12T20:44:07.393"
+    },
+    {
+      "id": 5183,
+      "name": "eclipse-output-ECLIPSE_PVTG_WET_GAS.UNSMRY",
+      "type": "output",
+      "contentType": "application/octet-stream",
+      "sizeBytes": 1824,
+      "sha256": "ed5a737011cce322111ae2c0331b4d3053465f4568ee9281d2fd52fed8ead5dc",
+      "createdAt": "2026-10-13T20:44:07.395",
+      "expiresAt": "2026-11-12T20:44:07.395"
+    },
+    {
+      "id": 5184,
+      "name": "normalized-result.json",
+      "type": "normalized-result",
+      "contentType": "application/json",
+      "sizeBytes": 83398,
+      "sha256": "e91e0c19cb396a02c53a2cdabaf9ddf218113f951975fcb03d5218711204806b",
+      "createdAt": "2026-10-13T20:44:07.397",
+      "expiresAt": "2026-11-12T20:44:07.397"
+    },
+    {
+      "id": 5185,
+      "name": "run.log",
+      "type": "log",
+      "contentType": "text/plain",
+      "sizeBytes": 20,
+      "sha256": "49a9a2378ce2aa9174c8c9da7faa3f814612d01699e43a52b84d2fe7b63e06aa",
+      "createdAt": "2026-10-13T20:44:07.398",
+      "expiresAt": "2026-11-12T20:44:07.398"
+    },
+    {
+      "id": 5186,
+      "name": "manifest.json",
+      "type": "manifest",
+      "contentType": "application/json",
+      "sizeBytes": 2087,
+      "sha256": "747fd56956244ef3c423aaf336787e1a0ff8eddc723920b1ad88ace440ca1eb1",
+      "createdAt": "2026-10-13T20:44:07.4",
+      "expiresAt": "2026-11-12T20:44:07.4"
+    }
+  ],
+  "resultExpiresAt": "2026-11-12T20:44:07.403",
+  "resultExpired": false
+}

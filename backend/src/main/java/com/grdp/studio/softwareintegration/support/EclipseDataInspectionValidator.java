@@ -72,6 +72,14 @@ public final class EclipseDataInspectionValidator {
         if ("eclipse-data-inspection/1".equals(schemaVersion)) return validateV1(input, mapper);
         if ("eclipse-data-inspection/2".equals(schemaVersion)) return validateV2(input, mapper);
         if ("eclipse-data-inspection/3".equals(schemaVersion)) return validateV3(input, mapper);
+        if ("eclipse-data-inspection/23".equals(schemaVersion)) return validateV23(input, mapper);
+        if ("eclipse-data-inspection/22".equals(schemaVersion)) return validateV22(input, mapper);
+        if ("eclipse-data-inspection/21".equals(schemaVersion)) return validateV21(input, mapper);
+        if ("eclipse-data-inspection/20".equals(schemaVersion)) return validateV20(input, mapper);
+        if ("eclipse-data-inspection/19".equals(schemaVersion)) return validateV19(input, mapper);
+        if ("eclipse-data-inspection/18".equals(schemaVersion)) return validateV18(input, mapper);
+        if ("eclipse-data-inspection/17".equals(schemaVersion)) return validateV17(input, mapper);
+        if ("eclipse-data-inspection/16".equals(schemaVersion)) return validateV16(input, mapper);
         if ("eclipse-data-inspection/14".equals(schemaVersion)) return validateV14(input, mapper);
         if ("eclipse-data-inspection/15".equals(schemaVersion)) return validateV15(input, mapper);
         if ("eclipse-data-inspection/13".equals(schemaVersion)) return validateV13(input, mapper);
@@ -120,21 +128,95 @@ public final class EclipseDataInspectionValidator {
 
     private static JsonNode validateV14(ObjectNode input, ObjectMapper mapper) {
         var fields = new HashSet<>(ROOT_FIELDS_V3); fields.add("simulation");
+        if (input.has("compositionalProductionContext")) fields.add("compositionalProductionContext");
         if (input.size() != fields.size()) fail();
         input.properties().forEach(f -> { if (!fields.contains(f.getKey())) fail(); });
+        if (input.has("compositionalProductionContext") && !EclipseCompositionalProductionParameters.validContext(input.get("compositionalProductionContext"), input)) fail();
         if (!EclipseSimulationMetadataValidator.valid(input.get("simulation")) || !Set.of("FIELD", "METRIC").contains(input.path("unitSystem").asText()) || input.path("dimensions").isNull()) fail();
         ObjectNode result = (ObjectNode) validateV1Fields(input, mapper, "eclipse-data-inspection/14");
         result.set("wellNames", wellNames(input.get("wellNames"), mapper));
         result.set("scheduleTimeline", scheduleTimeline(input.get("scheduleTimeline"), mapper, true));
         result.set("packageFiles", packageFiles(input.get("packageFiles"), mapper));
         result.set("simulation", input.get("simulation").deepCopy());
+        if (input.has("compositionalProductionContext")) result.set("compositionalProductionContext", input.get("compositionalProductionContext").deepCopy());
         return result;
     }
 
-    private static JsonNode validateV15(ObjectNode input, ObjectMapper mapper) {
-        var fields = new HashSet<>(ROOT_FIELDS_V3); fields.add("simulation");
+    private static JsonNode validateV22(ObjectNode input, ObjectMapper mapper) {
+        if (!EclipseCompositionalFluidPropertyParameters.validEosPropertyContexts(input.get("compositionalEosPropertyContexts"), input)) fail();
+        var compatible = input.deepCopy(); compatible.remove("compositionalEosPropertyContexts"); compatible.put("schemaVersion", "eclipse-data-inspection/21");
+        var result = (ObjectNode) validateV21(compatible, mapper); result.put("schemaVersion", "eclipse-data-inspection/22");
+        result.set("compositionalEosPropertyContexts", input.get("compositionalEosPropertyContexts").deepCopy()); return result;
+    }
+
+    private static JsonNode validateV21(ObjectNode input, ObjectMapper mapper) {
+        if (!EclipseCompositionalFluidPropertyParameters.validAcentricFactorContext(input.get("compositionalAcentricFactorContext"), input)) fail();
+        var compatible = input.deepCopy(); compatible.remove("compositionalAcentricFactorContext"); compatible.put("schemaVersion", "eclipse-data-inspection/20");
+        var result = (ObjectNode) validateV20(compatible, mapper); result.put("schemaVersion", "eclipse-data-inspection/21");
+        result.set("compositionalAcentricFactorContext", input.get("compositionalAcentricFactorContext").deepCopy()); return result;
+    }
+
+    private static JsonNode validateV20(ObjectNode input, ObjectMapper mapper) {
+        if (!EclipseCompositionalFluidPropertyParameters.validCriticalZContext(input.get("compositionalCriticalZContext"), input)) fail();
+        var compatible = input.deepCopy(); compatible.remove("compositionalCriticalZContext"); compatible.put("schemaVersion", "eclipse-data-inspection/19");
+        var result = (ObjectNode) validateV19(compatible, mapper); result.put("schemaVersion", "eclipse-data-inspection/20");
+        result.set("compositionalCriticalZContext", input.get("compositionalCriticalZContext").deepCopy()); return result;
+    }
+
+    private static JsonNode validateV19(ObjectNode input, ObjectMapper mapper) {
+        if (!EclipseCompositionalFluidPropertyParameters.validTemperatureContext(input.get("compositionalTemperatureContext"), input)) fail();
+        var compatible = input.deepCopy(); compatible.remove("compositionalTemperatureContext"); compatible.put("schemaVersion", "eclipse-data-inspection/17");
+        var result = (ObjectNode) validateV17(compatible, mapper); result.put("schemaVersion", "eclipse-data-inspection/19");
+        result.set("compositionalTemperatureContext", input.get("compositionalTemperatureContext").deepCopy()); return result;
+    }
+
+    private static JsonNode validateV18(ObjectNode input, ObjectMapper mapper) {
+        var fields = new HashSet<>(ROOT_FIELDS_V3); fields.addAll(Set.of("simulation", "compositionalRestartContext"));
         if (input.size() != fields.size()) fail();
         input.properties().forEach(f -> { if (!fields.contains(f.getKey())) fail(); });
+        if (!EclipseCompositionalForecastParameters.validPortableContext(input.get("compositionalRestartContext"), input)) fail();
+        var compatible = input.deepCopy(); compatible.remove("compositionalRestartContext"); compatible.put("schemaVersion", "eclipse-data-inspection/14");
+        var result = (ObjectNode)validateV14(compatible, mapper); result.put("schemaVersion", "eclipse-data-inspection/18");
+        result.set("compositionalRestartContext", input.get("compositionalRestartContext").deepCopy()); return result;
+    }
+
+    private static JsonNode validateV17(ObjectNode input, ObjectMapper mapper) {
+        var fields = new HashSet<>(ROOT_FIELDS_V3);
+        fields.addAll(Set.of("simulation", "compositionalProductionContext", "compositionalFluidPropertyContext"));
+        if (input.has("compositionalReinjectionContext")) fields.add("compositionalReinjectionContext");
+        if (input.size() != fields.size()) fail();
+        input.properties().forEach(f -> { if (!fields.contains(f.getKey())) fail(); });
+        if (!EclipseCompositionalFluidPropertyParameters.validContext(input.get("compositionalFluidPropertyContext"), input)) fail();
+        var compatible = input.deepCopy(); compatible.remove("compositionalFluidPropertyContext");
+        compatible.put("schemaVersion", input.has("compositionalReinjectionContext") ? "eclipse-data-inspection/16" : "eclipse-data-inspection/14");
+        var result = (ObjectNode)(input.has("compositionalReinjectionContext") ? validateV16(compatible, mapper) : validateV14(compatible, mapper));
+        result.put("schemaVersion", "eclipse-data-inspection/17"); result.set("compositionalFluidPropertyContext", input.get("compositionalFluidPropertyContext").deepCopy()); return result;
+    }
+
+    private static JsonNode validateV16(ObjectNode input, ObjectMapper mapper) {
+        var fields = new HashSet<>(ROOT_FIELDS_V3);
+        fields.addAll(Set.of("simulation", "compositionalProductionContext", "compositionalReinjectionContext"));
+        if (input.size() != fields.size()) fail();
+        input.properties().forEach(f -> { if (!fields.contains(f.getKey())) fail(); });
+        if (!EclipseCompositionalReinjectionParameters.validContext(input.get("compositionalReinjectionContext"), input)) fail();
+        var compatible = input.deepCopy(); compatible.remove("compositionalReinjectionContext"); compatible.put("schemaVersion", "eclipse-data-inspection/14");
+        var result = (ObjectNode) validateV14(compatible, mapper); result.put("schemaVersion", "eclipse-data-inspection/16");
+        result.set("compositionalReinjectionContext", input.get("compositionalReinjectionContext").deepCopy());
+        return result;
+    }
+
+    private static JsonNode validateV23(ObjectNode input, ObjectMapper mapper) {
+        if (!EclipseThermalRockParameters.validContext(input.get("thermalRockContext"),input)) fail();
+        var compatible=input.deepCopy();compatible.remove("thermalRockContext");compatible.put("schemaVersion","eclipse-data-inspection/15");
+        var result=(ObjectNode)validateV15(compatible,mapper);result.put("schemaVersion","eclipse-data-inspection/23");
+        result.set("thermalRockContext",input.get("thermalRockContext").deepCopy());return result;
+    }
+    private static JsonNode validateV15(ObjectNode input, ObjectMapper mapper) {
+        var fields = new HashSet<>(ROOT_FIELDS_V3); fields.add("simulation");
+        if (input.has("thermalInjectionContext")) fields.add("thermalInjectionContext");
+        if (input.size() != fields.size()) fail();
+        input.properties().forEach(f -> { if (!fields.contains(f.getKey())) fail(); });
+        if (input.has("thermalInjectionContext") && !EclipseThermalInjectionParameters.validContext(input.get("thermalInjectionContext"), input)) fail();
         if (!EclipseThermalMetadataValidator.valid(input.get("simulation")) || !Set.of("FIELD", "METRIC").contains(input.path("unitSystem").asText()) || input.path("dimensions").isNull()) fail();
         var phases = input.path("phases");
         if (!phases.isArray() || phases.size() != 3 || !"OIL".equals(phases.get(0).asText()) || !"WATER".equals(phases.get(1).asText()) || !"GAS".equals(phases.get(2).asText())) fail();
@@ -143,6 +225,7 @@ public final class EclipseDataInspectionValidator {
         result.set("scheduleTimeline", scheduleTimeline(input.get("scheduleTimeline"), mapper, true));
         result.set("packageFiles", packageFiles(input.get("packageFiles"), mapper));
         result.set("simulation", input.get("simulation").deepCopy());
+        if (input.has("thermalInjectionContext")) result.set("thermalInjectionContext", input.get("thermalInjectionContext").deepCopy());
         return result;
     }
 
@@ -157,24 +240,102 @@ public final class EclipseDataInspectionValidator {
     }
 
     private static JsonNode validateV4(ObjectNode input, ObjectMapper mapper) {
+        boolean withWaterInjectionControlPlanContext = input.has("waterInjectionControlPlanContext");
+        boolean withPackageControlPlanContext = input.has("packageProductionControlPlanContext");
+        boolean withPackageProductionTargetContext = input.has("packageProductionTargetContext");
         boolean withNewWellContext = input.has("newWellContext");
         boolean withPvtwContext = input.has("pvtwContext");
+        boolean withWetGasPvtContext = input.has("wetGasPvtContext");
+        boolean withLiveOilPvtContext = input.has("liveOilPvtContext");
         boolean withOilPvtContext = input.has("oilPvtContext");
         boolean withGasPvtContext = input.has("gasPvtContext");
+        boolean withMultiWaterPvtContext = input.has("multiWaterPvtContext");
+        boolean withMultiWetGasPvtContext = input.has("multiWetGasPvtContext");
+        boolean withMultiLiveOilPvtContext = input.has("multiLiveOilPvtContext");
+        boolean withMultiPvtContext = input.has("multiPvtContext");
+        boolean withMultiSatRelpermContext = input.has("multiSatRelpermContext");
+        boolean withCoupledRelpermContext = input.has("coupledRelpermContext");
         boolean withRelpermContext = input.has("relpermContext");
-        if (input.size() != ROOT_FIELDS_V4.size() + (withNewWellContext ? 1 : 0) + (withPvtwContext ? 1 : 0) + (withOilPvtContext ? 1 : 0) + (withGasPvtContext ? 1 : 0) + (withRelpermContext ? 1 : 0)) fail();
+        if (input.size() != ROOT_FIELDS_V4.size() + (withWaterInjectionControlPlanContext ? 1 : 0) + (withPackageControlPlanContext ? 1 : 0) + (withPackageProductionTargetContext ? 1 : 0) + (withNewWellContext ? 1 : 0) + (withPvtwContext ? 1 : 0) + (withWetGasPvtContext ? 1 : 0) + (withLiveOilPvtContext ? 1 : 0) + (withOilPvtContext ? 1 : 0) + (withGasPvtContext ? 1 : 0) + (withRelpermContext ? 1 : 0) + (withCoupledRelpermContext ? 1 : 0) + (withMultiSatRelpermContext ? 1 : 0) + (withMultiPvtContext ? 1 : 0) + (withMultiLiveOilPvtContext ? 1 : 0) + (withMultiWetGasPvtContext ? 1 : 0) + (withMultiWaterPvtContext ? 1 : 0)) fail();
         input.properties().forEach(field -> {
-            if (!ROOT_FIELDS_V4.contains(field.getKey()) && !"newWellContext".equals(field.getKey()) && !"pvtwContext".equals(field.getKey()) && !"oilPvtContext".equals(field.getKey()) && !"gasPvtContext".equals(field.getKey()) && !"relpermContext".equals(field.getKey())) fail();
+            if (!ROOT_FIELDS_V4.contains(field.getKey()) && !"waterInjectionControlPlanContext".equals(field.getKey()) && !"packageProductionControlPlanContext".equals(field.getKey()) && !"packageProductionTargetContext".equals(field.getKey()) && !"newWellContext".equals(field.getKey()) && !"pvtwContext".equals(field.getKey()) && !"wetGasPvtContext".equals(field.getKey()) && !"liveOilPvtContext".equals(field.getKey()) && !"oilPvtContext".equals(field.getKey()) && !"gasPvtContext".equals(field.getKey()) && !"relpermContext".equals(field.getKey()) && !"coupledRelpermContext".equals(field.getKey()) && !"multiSatRelpermContext".equals(field.getKey()) && !"multiPvtContext".equals(field.getKey()) && !"multiLiveOilPvtContext".equals(field.getKey()) && !"multiWetGasPvtContext".equals(field.getKey()) && !"multiWaterPvtContext".equals(field.getKey())) fail();
         });
         ObjectNode result = (ObjectNode) validateV1Fields(input, mapper, "eclipse-data-inspection/4");
         result.set("wellNames", wellNames(input.get("wellNames"), mapper));
         result.set("scheduleTimeline", scheduleTimeline(input.get("scheduleTimeline"), mapper, true));
         result.set("packageFiles", packageFiles(input.get("packageFiles"), mapper));
         result.set("scheduleMetadata", scheduleMetadata(input.get("scheduleMetadata"), mapper));
+        if (withPackageControlPlanContext) {
+            if (!EclipsePackageControlPlanParameters.validContext(input.get("packageProductionControlPlanContext"), result)) fail();
+            result.set("packageProductionControlPlanContext", input.get("packageProductionControlPlanContext").deepCopy());
+        }
+        if (withWaterInjectionControlPlanContext) {
+            if (!EclipseWaterInjectionPlanParameters.validContext(input.get("waterInjectionControlPlanContext"), result)) fail();
+            result.set("waterInjectionControlPlanContext", input.get("waterInjectionControlPlanContext").deepCopy());
+        }
+        if (withPackageProductionTargetContext) {
+            if (!EclipsePackageProductionTargetParameters.validContext(input.get("packageProductionTargetContext"), result)) fail();
+            result.set("packageProductionTargetContext", input.get("packageProductionTargetContext").deepCopy());
+        }
         if (withNewWellContext) result.set("newWellContext", newWellContext(input.get("newWellContext"), result));
         if (withPvtwContext) result.set("pvtwContext", pvtwContext(input.get("pvtwContext"), result));
+        if (withWetGasPvtContext) result.set("wetGasPvtContext", wetGasPvtContext(input.get("wetGasPvtContext"), result));
+        if (withLiveOilPvtContext) result.set("liveOilPvtContext", liveOilPvtContext(input.get("liveOilPvtContext"), result));
         if (withOilPvtContext) result.set("oilPvtContext", oilPvtContext(input.get("oilPvtContext"), result));
         if (withGasPvtContext) result.set("gasPvtContext", gasPvtContext(input.get("gasPvtContext"), result));
+        if(withMultiLiveOilPvtContext){
+            var c=input.get("multiLiveOilPvtContext");if(!EclipseMultiLiveOilPvtParameters.validContext(c,result))fail();
+            int last=0;for(var r:c.path("regions")){if(!validSource(c.path("sourceFile").asText(),r.get("keywordLineNumber"))||!validSource(c.path("sourceFile").asText(),r.path("gasTable").get("keywordLineNumber")))fail();var records=r.path("records");var rows=records.path(records.size()-1).path("rows");last=Math.max(last,rows.path(rows.size()-1).path("lineNumber").asInt());}
+            for(var event:result.path("scheduleTimeline"))if(!event.path("sourceFile").equals(c.path("sourceFile"))||event.path("lineNumber").asInt()<=last)fail();result.set("multiLiveOilPvtContext",c.deepCopy());
+        }
+        if(withMultiWetGasPvtContext){
+            var c=input.get("multiWetGasPvtContext");if(!EclipseMultiWetGasPvtParameters.validContext(c,result))fail();
+            int last=0;for(var r:c.path("regions")){if(!validSource(c.path("sourceFile").asText(),r.get("keywordLineNumber"))||!validSource(c.path("sourceFile").asText(),r.path("oilTable").get("keywordLineNumber")))fail();var records=r.path("oilTable").path("records");var rows=records.path(records.size()-1).path("rows");last=Math.max(last,rows.path(rows.size()-1).path("lineNumber").asInt());}
+            for(var event:result.path("scheduleTimeline"))if(!event.path("sourceFile").equals(c.path("sourceFile"))||event.path("lineNumber").asInt()<=last)fail();result.set("multiWetGasPvtContext",c.deepCopy());
+        }
+        if (withMultiPvtContext) {
+            var c=input.get("multiPvtContext");if(!EclipseMultiPvtParameters.validContext(c,result))fail();
+            int last=0;for(var region:c.path("regions"))for(var t:region.path("tables")){if(!validSource(c.path("sourceFile").asText(),t.get("keywordLineNumber")))fail();last=Math.max(last,t.path("rows").path(t.path("rows").size()-1).path("lineNumber").asInt());}
+            for(var event:result.path("scheduleTimeline"))if(!event.path("sourceFile").equals(c.path("sourceFile"))||event.path("lineNumber").asInt()<=last)fail();
+            result.set("multiPvtContext",c.deepCopy());
+        }
+        if (withMultiSatRelpermContext) result.set("multiSatRelpermContext", multiSatRelpermContext(input.get("multiSatRelpermContext"), result));
+        if (withMultiSatRelpermContext && withMultiPvtContext) {
+            if (!Set.of("eclipse-multi-sat-relperm-context/1","eclipse-multi-sat-relperm-context/2").contains(result.path("multiSatRelpermContext").path("schemaVersion").asText())) fail();
+            var satLines = new java.util.HashSet<Integer>();
+            for (var region : result.path("multiSatRelpermContext").path("regions")) for (var table : region.path("tables")) {
+                satLines.add(table.path("keywordLineNumber").asInt());
+                for (var row : table.path("rows")) satLines.add(row.path("lineNumber").asInt());
+            }
+            for (var region : result.path("multiPvtContext").path("regions")) for (var table : region.path("tables")) {
+                if (satLines.contains(table.path("keywordLineNumber").asInt())) fail();
+                for (var row : table.path("rows")) if (satLines.contains(row.path("lineNumber").asInt())) fail();
+            }
+        }
+        if (withMultiSatRelpermContext && withMultiLiveOilPvtContext) {
+            if(!java.util.Set.of("eclipse-multi-sat-relperm-context/1","eclipse-multi-sat-relperm-context/2").contains(result.path("multiSatRelpermContext").path("schemaVersion").asText()))fail();
+            var satLines=new java.util.HashSet<Integer>();for(var r:result.path("multiSatRelpermContext").path("regions"))for(var t:r.path("tables")){satLines.add(t.path("keywordLineNumber").asInt());for(var row:t.path("rows"))satLines.add(row.path("lineNumber").asInt());}
+            for(var r:result.path("multiLiveOilPvtContext").path("regions")){
+                if(satLines.contains(r.path("keywordLineNumber").asInt())||satLines.contains(r.path("gasTable").path("keywordLineNumber").asInt()))fail();
+                for(var record:r.path("records"))for(var row:record.path("rows"))if(satLines.contains(row.path("lineNumber").asInt()))fail();
+                for(var row:r.path("gasTable").path("rows"))if(satLines.contains(row.path("lineNumber").asInt()))fail();
+            }
+        }
+        if (withMultiSatRelpermContext && withMultiWetGasPvtContext) {
+            if(!java.util.Set.of("eclipse-multi-sat-relperm-context/1","eclipse-multi-sat-relperm-context/2").contains(result.path("multiSatRelpermContext").path("schemaVersion").asText()))fail();
+            var satLines=new java.util.HashSet<Integer>();for(var r:result.path("multiSatRelpermContext").path("regions"))for(var t:r.path("tables")){satLines.add(t.path("keywordLineNumber").asInt());for(var row:t.path("rows"))satLines.add(row.path("lineNumber").asInt());}
+            for(var r:result.path("multiWetGasPvtContext").path("regions")){
+                if(satLines.contains(r.path("keywordLineNumber").asInt())||satLines.contains(r.path("oilTable").path("keywordLineNumber").asInt()))fail();
+                for(var record:r.path("records"))for(var row:record.path("rows"))if(satLines.contains(row.path("lineNumber").asInt()))fail();
+                for(var record:r.path("oilTable").path("records"))for(var row:record.path("rows"))if(satLines.contains(row.path("lineNumber").asInt()))fail();
+            }
+        }
+        if (withMultiWaterPvtContext) {
+            var c=input.get("multiWaterPvtContext");if(!EclipseMultiWaterPvtParameters.validContext(c,result))fail();
+            for(var r:c.path("regions")){if(!validSource(c.path("sourceFile").asText(),r.get("lineNumber")))fail();for(var event:result.path("scheduleTimeline"))if(event.path("lineNumber").asInt()<=r.path("lineNumber").asInt())fail();}
+            result.set("multiWaterPvtContext",c.deepCopy());
+        }
+        if (withCoupledRelpermContext) result.set("coupledRelpermContext", coupledRelpermContext(input.get("coupledRelpermContext"), result));
         if (withRelpermContext) result.set("relpermContext", relpermContext(input.get("relpermContext"), result));
         return result;
     }
@@ -196,6 +357,37 @@ public final class EclipseDataInspectionValidator {
         return c.deepCopy();
     }
 
+    private static JsonNode multiSatRelpermContext(JsonNode c,ObjectNode inspection) {
+        var fields=Set.of("schemaVersion","sourceFile","regionCount","regions");
+        if(c==null||!c.isObject()||c.size()!=fields.size())fail();c.properties().forEach(p->{if(!fields.contains(p.getKey()))fail();});
+        var phases=new HashSet<String>();for(var phase:inspection.path("phases"))phases.add(phase.asText());long cells=1;
+        for(var axis:new String[]{"nx","ny","nz"}){var n=inspection.path("dimensions").path(axis);if(!n.isIntegralNumber()||!n.canConvertToInt()||n.asInt()<1||n.asInt()>2000000)fail();cells*=n.asInt();if(cells>2000000)fail();}
+        if(!c.path("schemaVersion").isString()||!Set.of("eclipse-multi-sat-relperm-context/1","eclipse-multi-sat-relperm-context/2").contains(c.path("schemaVersion").asText())||!c.path("sourceFile").isString()||!c.path("sourceFile").asText().matches("(?i)^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\\.DATA$")
+            ||!phases.equals(Set.of("OIL","GAS","WATER"))||!UNIT_SYSTEMS.contains(inspection.path("unitSystem").asText())||inspection.path("packageFiles").size()!=1
+            ||!c.path("sourceFile").equals(inspection.path("packageFiles").path(0).path("relativePath"))||!c.path("sourceFile").equals(inspection.path("caseName"))
+            ||!c.path("regionCount").isIntegralNumber()||!c.path("regionCount").canConvertToInt()||!EclipseMultiSatRelpermParameters.validRegions(c.path("regions"),c.path("regionCount").asInt(),cells,"eclipse-multi-sat-relperm-context/2".equals(c.path("schemaVersion").asText())))fail();
+        int last=0;for(var region:c.path("regions"))for(var t:region.path("tables")){if(!validSource(c.path("sourceFile").asText(),t.get("keywordLineNumber")))fail();last=Math.max(last,t.path("rows").path(t.path("rows").size()-1).path("lineNumber").asInt());}
+        for(var event:inspection.path("scheduleTimeline"))if(!event.path("sourceFile").equals(c.path("sourceFile"))||event.path("lineNumber").asInt()<=last)fail();
+        return c.deepCopy();
+    }
+
+    private static JsonNode coupledRelpermContext(JsonNode c,ObjectNode inspection) {
+        var fields=Set.of("schemaVersion","sourceFile","tables");
+        if(c==null||!c.isObject()||c.size()!=fields.size())fail();
+        c.properties().forEach(p->{if(!fields.contains(p.getKey()))fail();});
+        var phases=new HashSet<String>();for(var phase:inspection.path("phases"))phases.add(phase.asText());
+        if(!c.path("schemaVersion").isString()||!"eclipse-coupled-relperm-context/1".equals(c.path("schemaVersion").asText())||!c.path("sourceFile").isString()||!c.path("sourceFile").asText().matches("(?i)^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\\.DATA$")
+            ||!phases.equals(Set.of("OIL","GAS","WATER"))||!UNIT_SYSTEMS.contains(inspection.path("unitSystem").asText())||inspection.path("packageFiles").size()!=1
+            ||!c.path("sourceFile").equals(inspection.path("packageFiles").path(0).path("relativePath"))||!c.path("sourceFile").equals(inspection.path("caseName"))||!EclipseCoupledRelpermParameters.validTables(c.path("tables")))fail();
+        int last=0;
+        for(var t:c.path("tables")){
+            if(!validSource(c.path("sourceFile").asText(),t.get("keywordLineNumber"))||t.path("keywordLineNumber").asInt()<=last)fail();
+            last=t.path("rows").path(t.path("rows").size()-1).path("lineNumber").asInt();
+        }
+        for(var event:inspection.path("scheduleTimeline"))if(!event.path("sourceFile").equals(c.path("sourceFile"))||event.path("lineNumber").asInt()<=last)fail();
+        return c.deepCopy();
+    }
+
     private static JsonNode gasPvtContext(JsonNode c,ObjectNode inspection) {
         var fields=Set.of("schemaVersion","sourceFile","keywordLineNumber","rows");
         if(c==null||!c.isObject()||c.size()!=fields.size())fail();
@@ -208,6 +400,40 @@ public final class EclipseDataInspectionValidator {
             ||!c.path("sourceFile").equals(inspection.path("packageFiles").path(0).path("relativePath"))
             ||!c.path("sourceFile").equals(inspection.path("caseName"))||!c.path("sourceFile").asText().matches("(?i)^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\\.DATA$"))fail();
         int last=c.path("rows").path(c.path("rows").size()-1).path("lineNumber").asInt();
+        for(var event:inspection.path("scheduleTimeline"))if(!event.path("sourceFile").equals(c.path("sourceFile"))||event.path("lineNumber").asInt()<=last)fail();
+        return c.deepCopy();
+    }
+
+    private static JsonNode wetGasPvtContext(JsonNode c,ObjectNode inspection) {
+        var fields=Set.of("schemaVersion","sourceFile","keywordLineNumber","records");
+        if(c==null||!c.isObject()||c.size()!=fields.size())fail();
+        c.properties().forEach(p->{if(!fields.contains(p.getKey()))fail();});
+        var phases=new HashSet<String>();for(var phase:inspection.path("phases"))phases.add(phase.asText());
+        if(!c.path("schemaVersion").isString()||!"eclipse-wet-gas-pvt-context/1".equals(c.path("schemaVersion").asText())
+            ||!c.path("sourceFile").isString()||!validSource(c.path("sourceFile").asText(),c.get("keywordLineNumber"))
+            ||!EclipseWetGasPvtParameters.validRecords(c.path("records"),c.path("keywordLineNumber").asInt())||!phases.containsAll(Set.of("OIL","GAS"))
+            ||!UNIT_SYSTEMS.contains(inspection.path("unitSystem").asText())||inspection.path("packageFiles").size()!=1
+            ||!c.path("sourceFile").equals(inspection.path("packageFiles").path(0).path("relativePath"))
+            ||!c.path("sourceFile").equals(inspection.path("caseName"))||!c.path("sourceFile").asText().matches("(?i)^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\\.DATA$"))fail();
+        var rows=c.path("records").path(c.path("records").size()-1).path("rows");
+        int last=rows.path(rows.size()-1).path("lineNumber").asInt();
+        for(var event:inspection.path("scheduleTimeline"))if(!event.path("sourceFile").equals(c.path("sourceFile"))||event.path("lineNumber").asInt()<=last)fail();
+        return c.deepCopy();
+    }
+
+    private static JsonNode liveOilPvtContext(JsonNode c,ObjectNode inspection) {
+        var fields=Set.of("schemaVersion","sourceFile","keywordLineNumber","records");
+        if(c==null||!c.isObject()||c.size()!=fields.size())fail();
+        c.properties().forEach(p->{if(!fields.contains(p.getKey()))fail();});
+        var phases=new HashSet<String>();for(var phase:inspection.path("phases"))phases.add(phase.asText());
+        if(!c.path("schemaVersion").isString()||!"eclipse-live-oil-pvt-context/1".equals(c.path("schemaVersion").asText())
+            ||!c.path("sourceFile").isString()||!validSource(c.path("sourceFile").asText(),c.get("keywordLineNumber"))
+            ||!EclipseLiveOilPvtParameters.validRecords(c.path("records"),c.path("keywordLineNumber").asInt())||!phases.containsAll(Set.of("OIL","GAS"))
+            ||!UNIT_SYSTEMS.contains(inspection.path("unitSystem").asText())||inspection.path("packageFiles").size()!=1
+            ||!c.path("sourceFile").equals(inspection.path("packageFiles").path(0).path("relativePath"))
+            ||!c.path("sourceFile").equals(inspection.path("caseName"))||!c.path("sourceFile").asText().matches("(?i)^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\\.DATA$"))fail();
+        var rows=c.path("records").path(c.path("records").size()-1).path("rows");
+        int last=rows.path(rows.size()-1).path("lineNumber").asInt();
         for(var event:inspection.path("scheduleTimeline"))if(!event.path("sourceFile").equals(c.path("sourceFile"))||event.path("lineNumber").asInt()<=last)fail();
         return c.deepCopy();
     }

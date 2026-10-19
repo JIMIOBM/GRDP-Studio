@@ -4,6 +4,7 @@ import com.grdp.studio.softwareintegration.client.WorkerRunArtifact;
 import com.grdp.studio.softwareintegration.support.SoftwareIntegrationProperties;
 import com.grdp.studio.softwareintegration.support.SoftwareIntegrationEclipseSanitizer;
 import com.grdp.studio.softwareintegration.support.SoftwareIntegrationStorageKeyNormalizer;
+import com.grdp.studio.softwareintegration.support.EclipseCompositionalForecastParameters;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -35,11 +36,12 @@ public class SoftwareIntegrationArtifactPublisher {
             "eclipse-grid-field-applied-package.zip", "application/zip",
             "eclipse-schedule-applied-package.zip", "application/zip",
             "eclipse-restart-catalog.json", "application/json",
+            "eclipse-compositional-save-catalog.json", "application/json",
             "eclipse-forecast-applied-package.zip", "application/zip",
             "eclipse-compositional-input-package.zip", "application/zip",
             "eclipse-thermal-input-package.zip", "application/zip");
     private static final Pattern ECLIPSE_BINARY_OUTPUT = Pattern.compile(
-            "^eclipse-output-[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\\.(?:EGRID|INIT|FEGRID|FINIT|UNRST|UNSMRY|SMSPEC|FUNRST|FUNSMRY|S\\d{4,5})$",
+            "^eclipse-output-[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\\.(?:EGRID|INIT|FEGRID|FINIT|UNRST|UNSMRY|SMSPEC|FUNRST|FUNSMRY|S\\d{4,5}|V\\d{4}|X\\d{4})$",
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
     private final SoftwareIntegrationStorageKeyNormalizer normalizer;
     private final SoftwareIntegrationProperties properties;
@@ -112,6 +114,7 @@ public class SoftwareIntegrationArtifactPublisher {
                         storageKey, actualSize, actualSha, LocalDateTime.now()));
             }
             validateWorkerManifest(runId, requiredPrefix, descriptors, manifestSource);
+            if (eclipseMetadata) validateCompositionalSaveArtifacts(published, staging);
             try {
                 Files.move(staging, target, StandardCopyOption.ATOMIC_MOVE);
             } catch (AtomicMoveNotSupportedException exception) {
@@ -127,6 +130,27 @@ public class SoftwareIntegrationArtifactPublisher {
         } catch (Exception exception) {
             deleteTree(staging);
             throw new ArtifactPublicationException("Artifact publication failed", exception);
+        }
+    }
+
+    private void validateCompositionalSaveArtifacts(List<PublishedArtifact> published, Path staging) throws Exception {
+        var saved = published.stream().filter(a -> a.name().matches("(?i)^eclipse-output-.*\\.(?:V|X)[0-9]{4}$")).toList();
+        var catalog = published.stream().filter(a -> EclipseCompositionalForecastParameters.CATALOG.equals(a.name())).findFirst().orElse(null);
+        if (saved.isEmpty() && catalog == null) return;
+        if (saved.size() != 3 || catalog == null || catalog.sizeBytes() > 64 * 1024
+                || published.stream().noneMatch(a -> "normalized-result.json".equals(a.name())))
+            throw new ArtifactPublicationException("Compositional SAVE artifact set is incomplete");
+        JsonNode binding;
+        JsonNode result;
+        try (var input = Files.newInputStream(staging.resolve(catalog.name()))) { binding = objectMapper.readTree(input); }
+        try (var input = Files.newInputStream(staging.resolve("normalized-result.json"))) { result = objectMapper.readTree(input); }
+        if (!EclipseCompositionalForecastParameters.matchesResult(binding, result))
+            throw new ArtifactPublicationException("Compositional SAVE catalog does not match the successful native result");
+        for (var file : binding.path("files")) {
+            var matches = saved.stream().filter(a -> a.name().equals(file.path("artifactName").asText())
+                && a.sizeBytes() == file.path("sizeBytes").asLong() && a.sha256().equals(file.path("sha256").asText())
+                && "application/octet-stream".equals(a.contentType())).count();
+            if (matches != 1) throw new ArtifactPublicationException("Compositional SAVE artifact identity differs from its catalog");
         }
     }
 

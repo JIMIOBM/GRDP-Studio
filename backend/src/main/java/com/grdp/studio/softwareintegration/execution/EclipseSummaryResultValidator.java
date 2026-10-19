@@ -44,20 +44,26 @@ public class EclipseSummaryResultValidator {
     }
 
     public ValidatedResult validateCompositional(String expectedCaseName, JsonNode result, JsonNode inspection) {
-        require(inspection != null && "eclipse-data-inspection/14".equals(inspection.path("schemaVersion").asText())
+        require(inspection != null && java.util.Set.of("eclipse-data-inspection/14", "eclipse-data-inspection/16", "eclipse-data-inspection/17", "eclipse-data-inspection/18", "eclipse-data-inspection/19", "eclipse-data-inspection/20", "eclipse-data-inspection/21", "eclipse-data-inspection/22").contains(inspection.path("schemaVersion").asText())
                 && EclipseSimulationMetadataValidator.valid(inspection.get("simulation")), "A verified compositional model inspection is required");
+        if ("eclipse-data-inspection/18".equals(inspection.path("schemaVersion").asText()))
+            require(com.grdp.studio.softwareintegration.support.EclipseCompositionalForecastParameters.validPortableContext(
+                inspection.path("compositionalRestartContext"), inspection), "A complete compositional historical-state binding is required");
         return validate(expectedCaseName, result, inspection);
     }
 
+    private static boolean thermalInspection(JsonNode inspection) {
+        return inspection != null && Set.of("eclipse-data-inspection/15", "eclipse-data-inspection/23").contains(inspection.path("schemaVersion").asText())
+            && EclipseThermalMetadataValidator.valid(inspection.get("simulation"));
+    }
     public ValidatedResult validateThermal(String expectedCaseName, JsonNode result, JsonNode inspection) {
-        require(inspection != null && "eclipse-data-inspection/15".equals(inspection.path("schemaVersion").asText())
-                && EclipseThermalMetadataValidator.valid(inspection.get("simulation")), "A verified thermal model inspection is required");
+        require(thermalInspection(inspection), "A verified thermal model inspection is required");
         return validate(expectedCaseName, result, inspection);
     }
 
     private ValidatedResult validate(String expectedCaseName, JsonNode result, JsonNode inspection) {
         boolean compositional = inspection != null;
-        boolean thermal = compositional && "eclipse-data-inspection/15".equals(inspection.path("schemaVersion").asText());
+        boolean thermal = thermalInspection(inspection);
         var required = new HashSet<>(REQUIRED_ROOT_FIELDS); var allowed = new HashSet<>(ALLOWED_ROOT_FIELDS);
         if (compositional) { required.add("simulation"); allowed.add("simulation"); }
         requireObject(result, required, allowed, "result");
@@ -73,6 +79,17 @@ public class EclipseSummaryResultValidator {
         validateEclEnd(result.get("eclEnd"), resultContract);
         if (compositional) validateCompositionalSummary(result.get("summary"), inspection);
         else validateSummary(result.get("summary"));
+        if (compositional && "eclipse-data-inspection/18".equals(inspection.path("schemaVersion").asText())) {
+            var history = inspection.path("compositionalRestartContext").path("historyCatalog");
+            require(result.path("summary").path("startDate").equals(history.path("startDate")), "Forecast must preserve the original historical time origin");
+            for (var series : result.path("summary").path("series")) {
+                var points = series.path("points");
+                require(points.size() > 0 && points.get(0).path("timeDays").asDouble() > history.path("timeDays").asDouble(), "Forecast output must follow the selected historical checkpoint");
+                var last = points.get(points.size() - 1).path("timeDays").asDouble();
+                require(last <= history.path("endTimeDays").asDouble() && (!"VALID_FULL".equals(resultContract) || last == history.path("endTimeDays").asDouble()),
+                    "Forecast must retain the complete qualified future interval");
+            }
+        }
         validateGrid(result.get("grid"));
         validateFieldIndex(result.get("fieldIndex"));
         validateMessages(result.get("messages"));
@@ -152,7 +169,7 @@ public class EclipseSummaryResultValidator {
             requireSafeText(item.get("objectName"), true, "object name");
             requireSafeText(item.get("unit"), true, "unit");
             String keyword = item.path("keyword").asText();
-            if ("eclipse-data-inspection/15".equals(inspection.path("schemaVersion").asText()) && Set.of("BTEMP", "WTEMP").contains(keyword)) {
+            if (thermalInspection(inspection) && Set.of("BTEMP", "WTEMP").contains(keyword)) {
                 require(("FIELD".equals(inspection.path("unitSystem").asText()) ? "DEG F" : "DEG C").equals(item.path("unit").asText()), "Temperature must preserve the verified native temperature unit");
                 if ("BTEMP".equals(keyword)) require(item.path("number").asInt() > 0, "Block temperature requires a real cell identity");
                 if ("WTEMP".equals(keyword) && !":+:+:+:+".equals(item.path("objectName").asText())) {

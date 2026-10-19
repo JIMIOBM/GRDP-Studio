@@ -18,7 +18,7 @@ public sealed class EclipseDeckPackageTests : IDisposable
         var main = Path.Combine(root, "CASE.DATA");
         File.WriteAllText(main, "RUNSPEC\nINCLUDE 'deck/grid.inc' /\n", Encoding.UTF8);
         Directory.CreateDirectory(Path.Combine(root, "deck", "parts"));
-        File.WriteAllText(Path.Combine(root, "deck", "grid.inc"), "GRID\nINCLUDE 'parts/props.inc' /\n", Encoding.UTF8);
+        File.WriteAllText(Path.Combine(root, "deck", "grid.inc"), "GRID\nINCLUDE 'deck/parts/props.inc' /\n", Encoding.UTF8);
         File.WriteAllText(Path.Combine(root, "deck", "parts", "props.inc"), "PROPS\n", Encoding.UTF8);
 
         var package = new EclipseDeckPackageResolver().Resolve(main, root);
@@ -53,6 +53,18 @@ public sealed class EclipseDeckPackageTests : IDisposable
         var error = Assert.Throws<EclipseDeckPackageException>(() => new EclipseDeckPackageResolver().Resolve(main, root));
 
         Assert.Equal("ECLIPSE_INCLUDE_CYCLE", error.Code);
+    }
+
+    [Fact]
+    public void NestedIncludesDoNotFallBackToTheIncludingFilesDirectory()
+    {
+        var main = Path.Combine(root, "CASE.DATA");
+        Directory.CreateDirectory(Path.Combine(root, "deck"));
+        File.WriteAllText(main, "RUNSPEC\nINCLUDE 'deck/grid.inc' /\n", Encoding.UTF8);
+        File.WriteAllText(Path.Combine(root, "deck/grid.inc"), "GRID\nINCLUDE 'props.inc' /\n", Encoding.UTF8);
+        File.WriteAllText(Path.Combine(root, "deck/props.inc"), "PROPS\n", Encoding.UTF8);
+        var error = Assert.Throws<EclipseDeckPackageException>(() => new EclipseDeckPackageResolver().Resolve(main, root));
+        Assert.Equal("ECLIPSE_INCLUDE_MISSING", error.Code);
     }
 
     [Fact]

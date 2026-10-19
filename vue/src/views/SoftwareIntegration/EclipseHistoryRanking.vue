@@ -1,0 +1,19 @@
+<script setup>
+import { computed } from 'vue'
+import { formatGridValue } from './eclipseGridPresentation.js'
+const props = defineProps({ comparison: Object, metricLabel: String })
+const emit = defineEmits(['select-run'])
+const rows = computed(() => props.comparison?.canRank ? props.comparison.rows.filter(row => Number.isFinite(row.metric?.rmse) && row.metric.rmse >= 0 && row.metric.matchedCount > 0 && Number.isInteger(row.rank)) : [])
+const maximum = computed(() => Math.max(0, ...rows.value.map(row => row.metric.rmse)))
+</script>
+<template>
+  <section v-if="rows.length" class="ranking-board" aria-label="历史拟合方案可视化排名">
+    <header><div><span>HISTORY MATCH / SCENARIO RANKING</span><h3>哪些方案更接近观察数据</h3><p>{{ metricLabel }} · 相同观察点 · RMSE越小越接近</p></div><div class="ranking-best"><small>当前指标第一</small><strong>{{ rows.find(row => row.rank === 1)?.name }}</strong></div></header>
+    <button v-for="row in rows" :key="row.runId" class="ranking-row" :aria-label="`${row.name} RMSE ${row.metric.rmse} 查看方案`" @click="emit('select-run', row.runId)"><span class="ranking-number" :class="{ first: row.rank === 1 }">{{ row.rank }}</span><span class="ranking-name">{{ row.name }}<small>#{{ row.runId }} · {{ row.metric.matchedCount }}个可比点</small></span><span class="ranking-track"><i :style="{ width: `${maximum ? row.metric.rmse / maximum * 100 : 0}%` }"/><b v-if="row.metric.rmse === 0" class="zero-mark"/></span><strong>{{ formatGridValue(row.metric.rmse) }}<small>{{ row.metric.unit }}</small></strong></button>
+    <p class="ranking-note">点击方案查看逐点结果。零误差按0显示；并列名次保留。排名仅针对当前指标，不代表其它指标或整个模型已拟合完成。</p>
+  </section>
+</template>
+<style scoped>
+.ranking-board { padding: 22px; background: linear-gradient(120deg,#f1f7fe,#fff); border: 1px solid #dce8f4; border-radius: 12px; margin: 18px 0; }.ranking-board header { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 20px; }.ranking-board header span { font-size: 10px; font-weight: 700; letter-spacing: .12em; color: #4081ba; }.ranking-board h3 { color: #214a6e; margin: 8px 0; font-size: 19px; }.ranking-board p { font-size: 11px; color: #859bb0; }.ranking-best { text-align: right; min-width: 140px; }.ranking-best small { color: #87a1b8; font-size: 10px; }.ranking-best strong { display: block; color: #296eb0; font-size: 15px; margin-top: 8px; }.ranking-row { display: grid; grid-template-columns: 28px minmax(100px,180px) minmax(70px,1fr) 110px; gap: 16px; align-items: center; width: 100%; padding: 13px 8px; background: transparent; border: 0; border-top: 1px solid #e9eff6; text-align: left; cursor: pointer; }.ranking-row:hover { background: #eaf3fe; }.ranking-number { display: grid; place-items: center; width: 26px; height: 26px; background: #eaf0f7; border-radius: 6px; color: #7b93aa; font-size: 12px; }.ranking-number.first { background: #dbeeff; color: #2772b5; }.ranking-name { font-size: 12px; color: #3a5d7c; overflow-wrap: anywhere; }.ranking-row small { display: block; font-size: 10px; color: #94a7b9; margin-top: 4px; font-weight: 400; }.ranking-track { height: 14px; background: #edf2f8; border-radius: 5px; position: relative; }.ranking-track i { display: block; height: 100%; background: linear-gradient(90deg,#91c3ee,#3683c8); border-radius: inherit; }.ranking-row > strong { font-size: 14px; color: #316792; text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }.zero-mark { position: absolute; left: 0; top: 3px; height: 8px; width: 2px; background: #3789c6; }.ranking-note { line-height: 1.7; margin-bottom: 0; }
+@media(max-width:650px) { .ranking-board { padding: 12px; }.ranking-board header { flex-direction: column; }.ranking-best { text-align: left; }.ranking-row { grid-template-columns: 24px minmax(70px,1fr) 75px; gap: 9px; }.ranking-track { grid-column: 2 / 4; grid-row: 2; height: 8px; }.ranking-row > strong { font-size: 12px; } }
+</style>

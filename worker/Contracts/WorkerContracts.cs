@@ -97,11 +97,43 @@ public sealed record EclipseDataInspection(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     EclipseNewWellContext? NewWellContext = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    EclipsePackageProductionTargetContext? PackageProductionTargetContext = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    EclipsePackageProductionControlPlanContext? PackageProductionControlPlanContext = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    EclipseWaterInjectionControlPlanContext? WaterInjectionControlPlanContext = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    EclipseCompositionalProductionContext? CompositionalProductionContext = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    EclipseThermalInjectionContext? ThermalInjectionContext = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     EclipsePvtwContext? PvtwContext = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     EclipseOilPvtContext? OilPvtContext = null,
     [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] EclipseGasPvtContext? GasPvtContext = null,
-    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] EclipseRelpermContext? RelpermContext = null);
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] EclipseRelpermContext? RelpermContext = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] EclipseLiveOilPvtContext? LiveOilPvtContext = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] EclipseWetGasPvtContext? WetGasPvtContext = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] EclipseRelpermContext? CoupledRelpermContext = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] EclipseMultiSatRelpermContext? MultiSatRelpermContext = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] EclipseMultiPvtContext? MultiPvtContext = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] EclipseMultiLiveOilPvtContext? MultiLiveOilPvtContext = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] EclipseMultiWetGasPvtContext? MultiWetGasPvtContext = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] EclipseMultiWaterPvtContext? MultiWaterPvtContext = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] EclipseCompositionalReinjectionContext? CompositionalReinjectionContext = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] EclipseCompositionalFluidPropertyContext? CompositionalFluidPropertyContext = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] EclipseCompositionalRestartContext? CompositionalRestartContext = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] EclipseCompositionalFluidPropertyContext? CompositionalTemperatureContext = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] EclipseCompositionalFluidPropertyContext? CompositionalCriticalZContext = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] EclipseCompositionalFluidPropertyContext? CompositionalAcentricFactorContext = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<EclipseCompositionalFluidPropertyContext>? CompositionalEosPropertyContexts = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] EclipseThermalRockContext? ThermalRockContext = null);
+
+public sealed record EclipseWetGasPvtContext(string SchemaVersion,string SourceFile,int KeywordLineNumber,IReadOnlyList<EclipseWetGasPvtRecord> Records);
+public sealed record EclipseWetGasPvtRecord(IReadOnlyList<EclipseGasPvtRow> Rows);
+
+public sealed record EclipseLiveOilPvtContext(string SchemaVersion,string SourceFile,int KeywordLineNumber,IReadOnlyList<EclipseLiveOilPvtRecord> Records);
+public sealed record EclipseLiveOilPvtRecord(IReadOnlyList<EclipseOilPvtRow> Rows);
 
 public sealed record EclipseOilPvtContext(string SchemaVersion,string SourceFile,int KeywordLineNumber,IReadOnlyList<EclipseOilPvtRow> Rows);
 public sealed record EclipseOilPvtRow(int LineNumber,IReadOnlyList<string> Values);
@@ -131,6 +163,8 @@ public sealed record EclipseGroupStructureControl(string ParentGroup, string Obj
 public sealed record EclipseGroupStructureLeaf(string Group, double Efficiency, IReadOnlyList<EclipseGroupStructureMember> Members);
 public sealed record EclipseGroupStructureMember(string Well, double BhpLimit, double OilRateLimit, double GuideRate);
 public sealed record EclipseProductionControlPlan(string StartDate, int EndTimeDays, IReadOnlyList<EclipseProductionPlanRecord> Records);
+public sealed record EclipsePackageProductionTargetContext(string SchemaVersion, IReadOnlyList<EclipsePackageProductionTarget> Targets);
+public sealed record EclipsePackageProductionTarget(string Well, string SourceFile, string SourceSha256, int LineNumber, double OriginalOilRate);
 public sealed record EclipseProductionPlanRecord(string Well, string SourceFile, int LineNumber, string Date,
     int TimeDays, string Unit, double OriginalOilRate, double BhpLimit);
 
@@ -249,3 +283,38 @@ public sealed record EclipseGasPvtRow(int LineNumber,IReadOnlyList<string> Value
 public sealed record EclipseRelpermContext(string SchemaVersion,string SourceFile,IReadOnlyList<EclipseRelpermTable> Tables);
 public sealed record EclipseRelpermTable(string Keyword,int KeywordLineNumber,IReadOnlyList<EclipseRelpermRow> Rows);
 public sealed record EclipseRelpermRow(int LineNumber,IReadOnlyList<string> Values);
+
+public sealed record EclipseMultiSatRelpermContext(string SchemaVersion,string SourceFile,int RegionCount,IReadOnlyList<EclipseSatRelpermRegion> Regions);
+public sealed record EclipseSatRelpermRegion(int Number,int CellCount,IReadOnlyList<EclipseRelpermTable> Tables);
+
+public sealed record EclipseMultiPvtContext(string SchemaVersion,string SourceFile,int RegionCount,IReadOnlyList<EclipsePvtRegion> Regions);
+public sealed record EclipsePvtRegion(int Number,int CellCount,IReadOnlyList<EclipsePvtTable> Tables);
+public sealed record EclipsePvtTable(string Keyword,int KeywordLineNumber,IReadOnlyList<EclipsePvtRow> Rows);
+public sealed record EclipsePvtRow(int LineNumber,IReadOnlyList<string> Values);
+
+public sealed record EclipseMultiLiveOilPvtContext(string SchemaVersion,string SourceFile,int RegionCount,IReadOnlyList<EclipseLiveOilPvtRegion> Regions);
+public sealed record EclipseLiveOilPvtRegion(int Number,int CellCount,int KeywordLineNumber,IReadOnlyList<EclipseLiveOilPvtRecord> Records,EclipseRegionGasPvtTable GasTable);
+public sealed record EclipseRegionGasPvtTable(int KeywordLineNumber,IReadOnlyList<EclipseGasPvtRow> Rows);
+
+public sealed record EclipseMultiWetGasPvtContext(string SchemaVersion,string SourceFile,int RegionCount,IReadOnlyList<EclipseWetGasPvtRegion> Regions);
+public sealed record EclipseWetGasPvtRegion(int Number,int CellCount,int KeywordLineNumber,IReadOnlyList<EclipseWetGasPvtRecord> Records,EclipseRegionLiveOilPvtTable OilTable);
+public sealed record EclipseRegionLiveOilPvtTable(int KeywordLineNumber,IReadOnlyList<EclipseLiveOilPvtRecord> Records);
+
+public sealed record EclipseMultiWaterPvtContext(string SchemaVersion,string SourceFile,int RegionCount,IReadOnlyList<EclipseWaterPvtRegion> Regions);
+public sealed record EclipseWaterPvtRegion(int Number,int CellCount,int LineNumber,IReadOnlyList<string> RecordValues);
+
+public sealed record EclipsePackageProductionControlPlanContext(string SchemaVersion, string StartDate, int EndTimeDays, IReadOnlyList<EclipsePackageProductionPlanRecord> Records);
+public sealed record EclipsePackageProductionPlanRecord(string Well, string SourceFile, string SourceSha256, int LineNumber, string Date, int TimeDays, string Unit, double OriginalOilRate, double BhpLimit);
+
+public sealed record EclipseCompositionalReinjectionContext(string SchemaVersion, string SourceFile, string SourceSha256, long SourceSizeBytes,
+    int Solver, int ComponentCount, IReadOnlyList<string> ComponentNames, string EquationOfState, IReadOnlyList<EclipseCompositionalReinjectionRecord> Records);
+public sealed record EclipseCompositionalReinjectionRecord(string Group, string Phase, string ControlMode, int LineNumber, double OriginalFraction,
+    string GasSourceKind, string GasSourceGroup, int GasSourceLineNumber, double SalesTarget, int SalesLineNumber, string RateUnit, string PressureUnit,
+    string InjectionWell, double InjectionBhpUpperLimit, int InjectionLineNumber, string ProductionWell, double ProductionGasTarget,
+    double ProductionBhpLowerLimit, double ShutAfterDays, int ShutLineNumber);
+
+public sealed record EclipseCompositionalFluidPropertyContext(string SchemaVersion, string SourceFile, string SourceSha256, long SourceSizeBytes,
+    int Solver, int ComponentCount, IReadOnlyList<string> ComponentNames, string EquationOfState, IReadOnlyList<EclipseCompositionalFluidPropertyRecord> Records);
+public sealed record EclipseCompositionalFluidPropertyRecord(int ComponentIndex, string ComponentName, string Field, int LineNumber, string Unit, double OriginalValue);
+public sealed record EclipseCompositionalRestartContext(string SchemaVersion, string SourceFile, string SourceSha256, long SourceSizeBytes,
+    string HistorySourceFile, double? TargetGasRate, Grdp.SoftwareIntegration.Worker.Execution.EclipseCompositionalSaveCatalog HistoryCatalog);

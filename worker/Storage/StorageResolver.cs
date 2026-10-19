@@ -166,6 +166,16 @@ public sealed class StorageResolver
         return Path.GetRelativePath(root, fullPath).Replace('\\', '/');
     }
 
+    internal string ResolvePublishedCompositionalSaveArtifact(long historyRunId, string artifactName)
+    {
+        if (historyRunId <= 0 || artifactName != "eclipse-compositional-save-catalog.json"
+            && !System.Text.RegularExpressions.Regex.IsMatch(artifactName ?? "",
+                @"^eclipse-output-[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\.(?:V|X)[0-9]{4}$",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant))
+            throw new StorageException("INVALID_COMPOSITIONAL_SAVE_ARTIFACT", "Historical SAVE artifact identity is invalid.");
+        return ResolveExistingFile("artifacts/" + historyRunId.ToString(System.Globalization.CultureInfo.InvariantCulture) + "/" + artifactName);
+    }
+
     public async Task<string> CopyPublishedRestartArtifactToWorkAsync(
         long historyRunId, string artifactName, string expectedSha256, string workRoot, CancellationToken cancellationToken)
     {
@@ -275,8 +285,8 @@ public sealed class StorageResolver
 
     private static bool IsRestartArtifactName(string? value)
     {
-        if (value is null || value.Length is < 20 or > 160 || !value.StartsWith("eclipse-output-", StringComparison.OrdinalIgnoreCase) || !value.EndsWith(".FUNRST", StringComparison.OrdinalIgnoreCase)) return false;
-        return value["eclipse-output-".Length..^7].Length > 0 && value["eclipse-output-".Length..^7].All(character => char.IsLetterOrDigit(character) || character is '.' or '_' or '-' or ' ');
+        if (value is null || value.Length is < 20 or > 160 || !value.StartsWith("eclipse-output-", StringComparison.OrdinalIgnoreCase) || !(value.EndsWith(".FUNRST", StringComparison.OrdinalIgnoreCase) || value.EndsWith(".UNRST", StringComparison.OrdinalIgnoreCase))) return false;
+        return value["eclipse-output-".Length..^Path.GetExtension(value).Length].Length > 0 && value["eclipse-output-".Length..^Path.GetExtension(value).Length].All(character => char.IsLetterOrDigit(character) || character is '.' or '_' or '-' or ' ');
     }
 
     private string CopyModelPackage(string sourceModel, string targetRoot)

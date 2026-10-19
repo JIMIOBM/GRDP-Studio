@@ -1,0 +1,297 @@
+{
+  "schemaVersion": "eclipse-data-inspection/4",
+  "caseName": "ECLIPSE_PVTO_LIVE_OIL.DATA",
+  "sections": [
+    "RUNSPEC",
+    "GRID",
+    "PROPS",
+    "SOLUTION",
+    "SUMMARY",
+    "SCHEDULE"
+  ],
+  "unitSystem": "FIELD",
+  "phases": [
+    "OIL",
+    "WATER",
+    "GAS"
+  ],
+  "dimensions": {
+    "nx": 10,
+    "ny": 10,
+    "nz": 3
+  },
+  "wellNames": [
+    "PRODUCER",
+    "INJECTOR"
+  ],
+  "scheduleTimeline": [
+    {
+      "kind": "TSTEP",
+      "steps": [
+        "365",
+        "365",
+        "182.5",
+        "87.5",
+        "100.0",
+        "100.0"
+      ],
+      "sourceFile": "ECLIPSE_PVTO_LIVE_OIL.DATA",
+      "lineNumber": 365
+    }
+  ],
+  "packageFiles": [
+    {
+      "relativePath": "ECLIPSE_PVTO_LIVE_OIL.DATA",
+      "sizeBytes": 9087,
+      "sha256": "2a0b8201182c6898303be1608d6979fbaf0a3e91f3bcb0e91a8218d2d2977b2d"
+    }
+  ],
+  "scheduleMetadata": {
+    "wells": [
+      {
+        "name": "PRODUCER",
+        "group": "G",
+        "sourceFile": "ECLIPSE_PVTO_LIVE_OIL.DATA",
+        "lineNumber": 336
+      },
+      {
+        "name": "INJECTOR",
+        "group": "G",
+        "sourceFile": "ECLIPSE_PVTO_LIVE_OIL.DATA",
+        "lineNumber": 337
+      }
+    ],
+    "groups": [],
+    "records": [
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "PRODUCER",
+          "10",
+          "10",
+          "3",
+          "3",
+          "OPEN",
+          "0",
+          "-1",
+          "0.5"
+        ],
+        "sourceFile": "ECLIPSE_PVTO_LIVE_OIL.DATA",
+        "lineNumber": 345
+      },
+      {
+        "keyword": "COMPDAT",
+        "values": [
+          "INJECTOR",
+          "1",
+          "1",
+          "1",
+          "1",
+          "OPEN",
+          "1",
+          "-1",
+          "0.5"
+        ],
+        "sourceFile": "ECLIPSE_PVTO_LIVE_OIL.DATA",
+        "lineNumber": 346
+      },
+      {
+        "keyword": "WCONPROD",
+        "values": [
+          "PRODUCER",
+          "OPEN",
+          "ORAT",
+          "20000",
+          "4*",
+          "1000"
+        ],
+        "sourceFile": "ECLIPSE_PVTO_LIVE_OIL.DATA",
+        "lineNumber": 354
+      },
+      {
+        "keyword": "WCONINJE",
+        "values": [
+          "INJECTOR",
+          "GAS",
+          "OPEN",
+          "RATE",
+          "100000"
+        ],
+        "sourceFile": "ECLIPSE_PVTO_LIVE_OIL.DATA",
+        "lineNumber": 362
+      }
+    ],
+    "completions": [
+      {
+        "keyword": "COMPDAT",
+        "well": "PRODUCER",
+        "i": "10",
+        "j": "10",
+        "k1": "3",
+        "k2": "3",
+        "status": "OPEN",
+        "sourceFile": "ECLIPSE_PVTO_LIVE_OIL.DATA",
+        "lineNumber": 345
+      },
+      {
+        "keyword": "COMPDAT",
+        "well": "INJECTOR",
+        "i": "1",
+        "j": "1",
+        "k1": "1",
+        "k2": "1",
+        "status": "OPEN",
+        "sourceFile": "ECLIPSE_PVTO_LIVE_OIL.DATA",
+        "lineNumber": 346
+      }
+    ]
+  },
+  "liveOilPvtContext": {
+    "schemaVersion": "eclipse-live-oil-pvt-context/1",
+    "sourceFile": "ECLIPSE_PVTO_LIVE_OIL.DATA",
+    "keywordLineNumber": 212,
+    "records": [
+      {
+        "rows": [
+          {
+            "lineNumber": 213,
+            "values": [
+              "0.001",
+              "14.7",
+              "1.062",
+              "1.04"
+            ]
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "lineNumber": 214,
+            "values": [
+              "0.0905",
+              "264.7",
+              "1.15",
+              "0.975"
+            ]
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "lineNumber": 215,
+            "values": [
+              "0.18",
+              "514.7",
+              "1.207",
+              "0.91"
+            ]
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "lineNumber": 216,
+            "values": [
+              "0.371",
+              "1014.7",
+              "1.295",
+              "0.83"
+            ]
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "lineNumber": 217,
+            "values": [
+              "0.636",
+              "2014.7",
+              "1.435",
+              "0.695"
+            ]
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "lineNumber": 218,
+            "values": [
+              "0.775",
+              "2514.7",
+              "1.5",
+              "0.641"
+            ]
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "lineNumber": 219,
+            "values": [
+              "0.93",
+              "3014.7",
+              "1.565",
+              "0.594"
+            ]
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "lineNumber": 220,
+            "values": [
+              "1.270",
+              "4014.7",
+              "1.695",
+              "0.51"
+            ]
+          },
+          {
+            "lineNumber": 221,
+            "values": [
+              "5014.7",
+              "1.671",
+              "0.549"
+            ]
+          },
+          {
+            "lineNumber": 222,
+            "values": [
+              "9014.7",
+              "1.579",
+              "0.74"
+            ]
+          }
+        ]
+      },
+      {
+        "rows": [
+          {
+            "lineNumber": 223,
+            "values": [
+              "1.618",
+              "5014.7",
+              "1.827",
+              "0.449"
+            ]
+          },
+          {
+            "lineNumber": 224,
+            "values": [
+              "9014.7",
+              "1.726",
+              "0.605"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

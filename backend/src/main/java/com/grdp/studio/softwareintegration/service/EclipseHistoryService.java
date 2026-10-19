@@ -35,6 +35,8 @@ public class EclipseHistoryService {
         if(projects.lockActiveProjectForVersion(versionId)==null)throw error(HttpStatus.NOT_FOUND,"模型项目不可用");
         var baseline=runs.get(request.path("baselineRunId").asLong());requireRun(baseline,versionId);
         if(baseline.parameters()!=null&&!baseline.parameters().isNull())throw error(HttpStatus.CONFLICT,"请从同版本无参数完整基线导入实测");
+        boolean indexed=observations.getFirst().vectorIndex()!=null;
+        if(indexed!="eclipse_300".equals(baseline.result().path("modelKind").asText()))throw error(HttpStatus.BAD_REQUEST,"组分E300观察CSV必须包含vectorIndex；E100沿用原五列表头");
         try{EclipseHistoryCsv.requireBaselineCoverage(observations,baseline.result().path("summary"));}catch(IllegalArgumentException e){throw error(HttpStatus.BAD_REQUEST,e.getMessage());}
         String sha=sha(request.path("csv").asText());
         var prior=history.selectOne(new LambdaQueryWrapper<EclipseHistoryEntity>().eq(EclipseHistoryEntity::getModelVersionId,versionId).eq(EclipseHistoryEntity::getSourceSha256,sha));
@@ -63,7 +65,7 @@ public class EclipseHistoryService {
     private static List<EclipseHistoryCsv.Observation> parse(String csv){try{return EclipseHistoryCsv.parse(csv);}catch(IllegalArgumentException e){throw error(HttpStatus.BAD_REQUEST,e.getMessage());}}
     private static boolean text(JsonNode n,int max){return n.isString()&&!n.asText().isBlank()&&n.asText().equals(n.asText().trim())&&n.asText().length()<=max&&n.asText().codePoints().noneMatch(Character::isISOControl);}
     private static void requireRun(SoftwareIntegrationRunDetailResponse run,long versionId){
-        if(run.modelVersionId()!=versionId||!"eclipse".equals(run.runType())||!"SUCCEEDED".equals(run.status())||!"VALID_FULL".equals(run.resultContract())||run.resultExpired()||run.result()==null||run.result().isNull()||!"eclipse_100".equals(run.result().path("modelKind").asText()))throw error(HttpStatus.CONFLICT,"需要同模型版本、未过期的完整E100实际结果");
+        if(run.modelVersionId()!=versionId||!"eclipse".equals(run.runType())||!"SUCCEEDED".equals(run.status())||!"VALID_FULL".equals(run.resultContract())||run.resultExpired()||run.result()==null||run.result().isNull()||!("eclipse_100".equals(run.result().path("modelKind").asText())||"eclipse_300".equals(run.result().path("modelKind").asText())&&"eclipse-summary-result/2".equals(run.result().path("schemaVersion").asText())&&"COMPOSITIONAL".equals(run.result().path("simulation").path("modelType").asText())))throw error(HttpStatus.CONFLICT,"需要同模型版本、未过期的完整E100或组分E300实际结果");
     }
     private static String sha(String csv){try{return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(csv.getBytes(StandardCharsets.UTF_8)));}catch(java.security.NoSuchAlgorithmException e){throw new IllegalStateException(e);}}
     private static RunException error(HttpStatus status,String message){return new RunException(status,message);}

@@ -32,4 +32,13 @@ class EclipseGasPvtParametersTests {
         var bad=inspection.deepCopy();((ObjectNode)bad.path("gasPvtContext")).put("extra",1);assertThrows(IllegalArgumentException.class,()->EclipseDataInspectionValidator.validateAndSerialize(bad,mapper));
         inspection.remove("gasPvtContext");assertNotNull(EclipseDataInspectionValidator.parsePersisted(EclipseDataInspectionValidator.validateAndSerialize(inspection,mapper)));
     }
+    @Test void VolumeFactorBindsSourceUnitsAndAllRowsWithSeparateTargetBounds()throws Exception{
+        var inspection=inspection();var p=request(inspection);p.put("schemaVersion",EclipseGasPvtParameters.FIELD_SCHEMA);p.put("field","FORMATION_VOLUME_FACTOR");p.put("unit","rb/Mscf");p.put("multiplier",1.02);
+        assertTrue(EclipseGasPvtParameters.valid(p));assertTrue(EclipseGasPvtParameters.matchesInspection(p,inspection));assertEquals(inspection.path("gasPvtContext").path("rows"),p.path("rows"));
+        for(String system:List.of("METRIC","PVT-M","LAB")){var i=inspection.deepCopy();i.put("unitSystem",system);assertFalse(EclipseGasPvtParameters.matchesInspection(p,i));var q=p.deepCopy();q.put("unit",system.equals("LAB")?"rcc/scc":"rm3/sm3");assertTrue(EclipseGasPvtParameters.matchesInspection(q,i));}
+        for(String fault:List.of("field","unit","multiplier","schemaVersion")){var bad=p.deepCopy();switch(fault){case "field"->bad.put(fault,2);case "unit"->bad.put(fault,"cP");case "multiplier"->bad.put(fault,101);default->bad.put(fault,EclipseGasPvtParameters.SCHEMA);}assertFalse(EclipseGasPvtParameters.valid(bad));}
+        var missing=p.deepCopy();missing.remove("field");assertFalse(EclipseGasPvtParameters.valid(missing));var stale=p.deepCopy();((tools.jackson.databind.node.ArrayNode)stale.path("rows").path(0).path("values")).set(1,mapper.getNodeFactory().stringNode("1.01"));assertTrue(EclipseGasPvtParameters.valid(stale));assertFalse(EclipseGasPvtParameters.matchesInspection(stale,inspection));
+        var overflow=p.deepCopy();((tools.jackson.databind.node.ArrayNode)overflow.path("rows").path(0).path("values")).set(1,mapper.getNodeFactory().stringNode("100000"));assertFalse(EclipseGasPvtParameters.valid(overflow));
+        var viscosity=p.deepCopy();viscosity.put("field","VISCOSITY");viscosity.put("unit","cP");assertTrue(EclipseGasPvtParameters.matchesInspection(viscosity,inspection));
+    }
 }
