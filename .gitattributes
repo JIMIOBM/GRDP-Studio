@@ -1,0 +1,2 @@
+# ECLIPSE save-state decks are compared byte-for-byte with generated LF output.
+worker/tests/Worker/Fixtures/COMPOSITIONAL-SAVE-*.DATA text eol=lf
