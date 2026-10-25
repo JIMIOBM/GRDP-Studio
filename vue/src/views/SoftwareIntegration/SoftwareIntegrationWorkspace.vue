@@ -8,6 +8,7 @@ import { useSoftwareIntegrationStore } from '@/stores/softwareIntegration'
 import PipesimModelRunPage from './PipesimModelRunPage.vue'
 import PipesimTemplateCreator from './PipesimTemplateCreator.vue'
 import SoftwareEnvironmentWizard from './SoftwareEnvironmentWizard.vue'
+import EclipsePreprocessingWorkbench from './EclipsePreprocessingWorkbench.vue'
 
 const store = useSoftwareIntegrationStore()
 const route = useRoute()
@@ -22,6 +23,16 @@ const {
   loadingProjects
 } = storeToRefs(store)
 const creating = ref(false)
+const preprocessingVisible = ref(false)
+const openPreprocessingResult = async record => {
+  try {
+    await store.loadProjectDetail(record.projectId)
+    await store.activateModel(record.projectId, record.modelId)
+    await store.selectVersion(record.versionId)
+    if (record.runId) await store.selectRun(record.runId)
+    preprocessingVisible.value = false
+  } catch { ElMessage.error('结果读取暂未完成，请在生成记录中重试') }
+}
 const createError = ref('')
 const duplicateProject = computed(() => projects.value.find(project => project.name.trim().toLowerCase() === projectName.value.trim().toLowerCase()))
 const projectName = ref('')
@@ -408,6 +419,9 @@ defineExpose({ openCreateDialog, openImportModel, importExternalFile })
       </template>
     </aside>
     <main class="software-content">
+    <div v-if="activeProjectId && !preprocessingVisible" class="preprocessing-entry"><span>ECLIPSE 工程前处理</span><el-button type="primary" plain @click="preprocessingVisible=true">Excel / CSV 表格建模</el-button></div>
+    <EclipsePreprocessingWorkbench v-if="preprocessingVisible && activeProjectId" :key="activeProjectId" :project-id="Number(activeProjectId)" @close="preprocessingVisible=false" @registered="refreshCreatedModel" @open-result="openPreprocessingResult" />
+    <template v-else>
     <SoftwareEnvironmentWizard @configured="store.loadCapabilities().catch(() => {})" />
     <PipesimTemplateCreator v-if="activeProjectId" :project-id="Number(activeProjectId)" @registered="refreshCreatedModel" />
     <PipesimModelRunPage v-if="activeModel" />
@@ -461,6 +475,7 @@ defineExpose({ openCreateDialog, openImportModel, importExternalFile })
       </el-table>
     </template>
     </template>
+    </template>
     </main>
     <el-dialog v-model="createDialogVisible" title="新建软件项目" width="500px" :close-on-click-modal="false">
       <el-form label-position="top" @submit.prevent="createProject">
@@ -498,6 +513,8 @@ defineExpose({ openCreateDialog, openImportModel, importExternalFile })
 .software-tree-node { min-width: 0; width: 100%; display: flex; align-items: center; gap: 5px; }.software-tree-node .el-icon { flex: 0 0 auto; color: #b58b00; }.software-tree-node > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.tree-model-action { display: none; margin-left: auto; padding: 2px 5px; border: 1px solid #d7ad00; border-radius: 2px; background: #fff; color: #695400; cursor: pointer; font-size: 11px; line-height: 16px; white-space: nowrap; }.tree-model-action:hover { background: #f4d000; color: #1f1a00; }.resource-tree-wrap :deep(.el-tree-node.is-current) .tree-model-action { display: block; }
 .tree-empty { padding: 18px 8px; color: #909399; text-align: center; font-size: 12px; }
 .software-content { flex: 1; min-width: 0; min-height: 0; overflow: auto; background: #fff; }
+.preprocessing-entry { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 12px 20px 0; padding: 8px 12px; border: 1px solid #deded9; border-left: 3px solid #f4d000; background: #f5f5f1; color: #333; font-size: 13px; }
+.preprocessing-entry :deep(.el-button) { --el-button-text-color: #333; --el-button-bg-color: #fff; --el-button-border-color: #c9c9c2; --el-button-hover-text-color: #202020; --el-button-hover-bg-color: #fff8d8; --el-button-hover-border-color: #b99500; height: 28px; padding: 6px 10px; border-radius: 2px; font-size: 12px; }
 .software-content > .workspace-header, .software-content > .workspace-toolbar, .software-content > .empty-state, .software-content > .empty-models, .software-content > .models-table { margin-left: 20px; margin-right: 20px; }
 .workspace-header, .workspace-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
 .workspace-header { padding-top: 20px; padding-bottom: 14px; }

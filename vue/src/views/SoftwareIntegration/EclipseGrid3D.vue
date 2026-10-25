@@ -18,6 +18,7 @@ const props = defineProps({
   fields: { type: Array, default: () => [] },
   artifacts: { type: Array, default: () => [] },
   unitSystem: { type: String, default: '' },
+  readOnly: { type: Boolean, default: false },
   wellCompletions: { type: Array, default: () => [] }
 })
 const emit = defineEmits(['create-grid-field-run', 'add-grid-batch-case'])
@@ -127,7 +128,7 @@ const editablePermxField = computed(() => selectedField.value?.keyword === 'PERM
   ? selectedField.value : null)
 const baselineFieldArtifact = computed(() => editablePermxField.value
   ? fieldArtifact(editablePermxField.value) : null)
-const canCreatePermxRun = computed(() => props.run?.status === 'SUCCEEDED'
+const canCreatePermxRun = computed(() => !props.readOnly && props.run?.status === 'SUCCEEDED'
   && props.run?.resultContract === 'VALID_FULL' && props.run?.parameters == null
   && editablePermxField.value?.count === totalCells.value
   && typeof baselineFieldArtifact.value?.sha256 === 'string'
@@ -141,7 +142,7 @@ const editableRegionField = computed(() => ['PERMX', 'PERMY', 'PERMZ', 'PORO'].i
   && selectedField.value?.file?.toUpperCase().endsWith('.INIT') && selectedField.value?.timeStep === undefined
   && ['REAL', 'DOUB'].includes(selectedField.value?.dataType) ? selectedField.value : null)
 const regionCount = computed(() => ['i', 'j', 'k'].reduce((count, axis) => count * Math.max(0, regionBounds.value[axis + '2'] - regionBounds.value[axis + '1'] + 1), 1))
-const canCreateRegionRun = computed(() => props.run?.status === 'SUCCEEDED' && props.run?.resultContract === 'VALID_FULL'
+const canCreateRegionRun = computed(() => !props.readOnly && props.run?.status === 'SUCCEEDED' && props.run?.resultContract === 'VALID_FULL'
   && props.run?.parameters == null && editableRegionField.value?.count === totalCells.value && !fieldLoading.value && fieldValues.value.length === totalCells.value)
 const currentLayerCells = computed(() => cells.filter(cell => cell.k === layer.value))
 const draftEntries = computed(() => Object.entries(draftOverrides.value)
@@ -921,7 +922,7 @@ onBeforeUnmount(() => {
 <template>
   <section v-if="grid" class="eclipse-grid-3d-panel" aria-label="ECLIPSE 三维网格与井定位" :data-render-ready="geometryReady && !fieldLoading ? 'true' : 'false'">
     <div class="panel-heading">
-      <div><span class="kicker">ECLIPSE EGRID</span><h3>三维几何、井轨迹定位与场值编辑</h3><p>几何与场值来自本次真实 Artifact；单格 INIT/PERMX 可绑定完整基线并真实重算，其他场值编辑仍是后处理草案。</p></div>
+      <div><span class="kicker">ECLIPSE EGRID</span><h3>{{ readOnly ? '三维储层与原始计算场值' : '三维几何、井轨迹定位与场值编辑' }}</h3><p v-if="readOnly">几何与场值来自本次真实计算文件；切换字段、剖面和报告步查看储层变化。</p><p v-else>几何与场值来自本次真实 Artifact；单格 INIT/PERMX 可绑定完整基线并真实重算，其他场值编辑仍是后处理草案。</p></div>
       <span>{{ grid.nx }} × {{ grid.ny }} × {{ grid.nz }}</span>
     </div>
     <div class="display-metrics" aria-label="三维原始场值统计"><div><small>当前字段</small><strong>{{ selectedField?.keyword || '—' }}</strong><span>报告步 {{ selectedField?.timeStep ?? '静态' }}</span></div><div v-for="entry in [{ label: '最低原值', value: displayStats?.min }, { label: '最高原值', value: displayStats?.max }, { label: '活动格算术均值', value: displayStats?.mean }]" :key="entry.label"><small>{{ entry.label }}</small><strong>{{ formatGridValue(entry.value) }}</strong><span>{{ displayUnit }}</span></div><div><small>可见 / 活动单元</small><strong>{{ visibleCells }} / {{ geometrySummary?.activeCells ?? 0 }}</strong><span>均值非体积加权</span></div></div>
@@ -948,7 +949,7 @@ onBeforeUnmount(() => {
       </div>
       <aside class="grid-3d-inspector">
         <div v-if="displayStats" class="inspector-block" aria-label="三维原始场值分布"><strong>活动格原值分布 · {{ displayStats.count }} 个有效值</strong><div class="display-histogram"><div v-for="bin in distribution" :key="bin.index" :style="{ height: `${Math.max(1, bin.height)}%`, background: gridValueColor((bin.low + bin.high) / 2, displayBounds) }" :title="`${bin.low}–${bin.high}：${bin.count}个`"><span>{{ bin.count }}</span></div></div><small>单元计数 · 不含展示草案</small></div>
-        <div class="inspector-block"><strong>当前场值</strong><span>{{ selectedFieldLabel }}</span><small>蓝 → 红表示当前场值由低到高；“加入编辑草案”仅生成草案，PERMX 可通过下方方案真实重算。</small></div>
+        <div class="inspector-block"><strong>当前场值</strong><span>{{ selectedFieldLabel }}</span><small v-if="readOnly">蓝 → 红表示原始计算场值由低到高。修改输入请返回表格参数，再生成新版本计算。</small><small v-else>蓝 → 红表示当前场值由低到高；“加入编辑草案”仅生成草案，PERMX 可通过下方方案真实重算。</small></div>
         <div class="inspector-block" aria-label="按 IJK 定位活动单元">
           <strong>按坐标选择网格</strong>
           <el-input-number v-model="locateI" :min="1" :max="grid.nx" :step="1" controls-position="right" aria-label="定位网格 I" />
@@ -960,10 +961,10 @@ onBeforeUnmount(() => {
         <div v-if="selectedCell" class="inspector-block selected-cell">
           <strong>选中网格单元</strong>
           <dl><div><dt>I</dt><dd>{{ selectedCell.i }}</dd></div><div><dt>J</dt><dd>{{ selectedCell.j }}</dd></div><div><dt>K</dt><dd>{{ selectedCell.k }}</dd></div><div><dt>原值</dt><dd>{{ selectedCell.value ?? '-' }}</dd></div><div><dt>当前值</dt><dd>{{ valueForCell(selectedCell) ?? '-' }}</dd></div></dl>
-          <el-input-number v-model="editValue" controls-position="right" :disabled="!selectedField" aria-label="编辑选中网格场值" />
-          <div class="inspector-actions"><el-button type="primary" size="small" :disabled="!selectedField" @click="applyEdit">加入编辑草案</el-button><el-button size="small" @click="clearEdits">清空草案</el-button></div>
+          <el-input-number v-if="!readOnly" v-model="editValue" controls-position="right" :disabled="!selectedField" aria-label="编辑选中网格场值" />
+          <div v-if="!readOnly" class="inspector-actions"><el-button type="primary" size="small" :disabled="!selectedField" @click="applyEdit">加入编辑草案</el-button><el-button size="small" @click="clearEdits">清空草案</el-button></div>
         </div>
-        <div v-if="selectedCell && editablePermxField" class="inspector-block selected-cell" aria-label="PERMX 单格真实重算方案">
+        <div v-if="!readOnly && selectedCell && editablePermxField" class="inspector-block selected-cell" aria-label="PERMX 单格真实重算方案">
           <strong>PERMX 单格输入方案</strong>
           <small>PERMX单位为mD（毫达西），乘数无量纲；只修改所选单元的X方向渗透率，PERMY、孔隙度和其它单元保持原输入。</small>
           <small>仅对当前完整成功基线的全网格 INIT/PERMX 生效；服务端和 Worker 会复核 Artifact、原值及坐标。</small>
@@ -971,8 +972,8 @@ onBeforeUnmount(() => {
           <el-button type="warning" :disabled="!canCreatePermxRun" @click="runPermxScenario">修改此单元并真实重算</el-button>
           <small v-if="!canCreatePermxRun">当前运行不满足完整无参数基线，或缺少匹配的全网格 PERMX INIT Artifact。</small>
         </div>
-        <div class="inspector-block"><strong>编辑草案</strong><span>{{ draftEntries.length }} 个当前字段单元</span><small>不会修改原始运行结果；可导出给后续审批或输入转换流程。</small><el-button v-if="draftEntries.length" size="small" @click="exportDraft">导出 JSON</el-button></div>
-        <div v-if="editableRegionField" class="inspector-block" aria-label="ECLIPSE 区域物性真实重算方案">
+        <div v-if="!readOnly" class="inspector-block"><strong>编辑草案</strong><span>{{ draftEntries.length }} 个当前字段单元</span><small>不会修改原始运行结果；可导出给后续审批或输入转换流程。</small><el-button v-if="draftEntries.length" size="small" @click="exportDraft">导出 JSON</el-button></div>
+        <div v-if="!readOnly && editableRegionField" class="inspector-block" aria-label="ECLIPSE 区域物性真实重算方案">
           <strong>{{ editableRegionField.keyword }} 区域输入方案</strong>
           <small>单位：{{ gridRegionUnit(editableRegionField.keyword) }}；乘数无量纲。仅修改以下矩形选区，最多4096个活动单元；范围外原输入保持。</small>
           <template v-for="(axis, index) in ['i', 'j', 'k']" :key="axis">

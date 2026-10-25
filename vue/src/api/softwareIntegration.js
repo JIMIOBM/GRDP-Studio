@@ -13,6 +13,24 @@ const request = createSoftwareIntegrationClient({
 })
 
 export const softwareIntegrationApi = {
+  listEclipsePreprocessingTemplates: () => request.get('/software-integration/eclipse-preprocessing/templates'),
+  getEclipsePreprocessingTemplate: id => request.get(`/software-integration/eclipse-preprocessing/templates/${id}`),
+  downloadEclipsePreprocessingTemplate: (id, format, blank = false) => request.get(`/software-integration/eclipse-preprocessing/templates/${id}/download`, { params: { format, blank }, responseType: 'blob', timeout: 60000 }),
+  loadEclipsePreprocessingExample: (projectId, id) => request.post(`/software-integration/projects/${projectId}/eclipse-preprocessing/examples/${id}`),
+  importEclipsePreprocessing: (projectId, templateId, files, mapping = {}) => {
+    const data = new FormData()
+    data.append('templateId', templateId)
+    data.append('mapping', JSON.stringify(mapping))
+    for (const file of files) data.append('files', file)
+    return request.post(`/software-integration/projects/${projectId}/eclipse-preprocessing/import`, data, { timeout: 60000 })
+  },
+  validateEclipsePreprocessing: (projectId, input) => request.post(`/software-integration/projects/${projectId}/eclipse-preprocessing/validate`, input, { timeout: 60000 }),
+  buildEclipsePreprocessing: (projectId, input) => request.post(`/software-integration/projects/${projectId}/eclipse-preprocessing/builds`, input, { timeout: 60000 }),
+  listEclipsePreprocessingBuilds: projectId => request.get(`/software-integration/projects/${projectId}/eclipse-preprocessing/builds`),
+  getEclipsePreprocessingBuild: (projectId, id) => request.get(`/software-integration/projects/${projectId}/eclipse-preprocessing/builds/${id}`),
+  getEclipsePreprocessingInputs: (projectId, id) => request.get(`/software-integration/projects/${projectId}/eclipse-preprocessing/builds/${id}/inputs`),
+  calculateEclipsePreprocessing: (projectId, id) => request.post(`/software-integration/projects/${projectId}/eclipse-preprocessing/builds/${id}/calculate`),
+  downloadEclipsePreprocessingBuild: (projectId, id) => request.get(`/software-integration/projects/${projectId}/eclipse-preprocessing/builds/${id}/download`, { responseType: 'blob' }),
   getCapabilities: () => request.get('/software-integration/capabilities'),
   listProjects: () => request.get('/software-integration/projects'),
   listDeletedProjects: () => request.get('/software-integration/recycle-bin/projects'),

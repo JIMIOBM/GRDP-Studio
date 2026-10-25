@@ -458,3 +458,9 @@ docs/
 
 !vue/tests/fixtures/eclipseMultiSatPvto/
 !vue/tests/fixtures/eclipseMultiSatPvto/*.json
+
+# ECLIPSE spreadsheet preprocessing documentation and regression tests.
+!/backend/src/test/java/com/grdp/studio/softwareintegration/EclipsePreprocessingTests.java
+!/backend/src/test/java/com/grdp/studio/softwareintegration/EclipsePreprocessingWorkflowTests.java
+!/vue/tests/eclipse-preprocessing.test.js
+!/docs/software-integration/eclipse-preprocessing-guide.md
