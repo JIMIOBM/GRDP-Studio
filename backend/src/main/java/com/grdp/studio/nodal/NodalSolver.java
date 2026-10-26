@@ -23,7 +23,7 @@ public final class NodalSolver {
             if (i > 0) {
                 Candidate previous = points.get(i - 1);
                 if (previous.valid() && current.valid()) {
-                    for (String code : List.of("liquidLoading", "erosion")) {
+                    for (String code : List.of("liquidLoading", "hydrate", "erosion", "sanding")) {
                         Double a = checkMargin(previous, code), b = checkMargin(current, code);
                         if (a != null && b != null && a * b < 0) {
                             Candidate lo = previous, hi = current;
@@ -87,7 +87,7 @@ public final class NodalSolver {
         if (truncated) notes.add("可行段到达搜索范围上限，请扩大井底压力范围");
         if (failures) notes.add(maximum == null ? "存在不可计算工况，尚不能确定全范围最大能力" : "低气量局部工况不可计算；不连接该缺口，已校核更高气量范围的最大能力");
         if (intervals.isEmpty()) notes.add("井筒边界与已选约束无共同可行气量区间");
-        if (incomplete) notes.add("所选冲蚀约束尚未接入有效判据，最大能力未确定");
+        if (incomplete) notes.add("存在尚未接入有效判据的约束，最大能力未确定");
         if (roots.size() > 1) notes.add("存在多个边界交点，未进行动态稳定性判断");
         var formation = new ArrayList<Point>(); formation.add(new Point(0, pr, null));
         refined.forEach(p -> formation.add(asPoint(p)));

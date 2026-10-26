@@ -47,42 +47,58 @@ export function nodalLegendGraphic(items) {
 }
 export function nodalChartOption(result, operation) {
   const injection=operation==='injection', maximumName=`最大合理${injection?'注':'采'}气能力`
-  const line=(name,data,color)=>({name,type:'line',showSymbol:false,smooth:false,connectNulls:false,data,lineStyle:{width:2,color},itemStyle:{color},z:3})
-  const series=[line(injection?'井筒流入曲线':'井筒流出曲线',result.wellboreCurve.map(xy),injection?'#c77575':'#aa70aa')], maximum=[]
-  result.scenarios.forEach((s,i)=>{
-    const colors=injection?['#e59138','#41a269','#36a9d2','#996dce']:['#31577a','#e59138','#41a269','#36a9d2']
-    const name=`${injection?'地层流出':'地层流入'}曲线 Pr=${s.reservoirPressure} MPa`
-    series.push(line(name,s.formation.map(xy),colors[i%colors.length]))
-    if(s.maximum) maximum.push({name,value:xy(s.maximum),stabilityPending:s.status==='MULTIPLE_INTERSECTIONS'})
+  const line=(name,data,color,lineType='solid',width=2)=>({name,type:'line',showSymbol:false,smooth:false,connectNulls:false,data,lineStyle:{width,color,type:lineType},itemStyle:{color},z:3})
+  const grouped=Array.isArray(result.caseResults)&&result.caseResults.length>0
+  const cases=grouped?result.caseResults:[{caseId:'legacy',caseName:'',idTubing:result.wellboreSnapshot?.idTubing,
+    wellboreCurve:result.wellboreCurve,scenarios:result.scenarios,regionScenarios:result.regionScenarios,
+    constraintCurves:result.constraintCurves,feasibleRegions:result.feasibleRegions}]
+  const tubingColors=['#7a3e9d','#c77575','#3b82b8','#2e8b74','#bc7a21','#5b6473','#be4f8a','#577a3a']
+  const formationColors=injection?['#e59138','#41a269','#36a9d2','#996dce']:['#31577a','#e59138','#41a269','#36a9d2']
+  const constraintColors={liquidLoading:'#4575b4',hydrate:'#1c9aa0',erosion:'#ed4545',sanding:'#9574bf'}
+  const dashTypes=['solid','dashed','dotted'], series=[], maximum=[]
+  cases.forEach((item,caseIndex)=>{
+    const suffix=grouped?` · ${item.caseName} (${item.idTubing} mm)`:''
+    series.push(line(`${injection?'井筒流入曲线':'井筒流出曲线'}${suffix}`,(item.wellboreCurve||[]).map(xy),tubingColors[caseIndex%tubingColors.length],dashTypes[caseIndex%dashTypes.length],2.4))
+    ;(item.scenarios||[]).forEach((s,i)=>{
+      const name=`${injection?'地层流出':'地层流入'}曲线 Pr=${s.reservoirPressure} MPa${suffix}`
+      series.push(line(name,s.formation.map(xy),formationColors[i%formationColors.length],dashTypes[caseIndex%dashTypes.length],grouped?1.5:2))
+      if(s.maximum) maximum.push({name:`${maximumName}${suffix}`,value:xy(s.maximum),stabilityPending:s.status==='MULTIPLE_INTERSECTIONS',itemStyle:{color:tubingColors[caseIndex%tubingColors.length]}})
+    })
+    if(Array.isArray(item.constraintCurves)) {
+      for(const curve of item.constraintCurves) for(const segment of curve.segments||[]) {
+        if(segment.length) series.push(line(`${curve.name}${suffix}`,segment.map(xy),constraintColors[curve.code]||'#777',dashTypes[caseIndex%dashTypes.length]))
+      }
+    } else {
+      // Old saved snapshots did not persist formal constraint curves.
+      const slices=[...(item.regionScenarios?.length?item.regionScenarios:item.scenarios||[])].sort((a,b)=>a.reservoirPressure-b.reservoirPressure)
+      for(const [code,name,color] of [['liquidLoading','临界携液流量','#4575b4'],['hydrate','水合物安全边界','#1c9aa0'],['erosion','临界冲蚀流量','#ed4545'],['sanding','出砂允许气量','#9574bf']]) {
+        if(injection && ['liquidLoading','sanding'].includes(code)) continue
+        const data=slices.map(s=>{const edges=nodalConstraintBoundary(s,code);return edges.length===1?edges[0]:[null,null]})
+        if(data.some(p=>p[0]!=null)) series.push(line(`${name}${suffix}`,data,color,dashTypes[caseIndex%dashTypes.length]))
+      }
+    }
+    const polygons=nodalEnvelope(item)
+    if(polygons.length) {
+      const fill=['rgba(122,62,157,.08)','rgba(199,117,117,.08)','rgba(59,130,184,.08)','rgba(46,139,116,.08)'][caseIndex%4]
+      series.push({name:`合理能力范围${suffix}`,type:'custom',silent:true,z:1,data:polygons.map((_,i)=>[i]),
+        renderItem(params,api) {
+          const points=polygons[params.dataIndex].map(p=>api.coord(p)),xs=points.map(p=>p[0]),ys=points.map(p=>p[1])
+          const left=Math.min(...xs),right=Math.max(...xs),top=Math.min(...ys),bottom=Math.max(...ys)
+          const children=[{type:'polygon',shape:{points},style:{fill}}]
+          for(let x=left;x<=right;x+=12) children.push({type:'line',shape:{x1:x,y1:top,x2:x,y2:bottom},style:{stroke:tubingColors[caseIndex%tubingColors.length],lineWidth:0.5,opacity:.55}})
+          return {type:'group',clipPath:{type:'polygon',shape:{points}},children}
+        }})
+    }
   })
-  const constraintColors={liquidLoading:'#4575b4',erosion:'#ed4545'}
-  if(Array.isArray(result.constraintCurves)) {
-    for(const curve of result.constraintCurves) for(const segment of curve.segments||[]) {
-      if(segment.length) series.push(line(curve.name,segment.map(xy),constraintColors[curve.code]||'#777'))
-    }
-  } else {
-    // Old saved snapshots did not persist formal constraint curves.
-    const slices=[...(result.regionScenarios?.length?result.regionScenarios:result.scenarios)].sort((a,b)=>a.reservoirPressure-b.reservoirPressure)
-    for(const [code,name,color] of [['liquidLoading','临界携液流量','#4575b4'],['erosion','临界冲蚀流量','#ed4545']]) {
-      if(injection && code==='liquidLoading') continue
-      const data=slices.map(s=>{const edges=nodalConstraintBoundary(s,code);return edges.length===1?edges[0]:[null,null]})
-      if(data.some(p=>p[0]!=null)) series.push(line(name,data,color))
-    }
-  }
-  const polygons=nodalEnvelope(result)
-  if(polygons.length) series.push({name:'合理能力范围',type:'custom',silent:true,z:1,data:polygons.map((_,i)=>[i]),
-    renderItem(params,api) {
-      const points=polygons[params.dataIndex].map(p=>api.coord(p)),xs=points.map(p=>p[0]),ys=points.map(p=>p[1])
-      const left=Math.min(...xs),right=Math.max(...xs),top=Math.min(...ys),bottom=Math.max(...ys)
-      const children=[{type:'polygon',shape:{points},style:{fill:'rgba(100,100,100,0.08)'}}]
-      for(let x=left;x<=right;x+=12) children.push({type:'line',shape:{x1:x,y1:top,x2:x,y2:bottom},style:{stroke:'#656565',lineWidth:0.6}})
-      for(let y=top;y<=bottom;y+=12) children.push({type:'line',shape:{x1:left,y1:y,x2:right,y2:y},style:{stroke:'#656565',lineWidth:0.6}})
-      return {type:'group',clipPath:{type:'polygon',shape:{points}},children}
-    }})
   if(maximum.length) series.push({name:maximumName,type:'scatter',symbol:'circle',symbolSize:12,data:maximum,z:5,itemStyle:{color:'#e32626'},tooltip:{trigger:'item',formatter:p=>`${p.name}<br/>${maximumName}${p.data.stabilityPending?'（多交点，稳定性待确认）':''}<br/>气量：${Number(p.value[0]).toFixed(4)} ×10⁴ m³/d<br/>井底流压：${Number(p.value[1]).toFixed(4)} MPa`}})
-  const legendSeries=[...series.slice(1,1+result.scenarios.length),series[0],...series.filter(s=>s.name.startsWith('临界'))]
+  const allLines=series.filter(s=>s.type==='line')
+  const legendSeries=grouped ? [
+    ...allLines.filter(s=>s.name.startsWith(injection?'井筒流入曲线':'井筒流出曲线')),
+    ...allLines.filter(s=>s.name.startsWith(injection?'地层流出':'地层流入')).slice(0,cases[0]?.scenarios?.length||0),
+    ...allLines.filter(s=>Object.values(constraintColors).includes(s.lineStyle.color)).filter((s,i,a)=>a.findIndex(x=>x.name.split(' · ')[0]===s.name.split(' · ')[0])===i)
+  ] : allLines
   const legendItems=[...(maximum.length?[{name:maximumName,color:'#e32626',symbol:'circle'}]:[]),
-    ...legendSeries.filter((s,i,a)=>a.findIndex(x=>x.name===s.name)===i).map(s=>({name:s.name,color:s.lineStyle.color,symbol:'line'}))]
+    ...legendSeries.filter((s,i,a)=>a.findIndex(x=>x.name===s.name)===i).map(s=>({name:grouped&&!s.name.startsWith('井筒')?s.name.split(' · ')[0]:s.name,color:s.lineStyle.color,symbol:'line'}))]
   return {animation:false,tooltip:{trigger:'axis'},legend:{show:false},graphic:[nodalLegendGraphic(legendItems)],grid:{top:40,left:75,right:280,bottom:65},
     xAxis:{type:'value',name:`${injection?'注气量':'采气量'} (10⁴ m³/d)`,nameLocation:'middle',nameGap:35,min:0,splitLine:{show:true,lineStyle:{color:'#dfe7f2',width:1}} ,axisLine:{show:true}},
     yAxis:{type:'value',name:'井底流压 (MPa)',splitLine:{show:true,lineStyle:{color:'#dfe7f2',width:1}} ,axisLine:{show:true}},series}

@@ -18,7 +18,6 @@ import com.grdp.studio.wellbore.pressure.mapper.PressureProfileMapper;
 import com.grdp.studio.wellbore.pressure.mapper.WellPressureConversionMapper;
 import com.grdp.studio.wellbore.pressure.method.PressureCalculator;
 import com.grdp.studio.wellbore.pressure.method.SingleGasInjectionMethod;
-import com.grdp.studio.wellbore.temperature.service.TemperatureStorageService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.core.JacksonException;
@@ -36,7 +35,6 @@ public class PressureStorageService {
     private final WellPressureConversionMapper records;
     private final PressureMethodResultMapper methods;
     private final PressureProfileMapper profiles;
-    private final TemperatureStorageService temperatures;
     private final PressureConversionService calculator;
     private final ObjectMapper json;
 
@@ -46,7 +44,6 @@ public class PressureStorageService {
             WellPressureConversionMapper records,
             PressureMethodResultMapper methods,
             PressureProfileMapper profiles,
-            TemperatureStorageService temperatures,
             PressureConversionService calculator,
             ObjectMapper json
     ) {
@@ -55,7 +52,6 @@ public class PressureStorageService {
         this.records = records;
         this.methods = methods;
         this.profiles = profiles;
-        this.temperatures = temperatures;
         this.calculator = calculator;
         this.json = json;
     }
@@ -122,28 +118,20 @@ public class PressureStorageService {
                 require(request.gasReservoirId, "气藏"),
                 request.wellName
         );
-        // 注气使用本次输入生成线性温度，不绑定未参与求解的历史温度方案。
+        // MODEL 只把历史方案作为配置来源并按本次边界重算，不能把配置来源冒充直接采用的温度记录外键。
         boolean injection = "injection".equals(request.operationMode);
-        Long temperatureRecordId = injection ? null : resolveTemperatureRecordId(request);
-        if (injection) request.temperatureRecordId = null;
-        resolvePvtId(request, wellId);
-        if (temperatureRecordId != null) {
-            var temperature = temperatures.detail(
-                    temperatureRecordId,
-                    request.projectId,
-                    request.gasReservoirId,
-                    request.wellName
-            );
-            if (!wellEquals(temperature.record().getWellId(), wellId)) {
-                throw new BusinessException(400, "温度方案不属于当前井");
-            }
+        if ("SAVED_PROFILE".equalsIgnoreCase(request.thermalSource)) {
+            throw new BusinessException(400, "已保存温度剖面直用模式尚未开放，请选择模型重算");
         }
+        // 旧协议仍可按原线性温度计算，但不再挂接一个没有实际参与求解的温度记录。
+        request.temperatureRecordId = null;
+        resolvePvtId(request, wellId);
 
         var calculation = calculator.calculateDetailed(request, token, cookie, environment);
         PressureCalculator.Result output = calculation.result();
         WellPressureConversionEntity entity = new WellPressureConversionEntity();
         entity.setWellId(wellId);
-        entity.setTemperatureId(temperatureRecordId);
+        entity.setTemperatureId(request.temperatureRecordId);
         entity.setPvtId(request.pvtId);
         entity.setPressureNo(nextNo(wellId));
         entity.setPressureName(name(save.pressureName, "压力折算方案"));
@@ -282,26 +270,6 @@ public class PressureStorageService {
                 .orElse(0) + 1;
     }
 
-    private Long resolveTemperatureRecordId(PressureCalculateRequest request) {
-        if (request.temperatureRecordId != null && request.temperatureRecordId > 0) {
-            return request.temperatureRecordId;
-        }
-        List<com.grdp.studio.wellbore.temperature.dto.TemperatureRecordSummary> history =
-                temperatures.list(
-                        request.projectId,
-                        request.gasReservoirId,
-                        request.wellName
-                );
-        if (history.isEmpty()) {
-            throw new BusinessException(
-                    400,
-                    "当前井没有温度计算历史，请先在温度模型页面完成一次计算"
-            );
-        }
-        request.temperatureRecordId = history.getFirst().id();
-        return request.temperatureRecordId;
-    }
-
     private Long resolvePvtId(PressureCalculateRequest request, long wellId) {
         WellPvtEntity pvt;
         if (request.pvtId != null && request.pvtId > 0) {
@@ -331,10 +299,6 @@ public class PressureStorageService {
         } catch (JacksonException exception) {
             throw new BusinessException(500, "压力方案快照序列化失败");
         }
-    }
-
-    private static boolean wellEquals(Long actual, long expected) {
-        return actual != null && actual == expected;
     }
 
     private static long require(Long id, String name) {

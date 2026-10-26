@@ -6,10 +6,12 @@ import { nodalApi } from '@/api/nodal'
 import { pvtStorageApi } from '@/api/pvtStorage'
 import { wellborePressureApi } from '@/api/wellborePressure'
 import { erosionApi } from '@/api/wellboreErosion'
+import { sandProductionApi } from '@/api/sandProduction'
 import { nodalChartOption, nodalStatus, nodalEnvelope } from '@/utils/nodalChart'
 import router from '@/router'
 import { coefficientLocation } from '@/utils/productivityCoefficientTree'
-import { nodalDefaults as defaults } from '@/utils/nodalDefaults'
+import { nodalDefaults as defaults, nodalHydrateComponents as hydrateComponents, nodalPvtCompositionKeys,
+  nodalCompositionFromPvt, nodalCompositionTotal, normalizeNodalComposition } from '@/utils/nodalDefaults'
 
 const props = defineProps({ node: { type: Object, required: true }, projectId: { type: [String, Number], required: true }, gasReservoirId: { type: [String, Number], required: true } })
 const emit = defineEmits(['saved', 'history-updated', 'restored'])
@@ -19,9 +21,17 @@ const form = reactive(defaults()), result = ref(null), acceptedInput = ref(null)
 const sources = ref([]), pvts = ref([]), pressureSources = ref([]), pressureId = ref(null), history = ref([])
 const chartElement = ref(null), historyVisible = ref(false)
 const activeContentTab = ref('chart')
-const envelopeNote = computed(() => !result.value ? '' : !result.value.regionScenarios?.length
+const selectedCaseId = ref('')
+const caseResults = computed(() => result.value?.caseResults?.length ? result.value.caseResults : result.value ? [{
+  caseId: 'legacy', caseName: `油管 ${result.value.wellboreSnapshot?.idTubing ?? ''} mm`, idTubing: result.value.wellboreSnapshot?.idTubing,
+  wellboreCurve: result.value.wellboreCurve, scenarios: result.value.scenarios, constraintStates: result.value.constraintStates,
+  warnings: result.value.warnings, regionScenarios: result.value.regionScenarios, constraintCurves: result.value.constraintCurves,
+  feasibleRegions: result.value.feasibleRegions
+}] : [])
+const displayResult = computed(() => caseResults.value.find(item => item.caseId === selectedCaseId.value) || caseResults.value[0] || null)
+const envelopeNote = computed(() => !displayResult.value ? '' : !displayResult.value.regionScenarios?.length
   ? '历史快照未包含范围校核数据，保留原结果；需要新版阴影时请手动重新计算。'
-  : nodalEnvelope(result.value).length ? '网格阴影为四个地层压力之间、经井筒边界和所选约束共同校核的能力包络；红点为各场景最大合理能力。'
+  : nodalEnvelope(displayResult.value).length ? '网格阴影为四个地层压力之间、经井筒边界和所选约束共同校核的能力包络；红点为各场景最大合理能力。'
   : '当前未形成可确认的连续合理能力范围，请在数据列表查看区间与约束校核结果。')
 watch(activeContentTab, async () => { await nextTick(); chart?.resize() })
 const paramsCollapsed = ref(false), panelWidth = ref(286), panelElement = ref(null)
@@ -42,8 +52,13 @@ function resizePanel(event) {
   window.addEventListener('pointerup', stopResize)
   window.addEventListener('pointercancel', stopResize)
 }
-let chart, observer, disposed = false, revision = 0, sourceSequence = 0, historySequence = 0, operationSequence = 0, applying = false
+let chart, observer, disposed = false, revision = 0, sourceSequence = 0, historySequence = 0, operationSequence = 0, pvtCompositionSequence = 0, applying = false
 const injection = computed(() => form.operationMode === 'injection')
+const hydrateCompositionTotal = computed(() => nodalCompositionTotal(form.constraints.composition))
+const hydrateCompositionValid = computed(() => Math.abs(hydrateCompositionTotal.value - 100) <= 0.01)
+const pvtCompositionKeys = new Set(nodalPvtCompositionKeys)
+const pvtCompositionLoading = ref(false)
+const pvtCompositionNote = ref('N₂、CO₂、H₂S由所选PVT自动读取')
 const selectedSource = computed(() => sources.value.find(s => s.id === form.coefficientId))
 const coefficientCustomized = computed(() => {
   const p = selectedSource.value?.parameters
@@ -55,11 +70,11 @@ const coefficientCustomized = computed(() => {
   return different(form.coefficientA,a) || different(form.coefficientB,b)
 })
 const curveWarnings = computed(() => {
-  if (!result.value) return []
-  const failed = result.value.wellboreCurve.filter(p => p.rate > 0 && p.pressure == null)
+  if (!displayResult.value) return []
+  const failed = displayResult.value.wellboreCurve.filter(p => p.rate > 0 && p.pressure == null)
   const notices = []
   if (failed.length) notices.push(`井筒曲线有 ${failed.length} 个工况无法计算：${[...new Set(failed.map(p => p.reason).filter(Boolean))].join('；')}。断线区间不作能力判定。`)
-  for (const s of result.value.scenarios) {
+  for (const s of displayResult.value.scenarios) {
     const reasons = [...new Set(s.candidates.map(p => p.reason).filter(Boolean))]
     if (reasons.length) notices.push(`Pr=${s.reservoirPressure} MPa：${reasons.join('；')}`)
   }
@@ -67,8 +82,10 @@ const curveWarnings = computed(() => {
 })
 const sourcesLoading = ref(false), sourceError = ref('')
 const erosionSourceNote = ref('')
+const sandSourceNote = ref('')
 const erosionFields = [['liquidHoldupPercent', '持液率 (%)'], ['sandContentPercent', '含砂率 (%)'], ['sandDensity', '砂粒密度 (kg/m³)'], ['erosionLiquidDensity', '冲蚀液相密度 (kg/m³)']]
-const controlLabel = value => String(value || '未确定').replaceAll('liquidLoading', '携液下限').replaceAll('erosion', '冲蚀上限').replaceAll('hydrate', '水合物限制')
+const sandFields = [['sandMassT', '支撑剂质量 (t)'], ['sandDensityGCm3', '堆积密度 (g/cm³)'], ['sandHalfLengthM', '平均裂缝半长 (m)'], ['sandClosurePressureMpa', '闭合压力 (MPa)'], ['sandCriticalVelocityMS', '临界出砂流速 (m/s，可选)']]
+const controlLabel = value => String(value || '未确定').replaceAll('liquidLoading', '携液下限').replaceAll('erosion', '冲蚀上限').replaceAll('hydrate', '水合物限制').replaceAll('sanding', '出砂上限')
 function scenarioReason(s) {
   if (s.maximum) {
     const atMax = (s.candidates || []).find(p => Math.abs(p.rate - s.maximum.rate) < 1e-6)
@@ -80,23 +97,19 @@ function scenarioReason(s) {
 }
 const coefficientEntry = computed(() => coefficientLocation({ ...scope(), method: '二项式' }))
 const fields = [ ['boundaryPressure', '井口边界压力 (MPa)'], ['depth', '井深 (m)'], ['step', '井深步长 (m)'],
-  ['idTubing', '油管内径 (mm)'], ['roughness', '粗糙度 (mm)'], ['angle', '井斜角 (°)'], ['tWh', '井口温度 (℃)'], ['tGrad', '温度梯度 (℃/100m)'], ['qLiq', '液量 (m³/d)'] ]
+  ['roughness', '粗糙度 (mm)'], ['angle', '井斜角 (°)'], ['tWh', '井口温度 (℃)'], ['tGrad', '温度梯度 (℃/100m)'], ['qLiq', '液量 (m³/d)'] ]
 const message = e => e?.msg || e?.message || '节点分析请求失败'
 const clone = x => JSON.parse(JSON.stringify(x))
 const display = x => x == null ? '未确定' : Number(x).toFixed(4)
 const modes = { production: null, injection: null }
-watch(() => { const input = clone(form); delete input.constraints.sanding; return JSON.stringify(input) },
-  () => { if (!applying) { revision++; result.value = null; acceptedInput.value = null } }, { flush: 'sync' })
-watch(() => form.constraints.sanding, value => {
-  if (!applying && acceptedInput.value) acceptedInput.value.constraints.sanding = value
-}, { flush: 'sync' })
+watch(() => JSON.stringify(form), () => { if (!applying) { revision++; result.value = null; acceptedInput.value = null } }, { flush: 'sync' })
 watch(() => form.operationMode, (mode, old) => {
   if (applying) return
   // Preserve complete independent drafts, including the previous mode's model and sources.
   modes[old] = { ...clone(form), operationMode: old }
   applying = true
   const next = modes[mode] || defaults(mode)
-  if (mode === 'injection') { next.wellbore.models = ['GAS']; next.wellbore.qLiq = 0; next.constraints.liquidLoading = false }
+  if (mode === 'injection') { next.wellbore.models = ['GAS']; next.wellbore.qLiq = 0; next.constraints.liquidLoading = false; next.constraints.sanding = false }
   Object.assign(form, next); applying = false; pressureId.value = null
   loadSources()
 }, { flush: 'sync' })
@@ -106,13 +119,45 @@ function chooseCoefficient() {
   fillCoefficients()
   // 临时测试使用多地层压力场景，选择系数时不覆盖用户已填的场景。
   if (!form.reservoirText.trim()) form.reservoirText = String(source.parameters.pressure)
-  if (source.pvtId && pvts.value.some(p => p.pvtId === source.pvtId)) form.wellbore.pvtId = source.pvtId
+  if (source.pvtId && pvts.value.some(p => p.pvtId === source.pvtId)) {
+    form.wellbore.pvtId = source.pvtId
+    void syncPvtComposition(source.pvtId)
+  }
 }
 function fillCoefficients() {
   const p = selectedSource.value?.parameters
   if (!p) return
   form.coefficientA = (form.coefficientSet === 'corrected' ? p.correctedA : p.a) ?? null
   form.coefficientB = (form.coefficientSet === 'corrected' ? p.correctedB : p.b) ?? null
+}
+async function syncPvtComposition(pvtId = form.wellbore.pvtId, { required = false } = {}) {
+  const numericPvtId = Number(pvtId)
+  if (!Number.isFinite(numericPvtId) || numericPvtId <= 0) {
+    const failure = new Error('请先选择PVT方案')
+    if (required) throw failure
+    return false
+  }
+  const seq = ++pvtCompositionSequence
+  pvtCompositionLoading.value = true
+  try {
+    const response = await pvtStorageApi.getDetail(numericPvtId, props.projectId, props.gasReservoirId, props.node.wellName)
+    if (disposed || seq !== pvtCompositionSequence || Number(form.wellbore.pvtId) !== numericPvtId) return false
+    const detail = response?.data ?? response
+    Object.assign(form.constraints.composition, nodalCompositionFromPvt(detail?.gasInput))
+    pvtCompositionNote.value = `已从PVT方案“${detail?.record?.pvtName || numericPvtId}”同步N₂、CO₂、H₂S`
+    return true
+  } catch (e) {
+    if (seq === pvtCompositionSequence) pvtCompositionNote.value = `PVT组分读取失败：${message(e)}`
+    if (required) throw e
+    error.value = message(e)
+    return false
+  } finally {
+    if (seq === pvtCompositionSequence) pvtCompositionLoading.value = false
+  }
+}
+async function onPvtChange(pvtId) {
+  error.value = ''
+  await syncPvtComposition(pvtId)
 }
 async function loadErosion(context, current, applyDefaults) {
   const signature = JSON.stringify(erosionFields.map(([key]) => form.constraints[key]))
@@ -130,6 +175,37 @@ async function loadErosion(context, current, applyDefaults) {
       erosionLiquidDensity: input.liquidDensityKgM3 ?? null })
     erosionSourceNote.value = `已读取冲蚀记录：${row.calculationName || rows[0].calculationName}`
   } catch (e) { if (current()) erosionSourceNote.value = `冲蚀记录读取失败：${message(e)}` }
+}
+async function loadSand(context, current, applyDefaults) {
+  const signature = JSON.stringify(sandFields.map(([key]) => form.constraints[key]))
+  try {
+    const rows = await sandProductionApi.list(context.projectId, context.gasReservoirId, context.wellName)
+    if (!current()) return
+    if (!rows.length) { sandSourceNote.value = '当前井暂无出砂记录，请填写参数'; return }
+    if (!applyDefaults || (sandFields.some(([key]) => form.constraints[key] != null && form.constraints[key] !== '') && form.constraints.sandMassT != null)) return
+    const row = await sandProductionApi.detail(rows[0].id, context.projectId, context.gasReservoirId, context.wellName)
+    if (!current() || result.value || signature !== JSON.stringify(sandFields.map(([key]) => form.constraints[key]))) return
+    const input = typeof row.input_json === 'string' ? JSON.parse(row.input_json) : (row.input_json ?? row.inputJson)
+    if (!input) throw new Error('记录缺少输入参数')
+    Object.assign(form.constraints, {
+      sandProppantType: input.proppantType ?? 'quartz-sand', sandMassT: input.massT ?? null,
+      sandDensityGCm3: input.densityGCm3 ?? null, sandHalfLengthM: input.halfLengthM ?? null,
+      sandClosurePressureMpa: input.closurePressureMpa ?? null,
+      sandCriticalVelocityMS: input.criticalVelocityOverrideMS ?? null
+    })
+    sandSourceNote.value = `已读取出砂记录：${row.calculationName || rows[0].calculationName}`
+  } catch (e) { if (current()) sandSourceNote.value = `出砂记录读取失败：${message(e)}` }
+}
+function addTubingCase() {
+  const index = form.tubingCases.length + 1
+  form.tubingCases.push({ id: `tubing-${Date.now()}-${index}`, name: `油管方案${index}`, idTubing: null })
+}
+function removeTubingCase(index) {
+  if (form.tubingCases.length > 1) form.tubingCases.splice(index, 1)
+}
+function onSandProppantChange(value) {
+  form.constraints.sandDensityGCm3 = value === 'composite-sand' ? 1.34 : 1.7
+  form.constraints.sandCriticalVelocityMS = null
 }
 async function loadSources({ applyDefaults = !result.value } = {}) {
   const seq = ++sourceSequence, context = scope(), mode = form.operationMode
@@ -162,6 +238,7 @@ async function loadSources({ applyDefaults = !result.value } = {}) {
   }
   await Promise.all([
     loadErosion(context, current, applyDefaults),
+    loadSand(context, current, applyDefaults),
     load(nodalApi.sources({ ...context, operationMode: mode }), sources, '二项式方案', true),
     load(pvtStorageApi.list(context.projectId, context.gasReservoirId, context.wellName), pvts, 'PVT方案'),
     load(wellborePressureApi.list(context.projectId, context.gasReservoirId, context.wellName).then(response => {
@@ -170,6 +247,7 @@ async function loadSources({ applyDefaults = !result.value } = {}) {
       return rows.filter(p => (p.operationMode || 'production') === mode)
     }), pressureSources, '压力方案')
   ])
+  if (current() && applyDefaults && form.wellbore.pvtId) await syncPvtComposition(form.wellbore.pvtId)
 }
 async function importPressure() {
   if (!pressureId.value) return
@@ -183,7 +261,10 @@ async function importPressure() {
     if (input.boundaryPosition !== 'wellhead') throw new Error('请选择井口边界的压力方案；井底边界方案不能直接用作井口能力边界')
     Object.keys(form.wellbore).forEach(key => { if (input[key] != null) form.wellbore[key] = clone(input[key]) })
     form.wellbore.models = [injection.value ? 'GAS' : (input.models?.[0] || 'HB')]
+    if (!form.tubingCases?.length) form.tubingCases = [{ id: 'tubing-1', name: '油管方案1', idTubing: input.idTubing }]
+    else form.tubingCases[0].idTubing = input.idTubing
     form.pressureSourceId = pressureId.value
+    if (form.wellbore.pvtId) await syncPvtComposition(form.wellbore.pvtId)
     ElMessage.success('已读取压力方案参数，请确认该井口压力是最低采气/最高注气边界')
   } catch (e) { if (!disposed && seq === operationSequence) error.value = message(e) }
   finally { if (seq === operationSequence) busy.value = false }
@@ -193,7 +274,7 @@ function payload() {
   input.reservoirPressures = input.reservoirText.split(/[,，;；\s]+/).filter(Boolean).map(Number)
   if (input.reservoirPressures.length !== 4 || new Set(input.reservoirPressures).size !== 4 || input.reservoirPressures.some(p => !Number.isFinite(p) || p <= 0))
     throw new Error('请输入4个互不重复的正数地层压力')
-  input.constraints.composition = input.constraints.hydrate ? JSON.parse(input.compositionText) : {}
+  input.constraints.composition = input.constraints.hydrate ? normalizeNodalComposition(input.constraints.composition) : {}
   input.constraints.surfaceTension = Number(input.constraints.surfaceTension)
   if (input.constraints.liquidLoading && (!Number.isFinite(input.constraints.surfaceTension) || input.constraints.surfaceTension <= 0)) throw new Error('气液表面张力必须为正数')
   for (const key of ['coefficientA', 'coefficientB']) {
@@ -206,19 +287,42 @@ function payload() {
     input.constraints[key] = value == null || String(value).trim() === '' ? null : Number(value)
     if (input.constraints.erosion && (input.constraints[key] == null || !Number.isFinite(input.constraints[key]))) throw new Error(`请填写${label}`)
   }
-  delete input.reservoirText; delete input.compositionText
+  if (!Array.isArray(input.tubingCases) || !input.tubingCases.length) throw new Error('请至少配置一个油管尺寸方案')
+  if (input.tubingCases.length > 8) throw new Error('油管尺寸方案最多8个')
+  const diameters = new Set()
+  input.tubingCases.forEach((item, index) => {
+    item.id ||= `tubing-${index + 1}`
+    item.name = String(item.name || `油管方案${index + 1}`).trim()
+    item.idTubing = Number(item.idTubing)
+    if (!Number.isFinite(item.idTubing) || item.idTubing <= 0) throw new Error(`请填写第${index + 1}个油管方案的正数内径`)
+    if (diameters.has(item.idTubing)) throw new Error('油管内径不能重复')
+    diameters.add(item.idTubing)
+  })
+  input.wellbore.idTubing = input.tubingCases[0].idTubing
+  for (const [key, label] of sandFields) {
+    const value = input.constraints[key]
+    input.constraints[key] = value == null || String(value).trim() === '' ? null : Number(value)
+    const optional = key === 'sandCriticalVelocityMS' || key === 'sandDensityGCm3'
+    if (input.constraints.sanding && !optional && (input.constraints[key] == null || !Number.isFinite(input.constraints[key]) || input.constraints[key] <= 0)) throw new Error(`请填写${label}`)
+    if (input.constraints.sanding && input.constraints[key] != null && (!Number.isFinite(input.constraints[key]) || input.constraints[key] <= 0)) throw new Error(`${label}必须大于零`)
+  }
+  delete input.reservoirText
   return { ...input, ...scope() }
 }
 async function calculate() {
   error.value = ''; result.value = null; acceptedInput.value = null
-  const rev = revision, seq = ++operationSequence; busy.value = true
+  let rev = revision
+  const seq = ++operationSequence; busy.value = true
   try {
+    if (form.constraints.hydrate) {
+      await syncPvtComposition(form.wellbore.pvtId, { required: true })
+      rev = revision
+    }
     const input = payload()
     if (!input.coefficientId || !input.wellbore.pvtId) throw new Error('请选择二项式系数方案和PVT方案')
     if (fields.some(([key]) => input.wellbore[key] == null || !Number.isFinite(input.wellbore[key]))) throw new Error('请补齐井筒参数')
     const output = await nodalApi.calculate(input)
     if (disposed || rev !== revision || seq !== operationSequence) return
-    input.constraints.sanding = form.constraints.sanding
     result.value = output; acceptedInput.value = input
   } catch (e) { if (!disposed && rev === revision && seq === operationSequence) error.value = message(e) }
   finally { if (seq === operationSequence) busy.value = false }
@@ -250,7 +354,17 @@ async function restore(id) {
     if (disposed || seq !== operationSequence || rev !== revision) return
     recordId.value = row.id
     applying = true
-    Object.assign(form, defaults(), row.input, { constraints: { ...defaults(row.input.operationMode).constraints, ...row.input.constraints }, reservoirText: row.input.reservoirPressures.join(', '), compositionText: JSON.stringify(row.input.constraints.composition || {}, null, 2) })
+    const fallback = defaults(row.input.operationMode)
+    Object.assign(form, fallback, row.input, {
+      constraints: {
+        ...fallback.constraints,
+        ...row.input.constraints,
+        composition: { ...fallback.constraints.composition, ...(row.input.constraints.composition || {}) }
+      },
+      reservoirText: row.input.reservoirPressures.join(', ')
+    })
+    if (!form.tubingCases?.length) form.tubingCases = [{ id: 'legacy', name: '原油管方案', idTubing: form.wellbore.idTubing }]
+    if (row.input.operationMode === 'injection') form.constraints.sanding = false
     const savedCoefficients = row.result?.coefficientSnapshot
     form.coefficientA ??= savedCoefficients?.effectiveA ?? (form.coefficientSet === 'corrected' ? savedCoefficients?.parameters?.correctedA : savedCoefficients?.parameters?.a) ?? null
     form.coefficientB ??= savedCoefficients?.effectiveB ?? (form.coefficientSet === 'corrected' ? savedCoefficients?.parameters?.correctedB : savedCoefficients?.parameters?.b) ?? null
@@ -268,6 +382,7 @@ async function remove(row) {
   catch (e) { if (e !== 'cancel' && e !== 'close') error.value = message(e) }
 }
 watch(result, async () => {
+  selectedCaseId.value = caseResults.value[0]?.caseId || ''
   await nextTick()
   if (disposed || !chartElement.value) return
   chart ||= echarts.init(chartElement.value)
@@ -322,24 +437,51 @@ onBeforeUnmount(() => { stopResize(); disposed = true; sourceSequence++; operati
     <section class="parameter-section"><div class="section-title">井筒参数 · {{ injection ? '最高注气井口压力' : '最低采气井口压力' }}边界</div>
       <div class="toolbar source-selector"><el-select v-model="pressureId" aria-label="读取同井压力方案" placeholder="可选：读取同井压力方案" clearable><el-option v-for="p in pressureSources" :key="p.id" :value="p.id" :label="p.pressureName" /></el-select><el-button :disabled="busy || !pressureId" @click="importPressure">读取参数</el-button></div>
       <div class="parameter-grid">
-        <label>PVT方案<el-select v-model="form.wellbore.pvtId"><el-option v-for="p in pvts" :key="p.pvtId" :value="p.pvtId" :label="p.pvtName" /></el-select></label>
+        <label>PVT方案<el-select v-model="form.wellbore.pvtId" :loading="pvtCompositionLoading" @change="onPvtChange"><el-option v-for="p in pvts" :key="p.pvtId" :value="p.pvtId" :label="p.pvtName" /></el-select></label>
         <label>压力折算方法<el-select v-model="form.wellbore.models[0]"><el-option v-if="injection" label="GAS 单相注气" value="GAS" /><template v-else><el-option label="HB" value="HB" /><el-option label="MB" value="MB" /></template></el-select></label>
         <label v-for="[key, label] in fields" :key="key">{{ label }}<el-input-number size="small" v-model="form.wellbore[key]" :controls="false" :disabled="injection && key === 'qLiq'" /></label>
+      </div>
+      <div class="tubing-case-title"><span>油管尺寸方案（每个内径分别计算曲线与可行区）</span><el-button size="small" :disabled="form.tubingCases.length >= 8" @click="addTubingCase">新增方案</el-button></div>
+      <div v-for="(item, index) in form.tubingCases" :key="item.id" class="tubing-case-row">
+        <el-input v-model="item.name" :aria-label="`油管方案${index + 1}名称`" placeholder="方案名称" />
+        <el-input-number v-model="item.idTubing" :aria-label="`油管方案${index + 1}内径`" :controls="false" :min="0.001" placeholder="内径 mm" />
+        <el-button size="small" :disabled="form.tubingCases.length === 1" @click="removeTubingCase(index)">删除</el-button>
       </div>
     </section>
     <section class="parameter-section"><div class="section-title">井筒约束条件</div>
       <div class="constraint-options">
         <el-checkbox v-model="form.constraints.liquidLoading" :disabled="injection">井筒积液{{ injection ? '（注气不适用）' : '' }}</el-checkbox>
-<!--        <el-checkbox v-model="form.constraints.hydrate">水合物</el-checkbox>-->
+        <el-checkbox v-model="form.constraints.hydrate">水合物</el-checkbox>
         <el-checkbox v-model="form.constraints.erosion">冲蚀</el-checkbox>
-<!--        <el-checkbox v-model="form.constraints.sanding">出砂（暂未接入计算）</el-checkbox>-->
+        <el-checkbox v-model="form.constraints.sanding" :disabled="injection">出砂{{ injection ? '（现有模型不适用）' : '' }}</el-checkbox>
       </div>
       <label v-if="form.constraints.liquidLoading">气液表面张力 (mN/m)<el-input v-model="form.constraints.surfaceTension" inputmode="decimal" placeholder="请输入正数" /></label>
       <div v-if="form.constraints.erosion" class="parameter-grid">
         <p class="note">{{ erosionSourceNote || '冲蚀参数无历史记录，请手动填写' }}</p>
         <label v-for="[key, label] in erosionFields" :key="key">{{ label }}<el-input v-model="form.constraints[key]" inputmode="decimal" placeholder="请输入" /></label>
       </div>
-      <div v-if="form.constraints.hydrate" class="parameter-grid"><label>完整气体组成（摩尔百分数JSON，合计100%）<el-input v-model="form.compositionText" type="textarea" :rows="3" placeholder='{"C1": 95, "C2": 3, "N2": 2}' /></label><label>要求温度裕量 (℃)<el-input-number size="small" v-model="form.constraints.hydrateMargin" :min="0" /></label><label>逸度缩放系数<el-input-number size="small" v-model="form.constraints.fugacityScale" :min="0.01" /></label></div>
+      <div v-if="form.constraints.hydrate" class="hydrate-parameters">
+        <div class="composition-heading">
+          <span>完整气体组成（摩尔百分数）</span>
+          <span class="composition-total" :class="{ invalid: !hydrateCompositionValid }">合计 {{ hydrateCompositionTotal.toFixed(4) }}%</span>
+        </div>
+        <p class="composition-source-note">{{ pvtCompositionNote }}</p>
+        <div class="composition-grid">
+          <label v-for="[key, label] in hydrateComponents" :key="key">
+            {{ label }}（{{ key }}，%）
+            <el-input-number v-model="form.constraints.composition[key]" :controls="false" :min="0" :max="100" :step="0.01" :disabled="pvtCompositionKeys.has(key)" />
+          </label>
+        </div>
+        <div class="parameter-grid">
+          <label>要求温度裕量 (℃)<el-input-number size="small" v-model="form.constraints.hydrateMargin" :min="0" /></label>
+          <label>逸度缩放系数<el-input-number size="small" v-model="form.constraints.fugacityScale" :min="0.01" /></label>
+        </div>
+      </div>
+      <div v-if="form.constraints.sanding" class="parameter-grid">
+        <p class="note">{{ sandSourceNote || '出砂参数无历史记录，请手动填写' }}；允许气量按临界出砂气量的 86.1% 计算。</p>
+        <label>支撑剂类型<el-select v-model="form.constraints.sandProppantType" @change="onSandProppantChange"><el-option label="70/140目石英砂" value="quartz-sand" /><el-option label="复合压裂砂（6:4）" value="composite-sand" /></el-select></label>
+        <label v-for="[key, label] in sandFields" :key="key">{{ label }}<el-input v-model="form.constraints[key]" inputmode="decimal" :placeholder="key === 'sandCriticalVelocityMS' ? '留空则按闭合压力插值' : '请输入'" /></label>
+      </div>
     </section>
       </div>
       <div v-show="!paramsCollapsed" class="panel-actions">
@@ -358,9 +500,10 @@ onBeforeUnmount(() => { stopResize(); disposed = true; sourceSequence++; operati
 <!--    <p v-show="activeContentTab === 'chart'" class="chart-note">{{ envelopeNote }}</p>-->
     <div v-show="activeContentTab === 'table'" class="result-details">
       <p v-if="!result">暂无计算结果</p>
-      <template v-if="result">
-      <p class="note">气量：10⁴ m³/d；压力：MPa。出砂未参与计算。</p>
-      <el-table :data="result.scenarios" border size="small">
+      <template v-if="result && displayResult">
+      <div v-if="caseResults.length > 1" class="case-result-selector"><span>油管方案</span><el-select v-model="selectedCaseId"><el-option v-for="item in caseResults" :key="item.caseId" :value="item.caseId" :label="`${item.caseName}（${item.idTubing} mm）`" /></el-select></div>
+      <p class="note">气量：10⁴ m³/d；压力：MPa。阴影和最大能力按当前油管方案及已启用的四项约束共同计算。</p>
+      <el-table :data="displayResult.scenarios" border size="small">
         <el-table-column prop="reservoirPressure" label="地层压力 MPa" width="125" />
         <el-table-column label="可行气量区间"><template #default="{ row }">{{ row.intervals.map(i => `${display(i.from.rate)}～${display(i.to.rate)}`).join('；') || '无' }}</template>
         </el-table-column>
@@ -416,10 +559,21 @@ onBeforeUnmount(() => { stopResize(); disposed = true; sourceSequence++; operati
   content: '';
 }
 .parameter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr)); column-gap: 24px; }
+.hydrate-parameters { margin-bottom: 4px; }
+.composition-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 3px 0 7px; color: #555; font-size: 13px; }
+.composition-total { flex-shrink: 0; color: #529b2e; font-size: 12px; }
+.composition-total.invalid { color: #c45656; }
+.composition-source-note { margin: -2px 0 7px; color: #777; }
+.composition-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 10px; }
+.composition-grid > label { display: flex; min-width: 0; flex-direction: column; gap: 3px; margin-bottom: 8px; color: #555; font-size: 12px; line-height: 18px; }
 .coefficient-source-help { grid-column: 1 / -1; margin-bottom: 10px; font-size: 12px; line-height: 1.6; color: #666; }
 .coefficient-source-help p { margin: 0 0 6px; }
 .coefficient-source-help .el-button + .el-button { margin-left: 4px; }
 .parameter-grid > label, .parameter-section > label { display: flex; flex-direction: column; gap: 3px; min-width: 0; margin-bottom: 9px; font-size: 13px; color: #555; line-height: 18px;}
+.tubing-case-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 8px 0 6px; color: #555; }
+.tubing-case-row { display: grid; grid-template-columns: minmax(90px, 1fr) minmax(105px, 1fr) auto; align-items: center; gap: 6px; margin-bottom: 6px; }
+.case-result-selector { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.case-result-selector :deep(.el-select) { width: 260px; }
 .params-panel :deep(.el-select), .params-panel :deep(.el-input-number) { width: 100%; }
 .params-panel :deep(.el-input__wrapper), .params-panel :deep(.el-select__wrapper) { box-sizing: border-box; min-height: 24px; height: 24px; padding: 0 6px; font-size: 12px; }
 .params-panel :deep(.el-input__inner) { text-align: left; font-size: 12px; }

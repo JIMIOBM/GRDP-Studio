@@ -51,7 +51,7 @@ request.interceptors.response.use(
         localStorage.removeItem('account')
         router.push('/login')
       }
-      ElMessage.error(res.msg || '请求失败')
+      if (!response.config?.silentError) ElMessage.error(res.msg || '请求失败')
       return Promise.reject(res)
     }
     return res

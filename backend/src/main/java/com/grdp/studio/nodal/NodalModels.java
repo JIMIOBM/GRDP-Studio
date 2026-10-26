@@ -9,8 +9,10 @@ public final class NodalModels {
         public long projectId, gasReservoirId, coefficientId;
         public Long pressureSourceId;
         public Double coefficientA, coefficientB;
+        public String schemaVersion = "nodal-input/v2";
         public String wellName, operationMode = "production", coefficientSet = "corrected";
         public List<Double> reservoirPressures = new ArrayList<>();
+        public List<TubingCase> tubingCases = new ArrayList<>();
         public double minimumPressure = 0.101325, maximumPressure = 40;
         public int samples = 80;
         public PressureCalculateRequest wellbore;
@@ -20,7 +22,17 @@ public final class NodalModels {
         public boolean liquidLoading, hydrate, erosion, sanding;
         public double surfaceTension = 30, hydrateMargin = 0, fugacityScale = 2;
         public Double liquidHoldupPercent, sandContentPercent, sandDensity, erosionLiquidDensity;
+        public String sandProppantType;
+        public Double sandMassT, sandDensityGCm3, sandHalfLengthM, sandClosurePressureMpa, sandCriticalVelocityMS;
         public Map<String, Double> composition = new LinkedHashMap<>();
+    }
+    public static class TubingCase {
+        public String id, name;
+        public double idTubing;
+        public TubingCase() {}
+        public TubingCase(String id, String name, double idTubing) {
+            this.id = id; this.name = name; this.idTubing = idTubing;
+        }
     }
     public record Point(double rate, Double pressure, String reason) {}
     public record Check(String code, String status, Double margin, String reason) {}
@@ -33,13 +45,18 @@ public final class NodalModels {
             List<Candidate> candidates, List<Interval> intervals, Point maximum, String controllingCondition, String status, List<String> notes) {}
     /** A calculated constraint boundary. Separate segments prevent drawing across gaps or ambiguous branches. */
     public record ConstraintCurve(String code, String name, List<List<Point>> segments) {}
+    public record CaseResult(String caseId, String caseName, double idTubing,
+            PressureCalculateRequest wellboreSnapshot, List<Point> wellboreCurve, List<Scenario> scenarios,
+            List<Check> constraintStates, List<String> warnings, List<Scenario> regionScenarios,
+            List<ConstraintCurve> constraintCurves, List<List<Point>> feasibleRegions) {}
     public record Result(String version, Object coefficientSnapshot, PressureCalculateRequest wellboreSnapshot,
             Object pressureSourceSnapshot, List<Point> wellboreCurve, List<Scenario> scenarios, List<Check> constraintStates, List<String> warnings,
-            List<Scenario> regionScenarios, List<ConstraintCurve> constraintCurves, List<List<Point>> feasibleRegions) {
+            List<Scenario> regionScenarios, List<ConstraintCurve> constraintCurves, List<List<Point>> feasibleRegions,
+            List<CaseResult> caseResults) {
         public Result(String version, Object coefficientSnapshot, PressureCalculateRequest wellboreSnapshot,
                 Object pressureSourceSnapshot, List<Point> wellboreCurve, List<Scenario> scenarios, List<Check> constraintStates, List<String> warnings) {
             this(version, coefficientSnapshot, wellboreSnapshot, pressureSourceSnapshot, wellboreCurve, scenarios,
-                    constraintStates, warnings, List.of(), List.of(), List.of());
+                    constraintStates, warnings, List.of(), List.of(), List.of(), List.of());
         }
     }
     public record Save(Long id, String name, Input input) {

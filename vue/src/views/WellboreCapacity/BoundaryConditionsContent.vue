@@ -30,6 +30,7 @@ const error = ref('')
 const fields = computed(() => [
   ['pressure', labels.value.pressure, 0.000001],
   ['temperature', labels.value.temperature, null],
+  ['tGrad', '地温梯度 (℃/100m)', 0],
   ['qGas', '日产气量 (×10⁴ m³/d)', 0],
   ['qLiq', '日产水量 (m³/d)', 0]
 ])
@@ -48,7 +49,8 @@ async function loadDefaults () {
       pressure: production.fWh ?? 3.8,
       temperature: production.tWh ?? 30,
       qGas: production.qGas ?? 2.5,
-      qLiq: production.qLiq ?? 2
+      qLiq: production.qLiq ?? 2,
+      tGrad: 3
     })
     Object.assign(draft, boundary.values)
     if (source.errors.length) error.value = source.errors.join('；')

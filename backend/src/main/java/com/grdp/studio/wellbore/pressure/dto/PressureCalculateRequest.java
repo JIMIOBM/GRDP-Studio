@@ -6,6 +6,11 @@ public class PressureCalculateRequest {
     public Long projectId;
     public Long gasReservoirId;
     public Long temperatureRecordId;
+    /** 温度来源协议：MODEL 使用历史方案作为配置来源重算，LINEAR 保留注气及旧调用路径。 */
+    public String thermalSource;
+    public Long thermalConfigSourceRecordId;
+    /** 服务端冻结的实际温度配置、有效输入和 T(z)，客户端提交值会被覆盖。 */
+    public java.util.Map<String, Object> thermalSnapshot;
     public Long pvtId;
     public java.util.Map<String, Object> pvtSnapshot;
     public String wellName;

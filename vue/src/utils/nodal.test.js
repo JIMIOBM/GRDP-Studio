@@ -2,6 +2,21 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { ensureNodalNavigation, nodalCommandTarget, applyNodalRecords, upsertNodalRecord, loadNodalRecords, deleteNodalRecord, NODAL_RECORD } from './nodalNavigation.js'
 import { nodalChartOption, nodalEnvelope, nodalConstraintBoundary, nodalLegendGraphic } from './nodalChart.js'
+import { nodalDefaults, nodalCompositionFromPvt, nodalCompositionTotal, normalizeNodalComposition } from './nodalDefaults.js'
+
+test('hydrate composition uses individual supported fields and validates the mole-percent total', () => {
+  const composition = nodalDefaults().constraints.composition
+  assert.equal(nodalCompositionTotal(composition), 100)
+  assert.deepEqual(normalizeNodalComposition(composition), { C1: 95, C2: 3, N2: 2 })
+  assert.throws(() => normalizeNodalComposition({ C1: 95, C2: 3 }), /合计须为100%/)
+  assert.throws(() => normalizeNodalComposition({ C1: 101 }), /须为0至100/)
+})
+test('nodal hydrate non-hydrocarbon composition is read from the selected PVT', () => {
+  assert.deepEqual(nodalCompositionFromPvt({ hydrogenSulfide: 0.1, carbonDioxide: 1.2, nitrogen: 2.3 }), {
+    H2S: 0.1, CO2: 1.2, N2: 2.3
+  })
+  assert.throws(() => nodalCompositionFromPvt({ hydrogenSulfide: 0, carbonDioxide: null, nitrogen: 2 }), /CO₂/)
+})
 test('nodal directory is lazy and does not create productivity or pressure submodules', () => {
   const nodes = [{ id: 'A-allocation', type: 'production-allocation', wellName: 'A', children: [] }]
   ensureNodalNavigation(nodes); ensureNodalNavigation(nodes)
@@ -103,4 +118,20 @@ test('new snapshots draw backend constraint segments without deriving them from 
   const option=nodalChartOption(result,'production')
   const erosion=option.series.find(s=>s.name==='临界冲蚀流量')
   assert.deepEqual(erosion.data,[[2,8],[3,9]])
+})
+
+test('grouped tubing results draw one inflow and outflow family plus four constraint boundaries per size', () => {
+  const scenario=diameter=>({reservoirPressure:10,formation:[{rate:0,pressure:10},{rate:diameter/10,pressure:8}],candidates:[],intervals:[],maximum:{rate:diameter/20,pressure:9},status:'SUCCESS'})
+  const makeCase=(id,name,diameter)=>({caseId:id,caseName:name,idTubing:diameter,
+    wellboreCurve:[{rate:1,pressure:diameter/10}],scenarios:[scenario(diameter)],feasibleRegions:[],regionScenarios:[],constraintCurves:[
+      {code:'liquidLoading',name:'临界携液流量',segments:[[{rate:1,pressure:8},{rate:2,pressure:9}]]},
+      {code:'hydrate',name:'水合物安全边界',segments:[[{rate:2,pressure:8},{rate:3,pressure:9}]]},
+      {code:'erosion',name:'临界冲蚀流量',segments:[[{rate:3,pressure:8},{rate:4,pressure:9}]]},
+      {code:'sanding',name:'出砂允许气量',segments:[[{rate:4,pressure:8},{rate:5,pressure:9}]]}
+    ]})
+  const option=nodalChartOption({caseResults:[makeCase('a','小油管',76),makeCase('b','大油管',100)]},'production')
+  assert.equal(option.series.filter(s=>s.name.startsWith('井筒流出曲线')).length,2)
+  assert.equal(option.series.filter(s=>s.name.startsWith('地层流入曲线')).length,2)
+  for(const name of ['临界携液流量','水合物安全边界','临界冲蚀流量','出砂允许气量'])
+    assert.equal(option.series.filter(s=>s.name.startsWith(name)).length,2)
 })

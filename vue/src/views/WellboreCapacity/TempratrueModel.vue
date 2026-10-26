@@ -168,6 +168,7 @@ const boundaryLabels = computed(() => wellboreBoundaryLabels(boundary.values.bou
 const sharedField = key => ({
   referencePressure: 'pressure',
   tWh: 'temperature',
+  tGrad: 'tGrad',
   qGas: 'qGas',
   qLiq: 'qLiq'
 })[key]

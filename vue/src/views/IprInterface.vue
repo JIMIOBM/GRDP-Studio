@@ -35,7 +35,7 @@ import WellboreStructureContent from '@/views/WellboreCapacity/WellboreStructure
 import TemperatureModelContent from '@/views/WellboreCapacity/TempratrueModel.vue'
 import PressureConversion from '@/views/WellboreCapacity/PressureConversion.vue'
 import BoundaryConditionsContent from '@/views/WellboreCapacity/BoundaryConditionsContent.vue'
-import LiquidLoadingContent from '@/views/WellboreCapacity/LiquidLoadingContent.vue'
+import LiquidLoadingContent from '@/views/WellboreCapacity/LiquidLoadingDepthContent.vue'
 import HydratePredictionContent from '@/views/WellboreCapacity/HydratePredictionContent.vue'
 import SandProductionContent from '@/views/WellboreCapacity/SandProductionContent.vue'
 import NodalAnalysis from '@/views/ProductionAllocation/NodalAnalysis.vue'

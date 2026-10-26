@@ -2,7 +2,8 @@ import request from '@/utils/request'
 
 export const wellborePressureApi = {
   calculate: data => request.post('/wellbore/pressure/calculate', data, {
-    timeout: 600000
+    timeout: 600000,
+    headers: { 'Process-Env': 'prod' }
   }).then(response => response?.data?.result ?? response),
 
   list: (projectId, gasReservoirId, wellName) => request.get(

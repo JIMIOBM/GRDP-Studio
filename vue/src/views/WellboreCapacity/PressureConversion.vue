@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
 import { wellborePressureApi } from '@/api/wellborePressure'
+import { wellboreTemperatureApi } from '@/api/wellboreTemperature'
 import request from '@/utils/request'
 import { selectedPvtProperties } from './pvtSource'
 import { loadTemperatureSources } from '@/api/temperatureSources'
@@ -42,6 +43,8 @@ const defaults = {
   muL: null,
   pvtId: null,
   pvtSnapshot: null,
+  thermalSource: 'MODEL',
+  thermalConfigSourceRecordId: null,
   qGas: 2.5,
   qLiq: 2,
   models: ['HB', 'MB']
@@ -61,6 +64,7 @@ const operationRecords = computed(() => availableProductionRecords.value.filter(
   isInjection.value ? isInjectionRecord(item.row) : !isInjectionRecord(item.row)))
 const productionFields = ref([])
 const availablePvtRecords = ref([])
+const temperatureSources = ref([])
 const busy = ref(false)
 const chartEl = ref(null)
 const chartAreaEl = ref(null)
@@ -139,6 +143,7 @@ const boundaryLabels = computed(() => wellboreBoundaryLabels(boundary.values.bou
 const sharedField = key => ({
   boundaryPressure: 'pressure',
   tWh: 'temperature',
+  tGrad: 'tGrad',
   qGas: 'qGas',
   qLiq: 'qLiq'
 })[key]
@@ -398,16 +403,25 @@ async function refresh () {
   calculatedInput.value = null
   chart?.clear()
   try {
-    const source = await loadTemperatureSources(
-      currentContext.projectId,
-      currentContext.gasReservoirId,
-      currentContext.wellName
-    )
+    const [source, temperatureHistoryResponse] = await Promise.all([
+      loadTemperatureSources(
+        currentContext.projectId,
+        currentContext.gasReservoirId,
+        currentContext.wellName
+      ),
+      wellboreTemperatureApi.list(
+        currentContext.projectId,
+        currentContext.gasReservoirId,
+        currentContext.wellName
+      )
+    ])
     if (disposed || sequence !== loadSequence) return
 
     availableProductionRecords.value = buildProductionRecords(source.productionRows)
     productionFields.value = source.productionFields
     availablePvtRecords.value = source.pvtRecords
+    temperatureSources.value = unwrap(temperatureHistoryResponse) || []
+    if (!temperatureSources.value.length) source.errors.push('当前井暂无温度方案，请先在温度模型页面计算并保存')
     if (!availableProductionRecords.value.length) source.errors.push('注采数据缺少可选择的生产日期')
     const selectedPvt = availablePvtRecords.value.find(
       record => Number(record.pvtId) === Number(boundary.values.pvtId)
@@ -436,6 +450,11 @@ async function refresh () {
       ...source.input,
       models: [...defaults.models]
     }
+    const selectedTemperature = temperatureSources.value.find(
+      item => Number(item.id) === Number(form.thermalConfigSourceRecordId)
+    ) || temperatureSources.value[0]
+    initial.thermalSource = 'MODEL'
+    initial.thermalConfigSourceRecordId = selectedTemperature?.id ?? null
 
     if (selectedPvt) {
       try {
@@ -570,6 +589,11 @@ async function calculate () {
   }
   if (!form.models.length) {
     error.value = '请选择HB或MB折算方法'
+    return
+  }
+  if (!isInjection.value && (!Number.isFinite(Number(form.thermalConfigSourceRecordId))
+    || Number(form.thermalConfigSourceRecordId) <= 0)) {
+    error.value = '请选择温度方案'
     return
   }
   if (!validBoundaryNumber(boundary.values.pressure)
@@ -733,6 +757,23 @@ onBeforeUnmount(() => {
         >
           <div class="section-title">{{ group.title }}</div>
           <div v-if="group.title === '井身结构及物性'" class="parameter-grid source-grid">
+            <div v-if="!isInjection" class="field">
+              <label for="pressure-temperature-source">温度方案</label>
+              <el-select
+                id="pressure-temperature-source"
+                v-model="form.thermalConfigSourceRecordId"
+                :disabled="busy || sourceLoading"
+                size="small"
+                placeholder="请选择温度方案"
+              >
+                <el-option
+                  v-for="source in temperatureSources"
+                  :key="source.id"
+                  :value="source.id"
+                  :label="`${source.temperatureName || `温度方案${source.temperatureNo}`}（${source.modelCode}）`"
+                />
+              </el-select>
+            </div>
             <div class="field">
               <label for="pressure-pvt-source">PVT性质</label>
               <el-select
@@ -818,10 +859,10 @@ onBeforeUnmount(() => {
             <template v-if="!operationRecords.length">当前无明确标识的注气记录，请手动填写注气温压和气量。</template>
           </template>
           <template v-else-if="boundary.values.boundaryPosition === 'wellhead'">
-            使用 {{ boundary.values.productionDate || '所选日期' }} 的{{ channelLabel }}温压和同日气水量，折算井底压力。
+            使用 {{ boundary.values.productionDate || '所选日期' }} 的{{ channelLabel }}温压和同日气水量，按所选温度方案重算流体温度剖面后折算井底压力。
           </template>
           <template v-else>
-            井底压力、井底温度由用户手动输入；生产日期仅提供同日气水量，反算井口压力。
+            井底压力、井底温度由用户手动输入；生产日期仅提供同日气水量，按所选温度方案重算流体温度剖面后反算井口压力。
           </template>
         </div>
 

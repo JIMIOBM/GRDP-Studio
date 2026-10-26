@@ -1,6 +1,6 @@
 import { reactive } from 'vue'
 
-const VALUE_FIELDS = ['pressure', 'temperature', 'qGas', 'qLiq']
+const VALUE_FIELDS = ['pressure', 'temperature', 'qGas', 'qLiq', 'tGrad']
 // 来源字段与边界值共同在温度模型和压力折算页面间共享，保证两页选择一致。
 const SOURCE_FIELDS = ['productionRecordKey', 'productionDate', 'wellheadChannel', 'pvtId']
 const EDITABLE_FIELDS = [...VALUE_FIELDS, ...SOURCE_FIELDS, 'boundaryPosition']
@@ -22,6 +22,7 @@ export function getWellboreBoundaryState (context) {
         temperature: null,
         qGas: null,
         qLiq: null,
+        tGrad: 3,
         productionRecordKey: null,
         productionDate: null,
         wellheadChannel: 'tubing',
@@ -38,7 +39,9 @@ export function getWellboreBoundaryState (context) {
 // three boundary editors are retained when another page reloads the source row.
 export function applyWellboreBoundaryDefaults (state, defaults) {
   for (const field of VALUE_FIELDS) {
-    if (!state.modified.has(field)) state.values[field] = defaults?.[field] ?? null
+    if (!state.modified.has(field) && Object.prototype.hasOwnProperty.call(defaults ?? {}, field)) {
+      state.values[field] = defaults[field] ?? null
+    }
   }
 }
 
@@ -72,6 +75,7 @@ export function boundaryValuesForTemperature (state) {
     boundaryPosition: state.values.boundaryPosition,
     referencePressure: state.values.pressure,
     tWh: state.values.temperature,
+    tGrad: state.values.tGrad,
     qGas: state.values.qGas,
     qLiq: state.values.qLiq
   }
@@ -82,6 +86,7 @@ export function boundaryValuesForPressure (state) {
     boundaryPosition: state.values.boundaryPosition,
     boundaryPressure: state.values.pressure,
     tWh: state.values.temperature,
+    tGrad: state.values.tGrad,
     qGas: state.values.qGas,
     qLiq: state.values.qLiq
   }
